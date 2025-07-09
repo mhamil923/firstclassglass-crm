@@ -1,6 +1,14 @@
+// File: src/index.js
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+
+// 1️⃣ Load your Tailwind-enabled index.css first:
 import './index.css';
+
+// 2️⃣ Then load Bootstrap (optional—remove if you no longer need it)
+import 'bootstrap/dist/css/bootstrap.min.css';
+
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 

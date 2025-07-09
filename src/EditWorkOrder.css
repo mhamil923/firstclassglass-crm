@@ -1,0 +1,101 @@
+/* File: src/EditWorkOrder.css */
+
+.edit-container {
+  min-height: 100vh;
+  background-color: #F1F5F9;
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+.edit-card {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 2rem;
+  margin: auto;
+  width: 100%;
+  max-width: 800px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+}
+
+.edit-title {
+  margin-top: 0;
+  text-align: center;
+  color: #2B2D42;
+  font-size: 1.75rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  color: #3D5A80;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.form-control-custom,
+.form-textarea-custom,
+.form-select-custom,
+.form-file-custom {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+  color: #2B2D42;
+  box-sizing: border-box;
+  transition: border 0.2s, box-shadow 0.2s;
+}
+
+.form-control-custom:focus,
+.form-textarea-custom:focus,
+.form-select-custom:focus {
+  outline: none;
+  border-color: #3D5A80;
+  box-shadow: 0 0 0 2px rgba(61, 90, 128, 0.2);
+}
+
+.button-row {
+  display: flex;
+  justify-content: flex-start;
+  gap: 0.5rem;
+}
+
+.btn-custom {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.btn-save {
+  background-color: #3D5A80;
+  color: #ffffff;
+}
+
+.btn-save:hover {
+  background-color: #2B2D42;
+}
+
+.btn-delete {
+  background-color: #E63946;
+  color: #ffffff;
+}
+
+.btn-delete:hover {
+  background-color: #D62839;
+}
+
+.btn-back {
+  background-color: #8D99AE;
+  color: #ffffff;
+}
+
+.btn-back:hover {
+  background-color: #6C757D;
+}
