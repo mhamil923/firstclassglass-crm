@@ -12,16 +12,17 @@
     "@testing-library/user-event": "^13.5.0",
     "axios": "^1.7.9",
     "bootstrap": "^5.3.3",
+    "convert-source-map": "^1.8.0",
     "jwt-decode": "^4.0.0",
     "moment": "^2.30.1",
-    "react": "^19.0.0",
+    "react": "^18.2.0",
     "react-big-calendar": "^1.18.0",
     "react-bootstrap": "^2.10.9",
     "react-dnd": "^16.0.1",
     "react-dnd-html5-backend": "^16.0.1",
-    "react-dom": "^19.0.0",
+    "react-dom": "^18.2.0",
     "react-router-dom": "^7.2.0",
-    "react-scripts": "^0.0.0",
+    "react-scripts": "5.0.1",
     "web-vitals": "^2.1.4"
   },
   "scripts": {
@@ -29,6 +30,11 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
+  },
+  "overrides": {
+    "nth-check": "2.0.1",
+    "postcss": "8.4.31",
+    "webpack-dev-server": "4.15.0"
   },
   "eslintConfig": {
     "extends": [
