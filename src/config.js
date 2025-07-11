@@ -1,6 +1,9 @@
 // File: src/config.js
 
-// You can also pull this from an env var: process.env.REACT_APP_API_BASE_URL
-const API_BASE_URL = 'https://firstclassglassmirror.us-east-2.elasticbeanstalk.com';
+// Try to read the Amplify‐injected REACT_APP_API_BASE_URL first,
+// otherwise fall back to your new EB endpoint:
+const API_BASE_URL =
+  process.env.REACT_APP_API_BASE_URL ||
+  'https://fcgg.us-east-2.elasticbeanstalk.com';
 
 export default API_BASE_URL;
