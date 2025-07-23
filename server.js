@@ -18,16 +18,17 @@ app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // ─── MySQL Setup ─────────────────────────────────────────────────────────
+// **Notice: we check DB_* first, then fall back to RDS_* then to defaults**
 const db = mysql.createPool({
-  host:     process.env.RDS_HOSTNAME || process.env.DB_HOST || 'localhost',
-  user:     process.env.RDS_USERNAME || process.env.DB_USER || 'root',
-  password: process.env.RDS_PASSWORD || process.env.DB_PASS || '',
-  database: process.env.RDS_DB_NAME || process.env.DB_NAME || 'firstclassglass_crm',
-  port:     process.env.RDS_PORT     ? Number(process.env.RDS_PORT)  :
-            process.env.DB_PORT      ? Number(process.env.DB_PORT)   : 3306,
+  host:     process.env.DB_HOST     || process.env.RDS_HOSTNAME || 'localhost',
+  user:     process.env.DB_USER     || process.env.RDS_USERNAME || 'root',
+  password: process.env.DB_PASS     || process.env.RDS_PASSWORD || '',
+  database: process.env.DB_NAME     || process.env.RDS_DB_NAME  || 'firstclassglass_crm',
+  port:     process.env.DB_PORT     ? Number(process.env.DB_PORT) :
+            process.env.RDS_PORT     ? Number(process.env.RDS_PORT) : 3306,
 });
 
-// ensure work_orders has the needed columns (defined here, invoked on startup)
+// ensure work_orders has the needed columns
 async function ensureCols() {
   const cols = [
     { name: 'scheduledDate', type: 'DATETIME NULL' },
@@ -35,6 +36,7 @@ async function ensureCols() {
     { name: 'photoPath',     type: 'TEXT NULL' },
     { name: 'notes',         type: 'TEXT NULL' },
   ];
+  console.log(`🔍 Checking schema on DB "${process.env.DB_NAME||process.env.RDS_DB_NAME}"`);
   for (const { name, type } of cols) {
     const [found] = await db.query(
       `SHOW COLUMNS FROM \`work_orders\` LIKE '${name}'`
@@ -47,8 +49,9 @@ async function ensureCols() {
     }
   }
 }
+ensureCols();
 
-// ─── Authentication ────────────────────────────────────────────────────────
+// ─── AUTHENTICATION ──────────────────────────────────────────────────────
 
 // Register
 app.post('/auth/register', async (req, res) => {
@@ -108,7 +111,7 @@ function authenticate(req, res, next) {
   }
 }
 
-// ─── File Uploads ───────────────────────────────────────────────────────────
+// ─── Multer for uploads ───────────────────────────────────────────────────
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = 'uploads/';
@@ -121,7 +124,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 app.use('/uploads', express.static(path.resolve(__dirname, 'uploads')));
-
 // ─── Users endpoint ────────────────────────────────────────────────────────
 app.get('/users', authenticate, async (req, res) => {
   try {
