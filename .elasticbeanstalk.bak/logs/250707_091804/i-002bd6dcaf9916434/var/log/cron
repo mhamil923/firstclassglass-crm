@@ -1,0 +1,2 @@
+Jul  7 14:13:08 ip-172-31-46-228 crond[2320]: (CRON) INFO (RANDOM_DELAY will be scaled with factor 5% if used.)
+Jul  7 14:13:08 ip-172-31-46-228 crond[2320]: (CRON) INFO (running with inotify support)

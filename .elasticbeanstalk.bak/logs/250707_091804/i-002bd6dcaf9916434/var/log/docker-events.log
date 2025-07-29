@@ -1,0 +1,8 @@
+2025-07-07T14:15:19.789563158Z container prune  (reclaimed=0)
+2025-07-07T14:15:24.239608375Z image pull node:18-alpine (name=node)
+2025-07-07T14:15:31.218978045Z image tag sha256:fefe8a77be58cfd0fc8561202e334924d1812e5ed20be5d3e9d451b800aeb7bf (name=aws_beanstalk/staging-app)
+2025-07-07T14:15:32.838415115Z container create 1f69344ff585dfda9ef9e151605a9ae5e71f4fb3611cd5fee1a3fd433484430b (image=fefe8a77be58, name=goofy_satoshi)
+2025-07-07T14:15:32.873845083Z network connect 25f34029b502890de42b85cb62d8d1d2b892554fcabad652c70b44e846c77899 (container=1f69344ff585dfda9ef9e151605a9ae5e71f4fb3611cd5fee1a3fd433484430b, name=bridge, type=bridge)
+2025-07-07T14:15:33.159283119Z container start 1f69344ff585dfda9ef9e151605a9ae5e71f4fb3611cd5fee1a3fd433484430b (image=fefe8a77be58, name=goofy_satoshi)
+2025-07-07T14:15:33.579907793Z network disconnect 25f34029b502890de42b85cb62d8d1d2b892554fcabad652c70b44e846c77899 (container=1f69344ff585dfda9ef9e151605a9ae5e71f4fb3611cd5fee1a3fd433484430b, name=bridge, type=bridge)
+2025-07-07T14:15:33.588288499Z container die 1f69344ff585dfda9ef9e151605a9ae5e71f4fb3611cd5fee1a3fd433484430b (execDuration=0, exitCode=1, image=fefe8a77be58, name=goofy_satoshi)

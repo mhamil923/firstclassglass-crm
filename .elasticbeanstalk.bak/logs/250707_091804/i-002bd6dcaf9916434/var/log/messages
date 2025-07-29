@@ -1,0 +1,1334 @@
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Linux version 5.10.238-231.953.amzn2.x86_64 (mockbuild@ip-10-0-61-157) (gcc10-gcc (GCC) 10.5.0 20230707 (Red Hat 10.5.0-1), GNU ld version 2.35.2-9.amzn2.0.5) #1 SMP Tue Jun 17 10:30:46 UTC 2025
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Command line: BOOT_IMAGE=/boot/vmlinuz-5.10.238-231.953.amzn2.x86_64 root=UUID=6e43975a-1916-4f3f-b40f-cfed25542d46 ro console=tty0 console=ttyS0,115200n8 net.ifnames=0 biosdevname=0 nvme_core.io_timeout=4294967295 rd.emergency=poweroff rd.shell=0
+Jul  7 14:13:03 ip-172-31-46-228 kernel: KASLR enabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: BIOS-provided physical RAM map:
+Jul  7 14:13:03 ip-172-31-46-228 kernel: BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff] usable
+Jul  7 14:13:03 ip-172-31-46-228 kernel: BIOS-e820: [mem 0x000000000009fc00-0x000000000009ffff] reserved
+Jul  7 14:13:03 ip-172-31-46-228 kernel: BIOS-e820: [mem 0x00000000000f0000-0x00000000000fffff] reserved
+Jul  7 14:13:03 ip-172-31-46-228 kernel: BIOS-e820: [mem 0x0000000000100000-0x000000003e3e9fff] usable
+Jul  7 14:13:03 ip-172-31-46-228 kernel: BIOS-e820: [mem 0x000000003e3ea000-0x000000003fffffff] reserved
+Jul  7 14:13:03 ip-172-31-46-228 kernel: BIOS-e820: [mem 0x00000000e0000000-0x00000000e03fffff] reserved
+Jul  7 14:13:03 ip-172-31-46-228 kernel: BIOS-e820: [mem 0x00000000fffc0000-0x00000000ffffffff] reserved
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NX (Execute Disable) protection: active
+Jul  7 14:13:03 ip-172-31-46-228 kernel: SMBIOS 2.7 present.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: DMI: Amazon EC2 t3.micro/, BIOS 1.0 10/16/2017
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Hypervisor detected: KVM
+Jul  7 14:13:03 ip-172-31-46-228 kernel: kvm-clock: Using msrs 4b564d01 and 4b564d00
+Jul  7 14:13:03 ip-172-31-46-228 kernel: kvm-clock: cpu 0, msr 21601001, primary cpu clock
+Jul  7 14:13:03 ip-172-31-46-228 kernel: kvm-clock: using sched offset of 2307374370 cycles
+Jul  7 14:13:03 ip-172-31-46-228 kernel: clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+Jul  7 14:13:03 ip-172-31-46-228 kernel: tsc: Detected 2499.998 MHz processor
+Jul  7 14:13:03 ip-172-31-46-228 kernel: last_pfn = 0x3e3ea max_arch_pfn = 0x400000000
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+Jul  7 14:13:03 ip-172-31-46-228 kernel: check: Scanning 1 areas for low memory corruption
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Using GB pages for direct mapping
+Jul  7 14:13:03 ip-172-31-46-228 kernel: RAMDISK: [mem 0x36851000-0x3741ffff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Early table checksum verification disabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: RSDP 0x00000000000F8F40 000014 (v00 AMAZON)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: RSDT 0x000000003E3EE350 000044 (v01 AMAZON AMZNRSDT 00000001 AMZN 00000001)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: FACP 0x000000003E3EFF80 000074 (v01 AMAZON AMZNFACP 00000001 AMZN 00000001)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: DSDT 0x000000003E3EE3A0 0010E9 (v01 AMAZON AMZNDSDT 00000001 AMZN 00000001)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: FACS 0x000000003E3EFF40 000040
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: SSDT 0x000000003E3EF6C0 00087A (v01 AMAZON AMZNSSDT 00000001 AMZN 00000001)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: APIC 0x000000003E3EF5D0 000076 (v01 AMAZON AMZNAPIC 00000001 AMZN 00000001)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: SRAT 0x000000003E3EF530 0000A0 (v01 AMAZON AMZNSRAT 00000001 AMZN 00000001)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: SLIT 0x000000003E3EF4C0 00006C (v01 AMAZON AMZNSLIT 00000001 AMZN 00000001)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: WAET 0x000000003E3EF490 000028 (v01 AMAZON AMZNWAET 00000001 AMZN 00000001)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: HPET 0x00000000000C9000 000038 (v01 AMAZON AMZNHPET 00000001 AMZN 00000001)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: SSDT 0x00000000000C9040 00007B (v01 AMAZON AMZNSSDT 00000001 AMZN 00000001)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Reserving FACP table memory at [mem 0x3e3eff80-0x3e3efff3]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Reserving DSDT table memory at [mem 0x3e3ee3a0-0x3e3ef488]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Reserving FACS table memory at [mem 0x3e3eff40-0x3e3eff7f]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Reserving SSDT table memory at [mem 0x3e3ef6c0-0x3e3eff39]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Reserving APIC table memory at [mem 0x3e3ef5d0-0x3e3ef645]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Reserving SRAT table memory at [mem 0x3e3ef530-0x3e3ef5cf]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Reserving SLIT table memory at [mem 0x3e3ef4c0-0x3e3ef52b]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Reserving WAET table memory at [mem 0x3e3ef490-0x3e3ef4b7]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Reserving HPET table memory at [mem 0xc9000-0xc9037]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Reserving SSDT table memory at [mem 0xc9040-0xc90ba]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: SRAT: PXM 0 -> APIC 0x00 -> Node 0
+Jul  7 14:13:03 ip-172-31-46-228 kernel: SRAT: PXM 0 -> APIC 0x01 -> Node 0
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: SRAT: Node 0 PXM 0 [mem 0x00000000-0x3fffffff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NODE_DATA(0) allocated [mem 0x3e3c7000-0x3e3e8fff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Zone ranges:
+Jul  7 14:13:03 ip-172-31-46-228 kernel:  DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel:  DMA32    [mem 0x0000000001000000-0x000000003e3e9fff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel:  Normal   empty
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Movable zone start for each node
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Early memory node ranges
+Jul  7 14:13:03 ip-172-31-46-228 kernel:  node   0: [mem 0x0000000000001000-0x000000000009efff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel:  node   0: [mem 0x0000000000100000-0x000000003e3e9fff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Initmem setup node 0 [mem 0x0000000000001000-0x000000003e3e9fff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: On node 0, zone DMA: 1 pages in unavailable ranges
+Jul  7 14:13:03 ip-172-31-46-228 kernel: On node 0, zone DMA: 97 pages in unavailable ranges
+Jul  7 14:13:03 ip-172-31-46-228 kernel: On node 0, zone DMA32: 7190 pages in unavailable ranges
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: PM-Timer IO Port: 0xb008
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: LAPIC_NMI (acpi_id[0xff] dfl dfl lint[0x1])
+Jul  7 14:13:03 ip-172-31-46-228 kernel: IOAPIC[0]: apic_id 0, version 32, address 0xfec00000, GSI 0-23
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: INT_SRC_OVR (bus 0 bus_irq 5 global_irq 5 high level)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: INT_SRC_OVR (bus 0 bus_irq 9 global_irq 9 high level)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: INT_SRC_OVR (bus 0 bus_irq 10 global_irq 10 high level)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: INT_SRC_OVR (bus 0 bus_irq 11 global_irq 11 high level)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Using ACPI (MADT) for SMP configuration information
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: HPET id: 0x8086a201 base: 0xfed00000
+Jul  7 14:13:03 ip-172-31-46-228 kernel: TSC deadline timer available
+Jul  7 14:13:03 ip-172-31-46-228 kernel: smpboot: Allowing 2 CPUs, 0 hotplug CPUs
+Jul  7 14:13:03 ip-172-31-46-228 kernel: PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: PM: hibernation: Registered nosave memory: [mem 0x0009f000-0x000fffff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: [mem 0x40000000-0xdfffffff] available for PCI devices
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Booting paravirtualized kernel on KVM
+Jul  7 14:13:03 ip-172-31-46-228 kernel: clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645519600211568 ns
+Jul  7 14:13:03 ip-172-31-46-228 kernel: setup_percpu: NR_CPUS:8192 nr_cpumask_bits:2 nr_cpu_ids:2 nr_node_ids:1
+Jul  7 14:13:03 ip-172-31-46-228 kernel: percpu: Embedded 62 pages/cpu s217088 r8192 d28672 u1048576
+Jul  7 14:13:03 ip-172-31-46-228 kernel: kvm-guest: stealtime: cpu 0, msr 3d034080
+Jul  7 14:13:03 ip-172-31-46-228 kernel: kvm-guest: PV spinlocks enabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: PV qspinlock hash table entries: 256 (order: 0, 4096 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Built 1 zonelists, mobility grouping on.  Total pages: 250851
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Policy zone: DMA32
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Kernel command line: BOOT_IMAGE=/boot/vmlinuz-5.10.238-231.953.amzn2.x86_64 root=UUID=6e43975a-1916-4f3f-b40f-cfed25542d46 ro console=tty0 console=ttyS0,115200n8 net.ifnames=0 biosdevname=0 nvme_core.io_timeout=4294967295 rd.emergency=poweroff rd.shell=0
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Fallback order for Node 0: 0 
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Dentry cache hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Inode-cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: mem auto-init: stack:off, heap alloc:off, heap free:off
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Memory: 261408K/1019424K available (12301K kernel code, 9445K rwdata, 8072K rodata, 2468K init, 18732K bss, 88180K reserved, 0K cma-reserved)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Kernel/User page tables isolation: enabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ftrace: allocating 40218 entries in 158 pages
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ftrace: allocated 158 pages with 5 groups
+Jul  7 14:13:03 ip-172-31-46-228 kernel: rcu: Hierarchical RCU implementation.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: rcu: #011RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=2.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: #011Rude variant of Tasks RCU enabled.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: #011Tracing variant of Tasks RCU enabled.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: rcu: RCU calculated value of scheduler-enlistment delay is 25 jiffies.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=2
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NR_IRQS: 524544, nr_irqs: 440, preallocated irqs: 16
+Jul  7 14:13:03 ip-172-31-46-228 kernel: random: crng init done
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Console: colour VGA+ 80x25
+Jul  7 14:13:03 ip-172-31-46-228 kernel: printk: console [tty0] enabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: printk: console [ttyS0] enabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Core revision 20200925
+Jul  7 14:13:03 ip-172-31-46-228 kernel: clocksource: hpet: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 30580167144 ns
+Jul  7 14:13:03 ip-172-31-46-228 kernel: APIC: Switch to symmetric I/O mode setup
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x2apic enabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Switched APIC routing to physical x2apic.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: clocksource: tsc-early: mask: 0xffffffffffffffff max_cycles: 0x240937b9988, max_idle_ns: 440795218083 ns
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Calibrating delay loop (skipped) preset value.. 4999.99 BogoMIPS (lpj=9999992)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Last level iTLB entries: 4KB 64, 2MB 8, 4MB 8
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Last level dTLB entries: 4KB 64, 2MB 32, 4MB 32, 1GB 4
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Spectre V2 : Mitigation: Retpolines
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Spectre V2 : Spectre v2 / SpectreRSB mitigation: Filling RSB on context switch
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Spectre V2 : Spectre v2 / SpectreRSB : Filling RSB on VMEXIT
+Jul  7 14:13:03 ip-172-31-46-228 kernel: RETBleed: WARNING: Spectre v2 mitigation leaves CPU vulnerable to RETBleed attacks, data leaks possible!
+Jul  7 14:13:03 ip-172-31-46-228 kernel: RETBleed: Vulnerable
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Speculative Store Bypass: Vulnerable
+Jul  7 14:13:03 ip-172-31-46-228 kernel: MDS: Vulnerable: Clear CPU buffers attempted, no microcode
+Jul  7 14:13:03 ip-172-31-46-228 kernel: MMIO Stale Data: Vulnerable: Clear CPU buffers attempted, no microcode
+Jul  7 14:13:03 ip-172-31-46-228 kernel: GDS: Unknown: Dependent on hypervisor status
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ITS: Mitigation: Aligned branch/return thunks
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: Supporting XSAVE feature 0x008: 'MPX bounds registers'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: Supporting XSAVE feature 0x010: 'MPX CSR'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: Supporting XSAVE feature 0x020: 'AVX-512 opmask'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: Supporting XSAVE feature 0x040: 'AVX-512 Hi256'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: Supporting XSAVE feature 0x080: 'AVX-512 ZMM_Hi256'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: xstate_offset[3]:  832, xstate_sizes[3]:   64
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: xstate_offset[4]:  896, xstate_sizes[4]:   64
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: xstate_offset[5]:  960, xstate_sizes[5]:   64
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: xstate_offset[6]: 1024, xstate_sizes[6]:  512
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: xstate_offset[7]: 1536, xstate_sizes[7]: 1024
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: xstate_offset[9]: 2560, xstate_sizes[9]:    8
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/fpu: Enabled xstate features 0x2ff, context size is 2568 bytes, using 'compacted' format.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Freeing SMP alternatives memory: 32K
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pid_max: default: 32768 minimum: 301
+Jul  7 14:13:03 ip-172-31-46-228 kernel: LSM: Security Framework initializing
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Yama: becoming mindful.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: SELinux:  Initializing.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: LSM support for eBPF active
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Mount-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Mountpoint-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: smpboot: CPU0: Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz (family: 0x6, model: 0x55, stepping: 0x7)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Performance Events: unsupported p6 CPU model 85 no PMU driver, software events only.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: rcu: Hierarchical SRCU implementation.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NMI watchdog: Perf NMI watchdog permanently disabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: smp: Bringing up secondary CPUs ...
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86: Booting SMP configuration:
+Jul  7 14:13:03 ip-172-31-46-228 kernel: .... node  #0, CPUs:      #1
+Jul  7 14:13:03 ip-172-31-46-228 kernel: kvm-clock: cpu 1, msr 21601041, secondary cpu clock
+Jul  7 14:13:03 ip-172-31-46-228 kernel: kvm-guest: stealtime: cpu 1, msr 3d134080
+Jul  7 14:13:03 ip-172-31-46-228 kernel: MDS CPU bug present and SMT on, data leak possible. See https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/mds.html for more details.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: MMIO Stale Data CPU bug present and SMT on, data leak possible. See https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/processor_mmio_stale_data.html for more details.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: smp: Brought up 1 node, 2 CPUs
+Jul  7 14:13:03 ip-172-31-46-228 kernel: smpboot: Max logical packages: 1
+Jul  7 14:13:03 ip-172-31-46-228 kernel: smpboot: Total of 2 processors activated (9999.99 BogoMIPS)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: node 0 deferred pages initialised in 0ms
+Jul  7 14:13:03 ip-172-31-46-228 kernel: devtmpfs: initialized
+Jul  7 14:13:03 ip-172-31-46-228 kernel: x86/mm: Memory block size: 128MB
+Jul  7 14:13:03 ip-172-31-46-228 kernel: clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+Jul  7 14:13:03 ip-172-31-46-228 kernel: futex hash table entries: 512 (order: 3, 32768 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NET: Registered protocol family 16
+Jul  7 14:13:03 ip-172-31-46-228 kernel: DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+Jul  7 14:13:03 ip-172-31-46-228 kernel: DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+Jul  7 14:13:03 ip-172-31-46-228 kernel: DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+Jul  7 14:13:03 ip-172-31-46-228 kernel: audit: initializing netlink subsys (disabled)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: audit: type=2000 audit(1751897582.621:1): state=initialized audit_enabled=0 res=1
+Jul  7 14:13:03 ip-172-31-46-228 kernel: thermal_sys: Registered thermal governor 'fair_share'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: thermal_sys: Registered thermal governor 'step_wise'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: thermal_sys: Registered thermal governor 'user_space'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: cpuidle: using governor ladder
+Jul  7 14:13:03 ip-172-31-46-228 kernel: cpuidle: using governor menu
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: bus type PCI registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+Jul  7 14:13:03 ip-172-31-46-228 kernel: PCI: Using configuration type 1 for base access
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Kprobes globally optimized
+Jul  7 14:13:03 ip-172-31-46-228 kernel: HugeTLB registered 1.00 GiB page size, pre-allocated 0 pages
+Jul  7 14:13:03 ip-172-31-46-228 kernel: HugeTLB registered 2.00 MiB page size, pre-allocated 0 pages
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Added _OSI(Module Device)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Added _OSI(Processor Device)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Added _OSI(3.0 _SCP Extensions)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Added _OSI(Processor Aggregator Device)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Added _OSI(Linux-Dell-Video)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Added _OSI(Linux-Lenovo-NV-HDMI-Audio)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Added _OSI(Linux-HPI-Hybrid-Graphics)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: 3 ACPI AML tables successfully acquired and loaded
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Interpreter enabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: (supports S0 S4 S5)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Using IOAPIC for interrupt routing
+Jul  7 14:13:03 ip-172-31-46-228 kernel: PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: Enabled 16 GPEs in block 00 to 0F
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: PCI Root Bridge [PCI0] (domain 0000 [bus 00-ff])
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpi PNP0A03:00: _OSC: OS supports [ASPM ClockPM Segments MSI HPX-Type3]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpi PNP0A03:00: fail to add MMCONFIG information, can't access extended PCI configuration space under this bridge.
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [3] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [4] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [5] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [6] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [7] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [8] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [9] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [10] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [11] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [12] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [13] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [14] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [15] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [16] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [17] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [18] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [19] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [20] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [21] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [22] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [23] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [24] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [25] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [26] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [27] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [28] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [29] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [30] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: acpiphp: Slot [31] registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: PCI host bridge to bus 0000:00
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci_bus 0000:00: root bus resource [mem 0x000a0000-0x000bffff window]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci_bus 0000:00: root bus resource [mem 0x80000000-0xfebfffff window]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci_bus 0000:00: root bus resource [bus 00-ff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:00.0: [8086:1237] type 00 class 0x060000
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.0: [8086:7000] type 00 class 0x060100
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.3: [8086:7113] type 00 class 0x000000
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.3: quirk: [io  0xb000-0xb03f] claimed by PIIX4 ACPI
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.3: quirk: [io  0xb100-0xb10f] claimed by PIIX4 SMB
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.3: PIIX4 devres E PIO at fff0-ffff
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.3: PIIX4 devres F MMIO at ffc00000-ffffffff
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.3: PIIX4 devres G PIO at fff0-ffff
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.3: PIIX4 devres H MMIO at ffc00000-ffffffff
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.3: PIIX4 devres I PIO at fff0-ffff
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.3: PIIX4 devres J PIO at fff0-ffff
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.3: quirk_piix4_acpi+0x0/0x170 took 31250 usecs
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:03.0: [1d0f:1111] type 00 class 0x030000
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:03.0: reg 0x10: [mem 0xfe400000-0xfe7fffff pref]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:03.0: reg 0x30: [mem 0xfebe0000-0xfebeffff pref]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:04.0: [1d0f:8061] type 00 class 0x010802
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:04.0: reg 0x10: [mem 0xfebf0000-0xfebf3fff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:05.0: [1d0f:ec20] type 00 class 0x020000
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:05.0: reg 0x10: [mem 0xfebf4000-0xfebf7fff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: PCI Interrupt Link [LNKA] (IRQs 5 *10 11)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: PCI Interrupt Link [LNKB] (IRQs 5 *10 11)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: PCI Interrupt Link [LNKC] (IRQs 5 10 *11)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: PCI Interrupt Link [LNKD] (IRQs 5 10 *11)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ACPI: PCI Interrupt Link [LNKS] (IRQs *9)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: iommu: Default domain type: Translated 
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:03.0: vgaarb: setting as boot VGA device
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:03.0: vgaarb: VGA device added: decodes=io+mem,owns=io+mem,locks=none
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:03.0: vgaarb: bridge control possible
+Jul  7 14:13:03 ip-172-31-46-228 kernel: vgaarb: loaded
+Jul  7 14:13:03 ip-172-31-46-228 kernel: EDAC MC: Ver: 3.0.0
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NetLabel: Initializing
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NetLabel:  domain hash size = 128
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NetLabel:  unlabeled traffic allowed by default
+Jul  7 14:13:03 ip-172-31-46-228 kernel: PCI: Using ACPI for IRQ routing
+Jul  7 14:13:03 ip-172-31-46-228 kernel: hpet0: at MMIO 0xfed00000, IRQs 2, 8, 0, 0, 0, 0, 0, 0
+Jul  7 14:13:03 ip-172-31-46-228 kernel: hpet0: 8 comparators, 32-bit 62.500000 MHz counter
+Jul  7 14:13:03 ip-172-31-46-228 kernel: clocksource: Switched to clocksource kvm-clock
+Jul  7 14:13:03 ip-172-31-46-228 kernel: VFS: Disk quotas dquot_6.6.0
+Jul  7 14:13:03 ip-172-31-46-228 kernel: VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pnp: PnP ACPI init
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pnp: PnP ACPI: found 5 devices
+Jul  7 14:13:03 ip-172-31-46-228 kernel: clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NET: Registered protocol family 2
+Jul  7 14:13:03 ip-172-31-46-228 kernel: IP idents hash table entries: 16384 (order: 5, 131072 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: tcp_listen_portaddr_hash hash table entries: 512 (order: 1, 8192 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: TCP established hash table entries: 8192 (order: 4, 65536 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: TCP bind hash table entries: 8192 (order: 5, 131072 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: TCP: Hash tables configured (established 8192 bind 8192)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: MPTCP token hash table entries: 1024 (order: 2, 24576 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: UDP hash table entries: 512 (order: 2, 16384 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: UDP-Lite hash table entries: 512 (order: 2, 16384 bytes, linear)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NET: Registered protocol family 1
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NET: Registered protocol family 44
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci_bus 0000:00: resource 6 [mem 0x000a0000-0x000bffff window]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci_bus 0000:00: resource 7 [mem 0x80000000-0xfebfffff window]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:00.0: Limiting direct PCI/PCI transfers
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:01.0: Activating ISA DMA hang workarounds
+Jul  7 14:13:03 ip-172-31-46-228 kernel: pci 0000:00:03.0: Video device with shadowed ROM at [mem 0x000c0000-0x000dffff]
+Jul  7 14:13:03 ip-172-31-46-228 kernel: PCI: CLS 0 bytes, default 64
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Trying to unpack rootfs image as initramfs...
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Freeing initrd memory: 12092K
+Jul  7 14:13:03 ip-172-31-46-228 kernel: clocksource: tsc: mask: 0xffffffffffffffff max_cycles: 0x240937b9988, max_idle_ns: 440795218083 ns
+Jul  7 14:13:03 ip-172-31-46-228 kernel: clocksource: Switched to clocksource tsc
+Jul  7 14:13:03 ip-172-31-46-228 kernel: check: Scanning for low memory corruption every 60 seconds
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Initialise system trusted keyrings
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Key type blacklist registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: workingset: timestamp_bits=36 max_order=18 bucket_order=0
+Jul  7 14:13:03 ip-172-31-46-228 kernel: zbud: loaded
+Jul  7 14:13:03 ip-172-31-46-228 kernel: SGI XFS with ACLs, security attributes, quota, no debug enabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Key type asymmetric registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Asymmetric key parser 'x509' registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Block layer SCSI generic (bsg) driver version 0.4 loaded (major 251)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: io scheduler mq-deadline registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: io scheduler kyber registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: io scheduler bfq registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: shpchp: Standard Hot Plug PCI Controller Driver version: 0.4
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: 00:04: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+Jul  7 14:13:03 ip-172-31-46-228 kernel: nvme nvme0: pci function 0000:00:04.0
+Jul  7 14:13:03 ip-172-31-46-228 kernel: i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+Jul  7 14:13:03 ip-172-31-46-228 kernel: PCI Interrupt Link [LNKD] enabled at IRQ 11
+Jul  7 14:13:03 ip-172-31-46-228 kernel: i8042: Warning: Keylock active
+Jul  7 14:13:03 ip-172-31-46-228 kernel: serio: i8042 KBD port at 0x60,0x64 irq 1
+Jul  7 14:13:03 ip-172-31-46-228 kernel: serio: i8042 AUX port at 0x60,0x64 irq 12
+Jul  7 14:13:03 ip-172-31-46-228 kernel: rtc_cmos 00:00: RTC can wake from S4
+Jul  7 14:13:03 ip-172-31-46-228 kernel: nvme nvme0: 2/0/0 default/read/poll queues
+Jul  7 14:13:03 ip-172-31-46-228 kernel: rtc_cmos 00:00: registered as rtc0
+Jul  7 14:13:03 ip-172-31-46-228 kernel: rtc_cmos 00:00: setting system clock to 2025-07-07T14:13:03 UTC (1751897583)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: rtc_cmos 00:00: alarms up to one day, 114 bytes nvram
+Jul  7 14:13:03 ip-172-31-46-228 kernel: intel_pstate: CPU model not supported
+Jul  7 14:13:03 ip-172-31-46-228 kernel: hid: raw HID events driver (C) Jiri Kosina
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NET: Registered protocol family 10
+Jul  7 14:13:03 ip-172-31-46-228 kernel: nvme0n1: detected capacity change from 0 to 8589934592
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Segment Routing with IPv6
+Jul  7 14:13:03 ip-172-31-46-228 kernel: NET: Registered protocol family 17
+Jul  7 14:13:03 ip-172-31-46-228 kernel: nvme0n1: p1 p128
+Jul  7 14:13:03 ip-172-31-46-228 kernel: IPI shorthand broadcast: enabled
+Jul  7 14:13:03 ip-172-31-46-228 kernel: sched_clock: Marking stable (1031081319, 670761666)->(2183870595, -482027610)
+Jul  7 14:13:03 ip-172-31-46-228 kernel: registered taskstats version 1
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Loading compiled-in X.509 certificates
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Loaded X.509 cert 'Build time autogenerated kernel key: 112c95052ccbe9ad0a2bedff5244db2b30dd7ca0'
+Jul  7 14:13:03 ip-172-31-46-228 kernel: zswap: loaded using pool lzo/zbud
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Key type .fscrypt registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Key type fscrypt-provisioning registered
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ima: No TPM chip found, activating TPM-bypass!
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ima: Allocated hash algorithm: sha1
+Jul  7 14:13:03 ip-172-31-46-228 kernel: ima: No architecture policies found
+Jul  7 14:13:03 ip-172-31-46-228 kernel: clk: Disabling unused clocks
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Freeing unused decrypted memory: 2036K
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Freeing unused kernel image (initmem) memory: 2468K
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Write protecting the kernel read-only data: 22528k
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Freeing unused kernel image (text/rodata gap) memory: 2032K
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Freeing unused kernel image (rodata/data gap) memory: 120K
+Jul  7 14:13:03 ip-172-31-46-228 kernel: Run /init as init process
+Jul  7 14:13:03 ip-172-31-46-228 systemd[1]: systemd 219 running in system mode. (+PAM +AUDIT +SELINUX +IMA -APPARMOR +SMACK +SYSVINIT +UTMP +LIBCRYPTSETUP +GCRYPT +GNUTLS +ACL +XZ +LZ4 -SECCOMP +BLKID +ELFUTILS +KMOD +IDN)
+Jul  7 14:13:03 ip-172-31-46-228 systemd[1]: Detected virtualization amazon.
+Jul  7 14:13:03 ip-172-31-46-228 systemd[1]: Detected architecture x86-64.
+Jul  7 14:13:03 ip-172-31-46-228 systemd[1]: Running in initial RAM disk.
+Jul  7 14:13:03 ip-172-31-46-228 systemd[1]: No hostname configured.
+Jul  7 14:13:03 ip-172-31-46-228 systemd[1]: Set hostname to <localhost>.
+Jul  7 14:13:03 ip-172-31-46-228 systemd[1]: Initializing machine ID from VM UUID.
+Jul  7 14:13:03 ip-172-31-46-228 systemd[1]: Created slice Root Slice.
+Jul  7 14:13:03 ip-172-31-46-228 systemd[1]: Listening on Journal Socket.
+Jul  7 14:13:03 ip-172-31-46-228 systemd[1]: Listening on udev Kernel Socket.
+Jul  7 14:13:03 ip-172-31-46-228 journal: Journal started
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Started Apply Kernel Variables.
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Started Create list of required static device nodes for the current kernel.
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Starting Create Static Device Nodes in /dev...
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Started Create Static Device Nodes in /dev.
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Starting udev Kernel Device Manager...
+Jul  7 14:13:03 ip-172-31-46-228 systemd-udevd: starting version 219
+Jul  7 14:13:03 ip-172-31-46-228 systemd-udevd: Network interface NamePolicy= disabled on kernel command line, ignoring.
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Started udev Kernel Device Manager.
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Starting dracut pre-trigger hook...
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Started dracut pre-trigger hook.
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Starting udev Coldplug all Devices...
+Jul  7 14:13:03 ip-172-31-46-228 systemd-udevd: Network interface NamePolicy= disabled on kernel command line, ignoring.
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Started udev Coldplug all Devices.
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Reached target System Initialization.
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Reached target Basic System.
+Jul  7 14:13:03 ip-172-31-46-228 systemd: Starting dracut initqueue hook...
+Jul  7 14:13:04 ip-172-31-46-228 kernel: input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input0
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Found device Amazon Elastic Block Store /.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting File System Check on /dev/disk/by-uuid/6e43975a-1916-4f3f-b40f-cfed25542d46...
+Jul  7 14:13:04 ip-172-31-46-228 systemd-fsck: fsck.xfs doesn't exist, not checking file system on /dev/disk/by-uuid/6e43975a-1916-4f3f-b40f-cfed25542d46
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started File System Check on /dev/disk/by-uuid/6e43975a-1916-4f3f-b40f-cfed25542d46.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started dracut initqueue hook.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Mounting /sysroot...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Reached target Remote File Systems (Pre).
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Reached target Remote File Systems.
+Jul  7 14:13:04 ip-172-31-46-228 kernel: XFS (nvme0n1p1): Mounting V5 Filesystem
+Jul  7 14:13:04 ip-172-31-46-228 kernel: XFS (nvme0n1p1): Ending clean mount
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Mounted /sysroot.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Reached target Initrd Root File System.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Reload Configuration from the Real Root...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Reloading.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Reload Configuration from the Real Root.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Reached target Initrd File Systems.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Reached target Initrd Default Target.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting dracut pre-pivot and cleanup hook...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started dracut pre-pivot and cleanup hook.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Cleaning Up and Shutting Down Daemons...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped dracut pre-pivot and cleanup hook.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped target Remote File Systems.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped target Timers.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped target Initrd Default Target.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped target Basic System.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped target Paths.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped Dispatch Password Requests to Console Directory Watch.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped target System Initialization.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped target Local File Systems.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped target Swap.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped Apply Kernel Variables.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped target Slices.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped target Sockets.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped target Remote File Systems (Pre).
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped dracut initqueue hook.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped udev Coldplug all Devices.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped dracut pre-trigger hook.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopping udev Kernel Device Manager...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Cleaning Up and Shutting Down Daemons.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped udev Kernel Device Manager.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped Create Static Device Nodes in /dev.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Stopped Create list of required static device nodes for the current kernel.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Closed udev Kernel Socket.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Closed udev Control Socket.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Cleanup udevd DB...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Cleanup udevd DB.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Reached target Switch Root.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Switch Root...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Switching root.
+Jul  7 14:13:04 ip-172-31-46-228 journal: Journal stopped
+Jul  7 14:13:04 ip-172-31-46-228 journal: Runtime journal is using 5.8M (max allowed 46.3M, trying to leave 69.5M free of 452.2M available → current limit 46.3M).
+Jul  7 14:13:04 ip-172-31-46-228 systemd-journald[763]: Received SIGTERM from PID 1 (systemd).
+Jul  7 14:13:04 ip-172-31-46-228 kernel: printk: systemd: 13 output lines suppressed due to ratelimiting
+Jul  7 14:13:04 ip-172-31-46-228 kernel: SELinux:  Runtime disable is deprecated, use selinux=0 on the kernel cmdline.
+Jul  7 14:13:04 ip-172-31-46-228 kernel: SELinux:  Disabled at runtime.
+Jul  7 14:13:04 ip-172-31-46-228 kernel: audit: type=1404 audit(1751897584.472:2): enforcing=0 old_enforcing=0 auid=4294967295 ses=4294967295 enabled=0 old-enabled=1 lsm=selinux res=1
+Jul  7 14:13:04 ip-172-31-46-228 journal: Journal started
+Jul  7 14:13:04 ip-172-31-46-228 systemd: systemd 219 running in system mode. (+PAM +AUDIT +SELINUX +IMA -APPARMOR +SMACK +SYSVINIT +UTMP +LIBCRYPTSETUP +GCRYPT +GNUTLS +ACL +XZ +LZ4 -SECCOMP +BLKID +ELFUTILS +KMOD +IDN)
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Detected virtualization amazon.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Detected architecture x86-64.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Set hostname to <ip-172-31-16-44.us-west-2.compute.internal>.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Cannot add dependency job for unit display-manager.service, ignoring: Unit not found.
+Jul  7 14:13:04 ip-172-31-46-228 kernel: xfs filesystem being remounted at / supports timestamps until 2038-01-19 (0x7fffffff)
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Remount Root and Kernel File Systems.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Setup Virtual Console.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Read and set NIS domainname from /etc/sysconfig/network.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Create list of required static device nodes for the current kernel.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Create Static Device Nodes in /dev...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Configure read-only root support...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting udev Coldplug all Devices...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Relabel kernel modules early in the boot, if needed...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Flush Journal to Persistent Storage...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started LVM2 metadata daemon.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Relabel kernel modules early in the boot, if needed.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started udev Coldplug all Devices.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Configure read-only root support.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Load/Save Random Seed...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting udev Wait for Complete Device Initialization...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Load Kernel Modules...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Flush Journal to Persistent Storage.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Create Static Device Nodes in /dev.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Load/Save Random Seed.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting udev Kernel Device Manager...
+Jul  7 14:13:04 ip-172-31-46-228 systemd-udevd: starting version 219
+Jul  7 14:13:04 ip-172-31-46-228 systemd-udevd: Network interface NamePolicy= disabled on kernel command line, ignoring.
+Jul  7 14:13:04 ip-172-31-46-228 kernel: pps_core: LinuxPPS API ver. 1 registered
+Jul  7 14:13:04 ip-172-31-46-228 kernel: pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+Jul  7 14:13:04 ip-172-31-46-228 kernel: PTP clock support registered
+Jul  7 14:13:04 ip-172-31-46-228 kernel: ena 0000:00:05.0: Elastic Network Adapter (ENA) v2.13.2g
+Jul  7 14:13:04 ip-172-31-46-228 kernel: ena 0000:00:05.0: ENA device version: 0.10
+Jul  7 14:13:04 ip-172-31-46-228 kernel: ena 0000:00:05.0: ENA controller version: 0.0.1 implementation version 1
+Jul  7 14:13:04 ip-172-31-46-228 kernel: input: Power Button as /devices/LNXSYSTM:00/LNXPWRBN:00/input/input3
+Jul  7 14:13:04 ip-172-31-46-228 kernel: ACPI: Power Button [PWRF]
+Jul  7 14:13:04 ip-172-31-46-228 kernel: input: Sleep Button as /devices/LNXSYSTM:00/LNXSLPBN:00/input/input4
+Jul  7 14:13:04 ip-172-31-46-228 kernel: ACPI: Sleep Button [SLPF]
+Jul  7 14:13:04 ip-172-31-46-228 kernel: ena 0000:00:05.0: LLQ is not supported Fallback to host mode policy.
+Jul  7 14:13:04 ip-172-31-46-228 kernel: ena 0000:00:05.0: Elastic Network Adapter (ENA) found at mem febf4000, mac addr 06:b4:01:3a:76:2b
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started udev Kernel Device Manager.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Show Plymouth Boot Screen...
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Received SIGRTMIN+20 from PID 1632 (plymouthd).
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Show Plymouth Boot Screen.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Forward Password Requests to Plymouth Directory Watch.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Found device /dev/ttyS0.
+Jul  7 14:13:04 ip-172-31-46-228 systemd-modules-load: Inserted module 'ena'
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Started Load Kernel Modules.
+Jul  7 14:13:04 ip-172-31-46-228 systemd: Starting Apply Kernel Variables...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Apply Kernel Variables.
+Jul  7 14:13:05 ip-172-31-46-228 kernel: input: ImPS/2 Generic Wheel Mouse as /devices/platform/i8042/serio1/input/input5
+Jul  7 14:13:05 ip-172-31-46-228 kernel: cryptd: max_cpu_qlen set to 1000
+Jul  7 14:13:05 ip-172-31-46-228 kernel: mousedev: PS/2 mouse device common for all mice
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Created slice system-ec2net\x2difup.slice.
+Jul  7 14:13:05 ip-172-31-46-228 kernel: AVX2 version of gcm_enc/dec engaged.
+Jul  7 14:13:05 ip-172-31-46-228 kernel: AES CTR mode by8 optimization enabled
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Relabel kernel modules early in the boot, if needed...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Relabel kernel modules early in the boot, if needed.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Found device Elastic Network Adapter (ENA).
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started udev Wait for Complete Device Initialization.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Activation of DM RAID sets...
+Jul  7 14:13:05 ip-172-31-46-228 kernel: device-mapper: uevent: version 1.0.3
+Jul  7 14:13:05 ip-172-31-46-228 kernel: device-mapper: ioctl: 4.43.0-ioctl (2020-10-01) initialised: dm-devel@redhat.com
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Activation of DM RAID sets.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target Local Encrypted Volumes.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Monitoring of LVM2 mirrors, snapshots etc. using dmeventd or progress polling.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target Local File Systems (Pre).
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target Local File Systems.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Tell Plymouth To Write Out Runtime Data...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Preprocess NFS configuration...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Create Volatile Files and Directories...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Preprocess NFS configuration.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Tell Plymouth To Write Out Runtime Data.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Create Volatile Files and Directories.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Security Auditing Service...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Mounting RPC Pipe File System...
+Jul  7 14:13:05 ip-172-31-46-228 auditd[1774]: Started dispatcher: /sbin/audispd pid: 1776
+Jul  7 14:13:05 ip-172-31-46-228 auditd[1774]: Init complete, auditd 2.8.1 listening for events (startup state enable)
+Jul  7 14:13:05 ip-172-31-46-228 audispd: No plugins found, exiting
+Jul  7 14:13:05 ip-172-31-46-228 kernel: RPC: Registered named UNIX socket transport module.
+Jul  7 14:13:05 ip-172-31-46-228 kernel: RPC: Registered udp transport module.
+Jul  7 14:13:05 ip-172-31-46-228 kernel: RPC: Registered tcp transport module.
+Jul  7 14:13:05 ip-172-31-46-228 kernel: RPC: Registered tcp NFSv4.1 backchannel transport module.
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: /sbin/augenrules: No change
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Mounted RPC Pipe File System.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target rpc_pipefs.target.
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: No rules
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: enabled 1
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: failure 1
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: pid 1774
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: rate_limit 0
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: backlog_limit 8192
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: lost 0
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: backlog 0
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: backlog_wait_time 15000
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: enabled 1
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: failure 1
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: pid 1774
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: rate_limit 0
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: backlog_limit 8192
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: lost 0
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: backlog 0
+Jul  7 14:13:05 ip-172-31-46-228 augenrules: backlog_wait_time 15000
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Security Auditing Service.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Update UTMP about System Boot/Shutdown...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Update UTMP about System Boot/Shutdown.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target System Initialization.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Daily Cleanup of Temporary Directories.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target Timers.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Listening on RPCbind Server Activation Socket.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting RPC bind service...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Flexible branding.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target Paths.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Listening on D-Bus System Message Bus Socket.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target Sockets.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target Basic System.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started irqbalance daemon.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting ACPI Event Daemon...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Dump dmesg to /var/log/dmesg...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Hardware RNG Entropy Gatherer Wake threshold service...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting GSSAPI Proxy Daemon...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting NTP client/server...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Resets System Activity Logs...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started libstoragemgmt plug-in server daemon.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Initial cloud-init job (pre-networking)...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Starting Login Service...
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started D-Bus System Message Bus.
+Jul  7 14:13:05 ip-172-31-46-228 acpid: starting up with netlink and the input layer
+Jul  7 14:13:05 ip-172-31-46-228 acpid: skipping incomplete file /etc/acpi/events/videoconf
+Jul  7 14:13:05 ip-172-31-46-228 acpid: 2 rules loaded
+Jul  7 14:13:05 ip-172-31-46-228 acpid: waiting for events: event logging is off
+Jul  7 14:13:05 ip-172-31-46-228 chronyd[1825]: chronyd version 4.2 starting (+CMDMON +NTP +REFCLOCK +RTC +PRIVDROP +SCFILTER +SIGND +ASYNCDNS -NTS +SECHASH +IPV6 +DEBUG)
+Jul  7 14:13:05 ip-172-31-46-228 dbus[1818]: [system] Successfully activated service 'org.freedesktop.systemd1'
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started RPC bind service.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started ACPI Event Daemon.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Dump dmesg to /var/log/dmesg.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Hardware RNG Entropy Gatherer Wake threshold service.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Resets System Activity Logs.
+Jul  7 14:13:05 ip-172-31-46-228 chronyd[1825]: Frequency -5.069 +/- 0.063 ppm read from /var/lib/chrony/drift
+Jul  7 14:13:05 ip-172-31-46-228 chronyd[1825]: Loaded seccomp filter (level 2)
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Hardware RNG Entropy Gatherer Daemon.
+Jul  7 14:13:05 ip-172-31-46-228 systemd-logind: New seat seat0.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started NTP client/server.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started Login Service.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Started GSSAPI Proxy Daemon.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target NFS client services.
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target Remote File Systems (Pre).
+Jul  7 14:13:05 ip-172-31-46-228 systemd: Reached target Remote File Systems.
+Jul  7 14:13:05 ip-172-31-46-228 rngd: Disabling 5: JITTER Entropy generator (jitter)
+Jul  7 14:13:05 ip-172-31-46-228 rngd: Initializing available sources
+Jul  7 14:13:05 ip-172-31-46-228 rngd: Failed to init entropy source hwrng
+Jul  7 14:13:05 ip-172-31-46-228 rngd: Enabling RDSEED rng support
+Jul  7 14:13:05 ip-172-31-46-228 rngd: Initializing entropy source rdrand
+Jul  7 14:13:06 ip-172-31-46-228 cloud-init: Cloud-init v. 19.3-46.amzn2.0.5 running 'init-local' at Mon, 07 Jul 2025 14:13:06 +0000. Up 3.97 seconds.
+Jul  7 14:13:06 ip-172-31-46-228 systemd: Started Initial cloud-init job (pre-networking).
+Jul  7 14:13:06 ip-172-31-46-228 systemd: Reached target Network (Pre).
+Jul  7 14:13:06 ip-172-31-46-228 systemd: Starting LSB: Bring up/down networking...
+Jul  7 14:13:06 ip-172-31-46-228 network: Bringing up loopback interface:  [  OK  ]
+Jul  7 14:13:06 ip-172-31-46-228 network: Bringing up interface eth0:
+Jul  7 14:13:06 ip-172-31-46-228 kernel: ena 0000:00:05.0 eth0: Local page cache is disabled for less than 16 channels
+Jul  7 14:13:06 ip-172-31-46-228 dhclient[1982]: DHCPDISCOVER on eth0 to 255.255.255.255 port 67 interval 8 (xid=0x1f62ed7)
+Jul  7 14:13:06 ip-172-31-46-228 dhclient[1982]: DHCPREQUEST on eth0 to 255.255.255.255 port 67 (xid=0x1f62ed7)
+Jul  7 14:13:06 ip-172-31-46-228 dhclient[1982]: DHCPOFFER from 172.31.32.1
+Jul  7 14:13:06 ip-172-31-46-228 dhclient[1982]: DHCPACK from 172.31.32.1 (xid=0x1f62ed7)
+Jul  7 14:13:06 ip-172-31-46-228 NET: dhclient: Locked /run/dhclient/resolv.lock
+Jul  7 14:13:06 ip-172-31-46-228 NET[2041]: /usr/sbin/dhclient-script : updated /etc/resolv.conf
+Jul  7 14:13:07 ip-172-31-46-228 dhclient[1982]: bound to 172.31.46.228 -- renewal in 1425 seconds.
+Jul  7 14:13:07 ip-172-31-46-228 ec2net: [get_meta] Querying IMDS for meta-data/network/interfaces/macs/06:b4:01:3a:76:2b/local-ipv4s
+Jul  7 14:13:07 ip-172-31-46-228 network: Determining IP information for eth0... done.
+Jul  7 14:13:07 ip-172-31-46-228 ec2net: [get_meta] Getting token for IMDSv2.
+Jul  7 14:13:07 ip-172-31-46-228 ec2net: [get_meta] Trying to get http://169.254.169.254/latest/meta-data/network/interfaces/macs/06:b4:01:3a:76:2b/local-ipv4s
+Jul  7 14:13:07 ip-172-31-46-228 ec2net: [remove_aliases] Removing aliases of eth0
+Jul  7 14:13:07 ip-172-31-46-228 network: Determining IPv6 information for eth0... done.
+Jul  7 14:13:07 ip-172-31-46-228 network: [  OK  ]
+Jul  7 14:13:07 ip-172-31-46-228 systemd: Started LSB: Bring up/down networking.
+Jul  7 14:13:07 ip-172-31-46-228 systemd: Starting Initial cloud-init job (metadata service crawler)...
+Jul  7 14:13:07 ip-172-31-46-228 systemd: Reached target Network.
+Jul  7 14:13:07 ip-172-31-46-228 systemd: Starting Postfix Mail Transport Agent...
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: Cloud-init v. 19.3-46.amzn2.0.5 running 'init' at Mon, 07 Jul 2025 14:13:07 +0000. Up 5.00 seconds.
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: ++++++++++++++++++++++++++++++++++++++Net device info++++++++++++++++++++++++++++++++++++++
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: +--------+------+----------------------------+---------------+--------+-------------------+
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: | Device |  Up  |          Address           |      Mask     | Scope  |     Hw-Address    |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: +--------+------+----------------------------+---------------+--------+-------------------+
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: |  eth0  | True |       172.31.46.228        | 255.255.240.0 | global | 06:b4:01:3a:76:2b |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: |  eth0  | True | fe80::4b4:1ff:fe3a:762b/64 |       .       |  link  | 06:b4:01:3a:76:2b |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: |   lo   | True |         127.0.0.1          |   255.0.0.0   |  host  |         .         |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: |   lo   | True |          ::1/128           |       .       |  host  |         .         |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: +--------+------+----------------------------+---------------+--------+-------------------+
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: ++++++++++++++++++++++++++++++++Route IPv4 info++++++++++++++++++++++++++++++++
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: +-------+-----------------+-------------+-----------------+-----------+-------+
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: | Route |   Destination   |   Gateway   |     Genmask     | Interface | Flags |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: +-------+-----------------+-------------+-----------------+-----------+-------+
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: |   0   |     0.0.0.0     | 172.31.32.1 |     0.0.0.0     |    eth0   |   UG  |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: |   1   | 169.254.169.254 |   0.0.0.0   | 255.255.255.255 |    eth0   |   UH  |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: |   2   |   172.31.32.0   |   0.0.0.0   |  255.255.240.0  |    eth0   |   U   |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: +-------+-----------------+-------------+-----------------+-----------+-------+
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: +++++++++++++++++++Route IPv6 info+++++++++++++++++++
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: +-------+-------------+---------+-----------+-------+
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: | Route | Destination | Gateway | Interface | Flags |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: +-------+-------------+---------+-----------+-------+
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: |   9   |  fe80::/64  |    ::   |    eth0   |   U   |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: |   11  |    local    |    ::   |    eth0   |   U   |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: |   12  |  multicast  |    ::   |    eth0   |   U   |
+Jul  7 14:13:07 ip-172-31-46-228 cloud-init: ci-info: +-------+-------------+---------+-----------+-------+
+Jul  7 14:13:07 ip-172-31-46-228 dhclient[2104]: XMT: Solicit on eth0, interval 1030ms.
+Jul  7 14:13:07 ip-172-31-46-228 systemd: Started Postfix Mail Transport Agent.
+Jul  7 14:13:07 ip-172-31-46-228 dbus[1818]: [system] Activating via systemd: service name='org.freedesktop.hostname1' unit='dbus-org.freedesktop.hostname1.service'
+Jul  7 14:13:07 ip-172-31-46-228 systemd: Starting Hostname Service...
+Jul  7 14:13:07 ip-172-31-46-228 dbus[1818]: [system] Successfully activated service 'org.freedesktop.hostname1'
+Jul  7 14:13:07 ip-172-31-46-228 systemd-hostnamed: Changed static host name to 'ip-172-31-46-228.us-west-2.compute.internal'
+Jul  7 14:13:07 ip-172-31-46-228 systemd-hostnamed: Changed host name to 'ip-172-31-46-228.us-west-2.compute.internal'
+Jul  7 14:13:07 ip-172-31-46-228 systemd: Started Hostname Service.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Initial cloud-init job (metadata service crawler).
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting OpenSSH Server Key Generation...
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Reached target Network is Online.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting Finds and configures elastic network interfaces...
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting Notify NFS peers of a restart...
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting Dynamically Generate Message Of The Day...
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting System Logging Service...
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started amazon-ssm-agent.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting Permit User Sessions...
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Reached target Cloud-config availability.
+Jul  7 14:13:08 ip-172-31-46-228 sm-notify[2299]: Version 1.3.0 starting
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting Apply the settings specified in cloud-config...
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Notify NFS peers of a restart.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Permit User Sessions.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting Terminate Plymouth Boot Screen...
+Jul  7 14:13:08 ip-172-31-46-228 ec2net: [ec2ifscan] Scanning for unconfigured interfaces
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Command Scheduler.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Job spooling tools.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting Wait for Plymouth Boot Screen to Quit...
+Jul  7 14:13:08 ip-172-31-46-228 rsyslogd: [origin software="rsyslogd" swVersion="8.24.0-57.amzn2.2.0.2" x-pid="2301" x-info="http://www.rsyslog.com"] start
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started System Logging Service.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Finds and configures elastic network interfaces.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Dynamically Generate Message Of The Day.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Received SIGRTMIN+21 from PID 1632 (plymouthd).
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Terminate Plymouth Boot Screen.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Wait for Plymouth Boot Screen to Quit.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Serial Getty on ttyS0.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Getty on tty1.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Reached target Login Prompts.
+Jul  7 14:13:08 ip-172-31-46-228 sshd-keygen: Generating SSH2 RSA host key: [  OK  ]
+Jul  7 14:13:08 ip-172-31-46-228 sshd-keygen: Generating SSH2 ECDSA host key: [  OK  ]
+Jul  7 14:13:08 ip-172-31-46-228 sshd-keygen: Generating SSH2 ED25519 host key: [  OK  ]
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started OpenSSH Server Key Generation.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting OpenSSH server daemon...
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started OpenSSH server daemon.
+Jul  7 14:13:08 ip-172-31-46-228 amazon-ssm-agent: Error occurred fetching the seelog config file path:  open /etc/amazon/ssm/seelog.xml: no such file or directory
+Jul  7 14:13:08 ip-172-31-46-228 amazon-ssm-agent: Initializing new seelog logger
+Jul  7 14:13:08 ip-172-31-46-228 amazon-ssm-agent: New Seelog Logger Creation Complete
+Jul  7 14:13:08 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5068 INFO Proxy environment variables:
+Jul  7 14:13:08 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5071 INFO no_proxy:
+Jul  7 14:13:08 ip-172-31-46-228 dhclient[2104]: XMT: Solicit on eth0, interval 2110ms.
+Jul  7 14:13:08 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5071 INFO https_proxy:
+Jul  7 14:13:08 ip-172-31-46-228 cloud-init: Cloud-init v. 19.3-46.amzn2.0.5 running 'modules:config' at Mon, 07 Jul 2025 14:13:08 +0000. Up 6.15 seconds.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Started Apply the settings specified in cloud-config.
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting Execute cloud user/final scripts...
+Jul  7 14:13:08 ip-172-31-46-228 systemd: Starting Initial hibernation setup job...
+Jul  7 14:13:08 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5071 INFO http_proxy:
+Jul  7 14:13:08 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5071 INFO Checking if agent identity type OnPrem can be assumed
+Jul  7 14:13:08 ip-172-31-46-228 hibinit-agent: Effective config: {'grub_update': True, 'swap_percentage': 100, 'state_dir': '/var/lib/hibinit-agent', 'log_to_syslog': True, 'touch_swap': False, 'swap_mb': 4000, 'swapoff': 'swapoff {swapfile}', 'mkswap': 'mkswap {swapfile}', 'swapon': 'swapon {swapfile}', 'btrfs_enabled': False}
+Jul  7 14:13:08 ip-172-31-46-228 hibinit-agent: Requesting new IMDSv2 token.
+Jul  7 14:13:08 ip-172-31-46-228 hibinit-agent: Instance Launch has not enabled Hibernation Configured Flag. hibinit-agent exiting!!
+Jul  7 14:13:08 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5078 INFO Checking if agent identity type EC2 can be assumed
+Jul  7 14:13:09 ip-172-31-46-228 systemd: Started Initial hibernation setup job.
+Jul  7 14:13:09 ip-172-31-46-228 systemd: Reached target Multi-User System.
+Jul  7 14:13:09 ip-172-31-46-228 systemd: Reached target aws-eb.target.
+Jul  7 14:13:09 ip-172-31-46-228 systemd: Reached target Graphical Interface.
+Jul  7 14:13:09 ip-172-31-46-228 systemd: Starting Update UTMP about System Runlevel Changes...
+Jul  7 14:13:09 ip-172-31-46-228 systemd: Started Update UTMP about System Runlevel Changes.
+Jul  7 14:13:09 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5487 INFO Agent will take identity from EC2
+Jul  7 14:13:09 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5505 INFO [amazon-ssm-agent] amazon-ssm-agent - v3.3.2299.0
+Jul  7 14:13:09 ip-172-31-46-228 cloud-init: Cloud-init v. 19.3-46.amzn2.0.5 running 'modules:final' at Mon, 07 Jul 2025 14:13:09 +0000. Up 6.63 seconds.
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:09Z] Started EB User Data
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: + SLEEP_TIME=2
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: + SLEEP_TIME_MAX=3600
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: + true
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: + curl https://elasticbeanstalk-platform-assets-us-west-2.s3.us-west-2.amazonaws.com/stalks/eb_docker_amazon_linux_2_1.0.655.0_20250624222727/lib/UserDataScript.sh
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]:  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]:                                 Dload  Upload   Total   Spent    Left  Speed
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: #015  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0#015100  4838  100  4838    0     0   138k      0 --:--:-- --:--:-- --:--:--  138k
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: + RESULT=0
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: + [[ 0 -ne 0 ]]
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: + /bin/bash /tmp/ebbootstrap.sh 'https://cloudformation-waitcondition-us-west-2.s3-us-west-2.amazonaws.com/arn%3Aaws%3Acloudformation%3Aus-west-2%3A134051051460%3Astack/awseb-e-pjfpug3sgu-stack/67a55820-5b3c-11f0-b1ca-06bcdb4d5699/67a705d0-5b3c-11f0-b1ca-06bcdb4d5699/AWSEBInstanceLaunchWaitHandle?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20250707T141227Z&X-Amz-SignedHeaders=host&X-Amz-Expires=86399&X-Amz-Credential=AKIAJBJSWSW6NLR67N6A%2F20250707%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Signature=99b241516a6c875bf2eb2ec0dee7aeefd3ae6cd0d9f3e3a22791a6f3d1b09174' arn:aws:cloudformation:us-west-2:134051051460:stack/awseb-e-pjfpug3sgu-stack/67a55820-5b3c-11f0-b1ca-06bcdb4d5699 4f16e97b-949b-45ed-86ac-42a5ddee8921 https://elasticbeanstalk-health.us-west-2.amazonaws.com '' https://elasticbeanstalk-platform-assets-us-west-2.s3.us-west-2.amazonaws.com/stalks/eb_docker_amazon_linux_2_1.0.655.0_20250624222727 us-west-2
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:09.263Z] Started EB Bootstrapping Script.
+Jul  7 14:13:09 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5506 INFO [amazon-ssm-agent] OS: linux, Arch: amd64
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:09.267Z] Received parameters:
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: TARBALLS =
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: EB_GEMS =
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: SIGNAL_URL = https://cloudformation-waitcondition-us-west-2.s3-us-west-2.amazonaws.com/arn%3Aaws%3Acloudformation%3Aus-west-2%3A134051051460%3Astack/awseb-e-pjfpug3sgu-stack/67a55820-5b3c-11f0-b1ca-06bcdb4d5699/67a705d0-5b3c-11f0-b1ca-06bcdb4d5699/AWSEBInstanceLaunchWaitHandle?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20250707T141227Z&X-Amz-SignedHeaders=host&X-Amz-Expires=86399&X-Amz-Credential=AKIAJBJSWSW6NLR67N6A%2F20250707%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Signature=99b241516a6c875bf2eb2ec0dee7aeefd3ae6cd0d9f3e3a22791a6f3d1b09174
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: STACK_ID = arn:aws:cloudformation:us-west-2:134051051460:stack/awseb-e-pjfpug3sgu-stack/67a55820-5b3c-11f0-b1ca-06bcdb4d5699
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: REGION = us-west-2
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: GUID =
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: HEALTHD_GROUP_ID = 4f16e97b-949b-45ed-86ac-42a5ddee8921
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: HEALTHD_ENDPOINT = https://elasticbeanstalk-health.us-west-2.amazonaws.com
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: PROXY_SERVER =
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: HEALTHD_PROXY_LOG_LOCATION =
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: PLATFORM_ASSETS_URL = https://elasticbeanstalk-platform-assets-us-west-2.s3.us-west-2.amazonaws.com/stalks/eb_docker_amazon_linux_2_1.0.655.0_20250624222727
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:09.271Z] engine url is set to https://elasticbeanstalk-platform-assets-us-west-2.s3.us-west-2.amazonaws.com/stalks/eb_docker_amazon_linux_2_1.0.655.0_20250624222727/lib/platform-engine.zip
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:09.273Z] first init of instance.
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:09.274Z] Started executing cfn_init _OnInstanceBoot.
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:09.276Z] Running cfn-init ConfigSet: _OnInstanceBoot.
+Jul  7 14:13:09 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:09.278Z] Using stack-id from userdata
+Jul  7 14:13:09 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5506 INFO [amazon-ssm-agent] Starting Core Agent
+Jul  7 14:13:09 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5506 INFO [amazon-ssm-agent] Registrar detected. Attempting registration
+Jul  7 14:13:09 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5506 INFO [Registrar] Starting registrar module
+Jul  7 14:13:09 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5529 INFO [EC2Identity] Checking disk for registration info
+Jul  7 14:13:09 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5540 INFO [EC2Identity] No registration info found for ec2 instance, attempting registration
+Jul  7 14:13:09 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5540 INFO [EC2Identity] Found registration keys
+Jul  7 14:13:09 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5540 INFO [EC2Identity] Checking write access before registering
+Jul  7 14:13:10 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5542 INFO [EC2Identity] Registering EC2 instance with Systems Manager
+Jul  7 14:13:10 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5975 INFO [EC2Identity] EC2 registration was successful.
+Jul  7 14:13:10 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:10.233Z] Command Returned:
+Jul  7 14:13:10 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:10.235Z] Completed executing cfn_init.
+Jul  7 14:13:10 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:10.238Z] finished _OnInstanceBoot
+Jul  7 14:13:10 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:10.242Z] installing platform engine
+Jul  7 14:13:10 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5975 INFO [amazon-ssm-agent] Registration attempted. Resuming core agent startup.
+Jul  7 14:13:10 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5976 INFO [CredentialRefresher] credentialRefresher has started
+Jul  7 14:13:10 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.5976 INFO [CredentialRefresher] Starting credentials refresher loop
+Jul  7 14:13:10 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.6289 WARN EC2RoleProvider Failed to connect to Systems Manager with instance profile role credentials. Err: retrieved credentials failed to report to ssm. Error: AccessDeniedException: User: arn:aws:sts::134051051460:assumed-role/aws-elasticbeanstalk-ec2-role/i-002bd6dcaf9916434 is not authorized to perform: ssm:UpdateInstanceInformation on resource: arn:aws:ec2:us-west-2:134051051460:instance/i-002bd6dcaf9916434 because no identity-based policy allows the ssm:UpdateInstanceInformation action
+Jul  7 14:13:10 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.6578 ERROR EC2RoleProvider Failed to connect to Systems Manager with SSM role credentials. error calling RequestManagedInstanceRoleToken: AccessDeniedException: Systems Manager's instance management role is not configured for account: 134051051460
+Jul  7 14:13:10 ip-172-31-46-228 amazon-ssm-agent: status code: 400, request id: aea30c01-c343-48b1-b2ef-a2f5a2b74714
+Jul  7 14:13:10 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:10 URL:https://elasticbeanstalk-platform-assets-us-west-2.s3.us-west-2.amazonaws.com/stalks/eb_docker_amazon_linux_2_1.0.655.0_20250624222727/lib/platform-engine.zip [44460526/44460526] -> "/tmp/platform-engine.zip" [1]
+Jul  7 14:13:10 ip-172-31-46-228 dhclient[2104]: XMT: Solicit on eth0, interval 4030ms.
+Jul  7 14:13:10 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.6578 ERROR [CredentialRefresher] Retrieve credentials produced error: no valid credentials could be retrieved for ec2 identity. Default Host Management Err: error calling RequestManagedInstanceRoleToken: AccessDeniedException: Systems Manager's instance management role is not configured for account: 134051051460
+Jul  7 14:13:10 ip-172-31-46-228 amazon-ssm-agent: status code: 400, request id: aea30c01-c343-48b1-b2ef-a2f5a2b74714
+Jul  7 14:13:10 ip-172-31-46-228 amazon-ssm-agent: 2025-07-07 14:13:08.6579 INFO [CredentialRefresher] Sleeping for 26m8s before retrying retrieve credentials
+Jul  7 14:13:11 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:11.498Z] executing platform engine. see /var/log/eb-engine.log.
+Jul  7 14:13:12 ip-172-31-46-228 chronyd[1825]: Selected source 169.254.169.123
+Jul  7 14:13:12 ip-172-31-46-228 chronyd[1825]: System clock wrong by 1.126479 seconds
+Jul  7 14:13:12 ip-172-31-46-228 systemd: Time has been changed
+Jul  7 14:13:12 ip-172-31-46-228 chronyd[1825]: System clock was stepped by 1.126479 seconds
+Jul  7 14:13:13 ip-172-31-46-228 chronyd[1825]: System clock was stepped by 0.000000 seconds
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Reloading.
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Reloading.
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Reloading.
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Starting This is cfn-hup daemon...
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Started This is cfn-hup daemon.
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Stopping System Logging Service...
+Jul  7 14:13:13 ip-172-31-46-228 rsyslogd: [origin software="rsyslogd" swVersion="8.24.0-57.amzn2.2.0.2" x-pid="2301" x-info="http://www.rsyslog.com"] exiting on signal 15.
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Stopped System Logging Service.
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Starting System Logging Service...
+Jul  7 14:13:13 ip-172-31-46-228 rsyslogd: [origin software="rsyslogd" swVersion="8.24.0-57.amzn2.2.0.2" x-pid="2537" x-info="http://www.rsyslog.com"] start
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Started System Logging Service.
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Reloading.
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Starting containerd container runtime...
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Starting Docker Socket for the API.
+Jul  7 14:13:13 ip-172-31-46-228 systemd: Listening on Docker Socket for the API.
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.773987797Z" level=info msg="starting containerd" revision=fb4c30d4ede3531652d86197bf3fc9515e5276d9 version=2.0.5
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.785428180Z" level=info msg="loading plugin" id=io.containerd.image-verifier.v1.bindir type=io.containerd.image-verifier.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.785475954Z" level=info msg="loading plugin" id=io.containerd.internal.v1.opt type=io.containerd.internal.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.785649153Z" level=info msg="loading plugin" id=io.containerd.warning.v1.deprecations type=io.containerd.warning.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.785664999Z" level=info msg="loading plugin" id=io.containerd.content.v1.content type=io.containerd.content.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.785689134Z" level=info msg="loading plugin" id=io.containerd.snapshotter.v1.blockfile type=io.containerd.snapshotter.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.785868597Z" level=info msg="skip loading plugin" error="no scratch file generator: skip plugin" id=io.containerd.snapshotter.v1.blockfile type=io.containerd.snapshotter.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.785881384Z" level=info msg="loading plugin" id=io.containerd.snapshotter.v1.btrfs type=io.containerd.snapshotter.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.786186662Z" level=info msg="skip loading plugin" error="path /var/lib/containerd/io.containerd.snapshotter.v1.btrfs (xfs) must be a btrfs filesystem to be used with the btrfs snapshotter: skip plugin" id=io.containerd.snapshotter.v1.btrfs type=io.containerd.snapshotter.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.786201279Z" level=info msg="loading plugin" id=io.containerd.snapshotter.v1.devmapper type=io.containerd.snapshotter.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.786281032Z" level=info msg="skip loading plugin" error="devmapper not configured: skip plugin" id=io.containerd.snapshotter.v1.devmapper type=io.containerd.snapshotter.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.786291188Z" level=info msg="loading plugin" id=io.containerd.snapshotter.v1.native type=io.containerd.snapshotter.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.786399985Z" level=info msg="loading plugin" id=io.containerd.snapshotter.v1.overlayfs type=io.containerd.snapshotter.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.788430019Z" level=info msg="loading plugin" id=io.containerd.snapshotter.v1.zfs type=io.containerd.snapshotter.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.788483218Z" level=info msg="skip loading plugin" error="lstat /var/lib/containerd/io.containerd.snapshotter.v1.zfs: no such file or directory: skip plugin" id=io.containerd.snapshotter.v1.zfs type=io.containerd.snapshotter.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.788495874Z" level=info msg="loading plugin" id=io.containerd.event.v1.exchange type=io.containerd.event.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.789525189Z" level=info msg="loading plugin" id=io.containerd.monitor.task.v1.cgroups type=io.containerd.monitor.task.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.791380243Z" level=info msg="loading plugin" id=io.containerd.snapshotter.v1.soci type=io.containerd.snapshotter.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.791533867Z" level=info msg="loading plugin" id=io.containerd.metadata.v1.bolt type=io.containerd.metadata.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.791612754Z" level=info msg="metadata content store policy set" policy=shared
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802533314Z" level=info msg="loading plugin" id=io.containerd.gc.v1.scheduler type=io.containerd.gc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802632573Z" level=info msg="loading plugin" id=io.containerd.differ.v1.walking type=io.containerd.differ.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802652248Z" level=info msg="loading plugin" id=io.containerd.lease.v1.manager type=io.containerd.lease.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802665589Z" level=info msg="loading plugin" id=io.containerd.service.v1.containers-service type=io.containerd.service.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802679489Z" level=info msg="loading plugin" id=io.containerd.service.v1.content-service type=io.containerd.service.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802690618Z" level=info msg="loading plugin" id=io.containerd.service.v1.diff-service type=io.containerd.service.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802817672Z" level=info msg="loading plugin" id=io.containerd.service.v1.images-service type=io.containerd.service.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802833955Z" level=info msg="loading plugin" id=io.containerd.service.v1.introspection-service type=io.containerd.service.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802856215Z" level=info msg="loading plugin" id=io.containerd.service.v1.namespaces-service type=io.containerd.service.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802873152Z" level=info msg="loading plugin" id=io.containerd.service.v1.snapshots-service type=io.containerd.service.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802885156Z" level=info msg="loading plugin" id=io.containerd.shim.v1.manager type=io.containerd.shim.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.802897749Z" level=info msg="loading plugin" id=io.containerd.runtime.v2.task type=io.containerd.runtime.v2
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.803010202Z" level=info msg="loading plugin" id=io.containerd.service.v1.tasks-service type=io.containerd.service.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.803030679Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.containers type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.803048438Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.content type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.803060259Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.diff type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.803077078Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.events type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.803087875Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.images type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.803099892Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.introspection type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.803115430Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.leases type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.803135946Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.namespaces type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.803148228Z" level=info msg="loading plugin" id=io.containerd.sandbox.store.v1.local type=io.containerd.sandbox.store.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.803168637Z" level=info msg="loading plugin" id=io.containerd.cri.v1.images type=io.containerd.cri.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.804305863Z" level=info msg="Get image filesystem path \"/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs\" for snapshotter \"overlayfs\""
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.804473118Z" level=info msg="Start snapshots syncer"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.804515984Z" level=info msg="loading plugin" id=io.containerd.cri.v1.runtime type=io.containerd.cri.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.805377876Z" level=info msg="starting cri plugin" config="{\"containerd\":{\"defaultRuntimeName\":\"runc\",\"runtimes\":{\"runc\":{\"runtimeType\":\"io.containerd.runc.v2\",\"runtimePath\":\"\",\"PodAnnotations\":null,\"ContainerAnnotations\":null,\"options\":{\"BinaryName\":\"\",\"CriuImagePath\":\"\",\"CriuWorkPath\":\"\",\"IoGid\":0,\"IoUid\":0,\"NoNewKeyring\":false,\"Root\":\"\",\"ShimCgroup\":\"\"},\"privileged_without_host_devices\":false,\"privileged_without_host_devices_all_devices_allowed\":false,\"baseRuntimeSpec\":\"\",\"cniConfDir\":\"\",\"cniMaxConfNum\":0,\"snapshotter\":\"\",\"sandboxer\":\"podsandbox\",\"io_type\":\"\"}},\"ignoreBlockIONotEnabledErrors\":false,\"ignoreRdtNotEnabledErrors\":false},\"cni\":{\"binDir\":\"/opt/cni/bin\",\"confDir\":\"/etc/cni/net.d\",\"maxConfNum\":1,\"setupSerially\":false,\"confTemplate\":\"\",\"ipPref\":\"\",\"useInternalLoopback\":false},\"enableSelinux\":false,\"selinuxCategoryRange\":1024,\"maxContainerLogSize\":16384,\"disableApparmor\":false,\"restrictOOMScoreAdj\":false,\"disableProcMount\":false,\"unsetSeccompProfile\":\"\",\"tolerateMissingHugetlbController\":true,\"disableHugetlbController\":true,\"device_ownership_from_security_context\":false,\"ignoreImageDefinedVolumes\":false,\"netnsMountsUnderStateDir\":false,\"enableUnprivilegedPorts\":true,\"enableUnprivilegedICMP\":true,\"enableCDI\":true,\"cdiSpecDirs\":[\"/etc/cdi\",\"/var/run/cdi\"],\"drainExecSyncIOTimeout\":\"0s\",\"ignoreDeprecationWarnings\":null,\"containerdRootDir\":\"/var/lib/containerd\",\"containerdEndpoint\":\"/run/containerd/containerd.sock\",\"rootDir\":\"/var/lib/containerd/io.containerd.grpc.v1.cri\",\"stateDir\":\"/run/containerd/io.containerd.grpc.v1.cri\"}"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.805508857Z" level=info msg="loading plugin" id=io.containerd.podsandbox.controller.v1.podsandbox type=io.containerd.podsandbox.controller.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806062010Z" level=info msg="loading plugin" id=io.containerd.sandbox.controller.v1.shim type=io.containerd.sandbox.controller.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806167816Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.sandbox-controllers type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806193537Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.sandboxes type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806206937Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.snapshots type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806218658Z" level=info msg="loading plugin" id=io.containerd.streaming.v1.manager type=io.containerd.streaming.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806240915Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.streaming type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806253750Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.tasks type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806265881Z" level=info msg="loading plugin" id=io.containerd.transfer.v1.local type=io.containerd.transfer.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806332778Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.transfer type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806347940Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.version type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806362564Z" level=info msg="loading plugin" id=io.containerd.monitor.container.v1.restart type=io.containerd.monitor.container.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806411395Z" level=info msg="loading plugin" id=io.containerd.tracing.processor.v1.otlp type=io.containerd.tracing.processor.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806427184Z" level=info msg="skip loading plugin" error="skip plugin: tracing endpoint not configured" id=io.containerd.tracing.processor.v1.otlp type=io.containerd.tracing.processor.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806436819Z" level=info msg="loading plugin" id=io.containerd.internal.v1.tracing type=io.containerd.internal.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806446548Z" level=info msg="skip loading plugin" error="skip plugin: tracing endpoint not configured" id=io.containerd.internal.v1.tracing type=io.containerd.internal.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806506169Z" level=info msg="loading plugin" id=io.containerd.ttrpc.v1.otelttrpc type=io.containerd.ttrpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806518569Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.healthcheck type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806533664Z" level=info msg="loading plugin" id=io.containerd.nri.v1.nri type=io.containerd.nri.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806837289Z" level=info msg="runtime interface created"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806855560Z" level=info msg="created NRI interface"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806872639Z" level=info msg="loading plugin" id=io.containerd.grpc.v1.cri type=io.containerd.grpc.v1
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806889293Z" level=info msg="Connect containerd service"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.806926278Z" level=info msg="using experimental NRI integration - disable nri plugin to prevent this"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.809669205Z" level=error msg="failed to load cni during init, please check CRI plugin status before setting up network for pods" error="cni config load failed: no network config found in /etc/cni/net.d: cni plugin not initialized: failed to load cni config"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.918132737Z" level=info msg="Start subscribing containerd event"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.918599505Z" level=info msg="Start recovering state"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.918761369Z" level=info msg="Start event monitor"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.918780972Z" level=info msg="Start cni network conf syncer for default"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.918788838Z" level=info msg="Start streaming server"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.918797904Z" level=info msg="Registered namespace \"k8s.io\" with NRI"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.918805653Z" level=info msg="runtime interface starting up..."
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.918811661Z" level=info msg="starting plugins..."
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.918822587Z" level=info msg="Synchronizing NRI (plugin) with current runtime state"
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.918357352Z" level=info msg=serving... address=/run/containerd/containerd.sock.ttrpc
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.919136413Z" level=info msg=serving... address=/run/containerd/containerd.sock
+Jul  7 14:13:14 ip-172-31-46-228 systemd: Started containerd container runtime.
+Jul  7 14:13:14 ip-172-31-46-228 containerd: time="2025-07-07T14:13:14.919846181Z" level=info msg="containerd successfully booted in 0.148408s"
+Jul  7 14:13:14 ip-172-31-46-228 systemd: Starting Docker Application Container Engine...
+Jul  7 14:13:15 ip-172-31-46-228 docker: time="2025-07-07T14:13:15.889822298Z" level=info msg="Starting up"
+Jul  7 14:13:15 ip-172-31-46-228 dhclient[2104]: XMT: Solicit on eth0, interval 8110ms.
+Jul  7 14:13:16 ip-172-31-46-228 docker: time="2025-07-07T14:13:16.048264500Z" level=info msg="Loading containers: start."
+Jul  7 14:13:16 ip-172-31-46-228 kernel: bridge: filtering via arp/ip/ip6tables is no longer available by default. Update your scripts to load br_netfilter if you need this.
+Jul  7 14:13:16 ip-172-31-46-228 kernel: Bridge firewalling registered
+Jul  7 14:13:16 ip-172-31-46-228 kernel: bpfilter: Loaded bpfilter_umh pid 2632
+Jul  7 14:13:16 ip-172-31-46-228 journal: Started bpfilter
+Jul  7 14:13:16 ip-172-31-46-228 kernel: Initializing XFRM netlink socket
+Jul  7 14:13:16 ip-172-31-46-228 docker: time="2025-07-07T14:13:16.274359891Z" level=info msg="Loading containers: done."
+Jul  7 14:13:16 ip-172-31-46-228 docker: time="2025-07-07T14:13:16.306497988Z" level=info msg="Docker daemon" commit=71907ca containerd-snapshotter=false storage-driver=overlay2 version=25.0.8
+Jul  7 14:13:16 ip-172-31-46-228 docker: time="2025-07-07T14:13:16.306964812Z" level=info msg="Daemon has completed initialization"
+Jul  7 14:13:16 ip-172-31-46-228 docker: time="2025-07-07T14:13:16.344662359Z" level=info msg="API listen on /run/docker.sock"
+Jul  7 14:13:16 ip-172-31-46-228 systemd: Started Docker Application Container Engine.
+Jul  7 14:13:16 ip-172-31-46-228 systemd: Reloading.
+Jul  7 14:13:16 ip-172-31-46-228 systemd: Reloading.
+Jul  7 14:13:16 ip-172-31-46-228 systemd: Starting This is eb-docker-events daemon...
+Jul  7 14:13:16 ip-172-31-46-228 systemd: Started This is eb-docker-events daemon.
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:16.556Z] Successfully bootstrapped instance.
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:16.560Z] Sending signal 0 to CFN wait condition https://cloudformation-waitcondition-us-west-2.s3-us-west-2.amazonaws.com/arn%3Aaws%3Acloudformation%3Aus-west-2%3A134051051460%3Astack/awseb-e-pjfpug3sgu-stack/67a55820-5b3c-11f0-b1ca-06bcdb4d5699/67a705d0-5b3c-11f0-b1ca-06bcdb4d5699/AWSEBInstanceLaunchWaitHandle?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20250707T141227Z&X-Amz-SignedHeaders=host&X-Amz-Expires=86399&X-Amz-Credential=AKIAJBJSWSW6NLR67N6A%2F20250707%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Signature=99b241516a6c875bf2eb2ec0dee7aeefd3ae6cd0d9f3e3a22791a6f3d1b09174
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: CloudFormation signaled successfully with status SUCCESS
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:16.860Z] Tailing /var/log/eb-engine.log
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ******************* eb-engine taillog *******************
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.356461 [INFO] Running command: systemctl show -p PartOf cfn-hup.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.363383 [INFO] Running command: systemctl daemon-reload
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.426544 [INFO] Running command: systemctl reset-failed
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.430122 [INFO] Running command: systemctl is-enabled aws-eb.target
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.434155 [INFO] Running command: systemctl enable aws-eb.target
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.499479 [INFO] Running command: systemctl start aws-eb.target
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.504091 [INFO] Running command: systemctl enable cfn-hup.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.555834 [INFO] Created symlink from /etc/systemd/system/multi-user.target.wants/cfn-hup.service to /etc/systemd/system/cfn-hup.service.
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.555870 [INFO] Running command: systemctl is-active cfn-hup.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.559908 [INFO] cfn-hup process is not running, starting it now
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.559933 [INFO] Running command: systemctl show -p PartOf cfn-hup.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.564702 [INFO] Running command: systemctl is-active cfn-hup.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.568126 [INFO] Running command: systemctl start cfn-hup.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.605197 [INFO] Instance has NOT been bootstrapped
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.605211 [INFO] Executing instruction: SetupPublishLogCronjob
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.605215 [INFO] Setup publish logs cron job...
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.605219 [INFO] Copying file /opt/elasticbeanstalk/config/private/logtasks/cron/publishlogs to /etc/cron.d/publishlogs
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.607411 [INFO] Executing instruction: Start Docker
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.607427 [INFO] Starting Docker...
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.607479 [INFO] Copying file /opt/elasticbeanstalk/config/private/docker-log.conf to /etc/systemd/system/docker.service.d/docker-log.conf
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.609463 [INFO] Copying file /opt/elasticbeanstalk/config/private/docker-rsyslog.conf to /etc/rsyslog.d/docker-log.conf
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.612007 [INFO] Running command: systemctl restart rsyslog.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.634244 [INFO] Running command: systemctl show -p PartOf docker.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.651276 [INFO] Running command: systemctl daemon-reload
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.738093 [INFO] Running command: systemctl reset-failed
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.744782 [INFO] Running command: systemctl show -p PartOf docker.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.753362 [INFO] Running command: systemctl is-active docker.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:13.758439 [INFO] Running command: systemctl start docker.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.352984 [INFO] Instance has NOT been bootstrapped
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.352997 [INFO] Executing instruction: Setup Docker Options
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.353000 [INFO] Setting up configurations for docker platform
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.364210 [INFO] Running command: systemctl show -p PartOf eb-docker-events.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.371722 [INFO] Running command: systemctl daemon-reload
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.440712 [INFO] Running command: systemctl reset-failed
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.444998 [INFO] Running command: systemctl enable eb-docker-events.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.509479 [INFO] Created symlink from /etc/systemd/system/docker.service.wants/eb-docker-events.service to /etc/systemd/system/eb-docker-events.service.
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.509519 [INFO] Running command: systemctl show -p PartOf eb-docker-events.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.515420 [INFO] Running command: systemctl is-active eb-docker-events.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.519175 [INFO] Running command: systemctl start eb-docker-events.service
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.554122 [INFO] Instance has NOT been bootstrapped
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.554138 [INFO] Executing instruction: MarkBootstrapped
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.554152 [INFO] Starting MarkBootstrapped
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.554157 [INFO] Instance has NOT been bootstrapped
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.554221 [INFO] Marked instance as Bootstrapped
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.554226 [INFO] Executing instruction: Save CFN Stack Info
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.554273 [INFO] Executing cleanup logic
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025/07/07 14:13:16.554283 [INFO] Platform Engine finished execution on command: env-launch
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ******************* End of taillog *******************
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:16.876Z] Tailing /var/log/eb-tools.log
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ******************* eb-tools taillog *******************
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ***eb-tools is not available yet.***
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ******************* End of taillog *******************
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:16.878Z] Tailing /var/log/eb-hooks.log
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ******************* eb-hooks taillog *******************
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ***eb-hooks is not available yet.***
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ******************* End of taillog *******************
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:16.880Z] Tailing /var/log/cfn-init.log
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ******************* cfn-init taillog *******************
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:09,992 [INFO] -----------------------Starting build-----------------------
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:09,998 [INFO] Running configSets: _OnInstanceBoot
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:10,001 [INFO] Running configSet _OnInstanceBoot
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:10,004 [INFO] Running config AWSEBBaseConfig
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:10,192 [INFO] Command clearbackupfiles succeeded
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:10,195 [INFO] Running config AWSEBCfnHupEndpointOverride
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:10,200 [INFO] Command clearbackupfiles succeeded
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:10,201 [INFO] ConfigSets completed
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:10,201 [INFO] -----------------------Build complete-----------------------
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ******************* End of taillog *******************
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:16.883Z] Tailing /var/log/cfn-hup.log
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ******************* cfn-hup taillog *******************
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:13,878 [DEBUG] CloudFormation client initialized with endpoint https://cloudformation.us-west-2.amazonaws.com
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:13,879 [DEBUG] SQS client initialized with endpoint https://sqs.us-west-2.amazonaws.com
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:13,879 [DEBUG] CloudFormation client initialized with endpoint https://cloudformation.us-west-2.amazonaws.com
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:13,879 [DEBUG] Enabled single threading mode.
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:13,879 [DEBUG] Creating /var/lib/cfn-hup/data
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:13,887 [INFO] No umask value specified in config file. Using the default one: 0o22
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:14,016 [INFO] Pid: 2530
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:14,301 [INFO] Refreshing listener credentials
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: + RESULT=0
+Jul  7 14:13:16 ip-172-31-46-228 systemd: Started Execute cloud user/final scripts.
+Jul  7 14:13:16 ip-172-31-46-228 systemd: Reached target Cloud-init target.
+Jul  7 14:13:16 ip-172-31-46-228 systemd: Startup finished in 1.114s (kernel) + 778ms (initrd) + 11.411s (userspace) = 13.304s.
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: + [[ 0 -ne 0 ]]
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: + exit 0
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 2025-07-07 14:13:14,418 [INFO] Scheduling next credential refresh in 1799.0 seconds
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: ******************* End of taillog *******************
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: 
+Jul  7 14:13:16 ip-172-31-46-228 [eb-cfn-init]: [2025-07-07T14:13:16.887Z] Completed EB Bootstrapping Script.
+Jul  7 14:13:24 ip-172-31-46-228 dhclient[2104]: XMT: Solicit on eth0, interval 16570ms.
+Jul  7 14:13:40 ip-172-31-46-228 dhclient[2104]: XMT: Solicit on eth0, interval 32000ms.
+Jul  7 14:14:12 ip-172-31-46-228 dhclient[2104]: XMT: Solicit on eth0, interval 62930ms.
+Jul  7 14:15:15 ip-172-31-46-228 dhclient[2104]: XMT: Solicit on eth0, interval 113660ms.
+Jul  7 14:15:19 ip-172-31-46-228 docker: 2025/07/07 14:15:19 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)
+Jul  7 14:15:26 ip-172-31-46-228 kernel: docker0: port 1(veth3017006) entered blocking state
+Jul  7 14:15:26 ip-172-31-46-228 kernel: docker0: port 1(veth3017006) entered disabled state
+Jul  7 14:15:26 ip-172-31-46-228 kernel: device veth3017006 entered promiscuous mode
+Jul  7 14:15:26 ip-172-31-46-228 kernel: eth0: renamed from veth453f0b0
+Jul  7 14:15:26 ip-172-31-46-228 kernel: IPv6: ADDRCONF(NETDEV_CHANGE): veth3017006: link becomes ready
+Jul  7 14:15:26 ip-172-31-46-228 kernel: docker0: port 1(veth3017006) entered blocking state
+Jul  7 14:15:26 ip-172-31-46-228 kernel: docker0: port 1(veth3017006) entered forwarding state
+Jul  7 14:15:26 ip-172-31-46-228 kernel: IPv6: ADDRCONF(NETDEV_CHANGE): docker0: link becomes ready
+Jul  7 14:15:29 ip-172-31-46-228 kernel: veth453f0b0: renamed from eth0
+Jul  7 14:15:29 ip-172-31-46-228 kernel: docker0: port 1(veth3017006) entered disabled state
+Jul  7 14:15:29 ip-172-31-46-228 kernel: docker0: port 1(veth3017006) entered disabled state
+Jul  7 14:15:29 ip-172-31-46-228 kernel: device veth3017006 left promiscuous mode
+Jul  7 14:15:29 ip-172-31-46-228 kernel: docker0: port 1(veth3017006) entered disabled state
+Jul  7 14:15:31 ip-172-31-46-228 systemd: Reloading.
+Jul  7 14:15:31 ip-172-31-46-228 systemd: Reloading.
+Jul  7 14:15:31 ip-172-31-46-228 systemd: Reloading.
+Jul  7 14:15:31 ip-172-31-46-228 systemd: Starting This is healthd daemon...
+Jul  7 14:15:31 ip-172-31-46-228 systemd: Started This is healthd daemon.
+Jul  7 14:15:32 ip-172-31-46-228 systemd: Stopping System Logging Service...
+Jul  7 14:15:32 ip-172-31-46-228 rsyslogd: [origin software="rsyslogd" swVersion="8.24.0-57.amzn2.2.0.2" x-pid="2537" x-info="http://www.rsyslog.com"] exiting on signal 15.
+Jul  7 14:15:32 ip-172-31-46-228 systemd: Stopped System Logging Service.
+Jul  7 14:15:32 ip-172-31-46-228 systemd: Starting System Logging Service...
+Jul  7 14:15:32 ip-172-31-46-228 rsyslogd: [origin software="rsyslogd" swVersion="8.24.0-57.amzn2.2.0.2" x-pid="3189" x-info="http://www.rsyslog.com"] start
+Jul  7 14:15:32 ip-172-31-46-228 systemd: Started System Logging Service.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/puma-6.6.0/lib/puma/launcher.rb:92: warning: conflicting chdir during another chdir block
+Jul  7 14:15:32 ip-172-31-46-228 healthd: /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/bin/healthd:19: note: previous chdir was here
+Jul  7 14:15:32 ip-172-31-46-228 healthd: * Listening on http://127.0.0.1:22221
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 healthd: NOTE: Gem::Platform.match is deprecated; use Gem::Platform.match_spec? or match_gem? instead. It will be removed in Rubygems 4
+Jul  7 14:15:32 ip-172-31-46-228 healthd: Gem::Platform.match called from /opt/elasticbeanstalk/lib/ruby/lib/ruby/gems/3.4.0/gems/healthd-1.0.7/lib/healthd/daemon/plugins/manager.rb:72.
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:12] Failed to parse service type, ignoring: exec
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:18] Unknown lvalue 'LogsDirectory' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:19] Unknown lvalue 'LogsDirectoryMode' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:20] Unknown lvalue 'ConfigurationDirectory' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:21] Unknown lvalue 'ConfigurationDirectoryMode' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:12] Failed to parse service type, ignoring: exec
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:18] Unknown lvalue 'LogsDirectory' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:19] Unknown lvalue 'LogsDirectoryMode' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:20] Unknown lvalue 'ConfigurationDirectory' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:21] Unknown lvalue 'ConfigurationDirectoryMode' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:12] Failed to parse service type, ignoring: exec
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:18] Unknown lvalue 'LogsDirectory' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:19] Unknown lvalue 'LogsDirectoryMode' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:20] Unknown lvalue 'ConfigurationDirectory' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:21] Unknown lvalue 'ConfigurationDirectoryMode' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:12] Failed to parse service type, ignoring: exec
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:18] Unknown lvalue 'LogsDirectory' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:19] Unknown lvalue 'LogsDirectoryMode' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:20] Unknown lvalue 'ConfigurationDirectory' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 systemd: [/etc/systemd/system/xray.service:21] Unknown lvalue 'ConfigurationDirectoryMode' in section 'Service'
+Jul  7 14:15:32 ip-172-31-46-228 kernel: docker0: port 1(veth1603e43) entered blocking state
+Jul  7 14:15:32 ip-172-31-46-228 kernel: docker0: port 1(veth1603e43) entered disabled state
+Jul  7 14:15:32 ip-172-31-46-228 kernel: device veth1603e43 entered promiscuous mode
+Jul  7 14:15:32 ip-172-31-46-228 containerd: time="2025-07-07T14:15:32.958630235Z" level=info msg="connecting to shim 1f69344ff585dfda9ef9e151605a9ae5e71f4fb3611cd5fee1a3fd433484430b" address="unix:///run/containerd/s/cd2d3607ac9956b4936e41eaa203962f099fe889c267ac6818392841f1499de8" namespace=moby protocol=ttrpc version=3
+Jul  7 14:15:33 ip-172-31-46-228 kernel: eth0: renamed from veth9821603
+Jul  7 14:15:33 ip-172-31-46-228 kernel: IPv6: ADDRCONF(NETDEV_CHANGE): veth1603e43: link becomes ready
+Jul  7 14:15:33 ip-172-31-46-228 kernel: docker0: port 1(veth1603e43) entered blocking state
+Jul  7 14:15:33 ip-172-31-46-228 kernel: docker0: port 1(veth1603e43) entered forwarding state
+Jul  7 14:15:33 ip-172-31-46-228 docker: time="2025-07-07T14:15:33.478618162Z" level=info msg="ignoring event" container=1f69344ff585dfda9ef9e151605a9ae5e71f4fb3611cd5fee1a3fd433484430b module=libcontainerd namespace=moby topic=/tasks/delete type="*events.TaskDelete"
+Jul  7 14:15:33 ip-172-31-46-228 containerd: time="2025-07-07T14:15:33.479391943Z" level=info msg="shim disconnected" id=1f69344ff585dfda9ef9e151605a9ae5e71f4fb3611cd5fee1a3fd433484430b namespace=moby
+Jul  7 14:15:33 ip-172-31-46-228 containerd: time="2025-07-07T14:15:33.479436995Z" level=warning msg="cleaning up after shim disconnected" id=1f69344ff585dfda9ef9e151605a9ae5e71f4fb3611cd5fee1a3fd433484430b namespace=moby
+Jul  7 14:15:33 ip-172-31-46-228 containerd: time="2025-07-07T14:15:33.479449892Z" level=info msg="cleaning up dead shim" namespace=moby
+Jul  7 14:15:33 ip-172-31-46-228 kernel: docker0: port 1(veth1603e43) entered disabled state
+Jul  7 14:15:33 ip-172-31-46-228 kernel: veth9821603: renamed from eth0
+Jul  7 14:15:33 ip-172-31-46-228 kernel: docker0: port 1(veth1603e43) entered disabled state
+Jul  7 14:15:33 ip-172-31-46-228 kernel: device veth1603e43 left promiscuous mode
+Jul  7 14:15:33 ip-172-31-46-228 kernel: docker0: port 1(veth1603e43) entered disabled state
+Jul  7 14:15:38 ip-172-31-46-228 docker: 2025/07/07 14:15:38 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)
+Jul  7 14:15:42 ip-172-31-46-228 healthd: Version 2 of the Ruby SDK will enter maintenance mode as of November 20, 2020. To continue receiving service updates and new features, please upgrade to Version 3. More information can be found here: https://aws.amazon.com/blogs/developer/deprecation-schedule-for-aws-sdk-for-ruby-v2/
+Jul  7 14:17:09 ip-172-31-46-228 dhclient[2104]: XMT: Solicit on eth0, interval 125100ms.
