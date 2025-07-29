@@ -1,19 +1,20 @@
 version: 1
-applications:
-  - appRoot: crm-frontend
-    frontend:
-      phases:
-        preBuild:
-          commands:
-            - npm ci
-        build:
-          commands:
-            - npm run build
-      artifacts:
-        # after building, CRA emits to `build/` under crm-frontend
-        baseDirectory: build
-        files:
-          - '**/*'
-      cache:
-        paths:
-          - node_modules/**/*
+frontend:
+  # Instruct Amplify to use Node.js 20.x
+  runtime-versions:
+    nodejs: 20
+  phases:
+    preBuild:
+      commands:
+        - npm ci
+    build:
+      commands:
+        - npm run build
+  artifacts:
+    # CRA outputs to 'build'
+    baseDirectory: build
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*
