@@ -1,0 +1,83 @@
+/* File: src/HistoryReport.css */
+
+/* page background & container */
+.history-report {
+  min-height: 100vh;
+  background-color: #F1F5F9;
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+/* page title */
+.history-title {
+  text-align: center;
+  color: #2B2D42;
+  margin-bottom: 1.5rem;
+  font-size: 2rem;
+  font-weight: 600;
+}
+
+/* search form */
+.filter-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.filter-form .form-control {
+  padding: 0.5rem 1rem;
+  border: 1px solid #CBD5E1;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+.search-btn {
+  background-color: #3D5A80;
+  color: #ffffff;
+  border: none;
+  padding: 0 1.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.search-btn:hover {
+  background-color: #2B2D42;
+}
+
+/* results card */
+.results-table {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+  overflow-x: auto;
+}
+
+/* force full-width table */
+.results-table table {
+  width: 100% !important;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+.results-table thead th {
+  background: #2B2D42;
+  color: #ffffff;
+  padding: 0.75rem;
+  text-align: left;
+  border: none;
+}
+.results-table tbody td {
+  padding: 0.75rem;
+  border-bottom: 1px solid #E2E8F0;
+}
+.results-table tbody tr:hover {
+  background-color: #98C379;
+  color: #ffffff;
+}
+
+/* empty state */
+.empty-text {
+  text-align: center;
+  color: #8D99AE;
+  font-style: italic;
+  margin-top: 1rem;
+}
