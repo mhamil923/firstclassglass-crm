@@ -1,17 +1,19 @@
 version: 1
-frontend:
-  phases:
-    preBuild:
-      commands:
-        - cd crm-frontend
-        - npm install      # <<< use npm install here
-    build:
-      commands:
-        - npm run build     # your create-react-app build script
-  artifacts:
-    baseDirectory: crm-frontend/build
-    files:
-      - '**/*'
-  cache:
-    paths:
-      - crm-frontend/node_modules/**/*
+applications:
+  - appRoot: crm-frontend
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - npm ci
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        # after building, CRA emits to `build/` under crm-frontend
+        baseDirectory: build
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
