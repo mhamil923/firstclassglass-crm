@@ -1,19 +1,18 @@
 version: 1
-applications:
-  - frontend:
-      phases:
-        preBuild:
-          commands:
-            - cd crm-frontend
-            - npm ci
-        build:
-          commands:
-            - npm run build
-      artifacts:
-        # where CRA spits out the static files
-        baseDirectory: crm-frontend/build
-        files:
-          - '**/*'
-      cache:
-        paths:
-          - crm-frontend/node_modules/**/*
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - cd crm-frontend
+        - npm ci
+    build:
+      commands:
+        - npm run build
+  artifacts:
+    # point at the build output of Create React App:
+    baseDirectory: crm-frontend/build
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - crm-frontend/node_modules/**/*
