@@ -4,12 +4,11 @@ frontend:
     preBuild:
       commands:
         - cd crm-frontend
-        - npm ci
+        - npm install      # <<< use npm install here
     build:
       commands:
-        - npm run build
+        - npm run build     # your create-react-app build script
   artifacts:
-    # point at the build output of Create React App:
     baseDirectory: crm-frontend/build
     files:
       - '**/*'
