@@ -1,0 +1,122 @@
+/* Calendar.css */
+
+/* palette */
+:root {
+  --color-bg:      #F1F5F9;  /* light grey */
+  --color-primary: #3D5A80;  /* deep blue */
+  --color-secondary:#98C379; /* green accent */
+  --color-accent:  #2B2D42;  /* dark slate */
+  --color-white:   #ffffff;
+}
+
+/* page wrapper fills to navbar */
+.calendar-page {
+  background: var(--color-bg);
+  min-height: calc(100vh - 56px); /* adjust if your navbar height differs */
+  padding-top: 1rem;
+}
+
+/* title styling */
+.calendar-title {
+  text-align: center;
+  color: var(--color-accent);
+  margin: 1rem 0;
+}
+
+/* Unscheduled sidebar */
+.unscheduled-container {
+  background: var(--color-white);
+  padding: 1rem;
+  border-bottom: 1px solid var(--color-primary);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.unscheduled-list {
+  display: inline-flex;
+  gap: 0.75rem;
+}
+.unscheduled-item {
+  background: var(--color-secondary);
+  color: var(--color-white);
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  cursor: grab;
+  min-width: 140px;
+  text-align: center;
+}
+.unscheduled-item:active {
+  cursor: grabbing;
+}
+
+/* Calendar container */
+.calendar-container {
+  margin: 1rem;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-white);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+}
+
+/* BigCalendar full width */
+.rbc-calendar {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+/* events */
+.rbc-event {
+  background: var(--color-secondary) !important;
+  border-radius: 4px;
+  padding: 4px 6px;
+  color: var(--color-white);
+  font-size: 0.9rem;
+  cursor: grab;
+}
+.rbc-event:hover {
+  background: var(--color-primary) !important;
+}
+
+/* toolbar buttons */
+.rbc-toolbar button {
+  background: var(--color-primary);
+  color: var(--color-white);
+  border: none;
+  margin: 2px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.rbc-toolbar button:hover {
+  background: var(--color-accent);
+}
+
+/* modal overlay */
+.modal-overlay {
+  position: fixed;
+  top: 56px; /* height of your navbar */
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+/* modal content */
+.modal-content {
+  background: var(--color-white);
+  padding: 1.5rem;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+}
+
+/* empty list text */
+.empty-text {
+  text-align: center;
+  color: #6c757d;
+  margin: 1rem 0;
+}
