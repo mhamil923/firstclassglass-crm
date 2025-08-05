@@ -7,23 +7,35 @@ const bodyParser = require('body-parser');
 const mysql      = require('mysql2/promise');
 const multer     = require('multer');
 const path       = require('path');
-const fs         = require('fs');
+const AWS        = require('aws-sdk');
+const multerS3   = require('multer-s3');
 const bcrypt     = require('bcrypt');
 const jwt        = require('jsonwebtoken');
 
-// ─── CONFIG: env‐backed DB & JWT ───────────────────────────────────────────────
+// ─── CONFIG: env‐backed DB, JWT & S3 ──────────────────────────────────────────
 const {
-  DB_HOST = 'localhost',
-  DB_NAME = 'firstclassglass_crm',
-  DB_USER = 'root',
-  DB_PASS = '',
-  DB_PORT = '3306',
-  JWT_SECRET = 'supersecretjwtkey',
+  DB_HOST     = 'localhost',
+  DB_NAME     = 'firstclassglass_crm',
+  DB_USER     = 'root',
+  DB_PASS     = '',
+  DB_PORT     = '3306',
+  JWT_SECRET  = 'supersecretjwtkey',
+  S3_BUCKET,                // set this to "fcg-crm-migration"
+  AWS_REGION = 'us-east-2', // your region
 } = process.env;
+
+if (!S3_BUCKET) {
+  console.error('❌ Environment variable S3_BUCKET is not set');
+  process.exit(1);
+}
+
+// Configure AWS SDK
+AWS.config.update({ region: AWS_REGION });
+const s3 = new AWS.S3();
 
 // ─── EXPRESS SETUP ───────────────────────────────────────────────────────────
 const app = express();
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -37,7 +49,6 @@ const db = mysql.createPool({
 });
 
 // ─── SCHEMA CHECKER ───────────────────────────────────────────────────────────
-// Adds any missing columns to `work_orders` without crashing the app.
 async function ensureCols() {
   const cols = [
     { name: 'scheduledDate', type: 'DATETIME NULL' },
@@ -63,24 +74,22 @@ async function ensureCols() {
     }
   }
 }
-// run initial check in background
 ensureCols()
   .then(() => console.log('✅ Initial schema check passed'))
   .catch(err => console.warn('⚠️ Initial schema check failed (continuing):', err.message));
 
-// ─── MULTER UPLOADS ───────────────────────────────────────────────────────────
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = 'uploads/';
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}${path.extname(file.originalname)}`);
-  },
+// ─── MULTER-S3 UPLOADS ────────────────────────────────────────────────────────
+const upload = multer({
+  storage: multerS3({
+    s3,
+    bucket: S3_BUCKET,
+    acl: 'private',
+    key: (req, file, cb) => {
+      const filename = `${Date.now()}${path.extname(file.originalname)}`;
+      cb(null, `uploads/${filename}`);
+    }
+  })
 });
-const upload = multer({ storage });
-app.use('/uploads', express.static(path.resolve(__dirname, 'uploads')));
 
 // ─── AUTHENTICATION ───────────────────────────────────────────────────────────
 // Register
@@ -105,14 +114,9 @@ app.post('/auth/register', async (req, res) => {
 // Login
 app.post('/auth/login', async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) {
-    return res.status(400).json({ error: 'username & password required' });
-  }
+  if (!username || !password) return res.status(400).json({ error: 'username & password required' });
   try {
-    const [[user]] = await db.execute(
-      'SELECT * FROM users WHERE username = ?',
-      [username]
-    );
+    const [[user]] = await db.execute('SELECT * FROM users WHERE username = ?', [username]);
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -147,7 +151,7 @@ app.get('/ping',(_, res) => res.send('pong'));
 
 // ─── ROUTES (all protected by `authenticate`) ────────────────────────────────
 
-// USERS
+// -- USERS
 app.get('/users', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute("SELECT id, username FROM users");
@@ -158,7 +162,7 @@ app.get('/users', authenticate, async (req, res) => {
   }
 });
 
-// CUSTOMERS
+// -- CUSTOMERS
 app.get('/customers', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -170,7 +174,6 @@ app.get('/customers', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch customers.' });
   }
 });
-
 app.get('/customers/:id', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -184,7 +187,6 @@ app.get('/customers/:id', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch customer.' });
   }
 });
-
 app.post('/customers', authenticate, async (req, res) => {
   const { name, billingAddress } = req.body;
   if (!name || !billingAddress) {
@@ -202,7 +204,7 @@ app.post('/customers', authenticate, async (req, res) => {
   }
 });
 
-// WORK ORDERS
+// -- WORK ORDERS
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -216,7 +218,6 @@ app.get('/work-orders', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch work orders.' });
   }
 });
-
 app.get('/work-orders/search', authenticate, async (req, res) => {
   const { customer = '', poNumber = '', siteLocation = '' } = req.query;
   try {
@@ -235,7 +236,6 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Search failed.' });
   }
 });
-
 app.get('/work-orders/:id', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -248,7 +248,6 @@ app.get('/work-orders/:id', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch work order.' });
   }
 });
-
 app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
   const { status } = req.body;
   if (!status) return res.status(400).json({ error: 'status is required.' });
@@ -266,6 +265,7 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
   }
 });
 
+// Create
 app.post(
   '/work-orders',
   authenticate,
@@ -278,8 +278,8 @@ app.post(
     if (!customer || !billingAddress || !problemDescription) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-    const pdfPath   = req.files.pdfFile   && `uploads/${req.files.pdfFile[0].filename}`;
-    const photoPath = req.files.photoFile && `uploads/${req.files.photoFile[0].filename}`;
+    const pdfPath   = req.files.pdfFile   && req.files.pdfFile[0].key;
+    const photoPath = req.files.photoFile && req.files.photoFile[0].key;
     try {
       const [r] = await db.execute(
         `INSERT INTO work_orders
@@ -295,6 +295,7 @@ app.post(
   }
 );
 
+// Edit
 app.put(
   '/work-orders/:id/edit',
   authenticate,
@@ -313,13 +314,15 @@ app.put(
       // PDF
       let pdfPath = existing.pdfPath;
       if (req.files.pdfFile) {
-        if (pdfPath) fs.unlinkSync(path.resolve(__dirname, pdfPath));
-        pdfPath = `uploads/${req.files.pdfFile[0].filename}`;
+        if (pdfPath) {
+          await s3.deleteObject({ Bucket: S3_BUCKET, Key: pdfPath }).promise();
+        }
+        pdfPath = req.files.pdfFile[0].key;
       }
 
       // Photos
       const oldPhotos = existing.photoPath ? existing.photoPath.split(',') : [];
-      const newPhotos = (req.files.photoFile || []).map(f => `uploads/${f.filename}`);
+      const newPhotos = (req.files.photoFile || []).map(f => f.key);
       const merged    = [...oldPhotos, ...newPhotos];
 
       // Fields
@@ -375,12 +378,15 @@ app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (r
     const wid = req.params.id;
     const { photoPath } = req.body;
     if (!photoPath) return res.status(400).json({ error: 'photoPath required.' });
+
+    // delete from S3
+    await s3.deleteObject({ Bucket: S3_BUCKET, Key: photoPath }).promise();
+
+    // update DB
     const [[existing]] = await db.execute(
       'SELECT photoPath FROM work_orders WHERE id = ?', [wid]
     );
     const keep = existing.photoPath.split(',').filter(p => p !== photoPath);
-    const full = path.resolve(__dirname, photoPath);
-    if (fs.existsSync(full)) fs.unlinkSync(full);
     await db.execute(
       'UPDATE work_orders SET photoPath = ? WHERE id = ?', [keep.join(','), wid]
     );
@@ -396,9 +402,7 @@ app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (r
 
 app.delete('/work-orders/:id', authenticate, async (req, res) => {
   try {
-    await db.execute(
-      'DELETE FROM work_orders WHERE id = ?', [req.params.id]
-    );
+    await db.execute('DELETE FROM work_orders WHERE id = ?', [req.params.id]);
     res.json({ message: 'Deleted.' });
   } catch (err) {
     console.error(err);
