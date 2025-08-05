@@ -1,19 +1,18 @@
-# File: Dockerfile
-FROM node:18-alpine
+# Use Node 20 LTS
+FROM node:20-alpine
 
-# 1) Set working dir
-WORKDIR /usr/src/app
+# Create app directory
+WORKDIR /app
 
-# 2) Install only production dependencies
-COPY package*.json ./
+# Install dependencies first (leverages Docker cache)
+COPY package.json package-lock.json ./
 RUN npm ci --production
 
-# 3) Copy the rest of your source
+# Copy application code
 COPY . .
 
-# 4) Tell your app and Docker that it should listen on port 80
-ENV PORT=80
-EXPOSE 80
+# Expose the port your app will run on
+EXPOSE 8080
 
-# 5) Start your server
+# Start the app
 CMD ["node", "server.js"]
