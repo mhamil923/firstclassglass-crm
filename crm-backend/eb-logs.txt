@@ -1,0 +1,1 @@
+ERROR: InvalidOptionsError - You can't use "--instance" with "--all".
