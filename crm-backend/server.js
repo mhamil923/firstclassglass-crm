@@ -7,6 +7,7 @@ const bodyParser = require('body-parser');
 const mysql      = require('mysql2/promise');
 const multer     = require('multer');
 const path       = require('path');
+const fs         = require('fs');
 const AWS        = require('aws-sdk');
 const multerS3   = require('multer-s3');
 const bcrypt     = require('bcrypt');
@@ -20,17 +21,15 @@ const {
   DB_PASS     = '',
   DB_PORT     = '3306',
   JWT_SECRET  = 'supersecretjwtkey',
-  S3_BUCKET,                // set this to "fcg-crm-migration"
+  S3_BUCKET,                // e.g. 'fcg-crm-migration'
   AWS_REGION = 'us-east-2', // your region
 } = process.env;
 
 if (!S3_BUCKET) {
-  console.warn('⚠️ Environment variable S3_BUCKET is not set; uploads will be disabled');
-  // NOTE: We do NOT exit here, so EB can deploy this version successfully.
+  console.warn('⚠️ Environment variable S3_BUCKET is not set; uploads will use local storage');
+} else {
+  AWS.config.update({ region: AWS_REGION });
 }
-
-// Configure AWS SDK
-AWS.config.update({ region: AWS_REGION });
 const s3 = new AWS.S3();
 
 // ─── EXPRESS SETUP ───────────────────────────────────────────────────────────
@@ -78,18 +77,34 @@ ensureCols()
   .then(() => console.log('✅ Initial schema check passed'))
   .catch(err => console.warn('⚠️ Initial schema check failed (continuing):', err.message));
 
-// ─── MULTER-S3 UPLOADS ────────────────────────────────────────────────────────
-const upload = multer({
-  storage: multerS3({
-    s3,
-    bucket: S3_BUCKET,
-    acl: 'private',
-    key: (req, file, cb) => {
-      const filename = `${Date.now()}${path.extname(file.originalname)}`;
-      cb(null, `uploads/${filename}`);
-    }
-  })
-});
+// ─── MULTER CONFIG ────────────────────────────────────────────────────────────
+let upload;
+if (S3_BUCKET) {
+  // S3-backed storage
+  upload = multer({
+    storage: multerS3({
+      s3,
+      bucket: S3_BUCKET,
+      acl: 'private',
+      key: (req, file, cb) => {
+        const filename = `${Date.now()}${path.extname(file.originalname)}`;
+        cb(null, `uploads/${filename}`);
+      }
+    })
+  });
+} else {
+  // Local disk storage
+  const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      const dir = path.resolve(__dirname, 'uploads');
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, file, cb) => cb(null, `${Date.now()}${path.extname(file.originalname)}`),
+  });
+  upload = multer({ storage });
+  app.use('/uploads', express.static(path.resolve(__dirname, 'uploads')));
+}
 
 // ─── AUTHENTICATION ───────────────────────────────────────────────────────────
 // Register
@@ -146,15 +161,14 @@ function authenticate(req, res, next) {
 }
 
 // ─── HEALTH & ROOT ───────────────────────────────────────────────────────────
-app.get('/',    (_, res) => res.send('API running'));
-app.get('/ping',(_, res) => res.send('pong'));
+app.get('/', (_, res) => res.send('API running'));
+app.get('/ping', (_, res) => res.send('pong'));
 
-// ─── ROUTES (all protected by `authenticate`) ────────────────────────────────
-
-// -- USERS
+// ─── ROUTES (protected by authenticate) ────────────────────────────────────────
+// Users
 app.get('/users', authenticate, async (req, res) => {
   try {
-    const [rows] = await db.execute("SELECT id, username FROM users");
+    const [rows] = await db.execute('SELECT id, username FROM users');
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -162,7 +176,7 @@ app.get('/users', authenticate, async (req, res) => {
   }
 });
 
-// -- CUSTOMERS
+// Customers
 app.get('/customers', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -204,7 +218,7 @@ app.post('/customers', authenticate, async (req, res) => {
   }
 });
 
-// -- WORK ORDERS
+// Work Orders
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -238,9 +252,7 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
 });
 app.get('/work-orders/:id', authenticate, async (req, res) => {
   try {
-    const [rows] = await db.execute(
-      'SELECT * FROM work_orders WHERE id = ?', [req.params.id]
-    );
+    const [rows] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Not found.' });
     res.json(rows[0]);
   } catch (err) {
@@ -252,154 +264,91 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
   const { status } = req.body;
   if (!status) return res.status(400).json({ error: 'status is required.' });
   try {
-    await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [
-      status, req.params.id
-    ]);
-    const [[updated]] = await db.execute(
-      'SELECT * FROM work_orders WHERE id = ?', [req.params.id]
-    );
+    await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [status, req.params.id]);
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
     res.json(updated);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update status.' });
   }
 });
-
-// Create
-app.post(
-  '/work-orders',
-  authenticate,
-  upload.fields([
-    { name: 'pdfFile',   maxCount: 1 },
-    { name: 'photoFile', maxCount: 1 }
-  ]),
-  async (req, res) => {
-    const { poNumber, customer, siteLocation, billingAddress, problemDescription, status } = req.body;
-    if (!customer || !billingAddress || !problemDescription) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-    const pdfPath   = req.files.pdfFile   && req.files.pdfFile[0].key;
-    const photoPath = req.files.photoFile && req.files.photoFile[0].key;
-    try {
-      const [r] = await db.execute(
-        `INSERT INTO work_orders
-          (poNumber,customer,siteLocation,billingAddress,problemDescription,status,pdfPath,photoPath)
-         VALUES (?,?,?,?,?,?,?,?)`,
-        [poNumber||'', customer, siteLocation, billingAddress, problemDescription, status, pdfPath, photoPath]
-      );
-      res.status(201).json({ workOrderId: r.insertId });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Failed to save work order.' });
-    }
+app.post('/work-orders', authenticate, upload.fields([{ name: 'pdfFile', maxCount: 1 }, { name: 'photoFile', maxCount: 1 }]), async (req, res) => {
+  const { poNumber, customer, siteLocation, billingAddress, problemDescription, status } = req.body;
+  if (!customer || !billingAddress || !problemDescription) return res.status(400).json({ error: 'Missing required fields' });
+  const pdfPath   = req.files.pdfFile   && (S3_BUCKET ? req.files.pdfFile[0].key : req.files.pdfFile[0].filename);
+  const photoPath = req.files.photoFile && (S3_BUCKET ? req.files.photoFile[0].key : req.files.photoFile[0].filename);
+  try {
+    const [r] = await db.execute(
+      `INSERT INTO work_orders (poNumber,customer,siteLocation,billingAddress,problemDescription,status,pdfPath,photoPath) VALUES (?,?,?,?,?,?,?,?)`,
+      [poNumber||'', customer, siteLocation, billingAddress, problemDescription, status, pdfPath, photoPath]
+    );
+    res.status(201).json({ workOrderId: r.insertId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save work order.' });
   }
-);
-
-// Edit
-app.put(
-  '/work-orders/:id/edit',
-  authenticate,
-  upload.fields([
-    { name: 'pdfFile',   maxCount: 1 },
-    { name: 'photoFile', maxCount: 20 }
-  ]),
-  async (req, res) => {
-    try {
-      const wid = req.params.id;
-      const [[existing]] = await db.execute(
-        'SELECT * FROM work_orders WHERE id = ?', [wid]
-      );
-      if (!existing) return res.status(404).json({ error: 'Not found.' });
-
-      // PDF
-      let pdfPath = existing.pdfPath;
-      if (req.files.pdfFile) {
-        if (pdfPath) {
-          await s3.deleteObject({ Bucket: S3_BUCKET, Key: pdfPath }).promise();
-        }
-        pdfPath = req.files.pdfFile[0].key;
-      }
-
-      // Photos
-      const oldPhotos = existing.photoPath ? existing.photoPath.split(',') : [];
-      const newPhotos = (req.files.photoFile || []).map(f => f.key);
-      const merged    = [...oldPhotos, ...newPhotos];
-
-      // Fields
-      const {
-        poNumber = existing.poNumber,
-        customer = existing.customer,
-        siteLocation = existing.siteLocation,
-        billingAddress = existing.billingAddress,
-        problemDescription = existing.problemDescription,
-        status = existing.status,
-      } = req.body;
-
-      await db.execute(
-        `UPDATE work_orders
-           SET poNumber=?,customer=?,siteLocation=?,billingAddress=?,
-               problemDescription=?,status=?,pdfPath=?,photoPath=?
-         WHERE id=?`,
-        [poNumber, customer, siteLocation, billingAddress, problemDescription, status, pdfPath, merged.join(','), wid]
-      );
-      const [[updated]] = await db.execute(
-        'SELECT * FROM work_orders WHERE id = ?', [wid]
-      );
-      res.json(updated);
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Failed to update work order.' });
+});
+app.put('/work-orders/:id/edit', authenticate, upload.fields([{ name: 'pdfFile', maxCount: 1 }, { name: 'photoFile', maxCount: 20 }]), async (req, res) => {
+  try {
+    const wid = req.params.id;
+    const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    if (!existing) return res.status(404).json({ error: 'Not found.' });
+    let pdfPath = existing.pdfPath;
+    if (req.files.pdfFile) {
+      if (S3_BUCKET && pdfPath) await s3.deleteObject({ Bucket: S3_BUCKET, Key: pdfPath }).promise();
+      else if (!S3_BUCKET && pdfPath) fs.unlinkSync(path.resolve(__dirname, 'uploads', pdfPath));
+      pdfPath = S3_BUCKET ? req.files.pdfFile[0].key : req.files.pdfFile[0].filename;
     }
+    const oldPhotos = existing.photoPath ? existing.photoPath.split(',') : [];
+    const newPhotos = (req.files.photoFile || []).map(f => S3_BUCKET ? f.key : f.filename);
+    const merged    = [...oldPhotos, ...newPhotos];
+    const { poNumber = existing.poNumber, customer = existing.customer, siteLocation = existing.siteLocation, billingAddress = existing.billingAddress, problemDescription = existing.problemDescription, status = existing.status } = req.body;
+    await db.execute(
+      `UPDATE work_orders SET poNumber=?,customer=?,siteLocation=?,billingAddress=?,problemDescription=?,status=?,pdfPath=?,photoPath=? WHERE id=?`,
+      [poNumber, customer, siteLocation, billingAddress, problemDescription, status, pdfPath, merged.join(','), wid]
+    );
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    res.json(updated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update work order.' });
   }
-);
-
+});
 app.post('/work-orders/:id/notes', authenticate, express.json(), async (req, res) => {
   try {
     const wid = req.params.id;
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: 'Note text required.' });
-    const [[row]] = await db.execute(
-      'SELECT notes FROM work_orders WHERE id = ?', [wid]
-    );
+    const [[row]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [wid]);
     const arr = row.notes ? JSON.parse(row.notes) : [];
     arr.push({ text, createdAt: new Date().toISOString() });
-    await db.execute(
-      'UPDATE work_orders SET notes = ? WHERE id = ?', [JSON.stringify(arr), wid]
-    );
+    await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [JSON.stringify(arr), wid]);
     res.json({ notes: arr });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to add note.' });
   }
 });
-
 app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (req, res) => {
   try {
     const wid = req.params.id;
     const { photoPath } = req.body;
     if (!photoPath) return res.status(400).json({ error: 'photoPath required.' });
-
-    // delete from S3
-    await s3.deleteObject({ Bucket: S3_BUCKET, Key: photoPath }).promise();
-
-    // update DB
-    const [[existing]] = await db.execute(
-      'SELECT photoPath FROM work_orders WHERE id = ?', [wid]
-    );
+    if (S3_BUCKET) {
+      await s3.deleteObject({ Bucket: S3_BUCKET, Key: photoPath }).promise();
+    } else {
+      fs.unlinkSync(path.resolve(__dirname, 'uploads', photoPath));
+    }
+    const [[existing]] = await db.execute('SELECT photoPath FROM work_orders WHERE id = ?', [wid]);
     const keep = existing.photoPath.split(',').filter(p => p !== photoPath);
-    await db.execute(
-      'UPDATE work_orders SET photoPath = ? WHERE id = ?', [keep.join(','), wid]
-    );
-    const [[fresh]] = await db.execute(
-      'SELECT * FROM work_orders WHERE id = ?', [wid]
-    );
+    await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [keep.join(','), wid]);
+    const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     res.json(fresh);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to delete attachment.' });
   }
 });
-
 app.delete('/work-orders/:id', authenticate, async (req, res) => {
   try {
     await db.execute('DELETE FROM work_orders WHERE id = ?', [req.params.id]);
