@@ -25,8 +25,8 @@ const {
 } = process.env;
 
 if (!S3_BUCKET) {
-  console.error('❌ Environment variable S3_BUCKET is not set');
-  process.exit(1);
+  console.warn('⚠️ Environment variable S3_BUCKET is not set; uploads will be disabled');
+  // NOTE: We do NOT exit here, so EB can deploy this version successfully.
 }
 
 // Configure AWS SDK
@@ -411,7 +411,7 @@ app.delete('/work-orders/:id', authenticate, async (req, res) => {
 });
 
 // ─── START SERVER ───────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 80;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server listening on 0.0.0.0:${PORT}`);
 });
