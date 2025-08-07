@@ -1,20 +1,21 @@
 version: 1
 frontend:
-  # Instruct Amplify to use Node.js 20.x
   runtime-versions:
     nodejs: 20
   phases:
     preBuild:
       commands:
+        - cd crm-frontend
         - npm ci
     build:
       commands:
         - npm run build
   artifacts:
-    # CRA outputs to 'build'
-    baseDirectory: build
+    # point to the build output inside crm-frontend
+    baseDirectory: crm-frontend/build
     files:
       - '**/*'
   cache:
+    # cache only your front-end deps
     paths:
-      - node_modules/**/*
+      - crm-frontend/node_modules/**/*
