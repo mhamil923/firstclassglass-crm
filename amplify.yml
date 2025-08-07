@@ -9,13 +9,12 @@ frontend:
         - npm ci
     build:
       commands:
+        - cd crm-frontend
         - npm run build
   artifacts:
-    # point to the build output inside crm-frontend
     baseDirectory: crm-frontend/build
     files:
       - '**/*'
   cache:
-    # cache only your front-end deps
     paths:
       - crm-frontend/node_modules/**/*
