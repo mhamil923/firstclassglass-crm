@@ -9,7 +9,8 @@ frontend:
         - npm ci
     build:
       commands:
-        - npm run build        # <- no cd here!
+        - cd crm-frontend       # <-- make sure we’re inside crm-frontend again
+        - npm run build
   artifacts:
     baseDirectory: crm-frontend/build
     files:
