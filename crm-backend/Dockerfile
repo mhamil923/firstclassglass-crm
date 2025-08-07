@@ -12,7 +12,8 @@ RUN npm ci --production
 COPY . .
 
 # Expose the port your app will run on
-EXPOSE 8080
+EXPOSE 80
+ENV PORT=80
 
 # Start the app
 CMD ["node", "server.js"]
