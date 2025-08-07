@@ -5,12 +5,27 @@ frontend:
   phases:
     preBuild:
       commands:
-        - cd crm-frontend
-        - npm ci
+        - echo "🔍 Listing root directory:" && ls -al
+        - |
+          # Try crm-frontend first, then fallback to frontend
+          if [ -d crm-frontend ]; then
+            cd crm-frontend
+          elif [ -d frontend ]; then
+            cd frontend
+          else
+            echo "❌ No crm-frontend or frontend folder found" && exit 1
+          fi
+        - echo "📂 Now in $(pwd), running npm ci" && npm ci
     build:
       commands:
-        - cd crm-frontend
-        - npm run build
+        - |
+          # repeat same folder logic for build
+          if [ -d crm-frontend ]; then
+            cd crm-frontend
+          elif [ -d frontend ]; then
+            cd frontend
+          fi
+        - echo "📂 Building from $(pwd)" && npm run build
   artifacts:
     baseDirectory: crm-frontend/build
     files:
