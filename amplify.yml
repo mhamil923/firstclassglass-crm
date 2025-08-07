@@ -5,15 +5,11 @@ frontend:
   phases:
     preBuild:
       commands:
-        - pwd
-        - ls -al
-        - cd crm-frontend            # ← force into your frontend folder
-        - pwd
+        - cd crm-frontend
         - npm ci
     build:
       commands:
-        - cd crm-frontend            # ← again, ensure we’re in crm-frontend
-        - npm run build
+        - npm run build        # <- no cd here!
   artifacts:
     baseDirectory: crm-frontend/build
     files:
