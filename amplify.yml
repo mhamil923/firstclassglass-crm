@@ -1,20 +1,24 @@
 version: 1
-frontend:
-  runtime-versions:
-    nodejs: 20
-  phases:
-    preBuild:
-      commands:
-        - cd crm-frontend
-        - npm ci
-    build:
-      commands:
-        - cd crm-frontend       # <-- make sure we’re inside crm-frontend again
-        - npm run build
-  artifacts:
-    baseDirectory: crm-frontend/build
-    files:
-      - '**/*'
-  cache:
-    paths:
-      - crm-frontend/node_modules/**/*
+applications:
+  - appRoot: crm-frontend
+    frontend:
+      # (runtime-versions sometimes gets ignored; we force Node 20 with nvm below)
+      phases:
+        preBuild:
+          commands:
+            - 'export NVM_DIR="$HOME/.nvm"'
+            - '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"'
+            - nvm install 20
+            - nvm use 20
+            - node -v
+            - npm ci
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: build
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
