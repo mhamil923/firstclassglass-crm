@@ -2,12 +2,13 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import api from "./api";                   // axios wrapper w/ JWT interceptor
-import "./AddWorkOrder.css";              // your styles
+import api from "./api";
+import "./AddWorkOrder.css";
 
 export default function AddWorkOrder() {
   const navigate = useNavigate();
 
+  // ---- form state
   const [workOrder, setWorkOrder] = useState({
     customer: "",
     poNumber: "",
@@ -15,154 +16,150 @@ export default function AddWorkOrder() {
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
-    assignedTo: "" // user id (string)
+    assignedTo: "" // user id as string
   });
 
+  // files
   const [pdfFile, setPdfFile] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
 
+  // lists
   const [customers, setCustomers] = useState([]);
-  const [techs, setTechs] = useState([]); // users from /users
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState("");
+  const [techs, setTechs] = useState([]);
 
+  // google places
   const siteInputRef = useRef(null);
   const autocompleteRef = useRef(null);
 
-  // Load customers + users (techs) + Google Places
+  // ---------- load reference data + Places script once
   useEffect(() => {
-    let cancelled = false;
+    // customers
+    api.get("/customers")
+      .then(r => setCustomers(r.data || []))
+      .catch(e => console.error("Error loading customers:", e));
 
-    async function bootstrap() {
-      setLoading(true);
-      setErr("");
+    // techs (users)
+    api.get("/users")
+      .then(r => setTechs(r.data || []))
+      .catch(e => console.error("Error loading users:", e));
 
-      try {
-        const [custRes, usersRes] = await Promise.all([
-          api.get("/customers"),
-          api.get("/users") // returns [{id, username}]
-        ]);
-        if (!cancelled) {
-          setCustomers(custRes.data || []);
-          setTechs(usersRes.data || []);
-        }
-      } catch (e) {
-        console.error("Bootstrap load failed:", e);
-        if (!cancelled) setErr(e?.response?.data?.error || e.message || "Failed to load data.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-
-      // Load Google Places (optional)
-      const existing = document.getElementById("gmaps-script");
-      const apiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-      if (apiKey && !existing) {
-        const script = document.createElement("script");
-        script.id = "gmaps-script";
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
-        script.async = true;
-        script.onload = initAutocomplete;
-        document.body.appendChild(script);
-      } else {
-        initAutocomplete();
-      }
+    // google places script
+    const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
+    if (!key || key === "YOUR_ACTUAL_KEY_HERE") {
+      console.warn("Google Maps API key missing; Places autocomplete disabled.");
+      return;
     }
-
-    bootstrap();
-    return () => {
-      cancelled = true;
-    };
+    const existing = document.getElementById("gmaps-script");
+    if (existing) {
+      initAutocomplete();
+      return;
+    }
+    const script = document.createElement("script");
+    script.id = "gmaps-script";
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places`;
+    script.async = true;
+    script.onload = initAutocomplete;
+    script.onerror = () => console.error("Failed to load Google Maps script");
+    document.body.appendChild(script);
+    // no cleanup needed; script stays for app lifetime
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ---------- wire up Google Places Autocomplete on the input
   function initAutocomplete() {
-    if (window.google && siteInputRef.current && !autocompleteRef.current) {
-      autocompleteRef.current = new window.google.maps.places.Autocomplete(
-        siteInputRef.current,
-        { types: ["address"] }
-      );
-      // setFields is deprecated on Places V3; we'll just read place when available
-      autocompleteRef.current.addListener("place_changed", () => {
-        const place = autocompleteRef.current.getPlace();
-        const addr =
-          place?.formatted_address ||
-          siteInputRef.current?.value ||
-          "";
-        setWorkOrder(o => ({ ...o, siteLocation: addr }));
-      });
-    }
+    if (!window.google || !siteInputRef.current) return;
+
+    // IMPORTANT: do NOT call setFields (removed in Places v3)
+    const ac = new window.google.maps.places.Autocomplete(siteInputRef.current, {
+      types: ["address"]
+    });
+    ac.addListener("place_changed", () => {
+      const place = ac.getPlace();
+      const addr = (place && place.formatted_address) || siteInputRef.current.value || "";
+      setWorkOrder(prev => ({ ...prev, siteLocation: addr }));
+    });
+    autocompleteRef.current = ac;
   }
 
-  // helper to grab first line of billing for auto‐customer
-  const extractCustomerFromBilling = addr => {
+  // ---------- helpers
+  const extractCustomerFromBilling = (addr) => {
     if (!addr) return "";
-    const [first] = addr.split("\n").map(l => l.trim()).filter(Boolean);
+    const first = addr.split("\n").map(s => s.trim()).filter(Boolean)[0];
     return first || "";
   };
 
-  const handleChange = e => {
+  const handleChange = (e) => {
     const { name, value } = e.target;
     setWorkOrder(prev => {
       const upd = { ...prev, [name]: value };
+
       if (name === "customer") {
         const found = customers.find(c => c.name === value);
-        if (found) upd.billingAddress = found.billingAddress || "";
+        if (found?.billingAddress) {
+          upd.billingAddress = found.billingAddress;
+        }
       }
+
       if (name === "billingAddress") {
         const first = extractCustomerFromBilling(value);
-        // keep auto-fill behavior only if user hasn’t typed a different customer yet
-        if (!prev.customer || prev.customer === extractCustomerFromBilling(prev.billingAddress)) {
+        // only auto-fill customer if user hasn't set it explicitly
+        const prevAuto = extractCustomerFromBilling(prev.billingAddress || "");
+        if (!prev.customer || prev.customer === prevAuto) {
           upd.customer = first;
         }
       }
+
       return upd;
     });
   };
 
-  const handlePdfChange = (e) => {
-    const f = e.target.files?.[0] || null;
-    if (f && f.type !== "application/pdf") {
-      setErr("PDF must be a .pdf file.");
-      e.target.value = "";
-      return;
+  const handlePdfChange = (e) => setPdfFile(e.target.files?.[0] || null);
+  const handlePhotoChange = (e) => setPhotoFile(e.target.files?.[0] || null);
+
+  const validate = () => {
+    const missing = [];
+    if (!workOrder.customer) missing.push("Customer");
+    if (!workOrder.billingAddress) missing.push("Billing Address");
+    if (!workOrder.problemDescription) missing.push("Problem Description");
+    if (missing.length) {
+      alert(`Please fill required fields: ${missing.join(", ")}`);
+      return false;
     }
-    setErr("");
-    setPdfFile(f);
+    return true;
   };
 
-  const handlePhotoChange = (e) => {
-    const f = e.target.files?.[0] || null;
-    // Optional: size/type checks
-    setPhotoFile(f);
-  };
-
-  const handleSubmit = async e => {
+  // ---------- submit
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setErr("");
-    setSubmitting(true);
+    if (!validate()) return;
+
+    const form = new FormData();
+    form.append("customer", workOrder.customer);
+    form.append("poNumber", workOrder.poNumber || "");
+    form.append("siteLocation", workOrder.siteLocation || "");
+    form.append("billingAddress", workOrder.billingAddress);
+    form.append("problemDescription", workOrder.problemDescription);
+    form.append("status", workOrder.status || "Needs to be Scheduled");
+    if (workOrder.assignedTo) {
+      // your backend currently ignores this field in the INSERT,
+      // but it won't hurt to send it. Once the API is updated, it'll be used.
+      form.append("assignedTo", workOrder.assignedTo);
+    }
+    if (pdfFile) form.append("pdfFile", pdfFile);       // <-- MUST be pdfFile
+    if (photoFile) form.append("photoFile", photoFile); // <-- MUST be photoFile
 
     try {
-      // Build multipart form-data; DO NOT set Content-Type manually
-      const fd = new FormData();
-      fd.append("customer", workOrder.customer);
-      fd.append("poNumber", workOrder.poNumber);
-      fd.append("siteLocation", workOrder.siteLocation);
-      fd.append("billingAddress", workOrder.billingAddress);
-      fd.append("problemDescription", workOrder.problemDescription);
-      fd.append("status", workOrder.status);
-      if (workOrder.assignedTo) fd.append("assignedTo", String(workOrder.assignedTo));
-
-      if (pdfFile)   fd.append("pdfFile", pdfFile);     // exact field names server expects
-      if (photoFile) fd.append("photoFile", photoFile); // exact field names server expects
-
-      await api.post("/work-orders", fd);
+      await api.post("/work-orders", form, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
       navigate("/work-orders");
-    } catch (error) {
-      console.error("Create work order failed:", error);
-      const msg = error?.response?.data?.error || error?.message || "Failed to create work order.";
-      setErr(msg);
-    } finally {
-      setSubmitting(false);
+    } catch (err) {
+      const msg =
+        err?.response?.data?.error ||
+        err?.message ||
+        "Failed to save — check server logs";
+      console.error("⚠️ Error adding work order:", err);
+      alert(msg);
     }
   };
 
@@ -171,159 +168,139 @@ export default function AddWorkOrder() {
       <form className="add-workorder-card" onSubmit={handleSubmit}>
         <h2 className="add-workorder-title">Add Work Order</h2>
 
-        {err ? (
-          <div className="error-banner">
-            {err}
-          </div>
-        ) : null}
+        {/* Customer */}
+        <div className="form-group">
+          <label>Customer Name</label>
+          <input
+            name="customer"
+            list="customers-list"
+            value={workOrder.customer}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="Customer name"
+            autoComplete="off"
+          />
+          <datalist id="customers-list">
+            {customers.map(c => (
+              <option key={c.id} value={c.name} />
+            ))}
+          </datalist>
+        </div>
 
-        {loading ? (
-          <div style={{ padding: 12 }}>Loading…</div>
-        ) : (
-          <>
-            {/* Customer */}
-            <div className="form-group">
-              <label>Customer Name</label>
-              <input
-                name="customer"
-                list="customers-list"
-                value={workOrder.customer}
-                onChange={handleChange}
-                className="form-control-custom"
-                placeholder="Start typing or pick from history…"
-                required
-              />
-              <datalist id="customers-list">
-                {customers.map(c => <option key={c.id} value={c.name} />)}
-              </datalist>
-            </div>
+        {/* Assign to Tech */}
+        <div className="form-group">
+          <label>Assign To</label>
+          <select
+            name="assignedTo"
+            value={workOrder.assignedTo}
+            onChange={handleChange}
+            className="form-select-custom"
+          >
+            <option value="">— Unassigned —</option>
+            {techs.map(u => (
+              <option key={u.id} value={u.id}>
+                {u.username}
+              </option>
+            ))}
+          </select>
+        </div>
 
-            {/* PO Number */}
-            <div className="form-group">
-              <label>PO Number</label>
-              <input
-                name="poNumber"
-                value={workOrder.poNumber}
-                onChange={handleChange}
-                className="form-control-custom"
-              />
-            </div>
+        {/* PO Number */}
+        <div className="form-group">
+          <label>PO Number</label>
+          <input
+            name="poNumber"
+            value={workOrder.poNumber}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="Optional"
+            autoComplete="off"
+          />
+        </div>
 
-            {/* Site Location (Google Places) */}
-            <div className="form-group">
-              <label>Site Location</label>
-              <input
-                name="siteLocation"
-                ref={siteInputRef}
-                value={workOrder.siteLocation}
-                onChange={handleChange}
-                placeholder="Start typing address…"
-                className="form-control-custom"
-              />
-            </div>
+        {/* Site Location (Google Places) */}
+        <div className="form-group">
+          <label>Site Location</label>
+          <input
+            name="siteLocation"
+            ref={siteInputRef}
+            value={workOrder.siteLocation}
+            onChange={handleChange}
+            placeholder="Start typing address…"
+            className="form-control-custom"
+            autoComplete="off"
+          />
+        </div>
 
-            {/* Billing Address */}
-            <div className="form-group">
-              <label>Billing Address</label>
-              <textarea
-                name="billingAddress"
-                rows={3}
-                value={workOrder.billingAddress}
-                onChange={handleChange}
-                className="form-textarea-custom"
-                required
-              />
-            </div>
+        {/* Billing Address */}
+        <div className="form-group">
+          <label>Billing Address</label>
+          <textarea
+            name="billingAddress"
+            rows={3}
+            value={workOrder.billingAddress}
+            onChange={handleChange}
+            className="form-textarea-custom"
+            placeholder="Company / Name&#10;Street&#10;City, ST ZIP"
+          />
+        </div>
 
-            {/* Problem Description */}
-            <div className="form-group">
-              <label>Problem Description</label>
-              <textarea
-                name="problemDescription"
-                rows={4}
-                value={workOrder.problemDescription}
-                onChange={handleChange}
-                className="form-textarea-custom"
-                required
-              />
-            </div>
+        {/* Problem Description */}
+        <div className="form-group">
+          <label>Problem Description</label>
+          <textarea
+            name="problemDescription"
+            rows={4}
+            value={workOrder.problemDescription}
+            onChange={handleChange}
+            className="form-textarea-custom"
+            placeholder="Describe the issue…"
+          />
+        </div>
 
-            {/* Status */}
-            <div className="form-group">
-              <label>Status</label>
-              <select
-                name="status"
-                value={workOrder.status}
-                onChange={handleChange}
-                className="form-select-custom"
-              >
-                <option>Needs to be Scheduled</option>
-                <option>Scheduled</option>
-                <option>Waiting for Approval</option>
-                <option>Waiting on Parts</option>
-                <option>Completed</option>
-              </select>
-            </div>
+        {/* Status */}
+        <div className="form-group">
+          <label>Status</label>
+          <select
+            name="status"
+            value={workOrder.status}
+            onChange={handleChange}
+            className="form-select-custom"
+          >
+            <option>Needs to be Scheduled</option>
+            <option>Scheduled</option>
+            <option>Waiting for Approval</option>
+            <option>Waiting on Parts</option>
+            <option>Completed</option>
+          </select>
+        </div>
 
-            {/* Assigned To (Tech) */}
-            <div className="form-group">
-              <label>Assigned To (Tech)</label>
-              <select
-                name="assignedTo"
-                value={workOrder.assignedTo}
-                onChange={handleChange}
-                className="form-select-custom"
-              >
-                <option value="">— Unassigned —</option>
-                {techs.map(t => (
-                  <option key={t.id} value={t.id}>
-                    {t.username}
-                  </option>
-                ))}
-              </select>
-            </div>
+        {/* PDF Upload */}
+        <div className="form-group">
+          <label>Upload PDF</label>
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={handlePdfChange}
+            className="form-file-custom"
+          />
+        </div>
 
-            {/* PDF Upload */}
-            <div className="form-group">
-              <label>Upload PDF</label>
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={handlePdfChange}
-                className="form-file-custom"
-              />
-            </div>
+        {/* Photo Upload (optional, single) */}
+        <div className="form-group">
+          <label>Upload Photo</label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handlePhotoChange}
+            className="form-file-custom"
+          />
+        </div>
 
-            {/* Photo Upload */}
-            <div className="form-group">
-              <label>Upload Photo</label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handlePhotoChange}
-                className="form-file-custom"
-              />
-            </div>
-
-            {/* Submit */}
-            <button type="submit" className="submit-btn" disabled={submitting}>
-              {submitting ? "Saving…" : "Add Work Order"}
-            </button>
-          </>
-        )}
+        <button type="submit" className="submit-btn">
+          Add Work Order
+        </button>
       </form>
-
-      {/* Tiny inline styles for errors if your CSS doesn't have them */}
-      <style>{`
-        .error-banner {
-          background: #fee;
-          color: #900;
-          padding: 8px;
-          margin-bottom: 12px;
-          border: 1px solid #f99;
-          border-radius: 6px;
-        }
-      `}</style>
     </div>
   );
 }
