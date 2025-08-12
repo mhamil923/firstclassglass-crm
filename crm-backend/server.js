@@ -117,7 +117,7 @@ if (S3_BUCKET) {
     }
   });
   upload = multer({ storage });
-  app.use('/uploads', express.static(localDir));
+  app.use('/uploads', express.static(localDir)); // local-only convenience
 }
 
 // ─── AUTHENTICATION ───────────────────────────────────────────────────────────
@@ -326,9 +326,8 @@ app.post(
                  VALUES (?,?,?,?,?,?,?,?)`;
 
       // If table has assignedTo, include it
-      let assignedToVal = null;
       if (SCHEMA.hasAssignedTo && assignedTo !== undefined && assignedTo !== '') {
-        assignedToVal = Number.isFinite(Number(assignedTo)) ? Number(assignedTo) : null;
+        const assignedToVal = Number.isFinite(Number(assignedTo)) ? Number(assignedTo) : null;
         sql = `INSERT INTO work_orders
                (poNumber,customer,siteLocation,billingAddress,problemDescription,status,pdfPath,photoPath,assignedTo)
                VALUES (?,?,?,?,?,?,?,?,?)`;
@@ -474,6 +473,41 @@ app.delete('/work-orders/:id', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Work-order delete error:', err);
     res.status(500).json({ error: 'Failed to delete.' });
+  }
+});
+
+// ─── FILE RESOLVER (S3 or local) ─────────────────────────────────────────────
+app.get('/files', async (req, res) => {
+  try {
+    const key = req.query.key;
+    if (!key) return res.status(400).json({ error: 'Missing ?key=' });
+
+    // Only allow keys under the uploads/ prefix
+    if (!String(key).startsWith('uploads/')) {
+      return res.status(400).json({ error: 'Invalid key' });
+    }
+
+    if (S3_BUCKET) {
+      // Pre-signed S3 URL good for 60 seconds
+      const url = s3.getSignedUrl('getObject', {
+        Bucket: S3_BUCKET,
+        Key: key,
+        Expires: 60,
+      });
+      return res.redirect(302, url);
+    }
+
+    // Local disk fallback
+    const uploadsDir = path.resolve(__dirname, 'uploads');
+    const safePath = path.resolve(uploadsDir, key.replace(/^uploads\//, ''));
+    if (!safePath.startsWith(uploadsDir)) {
+      return res.status(400).json({ error: 'Bad path' });
+    }
+    if (!fs.existsSync(safePath)) return res.sendStatus(404);
+    return res.sendFile(safePath);
+  } catch (err) {
+    console.error('File resolver error:', err);
+    res.status(500).json({ error: 'Failed to resolve file' });
   }
 });
 
