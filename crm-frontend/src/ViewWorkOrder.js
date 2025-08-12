@@ -2,10 +2,10 @@
 
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import api from "./api";              // ← your axios instance
+import api from "./api";
 import moment from "moment";
 import API_BASE_URL from "./config";
-import "./ViewWorkOrder.css";        // ← import styles
+import "./ViewWorkOrder.css";
 
 export default function ViewWorkOrder() {
   const { id } = useParams();
@@ -14,12 +14,15 @@ export default function ViewWorkOrder() {
   const [workOrder, setWorkOrder] = useState(null);
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
-  // Fetch work order details
+  const fileUrl = (key) =>
+    key ? `${API_BASE_URL}/files?key=${encodeURIComponent(key)}` : null;
+
   const fetchWorkOrder = async () => {
     try {
-      const response = await api.get(`/work-orders/${id}`);
-      setWorkOrder(response.data);
+      const { data } = await api.get(`/work-orders/${id}`);
+      setWorkOrder(data);
     } catch (error) {
       console.error("⚠️ Error fetching work order:", error);
     }
@@ -27,6 +30,7 @@ export default function ViewWorkOrder() {
 
   useEffect(() => {
     fetchWorkOrder();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   if (!workOrder) {
@@ -48,6 +52,7 @@ export default function ViewWorkOrder() {
     pdfPath,
     photoPath,
     notes,
+    assignedToName,
   } = workOrder;
 
   // Parse existing notes
@@ -60,7 +65,7 @@ export default function ViewWorkOrder() {
     }
   }
 
-  // Handle new note submission
+  // Add a new note
   const handleAddNote = async () => {
     if (!newNote.trim()) return;
     try {
@@ -74,29 +79,35 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Upload attachments immediately on selection
+  // Upload attachments (photos) using the edit endpoint; backend will append
   const handleAttachmentChange = async (e) => {
-    const files = Array.from(e.target.files);
-    if (files.length === 0) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
     const formData = new FormData();
-    files.forEach((file) => formData.append("attachments", file));
+    // backend expects "photoFile" (and allows up to 20 files)
+    files.forEach((f) => formData.append("photoFile", f));
+
     try {
-      await api.post(
-        `/work-orders/${id}/attachments`,
-        formData,
-        { headers: { "Content-Type": "multipart/form-data" } }
-      );
-      fetchWorkOrder();
+      setUploading(true);
+      await api.put(`/work-orders/${id}/edit`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error uploading attachments:", error);
       alert("Failed to upload attachments.");
+    } finally {
+      setUploading(false);
+      e.target.value = ""; // reset input
     }
   };
 
   // Existing attachments
   const attachments = (photoPath || "")
     .split(",")
-    .filter((p) => p);
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   return (
     <div className="view-container">
@@ -114,15 +125,15 @@ export default function ViewWorkOrder() {
           </li>
           <li className="detail-item">
             <span className="detail-label">Site Location:</span>
-            <span className="detail-value">{siteLocation}</span>
+            <span className="detail-value">{siteLocation || "—"}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Billing Address:</span>
-            <span className="detail-value">{billingAddress}</span>
+            <span className="detail-value prewrap">{billingAddress}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Problem Description:</span>
-            <span className="detail-value">{problemDescription}</span>
+            <span className="detail-value prewrap">{problemDescription}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Status:</span>
@@ -136,53 +147,79 @@ export default function ViewWorkOrder() {
                 : "Not Scheduled"}
             </span>
           </li>
+          {assignedToName && (
+            <li className="detail-item">
+              <span className="detail-label">Assigned To:</span>
+              <span className="detail-value">{assignedToName}</span>
+            </li>
+          )}
         </ul>
 
-        {pdfPath && (
+        {/* PDF viewer */}
+        {pdfPath ? (
           <div className="view-card section-card">
             <h3 className="section-header">Work Order PDF</h3>
+            {/* Use the /files resolver so it works with S3 or local */}
             <iframe
-              src={`${API_BASE_URL}/${pdfPath}`}
+              src={fileUrl(pdfPath)}
               className="pdf-frame"
               title="Work Order PDF"
             />
+            <div className="pdf-actions">
+              <a
+                href={fileUrl(pdfPath)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open in new tab
+              </a>
+            </div>
+          </div>
+        ) : (
+          <div className="section-card">
+            <h3 className="section-header">Work Order PDF</h3>
+            <em className="empty-text">No PDF attached.</em>
           </div>
         )}
 
+        {/* Attachments (photos) */}
         <div className="section-card">
           <h3 className="section-header">Attachments</h3>
-          <div className="attachments">
-            {attachments.map((relPath, i) => {
-              const url = `${API_BASE_URL}/${relPath}`;
-              return (
-                <a
-                  key={i}
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <img
-                    src={url}
-                    alt={`attachment-${i}`}
-                    className="attachment-img"
-                  />
-                </a>
-              );
-            })}
-          </div>
+
+          {attachments.length ? (
+            <div className="attachments">
+              {attachments.map((relPath, i) => {
+                const url = fileUrl(relPath);
+                return (
+                  <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                    <img src={url} alt={`attachment-${i}`} className="attachment-img" />
+                  </a>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="empty-text">No attachments yet.</p>
+          )}
+
           <div className="attachment-upload">
-            <input
-              type="file"
-              multiple
-              onChange={handleAttachmentChange}
-            />
+            <label className="upload-label">
+              {uploading ? "Uploading…" : "Add photos"}
+              <input
+                type="file"
+                multiple
+                accept="image/*"
+                onChange={handleAttachmentChange}
+                disabled={uploading}
+                style={{ display: "none" }}
+              />
+            </label>
           </div>
         </div>
 
+        {/* Notes */}
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
 
-          {/* Toggle note form */}
           <button
             className="toggle-note-btn"
             onClick={() => setShowNoteInput((v) => !v)}
@@ -221,10 +258,7 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        <button
-          className="back-btn"
-          onClick={() => navigate("/work-orders")}
-        >
+        <button className="back-btn" onClick={() => navigate("/work-orders")}>
           ← Back to List
         </button>
       </div>
