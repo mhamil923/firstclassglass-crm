@@ -1,45 +1,40 @@
 // File: src/CalendarPage.js
 
-import React, { useEffect, useState } from "react";
-import api from "./api";                         // ← use our axios wrapper
+import React, { useEffect, useMemo, useState } from "react";
+import api from "./api";
 import { Calendar, momentLocalizer } from "react-big-calendar";
-import moment from "moment";
 import withDragAndDrop from "react-big-calendar/lib/addons/dragAndDrop";
+import moment from "moment";
 import { OverlayTrigger, Popover } from "react-bootstrap";
 
 import "react-big-calendar/lib/css/react-big-calendar.css";
+import "react-big-calendar/lib/addons/dragAndDrop/styles.css";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "./Calendar.css";
 
 const localizer = momentLocalizer(moment);
 const DnDCalendar = withDragAndDrop(Calendar);
 
+// Small popover for event hover
 function CustomEvent({ event }) {
-  const popover = (
-    <Popover id={`popover-${event.id}`}>
-      <Popover.Header as="h3">
-        PO#: {event.poNumber || event.id}
-      </Popover.Header>
+  const pop = (
+    <Popover id={`po-${event.id}`}>
+      <Popover.Header as="h3">PO#: {event.poNumber || event.id}</Popover.Header>
       <Popover.Body>
-        <strong>Site:</strong> {event.siteLocation} <br />
-        <strong>Problem:</strong> {event.problemDescription}
+        <div><strong>Site:</strong> {event.siteLocation || "—"}</div>
+        <div><strong>Problem:</strong> {event.problemDescription || "—"}</div>
       </Popover.Body>
     </Popover>
   );
   return (
-    <OverlayTrigger
-      trigger={["hover", "focus"]}
-      placement="top"
-      overlay={popover}
-    >
+    <OverlayTrigger trigger={["hover", "focus"]} placement="top" overlay={pop}>
       <span className="rbc-event-title">{event.title}</span>
     </OverlayTrigger>
   );
 }
 
 export default function WorkOrderCalendar() {
-  const [workOrders, setWorkOrders] = useState([]);
-  const [unscheduledOrders, setUnscheduledOrders] = useState([]);
+  const [allOrders, setAllOrders] = useState([]);
   const [dragItem, setDragItem] = useState(null);
   const [view, setView] = useState("month");
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -47,54 +42,87 @@ export default function WorkOrderCalendar() {
   const [selectedDayOrders, setSelectedDayOrders] = useState([]);
   const [modalTitle, setModalTitle] = useState("");
 
-  useEffect(fetchWorkOrders, []);
+  useEffect(() => {
+    fetchWorkOrders();
+  }, []);
 
-  function fetchWorkOrders() {
-    api
-      .get("/work-orders")
-      .then((res) => {
-        const scheduled = res.data.filter((o) => o.scheduledDate);
-        const unscheduled = res.data.filter((o) => !o.scheduledDate);
-        setWorkOrders(scheduled);
-        setUnscheduledOrders(unscheduled);
-      })
-      .catch((err) => console.error("⚠️ Error fetching work orders:", err));
+  async function fetchWorkOrders() {
+    try {
+      const { data } = await api.get("/work-orders");
+      setAllOrders(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("⚠️ Error fetching work orders:", err);
+    }
   }
 
-  function handleEventDrop({ event, start }) {
-    const formatted = moment(start).format("YYYY-MM-DD HH:mm:ss");
-    api
-      .put(`/work-orders/${event.id}/update-date`, {
-        scheduledDate: formatted,
-        status: "Scheduled",
-      })
-      .then(() =>
-        setWorkOrders((prev) =>
-          prev.map((o) =>
-            o.id === event.id
-              ? { ...o, scheduledDate: formatted, status: "Scheduled" }
-              : o
-          )
-        )
+  // Split into scheduled/unscheduled
+  const { scheduledEvents, unscheduledOrders } = useMemo(() => {
+    const scheduled = [];
+    const unscheduled = [];
+    for (const o of allOrders) {
+      if (o.scheduledDate) {
+        const start = moment(o.scheduledDate).toDate();
+        const end = moment(o.scheduledDate).add(1, "hour").toDate(); // give events a duration
+        scheduled.push({
+          id: o.id,
+          title: o.poNumber || `WO ${o.id}`,
+          poNumber: o.poNumber,
+          siteLocation: o.siteLocation,
+          problemDescription: o.problemDescription,
+          start,
+          end,
+          raw: o,
+        });
+      } else {
+        unscheduled.push(o);
+      }
+    }
+    return { scheduledEvents: scheduled, unscheduledOrders: unscheduled };
+  }, [allOrders]);
+
+  // --- Helpers ---------------------------------------------------------------
+
+  // Persist a date move/schedule to backend (multipart but no files)
+  async function saveSchedule(id, when, nextStatus = "Scheduled") {
+    const scheduledDate = moment(when).format("YYYY-MM-DD HH:mm:ss");
+    const form = new FormData();
+    form.append("scheduledDate", scheduledDate);
+    form.append("status", nextStatus);
+
+    await api.put(`/work-orders/${id}/edit`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+
+    // Optimistic local update
+    setAllOrders(prev =>
+      prev.map(o =>
+        o.id === id ? { ...o, scheduledDate, status: nextStatus } : o
       )
-      .catch((e) => console.error("⚠️ Error updating work order date:", e));
+    );
   }
 
-  function handleDropFromOutside({ start }) {
+  // RBC internal event drag
+  async function handleEventDrop({ event, start /*, end, allDay */ }) {
+    try {
+      await saveSchedule(event.id, start, "Scheduled");
+    } catch (e) {
+      console.error("⚠️ Error updating work order date:", e);
+      // fallback: reload from server so UI doesn't get out of sync
+      fetchWorkOrders();
+    }
+  }
+
+  // External drag-from-unscheduled into calendar
+  async function handleDropFromOutside({ start /*, end, allDay */ }) {
     if (!dragItem) return;
-    const formatted = moment(start).format("YYYY-MM-DD HH:mm:ss");
-    api
-      .put(`/work-orders/${dragItem.id}/update-date`, {
-        scheduledDate: formatted,
-        status: "Scheduled",
-      })
-      .then(() => {
-        fetchWorkOrders();
-        setDragItem(null);
-      })
-      .catch((e) =>
-        console.error("⚠️ Error scheduling work order:", e)
-      );
+    try {
+      await saveSchedule(dragItem.id, start, "Scheduled");
+    } catch (e) {
+      console.error("⚠️ Error scheduling work order:", e);
+      fetchWorkOrders();
+    } finally {
+      setDragItem(null);
+    }
   }
 
   function navigateToView(id) {
@@ -103,21 +131,22 @@ export default function WorkOrderCalendar() {
 
   function handleDayClick({ start }) {
     const day = moment(start).format("YYYY-MM-DD");
-    const list = workOrders.filter((o) =>
-      moment(o.scheduledDate).format("YYYY-MM-DD") === day
+    const list = allOrders.filter(
+      o => o.scheduledDate && moment(o.scheduledDate).format("YYYY-MM-DD") === day
     );
     setSelectedDayOrders(list);
     setModalTitle(`Work Orders for ${moment(start).format("LL")}`);
     setShowModal(true);
   }
 
+  // --- Render ----------------------------------------------------------------
   return (
     <>
       <div className="calendar-page">
         <div className="container-fluid p-0">
           <h2 className="calendar-title">Work Order Calendar</h2>
 
-          {/* Unscheduled sidebar */}
+          {/* Unscheduled list (draggable into calendar) */}
           <div className="unscheduled-container">
             <h4>Unscheduled Work Orders</h4>
             <div className="unscheduled-list">
@@ -126,7 +155,12 @@ export default function WorkOrderCalendar() {
                   key={order.id}
                   className="unscheduled-item"
                   draggable
-                  onDragStart={() => setDragItem(order)}
+                  onDragStart={(e) => {
+                    // Needed for some browsers (Safari) to allow drop
+                    try { e.dataTransfer.setData("text/plain", String(order.id)); } catch {}
+                    setDragItem(order);
+                  }}
+                  onDragEnd={() => setDragItem(null)}
                   onClick={() => navigateToView(order.id)}
                 >
                   <strong>{order.customer}</strong>
@@ -141,22 +175,15 @@ export default function WorkOrderCalendar() {
           <div className="calendar-container">
             <DnDCalendar
               localizer={localizer}
-              events={workOrders.map((o) => ({
-                id: o.id,
-                title: o.poNumber || `WO ${o.id}`,
-                poNumber: o.poNumber,
-                siteLocation: o.siteLocation,
-                problemDescription: o.problemDescription,
-                start: moment(o.scheduledDate).toDate(),
-                end: moment(o.scheduledDate).toDate(),
-              }))}
+              events={scheduledEvents}
               startAccessor="start"
               endAccessor="end"
-              style={{ height: "calc(100vh - 200px)" }}
+              style={{ height: "calc(100vh - 220px)" }}
               components={{ event: CustomEvent }}
               draggableAccessor={() => true}
+              resizable={false}
               onEventDrop={handleEventDrop}
-              dragFromOutsideItem={() => dragItem}
+              dragFromOutsideItem={() => dragItem || null}
               onDropFromOutside={handleDropFromOutside}
               onSelectEvent={(event) => navigateToView(event.id)}
               onDoubleClickEvent={(event) => navigateToView(event.id)}
@@ -164,13 +191,15 @@ export default function WorkOrderCalendar() {
               selectable
               views={["month", "week", "day", "agenda"]}
               view={view}
-              onView={(v) => setView(v)}
+              onView={setView}
               date={currentDate}
-              onNavigate={(d) => setCurrentDate(d)}
+              onNavigate={setCurrentDate}
+              popup
             />
           </div>
         </div>
 
+        {/* Simple modal */}
         {showModal && (
           <div className="modal-overlay">
             <div className="modal-content">
@@ -184,19 +213,14 @@ export default function WorkOrderCalendar() {
                       onClick={() => navigateToView(o.id)}
                       style={{ cursor: "pointer" }}
                     >
-                      {o.customer} — {o.problemDescription}
+                      {(o.poNumber || `WO ${o.id}`)} — {o.customer} — {o.problemDescription}
                     </li>
                   ))
                 ) : (
-                  <p className="empty-text">
-                    No work orders scheduled on this day.
-                  </p>
+                  <p className="empty-text">No work orders scheduled on this day.</p>
                 )}
               </ul>
-              <button
-                className="btn btn-secondary mt-3"
-                onClick={() => setShowModal(false)}
-              >
+              <button className="btn btn-secondary mt-3" onClick={() => setShowModal(false)}>
                 Close
               </button>
             </div>
