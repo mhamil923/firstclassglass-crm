@@ -1,12 +1,24 @@
 // File: src/AddWorkOrder.js
-
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "./api";
 import "./AddWorkOrder.css";
 
+function decodeRoleFromJWT() {
+  try {
+    const token = localStorage.getItem("jwt");
+    if (!token) return null;
+    const [, payload] = token.split(".");
+    const json = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    return json?.role || null;
+  } catch {
+    return null;
+  }
+}
+
 export default function AddWorkOrder() {
   const navigate = useNavigate();
+  const role = decodeRoleFromJWT(); // "dispatcher", "admin", "tech", etc.
 
   // ---- form state
   const [workOrder, setWorkOrder] = useState({
@@ -16,7 +28,7 @@ export default function AddWorkOrder() {
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
-    assignedTo: "" // user id as string
+    assignedTo: "", // user id (string)
   });
 
   // files
@@ -27,21 +39,25 @@ export default function AddWorkOrder() {
   const [customers, setCustomers] = useState([]);
   const [techs, setTechs] = useState([]);
 
+  // ui
+  const [submitting, setSubmitting] = useState(false);
+
   // google places
   const siteInputRef = useRef(null);
   const autocompleteRef = useRef(null);
 
   // ---------- load reference data + Places script once
   useEffect(() => {
-    // customers
-    api.get("/customers")
-      .then(r => setCustomers(r.data || []))
-      .catch(e => console.error("Error loading customers:", e));
-
-    // techs (users)
-    api.get("/users")
-      .then(r => setTechs(r.data || []))
-      .catch(e => console.error("Error loading users:", e));
+    // Load customers and only TECH users
+    Promise.all([
+      api.get("/customers"),
+      api.get("/users", { params: { role: "tech" } }),
+    ])
+      .then(([c, u]) => {
+        setCustomers(c.data || []);
+        setTechs(u.data || []);
+      })
+      .catch((e) => console.error("Error loading customers/users:", e));
 
     // google places script
     const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
@@ -61,7 +77,6 @@ export default function AddWorkOrder() {
     script.onload = initAutocomplete;
     script.onerror = () => console.error("Failed to load Google Maps script");
     document.body.appendChild(script);
-    // no cleanup needed; script stays for app lifetime
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -69,14 +84,17 @@ export default function AddWorkOrder() {
   function initAutocomplete() {
     if (!window.google || !siteInputRef.current) return;
 
-    // IMPORTANT: do NOT call setFields (removed in Places v3)
+    // Don't use setFields (removed in Places v3)
     const ac = new window.google.maps.places.Autocomplete(siteInputRef.current, {
-      types: ["address"]
+      types: ["address"],
     });
     ac.addListener("place_changed", () => {
       const place = ac.getPlace();
-      const addr = (place && place.formatted_address) || siteInputRef.current.value || "";
-      setWorkOrder(prev => ({ ...prev, siteLocation: addr }));
+      const addr =
+        (place && place.formatted_address) ||
+        siteInputRef.current.value ||
+        "";
+      setWorkOrder((prev) => ({ ...prev, siteLocation: addr }));
     });
     autocompleteRef.current = ac;
   }
@@ -84,17 +102,20 @@ export default function AddWorkOrder() {
   // ---------- helpers
   const extractCustomerFromBilling = (addr) => {
     if (!addr) return "";
-    const first = addr.split("\n").map(s => s.trim()).filter(Boolean)[0];
+    const first = addr
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)[0];
     return first || "";
   };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setWorkOrder(prev => {
+    setWorkOrder((prev) => {
       const upd = { ...prev, [name]: value };
 
       if (name === "customer") {
-        const found = customers.find(c => c.name === value);
+        const found = customers.find((c) => c.name === value);
         if (found?.billingAddress) {
           upd.billingAddress = found.billingAddress;
         }
@@ -140,17 +161,18 @@ export default function AddWorkOrder() {
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
     form.append("status", workOrder.status || "Needs to be Scheduled");
-    if (workOrder.assignedTo) {
-      // your backend currently ignores this field in the INSERT,
-      // but it won't hurt to send it. Once the API is updated, it'll be used.
-      form.append("assignedTo", workOrder.assignedTo);
-    }
-    if (pdfFile) form.append("pdfFile", pdfFile);       // <-- MUST be pdfFile
-    if (photoFile) form.append("photoFile", photoFile); // <-- MUST be photoFile
+
+    // server supports assignedTo on create
+    if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
+
+    // field names must match server.js (pdfFile / photoFile)
+    if (pdfFile) form.append("pdfFile", pdfFile);
+    if (photoFile) form.append("photoFile", photoFile);
 
     try {
+      setSubmitting(true);
       await api.post("/work-orders", form, {
-        headers: { "Content-Type": "multipart/form-data" }
+        headers: { "Content-Type": "multipart/form-data" },
       });
       navigate("/work-orders");
     } catch (err) {
@@ -160,6 +182,8 @@ export default function AddWorkOrder() {
         "Failed to save — check server logs";
       console.error("⚠️ Error adding work order:", err);
       alert(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -181,29 +205,31 @@ export default function AddWorkOrder() {
             autoComplete="off"
           />
           <datalist id="customers-list">
-            {customers.map(c => (
+            {customers.map((c) => (
               <option key={c.id} value={c.name} />
             ))}
           </datalist>
         </div>
 
-        {/* Assign to Tech */}
-        <div className="form-group">
-          <label>Assign To</label>
-          <select
-            name="assignedTo"
-            value={workOrder.assignedTo}
-            onChange={handleChange}
-            className="form-select-custom"
-          >
-            <option value="">— Unassigned —</option>
-            {techs.map(u => (
-              <option key={u.id} value={u.id}>
-                {u.username}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Assign to Tech (hide for tech users) */}
+        {role !== "tech" && (
+          <div className="form-group">
+            <label>Assign To</label>
+            <select
+              name="assignedTo"
+              value={workOrder.assignedTo}
+              onChange={handleChange}
+              className="form-select-custom"
+            >
+              <option value="">— Unassigned —</option>
+              {techs.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.username}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* PO Number */}
         <div className="form-group">
@@ -241,7 +267,7 @@ export default function AddWorkOrder() {
             value={workOrder.billingAddress}
             onChange={handleChange}
             className="form-textarea-custom"
-            placeholder="Company / Name&#10;Street&#10;City, ST ZIP"
+            placeholder={"Company / Name\nStreet\nCity, ST ZIP"}
           />
         </div>
 
@@ -297,8 +323,8 @@ export default function AddWorkOrder() {
           />
         </div>
 
-        <button type="submit" className="submit-btn">
-          Add Work Order
+        <button type="submit" className="submit-btn" disabled={submitting}>
+          {submitting ? "Saving..." : "Add Work Order"}
         </button>
       </form>
     </div>

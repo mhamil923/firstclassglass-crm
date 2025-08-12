@@ -1,10 +1,10 @@
 // File: src/CalendarPage.js
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import api from "./api";
 import { Calendar, momentLocalizer } from "react-big-calendar";
-import withDragAndDrop from "react-big-calendar/lib/addons/dragAndDrop";
 import moment from "moment";
+import withDragAndDrop from "react-big-calendar/lib/addons/dragAndDrop";
 import { OverlayTrigger, Popover } from "react-bootstrap";
 
 import "react-big-calendar/lib/css/react-big-calendar.css";
@@ -15,26 +15,40 @@ import "./Calendar.css";
 const localizer = momentLocalizer(moment);
 const DnDCalendar = withDragAndDrop(Calendar);
 
-// Small popover for event hover
+// Normalize a JS Date coming from rbc to a YYYY-MM-DD HH:mm:ss string at local noon
+function toMiddayString(dateLike) {
+  return moment(dateLike).startOf("day").add(12, "hours").format("YYYY-MM-DD HH:mm:ss");
+}
+
+// Safely build a JS Date for rbc from a DB string (treat as local, then set to noon)
+function toMiddayDate(dbString) {
+  // dbString like "2025-08-15 00:00:00" (no timezone). Treat as local.
+  return moment(dbString, "YYYY-MM-DD HH:mm:ss").startOf("day").add(12, "hours").toDate();
+}
+
 function CustomEvent({ event }) {
-  const pop = (
-    <Popover id={`po-${event.id}`}>
-      <Popover.Header as="h3">PO#: {event.poNumber || event.id}</Popover.Header>
+  const popover = (
+    <Popover id={`popover-${event.id}`}>
+      <Popover.Header as="h3">
+        {event.customer ? `${event.customer}` : `WO ${event.id}`}
+      </Popover.Header>
       <Popover.Body>
-        <div><strong>Site:</strong> {event.siteLocation || "—"}</div>
-        <div><strong>Problem:</strong> {event.problemDescription || "—"}</div>
+        <div><strong>PO#:</strong> {event.poNumber || event.id}</div>
+        {event.siteLocation ? <div><strong>Site:</strong> {event.siteLocation}</div> : null}
+        {event.problemDescription ? <div><strong>Problem:</strong> {event.problemDescription}</div> : null}
       </Popover.Body>
     </Popover>
   );
   return (
-    <OverlayTrigger trigger={["hover", "focus"]} placement="top" overlay={pop}>
+    <OverlayTrigger trigger={["hover", "focus"]} placement="top" overlay={popover}>
       <span className="rbc-event-title">{event.title}</span>
     </OverlayTrigger>
   );
 }
 
 export default function WorkOrderCalendar() {
-  const [allOrders, setAllOrders] = useState([]);
+  const [workOrders, setWorkOrders] = useState([]);
+  const [unscheduledOrders, setUnscheduledOrders] = useState([]);
   const [dragItem, setDragItem] = useState(null);
   const [view, setView] = useState("month");
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -42,87 +56,54 @@ export default function WorkOrderCalendar() {
   const [selectedDayOrders, setSelectedDayOrders] = useState([]);
   const [modalTitle, setModalTitle] = useState("");
 
-  useEffect(() => {
-    fetchWorkOrders();
-  }, []);
+  useEffect(fetchWorkOrders, []);
 
-  async function fetchWorkOrders() {
-    try {
-      const { data } = await api.get("/work-orders");
-      setAllOrders(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("⚠️ Error fetching work orders:", err);
-    }
+  function fetchWorkOrders() {
+    api
+      .get("/work-orders")
+      .then((res) => {
+        const scheduled = (res.data || []).filter((o) => o.scheduledDate);
+        const unscheduled = (res.data || []).filter((o) => !o.scheduledDate);
+        setWorkOrders(scheduled);
+        setUnscheduledOrders(unscheduled);
+      })
+      .catch((err) => console.error("⚠️ Error fetching work orders:", err));
   }
 
-  // Split into scheduled/unscheduled
-  const { scheduledEvents, unscheduledOrders } = useMemo(() => {
-    const scheduled = [];
-    const unscheduled = [];
-    for (const o of allOrders) {
-      if (o.scheduledDate) {
-        const start = moment(o.scheduledDate).toDate();
-        const end = moment(o.scheduledDate).add(1, "hour").toDate(); // give events a duration
-        scheduled.push({
-          id: o.id,
-          title: o.poNumber || `WO ${o.id}`,
-          poNumber: o.poNumber,
-          siteLocation: o.siteLocation,
-          problemDescription: o.problemDescription,
-          start,
-          end,
-          raw: o,
-        });
-      } else {
-        unscheduled.push(o);
-      }
-    }
-    return { scheduledEvents: scheduled, unscheduledOrders: unscheduled };
-  }, [allOrders]);
-
-  // --- Helpers ---------------------------------------------------------------
-
-  // Persist a date move/schedule to backend (multipart but no files)
-  async function saveSchedule(id, when, nextStatus = "Scheduled") {
-    const scheduledDate = moment(when).format("YYYY-MM-DD HH:mm:ss");
-    const form = new FormData();
-    form.append("scheduledDate", scheduledDate);
-    form.append("status", nextStatus);
-
-    await api.put(`/work-orders/${id}/edit`, form, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
-
-    // Optimistic local update
-    setAllOrders(prev =>
-      prev.map(o =>
-        o.id === id ? { ...o, scheduledDate, status: nextStatus } : o
+  // Drag within calendar
+  function handleEventDrop({ event, start }) {
+    const formatted = toMiddayString(start);
+    api
+      .put(`/work-orders/${event.id}/update-date`, {
+        scheduledDate: formatted,
+        status: "Scheduled",
+      })
+      .then(() =>
+        setWorkOrders((prev) =>
+          prev.map((o) =>
+            o.id === event.id
+              ? { ...o, scheduledDate: formatted, status: "Scheduled" }
+              : o
+          )
+        )
       )
-    );
+      .catch((e) => console.error("⚠️ Error updating work order date:", e));
   }
 
-  // RBC internal event drag
-  async function handleEventDrop({ event, start /*, end, allDay */ }) {
-    try {
-      await saveSchedule(event.id, start, "Scheduled");
-    } catch (e) {
-      console.error("⚠️ Error updating work order date:", e);
-      // fallback: reload from server so UI doesn't get out of sync
-      fetchWorkOrders();
-    }
-  }
-
-  // External drag-from-unscheduled into calendar
-  async function handleDropFromOutside({ start /*, end, allDay */ }) {
+  // Drag from "Unscheduled" list onto the calendar
+  function handleDropFromOutside({ start }) {
     if (!dragItem) return;
-    try {
-      await saveSchedule(dragItem.id, start, "Scheduled");
-    } catch (e) {
-      console.error("⚠️ Error scheduling work order:", e);
-      fetchWorkOrders();
-    } finally {
-      setDragItem(null);
-    }
+    const formatted = toMiddayString(start);
+    api
+      .put(`/work-orders/${dragItem.id}/update-date`, {
+        scheduledDate: formatted,
+        status: "Scheduled",
+      })
+      .then(() => {
+        fetchWorkOrders();
+        setDragItem(null);
+      })
+      .catch((e) => console.error("⚠️ Error scheduling work order:", e));
   }
 
   function navigateToView(id) {
@@ -131,22 +112,34 @@ export default function WorkOrderCalendar() {
 
   function handleDayClick({ start }) {
     const day = moment(start).format("YYYY-MM-DD");
-    const list = allOrders.filter(
-      o => o.scheduledDate && moment(o.scheduledDate).format("YYYY-MM-DD") === day
+    const list = workOrders.filter(
+      (o) => moment(o.scheduledDate, "YYYY-MM-DD HH:mm:ss").format("YYYY-MM-DD") === day
     );
     setSelectedDayOrders(list);
     setModalTitle(`Work Orders for ${moment(start).format("LL")}`);
     setShowModal(true);
   }
 
-  // --- Render ----------------------------------------------------------------
+  // Build calendar events with stable midday times + richer titles
+  const events = workOrders.map((o) => ({
+    id: o.id,
+    title: o.customer ? `${o.customer} — ${o.poNumber || `WO ${o.id}`}` : (o.poNumber || `WO ${o.id}`),
+    poNumber: o.poNumber,
+    customer: o.customer,
+    siteLocation: o.siteLocation,
+    problemDescription: o.problemDescription,
+    start: toMiddayDate(o.scheduledDate),
+    end: toMiddayDate(o.scheduledDate),
+    allDay: false,
+  }));
+
   return (
     <>
       <div className="calendar-page">
         <div className="container-fluid p-0">
           <h2 className="calendar-title">Work Order Calendar</h2>
 
-          {/* Unscheduled list (draggable into calendar) */}
+          {/* Unscheduled sidebar */}
           <div className="unscheduled-container">
             <h4>Unscheduled Work Orders</h4>
             <div className="unscheduled-list">
@@ -155,17 +148,16 @@ export default function WorkOrderCalendar() {
                   key={order.id}
                   className="unscheduled-item"
                   draggable
-                  onDragStart={(e) => {
-                    // Needed for some browsers (Safari) to allow drop
-                    try { e.dataTransfer.setData("text/plain", String(order.id)); } catch {}
-                    setDragItem(order);
-                  }}
-                  onDragEnd={() => setDragItem(null)}
+                  onDragStart={() => setDragItem(order)}
                   onClick={() => navigateToView(order.id)}
+                  title={order.problemDescription || ""}
                 >
-                  <strong>{order.customer}</strong>
+                  <strong>
+                    {order.customer ? `${order.customer}` : `WO ${order.id}`}
+                  </strong>
+                  {order.poNumber ? <> — {order.poNumber}</> : null}
                   <br />
-                  {order.problemDescription}
+                  <small>{order.problemDescription}</small>
                 </div>
               ))}
             </div>
@@ -175,15 +167,14 @@ export default function WorkOrderCalendar() {
           <div className="calendar-container">
             <DnDCalendar
               localizer={localizer}
-              events={scheduledEvents}
+              events={events}
               startAccessor="start"
               endAccessor="end"
-              style={{ height: "calc(100vh - 220px)" }}
+              style={{ height: "calc(100vh - 200px)" }}
               components={{ event: CustomEvent }}
               draggableAccessor={() => true}
-              resizable={false}
               onEventDrop={handleEventDrop}
-              dragFromOutsideItem={() => dragItem || null}
+              dragFromOutsideItem={() => dragItem}
               onDropFromOutside={handleDropFromOutside}
               onSelectEvent={(event) => navigateToView(event.id)}
               onDoubleClickEvent={(event) => navigateToView(event.id)}
@@ -191,10 +182,9 @@ export default function WorkOrderCalendar() {
               selectable
               views={["month", "week", "day", "agenda"]}
               view={view}
-              onView={setView}
+              onView={(v) => setView(v)}
               date={currentDate}
-              onNavigate={setCurrentDate}
-              popup
+              onNavigate={(d) => setCurrentDate(d)}
             />
           </div>
         </div>
@@ -213,14 +203,20 @@ export default function WorkOrderCalendar() {
                       onClick={() => navigateToView(o.id)}
                       style={{ cursor: "pointer" }}
                     >
-                      {(o.poNumber || `WO ${o.id}`)} — {o.customer} — {o.problemDescription}
+                      {o.customer ? `${o.customer}` : `WO ${o.id}`}
+                      {o.poNumber ? ` — ${o.poNumber}` : ""}
+                      {" — "}
+                      {o.problemDescription}
                     </li>
                   ))
                 ) : (
                   <p className="empty-text">No work orders scheduled on this day.</p>
                 )}
               </ul>
-              <button className="btn btn-secondary mt-3" onClick={() => setShowModal(false)}>
+              <button
+                className="btn btn-secondary mt-3"
+                onClick={() => setShowModal(false)}
+              >
                 Close
               </button>
             </div>
