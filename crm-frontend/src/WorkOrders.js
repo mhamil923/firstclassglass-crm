@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import api from "./api";
 import { Link, useNavigate } from "react-router-dom";
 import moment from "moment";
-import { jwtDecode } from "jwt-decode";        // ← named import
+import { jwtDecode } from "jwt-decode";
 import "./WorkOrders.css";
 
 export default function WorkOrders() {
@@ -13,7 +13,7 @@ export default function WorkOrders() {
   let userRole = null;
   if (token) {
     try {
-      userRole = jwtDecode(token).role;        // 'dispatcher' or 'tech'
+      userRole = jwtDecode(token).role; // 'dispatcher', 'admin', or 'tech'
     } catch {
       console.warn("Invalid JWT");
     }
@@ -27,12 +27,16 @@ export default function WorkOrders() {
 
   useEffect(() => {
     fetchWorkOrders();
-    if (userRole === "dispatcher") {
+
+    // Anyone who is NOT a tech should be able to assign (dispatcher/admin)
+    if (userRole !== "tech") {
+      // IMPORTANT: use assignees=1 to get techs + allow-list (e.g., Jeff, tech1)
       api
-        .get("/users")
-        .then((r) => setTechUsers(r.data))
-        .catch((err) => console.error("Error fetching tech users:", err));
+        .get("/users", { params: { assignees: 1 } })
+        .then((r) => setTechUsers(r.data || []))
+        .catch((err) => console.error("Error fetching assignable users:", err));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchWorkOrders = () => {
@@ -135,7 +139,7 @@ export default function WorkOrders() {
               <th>Site Location</th>
               <th>Problem Description</th>
               <th>Status</th>
-              {userRole === "dispatcher" && <th>Assigned To</th>}
+              {userRole !== "tech" && <th>Assigned To</th>}
               <th>Actions</th>
             </tr>
           </thead>
@@ -180,7 +184,7 @@ export default function WorkOrders() {
                   </select>
                 </td>
 
-                {userRole === "dispatcher" && (
+                {userRole !== "tech" && (
                   <td>
                     <select
                       className="form-select"

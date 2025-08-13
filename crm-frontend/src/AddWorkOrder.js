@@ -48,10 +48,10 @@ export default function AddWorkOrder() {
 
   // ---------- load reference data + Places script once
   useEffect(() => {
-    // Load customers and only TECH users
+    // customers + ASSIGNEES list (techs + allow-list like Jeff, tech1)
     Promise.all([
       api.get("/customers"),
-      api.get("/users", { params: { role: "tech" } }),
+      api.get("/users", { params: { assignees: 1 } }),
     ])
       .then(([c, u]) => {
         setCustomers(c.data || []);
@@ -72,7 +72,7 @@ export default function AddWorkOrder() {
     }
     const script = document.createElement("script");
     script.id = "gmaps-script";
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async`;
     script.async = true;
     script.onload = initAutocomplete;
     script.onerror = () => console.error("Failed to load Google Maps script");
@@ -84,7 +84,6 @@ export default function AddWorkOrder() {
   function initAutocomplete() {
     if (!window.google || !siteInputRef.current) return;
 
-    // Don't use setFields (removed in Places v3)
     const ac = new window.google.maps.places.Autocomplete(siteInputRef.current, {
       types: ["address"],
     });
