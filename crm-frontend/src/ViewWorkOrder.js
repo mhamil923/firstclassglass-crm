@@ -1,5 +1,4 @@
 // File: src/ViewWorkOrder.js
-
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "./api";
@@ -66,30 +65,12 @@ export default function ViewWorkOrder() {
     ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}`
     : null;
 
-  // Handle new note submission
-  const handleAddNote = async () => {
-    if (!newNote.trim()) return;
-    try {
-      await api.post(`/work-orders/${id}/notes`, { text: newNote });
-      setNewNote("");
-      setShowNoteInput(false);
-      fetchWorkOrder();
-    } catch (error) {
-      console.error("⚠️ Error adding note:", error);
-      alert("Failed to add note.");
-    }
-  };
-
-  // Upload attachments immediately on selection
+  // Upload attachments immediately on selection (append photos)
   const handleAttachmentChange = async (e) => {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
-
-    // Your server's edit route expects fields named pdfFile/photoFile,
-    // not a generic "attachments". Here we only support photo append here.
     const formData = new FormData();
     files.forEach((file) => formData.append("photoFile", file));
-
     try {
       await api.put(`/work-orders/${id}/edit`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -107,96 +88,230 @@ export default function ViewWorkOrder() {
     .map((p) => p.trim())
     .filter((p) => p);
 
-  // -------- PRINT: open a new window with a clean template and print it
+  // Helpers for the print template
+  const safe = (s) =>
+    (s ?? "")
+      .toString()
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+  // Try to split a multi-line billing address into Name / Address / City, State
+  const parseBilling = () => {
+    const lines = (billingAddress || "")
+      .split(/\r?\n/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const name = customer || lines[0] || "";
+    const address = lines[1] || (lines.length === 1 ? lines[0] : "");
+    const cityState = lines[2] || "";
+    return { name, address, cityState };
+  };
+
+  // Site address: we usually get a single-line street, so put that under ADDRESS
+  const parseSite = () => {
+    if (!siteLocation) return { name: "", address: "", cityState: "" };
+    // Try to split "street, city state" into address + city/state
+    const parts = siteLocation.split(",");
+    const address = parts[0]?.trim() || siteLocation;
+    const cityState = parts.slice(1).join(", ").trim();
+    return { name: customer || "", address, cityState };
+  };
+
+  const handleAddNote = async () => {
+    if (!newNote.trim()) return;
+    try {
+      await api.post(`/work-orders/${id}/notes`, { text: newNote });
+      setNewNote("");
+      setShowNoteInput(false);
+      fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error adding note:", error);
+      alert("Failed to add note.");
+    }
+  };
+
+  // -------- PRINT: render a template that matches your "Agreement" form
   const handlePrint = () => {
-    const formattedDate = scheduledDate
-      ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
-      : "Not Scheduled";
-
-    const now = moment().format("YYYY-MM-DD HH:mm");
-
-    const safe = (s) =>
-      (s ?? "")
-        .toString()
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+    const b = parseBilling();
+    const s = parseSite();
+    const formattedSched = scheduledDate
+      ? moment(scheduledDate).format("MM/DD/YYYY")
+      : "";
+    const printedAt = moment().format("MM/DD/YYYY HH:mm");
 
     const html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Work Order #${safe(poNumber || id)}</title>
+  <title>Agreement ${safe(poNumber || id)}</title>
   <style>
-    @page { size: A4; margin: 0.6in; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: #111; }
-    .wo-wrap { max-width: 800px; margin: 0 auto; }
-    .wo-header { display:flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-    .brand { font-size: 20px; font-weight: 700; letter-spacing: 0.4px; }
-    .meta { font-size: 12px; color: #555; text-align: right; }
-    .title { font-size: 22px; font-weight: 700; margin: 8px 0 16px; }
-    .grid { width: 100%; border-collapse: separate; border-spacing: 0; }
-    .grid th { text-align: left; width: 200px; vertical-align: top; color:#333; font-weight:600; padding: 10px 12px; border: 1px solid #ddd; background:#f8f9fa; }
-    .grid td { padding: 10px 12px; border: 1px solid #ddd; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-    .muted { color:#666; }
-    .footer { margin-top: 22px; font-size: 12px; color:#666; display:flex; justify-content: space-between; }
-    .sign-row { margin-top: 30px; display:flex; gap: 24px; }
-    .sign-col { flex: 1; }
-    .line { border-bottom: 1px solid #999; height: 24px; margin-bottom: 6px; }
-    .label { font-size: 12px; color:#555; }
+    @page { size: Letter; margin: 0.5in; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #000; }
+    .page { width: 100%; }
+
+    /* Header */
+    .hdr { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom: 10px; }
+    .hdr-left { display:flex; gap:12px; align-items:flex-start; }
+    .logo {
+      width: 58px; height: 58px;
+      background:#000; color:#fff; display:flex; align-items:center; justify-content:center;
+      font-weight:bold; font-size:10px; border:1px solid #000;
+    }
+    .company h1 { margin:0 0 4px 0; font-size:18px; font-weight:700; }
+    .company .addr { font-size:11px; line-height:1.3; }
+    .agr-box { text-align:right; }
+    .agr-box .title { font-size:18px; font-weight:700; text-decoration:underline; }
+    .agr-box .no { font-size:12px; margin-top:6px; }
+    .agr-box .no .lbl { font-weight:700; }
+
+    /* Big bordered table */
+    .frame { width:100%; border:2px solid #000; border-collapse:collapse; }
+
+    .row { display:flex; width:100%; }
+    .cell { border-bottom:1px solid #000; border-right:1px solid #000; padding:6px 8px; }
+    .cell:last-child { border-right:none; }
+
+    .row.head .cell { font-size:12px; font-weight:700; }
+    .row.head .left { width:50%; }
+    .row.head .right { width:50%; display:flex; justify-content:space-between; }
+    .row.head .right .label { font-weight:700; }
+    .row.head .right .date { min-width:160px; text-align:right; }
+
+    .row.fields { font-size:12px; }
+    .col { width:50%; }
+    .grid { display:grid; grid-template-columns:120px 1fr; }
+    .flabel { font-weight:700; border-right:1px solid #000; padding-right:8px; }
+    .fvalue { padding-left:8px; }
+
+    .desc-title { border-top:1px solid #000; font-weight:700; text-align:center; padding:4px 0; }
+    .desc-box { min-height:380px; padding:10px; }
+
+    /* Footer authorization */
+    .auth-title { text-align:center; font-weight:700; margin-top:12px; }
+    .auth-text { font-size:11px; text-align:center; margin:6px 14px; }
+    .sign-row { display:flex; gap:20px; margin-top:26px; }
+    .sign-col { flex:1; }
+    .line { border-bottom:1px solid #000; height:22px; }
+    .small { font-size:11px; margin-top:4px; }
+
+    .note { font-size:10px; margin-top:16px; border-top:1px solid #000; padding-top:6px; }
+
+    /* Tiny print metadata bottom-right (optional) */
+    .meta-print { position: fixed; right: 0.5in; bottom: 0.5in; font-size: 9px; color:#333; }
   </style>
 </head>
 <body>
-  <div class="wo-wrap">
-    <div class="wo-header">
-      <div class="brand">First Class Glass — Work Order</div>
-      <div class="meta">
-        Printed: <span class="mono">${safe(now)}</span><br/>
-        WO/PO: <span class="mono">${safe(poNumber || id)}</span>
+  <div class="page">
+    <div class="hdr">
+      <div class="hdr-left">
+        <div class="logo">FCG</div>
+        <div class="company">
+          <h1>First Class Glass & Mirror, INC.</h1>
+          <div class="addr">
+            1513 Industrial Dr<br/>
+            Itasca, Illinois 60143<br/>
+            630-250-9777 &nbsp;&nbsp; FCG@FirstClassGlassMirror.com
+          </div>
+        </div>
+      </div>
+      <div class="agr-box">
+        <div class="title">Agreement</div>
+        <div class="no"><span class="lbl">No.</span> ${safe(poNumber || id)}</div>
       </div>
     </div>
 
-    <div class="title">Work Order Details</div>
+    <div class="frame">
+      <!-- Head row -->
+      <div class="row head">
+        <div class="cell left">AGREEMENT SUBMITTED TO:</div>
+        <div class="cell right">
+          <span class="label">WORK TO BE PERFORMED AT:</span>
+          <span class="date">Date: ${safe(formattedSched)}</span>
+        </div>
+      </div>
 
-    <table class="grid">
-      <tr><th>WO/PO #</th><td class="mono">${safe(poNumber || id)}</td></tr>
-      <tr><th>Customer</th><td>${safe(customer)}</td></tr>
-      <tr><th>Site Location</th><td>${safe(siteLocation)}</td></tr>
-      <tr><th>Billing Address</th><td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress)}</pre></td></tr>
-      <tr><th>Problem Description</th><td><pre style="margin:0;white-space:pre-wrap">${safe(problemDescription)}</pre></td></tr>
-      <tr><th>Status</th><td>${safe(status)}</td></tr>
-      <tr><th>Scheduled Date</th><td class="mono">${safe(formattedDate)}</td></tr>
-    </table>
+      <!-- Info rows (two columns, same labels) -->
+      <div class="row fields">
+        <div class="cell col">
+          <div class="grid">
+            <div class="flabel">NAME:</div>
+            <div class="fvalue">${safe(b.name)}</div>
+            <div class="flabel">ADDRESS</div>
+            <div class="fvalue">${safe(b.address)}</div>
+            <div class="flabel">CITY, STATE</div>
+            <div class="fvalue">${safe(b.cityState)}</div>
+            <div class="flabel">Phone No.</div>
+            <div class="fvalue"></div>
+            <div class="flabel">Email:</div>
+            <div class="fvalue"></div>
+          </div>
+        </div>
+        <div class="cell col">
+          <div class="grid">
+            <div class="flabel">NAME:</div>
+            <div class="fvalue">${safe(s.name)}</div>
+            <div class="flabel">ADDRESS</div>
+            <div class="fvalue">${safe(s.address)}</div>
+            <div class="flabel">CITY, STATE</div>
+            <div class="fvalue">${safe(s.cityState)}</div>
+            <div class="flabel">Phone No.</div>
+            <div class="fvalue"></div>
+            <div class="flabel">Email:</div>
+            <div class="fvalue"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Description title -->
+      <div class="row">
+        <div class="cell desc-title" style="width:100%;">Description</div>
+      </div>
+
+      <!-- Description big box -->
+      <div class="row">
+        <div class="cell desc-box" style="width:100%;">
+          ${safe(problemDescription)}
+        </div>
+      </div>
+    </div>
+
+    <div class="auth-title">AUTHORIZATION TO PAY</div>
+    <div class="auth-text">
+      I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL SERVICES WERE PERFORMED
+      IN A PROFESSIONAL MANNER TO MY COMPLETE SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE
+      FOR PAYMENT.
+    </div>
 
     <div class="sign-row">
       <div class="sign-col">
         <div class="line"></div>
-        <div class="label">Technician Signature</div>
+        <div class="small">Customer Signature:</div>
       </div>
       <div class="sign-col">
         <div class="line"></div>
-        <div class="label">Customer Signature</div>
+        <div class="small">Date:</div>
       </div>
     </div>
 
-    <div class="footer">
-      <div class="muted">Thank you for your business.</div>
-      <div class="muted">Page 1 of 1</div>
+    <div class="note">
+      NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED.
+      PAST DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
     </div>
+
+    <div class="meta-print">Printed: ${safe(printedAt)}</div>
   </div>
+
   <script>
-    window.onload = function() {
-      setTimeout(function() {
-        window.print();
-        window.close();
-      }, 150);
+    window.onload = function () {
+      setTimeout(function () { window.print(); window.close(); }, 150);
     };
   </script>
 </body>
 </html>`;
 
-    const w = window.open("", "_blank", "width=900,height=1000");
+    const w = window.open("", "_blank", "width=900,height=1100");
     if (!w) {
       alert("Popup blocked. Please allow popups to print.");
       return;
@@ -259,11 +374,7 @@ export default function ViewWorkOrder() {
         {pdfUrl && (
           <div className="view-card section-card">
             <h3 className="section-header">Work Order PDF</h3>
-            <iframe
-              src={pdfUrl}
-              className="pdf-frame"
-              title="Work Order PDF"
-            />
+            <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
             <div className="mt-2">
               <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
                 Open PDF in new tab
@@ -292,7 +403,6 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
 
-          {/* Toggle note form */}
           <button
             className="toggle-note-btn"
             onClick={() => setShowNoteInput((v) => !v)}
