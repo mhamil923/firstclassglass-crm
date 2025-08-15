@@ -28,9 +28,9 @@ export default function AddWorkOrder() {
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
-    assignedTo: "", // user id (string)
+    assignedTo: "",
 
-    // NEW — optional customer contact (not required)
+    // optional contact (not required)
     customerPhone: "",
     customerEmail: "",
   });
@@ -52,10 +52,10 @@ export default function AddWorkOrder() {
 
   // ---------- load reference data + Places script once
   useEffect(() => {
-    // Load customers and only TECH users
+    // Load customers and the "assignees" list (techs + Jeff & other extras)
     Promise.all([
       api.get("/customers"),
-      api.get("/users", { params: { role: "tech" } }),
+      api.get("/users", { params: { assignees: 1 } }), // <-- ensures Jeff is included
     ])
       .then(([c, u]) => {
         setCustomers(c.data || []);
@@ -87,8 +87,6 @@ export default function AddWorkOrder() {
   // ---------- wire up Google Places Autocomplete on the input
   function initAutocomplete() {
     if (!window.google || !siteInputRef.current) return;
-
-    // Using classic Autocomplete (works for your account)
     const ac = new window.google.maps.places.Autocomplete(siteInputRef.current, {
       types: ["address"],
     });
@@ -166,7 +164,7 @@ export default function AddWorkOrder() {
     form.append("problemDescription", workOrder.problemDescription);
     form.append("status", workOrder.status || "Needs to be Scheduled");
 
-    // NEW — optional customer contact
+    // optional
     form.append("customerPhone", workOrder.customerPhone || "");
     form.append("customerEmail", workOrder.customerEmail || "");
 
@@ -219,7 +217,7 @@ export default function AddWorkOrder() {
           </datalist>
         </div>
 
-        {/* NEW — optional customer contact */}
+        {/* optional contact */}
         <div className="form-group">
           <label className="form-label">Customer Phone (optional)</label>
           <input

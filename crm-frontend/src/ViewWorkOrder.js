@@ -15,10 +15,6 @@ export default function ViewWorkOrder() {
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
-  // print-only phone fields (persisted locally per work order)
-  const [billingPhone, setBillingPhone] = useState("");
-  const [sitePhone, setSitePhone] = useState("");
-
   // Fetch work order details
   const fetchWorkOrder = async () => {
     try {
@@ -31,27 +27,8 @@ export default function ViewWorkOrder() {
 
   useEffect(() => {
     fetchWorkOrder();
-    // load locally-saved phones for printing
-    try {
-      const saved = localStorage.getItem(`woPhones:${id}`);
-      if (saved) {
-        const obj = JSON.parse(saved);
-        if (obj.billingPhone) setBillingPhone(obj.billingPhone);
-        if (obj.sitePhone) setSitePhone(obj.sitePhone);
-      }
-    } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-
-  // persist phone fields whenever they change
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        `woPhones:${id}`,
-        JSON.stringify({ billingPhone, sitePhone })
-      );
-    } catch {}
-  }, [id, billingPhone, sitePhone]);
 
   if (!workOrder) {
     return (
@@ -73,9 +50,13 @@ export default function ViewWorkOrder() {
     photoPath,
     notes,
 
-    // NEW from backend
+    // optional contact from DB
     customerPhone,
     customerEmail,
+
+    // legacy DB fields (if present)
+    billingPhone,
+    sitePhone,
   } = workOrder;
 
   // Parse existing notes
@@ -102,6 +83,7 @@ export default function ViewWorkOrder() {
   // ---------- PRINT helpers ----------
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put logo at /public/fcg-logo.png
 
+  // Pull out site "name" and "address" if user typed "Name - address" or "Name, 123…"
   function parseSite(loc, fallbackName) {
     const result = { name: fallbackName || "", address: "" };
     if (!loc) return result;
@@ -139,8 +121,9 @@ export default function ViewWorkOrder() {
     const siteName = siteParsed.name || customer || "";
     const siteAddr = siteParsed.address || "";
 
-    const billingPhonePrint = billingPhone || "";
-    const sitePhonePrint = sitePhone || "";
+    // No more local-only fields; use DB values if present
+    const billingPhonePrint = (customerPhone || billingPhone || "");
+    const sitePhonePrint = (sitePhone || "");
 
     const html = `<!doctype html>
 <html>
@@ -223,8 +206,9 @@ export default function ViewWorkOrder() {
       </tr>
     </table>
 
-    <div class="desc-title">Problem Description</div>
-    <div class="desc-box">${safe(problemDescription || "")}</div>
+ <!-- ✅ EXACTLY WHAT YOU ASKED: description text ABOVE the blank box -->
+    <div class="desc-title">Description: ${safe(problemDescription || "")}</div>
+    <div class="desc-box"></div>
 
     <div class="auth-title">AUTHORIZATION TO PAY</div>
     <div class="auth-note">
@@ -317,7 +301,7 @@ export default function ViewWorkOrder() {
             <span className="detail-value">{customer}</span>
           </li>
 
-          {/* NEW — show saved customer phone/email */}
+          {/* shows saved customer phone/email when present */}
           <li className="detail-item">
             <span className="detail-label">Customer Phone:</span>
             <span className="detail-value">{customerPhone || "—"}</span>
@@ -352,34 +336,6 @@ export default function ViewWorkOrder() {
             </span>
           </li>
         </ul>
-
-        {/* Print-only phone fields (local only for template phones) */}
-        <div className="section-card">
-          <h3 className="section-header">Print Fields (local only)</h3>
-          <div className="print-fields">
-            <div className="print-field">
-              <label>Agreement Submitted To — Phone</label>
-              <input
-                type="tel"
-                value={billingPhone}
-                onChange={(e) => setBillingPhone(e.target.value)}
-                placeholder="(###) ###-####"
-              />
-            </div>
-            <div className="print-field">
-              <label>Work To Be Performed At — Phone</label>
-              <input
-                type="tel"
-                value={sitePhone}
-                onChange={(e) => setSitePhone(e.target.value)}
-                placeholder="(###) ###-####"
-              />
-            </div>
-          </div>
-          <p className="muted-note">
-            These phone numbers are saved to your browser only and used in the printout. They are not stored on the server.
-          </p>
-        </div>
 
         {pdfUrl && (
           <div className="view-card section-card">
