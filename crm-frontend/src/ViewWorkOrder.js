@@ -1,5 +1,4 @@
 // File: src/ViewWorkOrder.js
-
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "./api";
@@ -61,12 +60,12 @@ export default function ViewWorkOrder() {
     }
   }
 
-  // Build safe URLs for files (works with S3 + local)
+  // Safe file URL (works with S3 + local)
   const pdfUrl = pdfPath
     ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}`
     : null;
 
-  // Upload attachments immediately on selection (append photos)
+  // Upload attachments immediately on selection (photo append)
   const handleAttachmentChange = async (e) => {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
@@ -85,29 +84,42 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Existing attachments (image keys joined by comma)
+  // Existing attachments
   const attachments = (photoPath || "")
     .split(",")
     .map((p) => p.trim())
     .filter((p) => p);
 
-  // -------- PRINT: single-page template; description box contains problem description
+  // Add a note
+  const handleAddNote = async () => {
+    if (!newNote.trim()) return;
+    try {
+      await api.post(`/work-orders/${id}/notes`, { text: newNote });
+      setNewNote("");
+      setShowNoteInput(false);
+      fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error adding note:", error);
+      alert("Failed to add note.");
+    }
+  };
+
+  // -------- PRINT: one-page template; Problem Description goes in the small "DESCRIPTION" box
   const handlePrint = () => {
     const formattedDate = scheduledDate
       ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
       : "Not Scheduled";
-
     const now = moment().format("YYYY-MM-DD HH:mm");
+
+    // If you placed your logo at frontend /public/fcg-logo.png it will render here
+    const logoUrl = "/fcg-logo.png";
 
     const safe = (s) =>
       (s ?? "")
         .toString()
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/\r?\n/g, "<br/>");
-
-    const logoUrl = `${window.location.origin}/fcg-logo.png`; // put your logo at /public/fcg-logo.png
+        .replace(/>/g, "&gt;");
 
     const html = `<!doctype html>
 <html>
@@ -115,110 +127,68 @@ export default function ViewWorkOrder() {
   <meta charset="utf-8" />
   <title>Work Order #${safe(poNumber || id)}</title>
   <style>
-    @page { size: A4; margin: 0.5in; }
-    html, body { height: 100%; }
+    @page { size: Letter; margin: 0.5in; }
+    * { box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: #111; }
-    .wrap { max-width: 800px; margin: 0 auto; }
-    .header { display:flex; align-items:center; justify-content: space-between; }
-    .brand { display:flex; align-items:center; gap: 12px; }
-    .brand img { height: 42px; width:auto; }
-    .brand-title { font-size: 18px; font-weight: 700; letter-spacing: .3px; }
-    .meta { text-align:right; font-size: 12px; color:#444; }
-    .title { margin: 10px 0 14px; font-size: 20px; font-weight: 700; letter-spacing:.2px; }
+    .wrap { max-width: 8in; margin: 0 auto; }
 
-    .row { display:flex; gap: 14px; }
-    .col { flex: 1; }
-    .box { border: 1px solid #cfd6e0; border-radius: 6px; padding: 10px 12px; }
-    .box h3 { margin: 0 0 6px; font-size: 13px; color:#333; text-transform: uppercase; letter-spacing:.5px; }
-    .kv { margin: 0 0 3px; font-size: 13px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+    /* Header */
+    .hdr { display:flex; align-items:center; gap:12px; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:10px; }
+    .logo { width: 140px; height: auto; object-fit: contain; }
+    .title { font-size: 22px; font-weight: 800; letter-spacing: 0.4px; }
+    .meta { margin-left:auto; text-align:right; font-size:12px; line-height:1.2; }
+    .meta b { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
-    .grid { width:100%; border-collapse: separate; border-spacing:0; margin-top:12px; }
-    .grid th { width: 190px; text-align:left; vertical-align: top; color:#333; padding: 8px 10px; border:1px solid #cfd6e0; background:#f5f7fb; font-size: 13px; }
-    .grid td { padding: 8px 10px; border:1px solid #cfd6e0; font-size: 13px; }
+    /* Two-column address section */
+    .cols { display:flex; gap:10px; margin-top:8px; }
+    .col { flex:1; border: 1px solid #000; padding:8px; min-height: 110px; }
+    .sect-h { font-weight:800; font-size:12px; border-bottom:1px solid #000; padding-bottom:4px; margin-bottom:6px; }
+    .line { margin: 2px 0; }
+    .pre { white-space: pre-wrap; margin: 0; }
 
-    .desc { margin-top: 12px; }
-    .desc h3 { margin: 0 0 6px; font-size: 13px; color:#333; text-transform: uppercase; letter-spacing:.5px; }
-    .desc-box { border: 1px solid #cfd6e0; border-radius: 6px; padding: 12px; min-height: 160px; /* description lives inside this box */ }
-    .desc-box p { margin: 0; line-height: 1.45; }
+    /* Description (small box) + big blank area */
+    .desc-label { margin-top:10px; font-weight:800; font-size:12px; }
+    .desc-box { border:1px solid #000; min-height: 84px; padding:8px; }
+    .big-blank { border:1px solid #000; height: 360px; margin-top:10px; }
 
-    .sign-row { display:flex; gap: 20px; margin-top: 16px; }
-    .sign { flex:1; }
-    .sign .line { height: 26px; border-bottom:1px solid #999; margin-bottom: 6px; }
-    .sign .label { font-size: 12px; color:#555; }
-
-    .footer { display:flex; justify-content: space-between; margin-top: 10px; font-size: 12px; color:#666; }
-
-    /* keep it to one page */
-    .wrap { page-break-inside: avoid; }
+    /* Footer (optional) */
+    .ftr { display:flex; justify-content:space-between; font-size:11px; color:#444; margin-top:8px; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="header">
-      <div class="brand">
-        <img src="${logoUrl}" alt="Logo"/>
-        <div class="brand-title">First Class Glass — Work Order</div>
-      </div>
+    <div class="hdr">
+      <img src="${safe(logoUrl)}" class="logo" onerror="this.style.display='none'"/>
+      <div class="title">WORK ORDER</div>
       <div class="meta">
-        Printed: <span class="mono">${safe(now)}</span><br/>
-        WO/PO: <span class="mono">${safe(poNumber || id)}</span>
+        WO/PO: <b>${safe(poNumber || id)}</b><br/>
+        Printed: ${safe(now)}
       </div>
     </div>
 
-    <div class="title">Work Order Details</div>
-
-    <table class="grid">
-      <tr><th>WO/PO #</th><td class="mono">${safe(poNumber || id)}</td></tr>
-      <tr><th>Status</th><td>${safe(status)}</td></tr>
-      <tr><th>Scheduled Date</th><td class="mono">${safe(formattedDate)}</td></tr>
-    </table>
-
-    <div class="row" style="margin-top:12px">
+    <div class="cols">
       <div class="col">
-        <div class="box">
-          <h3>Agreement Submitted To</h3>
-          <div class="kv"><strong>Name:</strong> ${safe(customer)}</div>
-          <div class="kv"><strong>Billing Address:</strong><br/><span class="mono">${safe(billingAddress)}</span></div>
-        </div>
+        <div class="sect-h">AGREEMENT SUBMITTED TO</div>
+        <div class="line"><strong>${safe(customer) || "&nbsp;"}</strong></div>
+        <div class="line"><pre class="pre">${safe(billingAddress)}</pre></div>
       </div>
       <div class="col">
-        <div class="box">
-          <h3>Work To Be Performed At</h3>
-          <div class="kv"><strong>Location:</strong> ${safe(siteLocation)}</div>
-        </div>
+        <div class="sect-h">WORK TO BE PERFORMED AT</div>
+        <div class="line"><pre class="pre">${safe(siteLocation)}</pre></div>
+        <div class="line" style="margin-top:6px;font-size:12px">Scheduled: ${safe(formattedDate)}</div>
       </div>
     </div>
 
-    <div class="desc">
-      <h3>Description</h3>
-      <div class="desc-box">
-        <p>${safe(problemDescription)}</p>
-      </div>
-    </div>
+    <div class="desc-label">DESCRIPTION</div>
+    <div class="desc-box"><pre class="pre">${safe(problemDescription)}</pre></div>
 
-    <div class="sign-row">
-      <div class="sign">
-        <div class="line"></div>
-        <div class="label">Technician Signature</div>
-      </div>
-      <div class="sign">
-        <div class="line"></div>
-        <div class="label">Customer Signature</div>
-      </div>
-    </div>
-
-    <div class="footer">
-      <div>Thank you for your business.</div>
-      <div>Page 1 of 1</div>
-    </div>
+    <!-- Leave the large box BLANK on purpose -->
+    <div class="big-blank"></div>
   </div>
+
   <script>
-    window.onload = function() {
-      setTimeout(function() {
-        window.print();
-        window.close();
-      }, 150);
+    window.onload = function () {
+      setTimeout(function(){ window.print(); window.close(); }, 150);
     };
   </script>
 </body>
@@ -234,26 +204,12 @@ export default function ViewWorkOrder() {
     w.document.close();
   };
 
-  // Handle new note submission
-  const handleAddNote = async () => {
-    if (!newNote.trim()) return;
-    try {
-      await api.post(`/work-orders/${id}/notes`, { text: newNote });
-      setNewNote("");
-      setShowNoteInput(false);
-      fetchWorkOrder();
-    } catch (error) {
-      console.error("⚠️ Error adding note:", error);
-      alert("Failed to add note.");
-    }
-  };
-
   return (
     <div className="view-container">
       <div className="view-card">
-        <div className="view-header-row" style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px"}}>
-          <h2 className="view-title" style={{margin:0}}>Work Order Details</h2>
-          <div className="view-actions" style={{display:"flex", gap:"8px"}}>
+        <div className="view-header-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <h2 className="view-title" style={{ margin: 0 }}>Work Order Details</h2>
+          <div className="view-actions" style={{ display: "flex", gap: 8 }}>
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
             </button>
@@ -301,11 +257,7 @@ export default function ViewWorkOrder() {
         {pdfUrl && (
           <div className="view-card section-card">
             <h3 className="section-header">Work Order PDF</h3>
-            <iframe
-              src={pdfUrl}
-              className="pdf-frame"
-              title="Work Order PDF"
-            />
+            <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
             <div className="mt-2">
               <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
                 Open PDF in new tab
