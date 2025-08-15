@@ -1,4 +1,5 @@
 // File: src/ViewWorkOrder.js
+
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "./api";
@@ -60,12 +61,12 @@ export default function ViewWorkOrder() {
     }
   }
 
-  // Safe file URL (works with S3 + local)
+  // Build safe URLs for files (works with S3 + local)
   const pdfUrl = pdfPath
     ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}`
     : null;
 
-  // Upload attachments immediately on selection (photo append)
+  // Upload attachments immediately on selection
   const handleAttachmentChange = async (e) => {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
@@ -90,29 +91,14 @@ export default function ViewWorkOrder() {
     .map((p) => p.trim())
     .filter((p) => p);
 
-  // Add a note
-  const handleAddNote = async () => {
-    if (!newNote.trim()) return;
-    try {
-      await api.post(`/work-orders/${id}/notes`, { text: newNote });
-      setNewNote("");
-      setShowNoteInput(false);
-      fetchWorkOrder();
-    } catch (error) {
-      console.error("⚠️ Error adding note:", error);
-      alert("Failed to add note.");
-    }
-  };
-
-  // -------- PRINT: one-page template; Problem Description goes in the small "DESCRIPTION" box
+  // -------- PRINT (kept same layout — only filled the small DESCRIPTION box) ----
   const handlePrint = () => {
     const formattedDate = scheduledDate
       ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
       : "Not Scheduled";
-    const now = moment().format("YYYY-MM-DD HH:mm");
 
-    // If you placed your logo at frontend /public/fcg-logo.png it will render here
-    const logoUrl = "/fcg-logo.png";
+    const now = moment().format("YYYY-MM-DD HH:mm");
+    const origin = window.location.origin;
 
     const safe = (s) =>
       (s ?? "")
@@ -127,68 +113,100 @@ export default function ViewWorkOrder() {
   <meta charset="utf-8" />
   <title>Work Order #${safe(poNumber || id)}</title>
   <style>
-    @page { size: Letter; margin: 0.5in; }
-    * { box-sizing: border-box; }
+    @page { size: A4; margin: 0.5in; }
+    html, body { height: 100%; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: #111; }
-    .wrap { max-width: 8in; margin: 0 auto; }
+    .sheet { max-width: 8in; margin: 0 auto; }
 
-    /* Header */
-    .hdr { display:flex; align-items:center; gap:12px; border-bottom:2px solid #000; padding-bottom:8px; margin-bottom:10px; }
-    .logo { width: 140px; height: auto; object-fit: contain; }
-    .title { font-size: 22px; font-weight: 800; letter-spacing: 0.4px; }
-    .meta { margin-left:auto; text-align:right; font-size:12px; line-height:1.2; }
-    .meta b { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    /* HEADER */
+    .hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    .hdr-left { display:flex; align-items:center; gap:12px; }
+    .logo { width:72px; height:72px; object-fit:contain; border:1px solid #ddd; border-radius:6px; padding:6px; }
+    .logo-fallback { width:72px; height:72px; border:1px solid #ddd; border-radius:6px; display:none; align-items:center; justify-content:center; font-weight:700; font-size:20px; }
+    .brand { font-size:22px; font-weight:800; letter-spacing:0.4px; }
+    .meta { text-align:right; font-size:12px; color:#444; }
+    .meta .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
 
-    /* Two-column address section */
-    .cols { display:flex; gap:10px; margin-top:8px; }
-    .col { flex:1; border: 1px solid #000; padding:8px; min-height: 110px; }
-    .sect-h { font-weight:800; font-size:12px; border-bottom:1px solid #000; padding-bottom:4px; margin-bottom:6px; }
-    .line { margin: 2px 0; }
-    .pre { white-space: pre-wrap; margin: 0; }
+    /* TWO MAIN ADDRESS BOXES */
+    .two-col { display:flex; gap:12px; margin-bottom:12px; }
+    .box { flex:1; border:1px solid #111; border-radius:6px; padding:8px 10px; }
+    .box-title { font-size:12px; font-weight:700; letter-spacing:0.4px; margin-bottom:6px; }
+    .line { min-height:18px; border-bottom:1px solid #bbb; margin-bottom:8px; padding-bottom:2px; white-space:pre-wrap; }
+    .lab { font-size:11px; color:#444; margin-top:-6px; margin-bottom:6px; }
 
-    /* Description (small box) + big blank area */
-    .desc-label { margin-top:10px; font-weight:800; font-size:12px; }
-    .desc-box { border:1px solid #000; min-height: 84px; padding:8px; }
-    .big-blank { border:1px solid #000; height: 360px; margin-top:10px; }
+    /* WO META (PO, STATUS, DATE) */
+    .meta-grid { width:100%; border-collapse:separate; border-spacing:0; margin-bottom:10px; }
+    .meta-grid th, .meta-grid td { border:1px solid #111; padding:6px 8px; }
+    .meta-grid th { width:28%; text-align:left; background:#f2f2f2; font-weight:700; }
 
-    /* Footer (optional) */
-    .ftr { display:flex; justify-content:space-between; font-size:11px; color:#444; margin-top:8px; }
+    /* SMALL DESCRIPTION BOX (FILLED) */
+    .desc-wrap { margin-top:6px; margin-bottom:8px; }
+    .desc-label { font-size:12px; font-weight:700; margin-bottom:4px; }
+    .desc-box { border:1px solid #111; border-radius:6px; min-height:40px; padding:6px 8px; }
+    .desc-text { white-space:pre-wrap; }
+
+    /* BIG BLANK BOX (LEAVE EMPTY) */
+    .big-label { font-size:12px; font-weight:700; margin-top:10px; margin-bottom:4px; }
+    .big-box { border:1px solid #111; border-radius:6px; height:320px; } /* keep single-page */
+    
+    /* FOOTER */
+    .footer { display:flex; justify-content:space-between; margin-top:10px; font-size:12px; color:#555; }
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="sheet">
+
     <div class="hdr">
-      <img src="${safe(logoUrl)}" class="logo" onerror="this.style.display='none'"/>
-      <div class="title">WORK ORDER</div>
+      <div class="hdr-left">
+        <img class="logo" src="${origin}/fcg-logo.png" alt="FCG Logo" onerror="this.style.display='none';document.getElementById('logo-fallback').style.display='flex'">
+        <div id="logo-fallback" class="logo-fallback">FCG</div>
+        <div class="brand">FIRST CLASS GLASS</div>
+      </div>
       <div class="meta">
-        WO/PO: <b>${safe(poNumber || id)}</b><br/>
-        Printed: ${safe(now)}
+        Printed: <span class="mono">${safe(now)}</span><br/>
+        WO/PO: <span class="mono">${safe(poNumber || id)}</span>
       </div>
     </div>
 
-    <div class="cols">
-      <div class="col">
-        <div class="sect-h">AGREEMENT SUBMITTED TO</div>
-        <div class="line"><strong>${safe(customer) || "&nbsp;"}</strong></div>
-        <div class="line"><pre class="pre">${safe(billingAddress)}</pre></div>
+    <div class="two-col">
+      <div class="box">
+        <div class="box-title">AGREEMENT SUBMITTED TO</div>
+        <div class="line">${safe(customer)}</div>
+        <div class="lab">Name</div>
+        <div class="line"><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress)}</pre></div>
+        <div class="lab">Billing Address</div>
       </div>
-      <div class="col">
-        <div class="sect-h">WORK TO BE PERFORMED AT</div>
-        <div class="line"><pre class="pre">${safe(siteLocation)}</pre></div>
-        <div class="line" style="margin-top:6px;font-size:12px">Scheduled: ${safe(formattedDate)}</div>
+      <div class="box">
+        <div class="box-title">WORK TO BE PERFORMED AT</div>
+        <div class="line">${safe(siteLocation)}</div>
+        <div class="lab">Site Location</div>
       </div>
     </div>
 
-    <div class="desc-label">DESCRIPTION</div>
-    <div class="desc-box"><pre class="pre">${safe(problemDescription)}</pre></div>
+    <table class="meta-grid">
+      <tr><th>Status</th><td>${safe(status)}</td></tr>
+      <tr><th>Scheduled Date</th><td class="mono">${safe(formattedDate)}</td></tr>
+    </table>
 
-    <!-- Leave the large box BLANK on purpose -->
-    <div class="big-blank"></div>
+    <!-- SMALL DESCRIPTION BOX: now filled with Problem Description -->
+    <div class="desc-wrap">
+      <div class="desc-label">DESCRIPTION</div>
+      <div class="desc-box"><div class="desc-text">${safe(problemDescription || "")}</div></div>
+    </div>
+
+    <!-- BIG BLANK AREA: intentionally empty -->
+    <div class="big-label">WORK AREA / NOTES</div>
+    <div class="big-box"></div>
+
+    <div class="footer">
+      <div>Thank you for your business.</div>
+      <div>Page 1 of 1</div>
+    </div>
   </div>
 
   <script>
-    window.onload = function () {
-      setTimeout(function(){ window.print(); window.close(); }, 150);
+    window.onload = function() {
+      setTimeout(function() { window.print(); window.close(); }, 150);
     };
   </script>
 </body>
@@ -204,12 +222,26 @@ export default function ViewWorkOrder() {
     w.document.close();
   };
 
+  // Add note
+  const handleAddNote = async () => {
+    if (!newNote.trim()) return;
+    try {
+      await api.post(`/work-orders/${id}/notes`, { text: newNote });
+      setNewNote("");
+      setShowNoteInput(false);
+      fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error adding note:", error);
+      alert("Failed to add note.");
+    }
+  };
+
   return (
     <div className="view-container">
       <div className="view-card">
-        <div className="view-header-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-          <h2 className="view-title" style={{ margin: 0 }}>Work Order Details</h2>
-          <div className="view-actions" style={{ display: "flex", gap: 8 }}>
+        <div className="view-header-row" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px'}}>
+          <h2 className="view-title" style={{margin: 0}}>Work Order Details</h2>
+          <div className="view-actions" style={{display: 'flex', gap: '8px'}}>
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
             </button>
@@ -257,7 +289,11 @@ export default function ViewWorkOrder() {
         {pdfUrl && (
           <div className="view-card section-card">
             <h3 className="section-header">Work Order PDF</h3>
-            <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
+            <iframe
+              src={pdfUrl}
+              className="pdf-frame"
+              title="Work Order PDF"
+            />
             <div className="mt-2">
               <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
                 Open PDF in new tab
