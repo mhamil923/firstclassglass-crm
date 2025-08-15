@@ -15,21 +15,9 @@ export default function ViewWorkOrder() {
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
-  // Local-only phone fields for printing
-  const [billingPhone, setBillingPhone] = useState(
-    localStorage.getItem("print_billingPhone") || ""
-  );
-  const [sitePhone, setSitePhone] = useState(
-    localStorage.getItem("print_sitePhone") || ""
-  );
-
-  useEffect(() => {
-    localStorage.setItem("print_billingPhone", billingPhone || "");
-  }, [billingPhone]);
-
-  useEffect(() => {
-    localStorage.setItem("print_sitePhone", sitePhone || "");
-  }, [sitePhone]);
+  // NEW: print-only phone fields (persisted locally per work order)
+  const [billingPhone, setBillingPhone] = useState("");
+  const [sitePhone, setSitePhone] = useState("");
 
   // Fetch work order details
   const fetchWorkOrder = async () => {
@@ -43,8 +31,27 @@ export default function ViewWorkOrder() {
 
   useEffect(() => {
     fetchWorkOrder();
+    // load locally-saved phones for printing
+    try {
+      const saved = localStorage.getItem(`woPhones:${id}`);
+      if (saved) {
+        const obj = JSON.parse(saved);
+        if (obj.billingPhone) setBillingPhone(obj.billingPhone);
+        if (obj.sitePhone) setSitePhone(obj.sitePhone);
+      }
+    } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // persist phone fields whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        `woPhones:${id}`,
+        JSON.stringify({ billingPhone, sitePhone })
+      );
+    } catch {}
+  }, [id, billingPhone, sitePhone]);
 
   if (!workOrder) {
     return (
@@ -77,29 +84,10 @@ export default function ViewWorkOrder() {
     }
   }
 
-  // Build safe URLs for files (works with S3 + local)
+  // File URLs (S3/local safe)
   const pdfUrl = pdfPath
     ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}`
     : null;
-
-  // Upload attachments immediately on selection
-  const handleAttachmentChange = async (e) => {
-    const files = Array.from(e.target.files);
-    if (files.length === 0) return;
-
-    const formData = new FormData();
-    files.forEach((file) => formData.append("photoFile", file));
-
-    try {
-      await api.put(`/work-orders/${id}/edit`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      fetchWorkOrder();
-    } catch (error) {
-      console.error("⚠️ Error uploading attachments:", error);
-      alert("Failed to upload attachments.");
-    }
-  };
 
   // Existing attachments (image keys joined by comma)
   const attachments = (photoPath || "")
@@ -107,117 +95,162 @@ export default function ViewWorkOrder() {
     .map((p) => p.trim())
     .filter((p) => p);
 
-  // ---- PRINT TEMPLATE: put problemDescription into the small DESCRIPTION box; keep big blank box
-  const handlePrint = () => {
-    const formattedDate = scheduledDate
-      ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
-      : "Not Scheduled";
-    const now = moment().format("YYYY-MM-DD HH:mm");
+  // ---------- PRINT helpers ----------
+  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put logo at /public/fcg-logo.png
 
-    const safe = (s) =>
-      (s ?? "")
-        .toString()
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+  // Pull out site "name" and "address" if user typed "Name - address" or "Name, 123…"
+  function parseSite(loc, fallbackName) {
+    const result = { name: fallbackName || "", address: "" };
+    if (!loc) return result;
 
-    function parseSite(loc) {
-      const s = (loc || "").trim();
-      if (!s) return { name: "", address: "" };
-      const m = s.match(/(.+?)\s*[-–—:]\s*(.+)/);
-      if (m) return { name: m[1].trim(), address: m[2].trim() };
-      const i = s.indexOf(",");
-      if (i > 0 && /\d/.test(s.slice(i + 1))) {
-        return { name: s.slice(0, i).trim(), address: s.slice(i + 1).trim() };
-      }
-      if (/^\d/.test(s)) return { name: "", address: s };
-      return { name: s, address: "" };
+    const s = String(loc).trim();
+
+    if (s.includes(" - ")) {
+      const [n, ...rest] = s.split(" - ");
+      result.name = (n || "").trim() || result.name;
+      result.address = rest.join(" - ").trim();
+      return result;
     }
 
-    const site = parseSite(siteLocation);
+    const parts = s.split(",").map((x) => x.trim());
+    if (parts.length >= 2 && !/\d/.test(parts[0]) && /\d/.test(parts[1])) {
+      result.name = parts[0] || result.name;
+      result.address = parts.slice(1).join(", ");
+      return result;
+    }
+
+    result.address = s;
+    return result;
+  }
+
+  const safe = (x) =>
+    (x ?? "")
+      .toString()
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+  // -------- PRINT: open a new window with a clean template and print it
+  const handlePrint = () => {
+    const siteParsed = parseSite(siteLocation, customer);
+    const siteName = siteParsed.name || customer || "";
+    const siteAddr = siteParsed.address || "";
+
+    const billingPhonePrint = billingPhone || "";
+    const sitePhonePrint = sitePhone || "";
 
     const html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Work Order #${safe(poNumber || id)}</title>
+  <title>Agreement ${safe(poNumber || id)}</title>
   <style>
     @page { size: Letter; margin: 0.5in; }
     * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: #111; }
-    .page { width: 100%; max-width: 8.5in; margin: 0 auto; }
+    body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; -webkit-print-color-adjust: exact; }
+    .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; page-break-inside: avoid; }
 
-    .header { display:flex; align-items:center; gap: 12px; margin-bottom: 8px; }
-    .logo { width: 120px; height: auto; object-fit: contain; }
-    .head-right { flex:1; text-align:right; font-size: 12px; color:#555; }
-    .title { font-weight: 800; font-size: 18px; margin: 4px 0 8px; }
+    .hdr { display: grid; grid-template-columns: 120px 1fr 220px; align-items: center; column-gap: 12px; }
+    .logo { width: 100%; height: auto; }
+    .company h1 { margin: 0; font-size: 18px; font-weight: 700; }
+    .company .addr { margin-top: 2px; font-size: 10px; line-height: 1.2; }
+    .agree { text-align: right; }
+    .agree .title { font-size: 18px; font-weight: 700; text-transform: uppercase; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 2px; }
+    .agree .no { margin-top: 6px; font-size: 12px; }
 
-    .two-col { display:flex; gap: 12px; margin-top: 6px; }
-    .box { flex:1; border: 2px solid #000; padding: 10px; min-height: 150px; }
-    .box-title { font-weight: 800; font-size: 14px; margin-bottom: 6px; text-transform: uppercase; }
-    .row { display:flex; gap:8px; margin-top:6px; align-items:flex-start; }
-    .label { width: 80px; font-weight: 600; font-size: 12px; }
-    .value { flex:1; font-size: 12px; white-space: pre-wrap; }
+    .spacer-8 { height: 8px; }
 
-    .desc-small { margin-top: 12px; border: 2px solid #000; padding: 8px; }
-    .desc-title { font-weight: 800; font-size: 13px; margin-bottom: 4px; }
-    .desc-body { min-height: 70px; font-size: 12px; white-space: pre-wrap; }
+    /* Two main blocks only */
+    table { border-collapse: collapse; width: 100%; }
+    .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
+    .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
+    .label { width: 18%; }
 
-    .big-blank { margin-top: 10px; border: 2px solid #000; height: 360px; }
+    .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: center; }
+    .desc-box { border: 1px solid #000; height: 6.0in; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; }
 
-    .page { page-break-inside: avoid; }
+    .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 6px; }
+    .auth-note { font-size: 8.5px; text-align: center; margin-top: 4px; }
+    .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 16px; margin-top: 10px; align-items: end; }
+    .sign-line { border-bottom: 1px solid #000; height: 16px; }
+    .sign-label { font-size: 10px; margin-top: 2px; }
+    .fine { font-size: 8px; color: #000; margin-top: 6px; text-align: left; }
   </style>
 </head>
 <body>
-  <div class="page">
-    <div class="header">
-      <img class="logo" src="/fcg-logo.png" alt="FCG Logo" />
-      <div class="head-right">
-        <div>Printed: ${safe(now)}</div>
-        <div>WO/PO: ${safe(poNumber || id)}</div>
-        <div>Status: ${safe(status || "")}</div>
-        <div>Scheduled: ${safe(formattedDate)}</div>
+  <div class="sheet">
+    <div class="hdr">
+      <img class="logo" src="${safe(LOGO_URL)}" alt="First Class Glass logo" />
+      <div class="company">
+        <h1>First Class Glass &amp; Mirror, INC.</h1>
+        <div class="addr">
+          1513 Industrial Dr, Itasca, Illinois 60143 • 630-250-9777<br/>
+          FCG@FirstClassGlassMirror.com
+        </div>
       </div>
-    </div>
-    <div class="title">WORK ORDER</div>
-
-    <div class="two-col">
-      <div class="box">
-        <div class="box-title">Agreement Submitted To:</div>
-        <div class="row"><div class="label">Name</div><div class="value">${safe(customer)}</div></div>
-        <div class="row"><div class="label">Address</div><div class="value"><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress)}</pre></div></div>
-        <div class="row"><div class="label">Phone</div><div class="value">${safe(billingPhone)}</div></div>
-      </div>
-      <div class="box">
-        <div class="box-title">Work To Be Performed At:</div>
-        <div class="row"><div class="label">Name</div><div class="value">${safe(site.name)}</div></div>
-        <div class="row"><div class="label">Address</div><div class="value">${safe(site.address || siteLocation || "")}</div></div>
-        <div class="row"><div class="label">Phone</div><div class="value">${safe(sitePhone)}</div></div>
+      <div class="agree">
+        <div class="title">Agreement</div>
+        <div class="no">No. ${safe(poNumber || id)}</div>
       </div>
     </div>
 
-    <!-- Small description box WITH problemDescription -->
-    <div class="desc-small">
-      <div class="desc-title">DESCRIPTION</div>
-      <div class="desc-body">${safe(problemDescription)}</div>
+    <div class="spacer-8"></div>
+
+    <table class="two-col">
+      <tr>
+        <th colspan="2">Agreement Submitted To:</th>
+        <th colspan="2">Work To Be Performed At:</th>
+      </tr>
+      <tr>
+        <th class="label">Name</th>
+        <td>${safe(customer || "")}</td>
+        <th class="label">Name</th>
+        <td>${safe(siteName)}</td>
+      </tr>
+      <tr>
+        <th class="label">Address</th>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
+        <th class="label">Address</th>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
+      </tr>
+      <tr>
+        <th class="label">Phone</th>
+        <td>${safe(billingPhonePrint)}</td>
+        <th class="label">Phone</th>
+        <td>${safe(sitePhonePrint)}</td>
+      </tr>
+    </table>
+
+    <div class="desc-title">Description</div>
+    <div class="desc-box">${safe(problemDescription || "")}</div>
+
+    <div class="auth-title">AUTHORIZATION TO PAY</div>
+    <div class="auth-note">
+      I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
     </div>
 
-    <!-- Big blank box (left empty on purpose) -->
-    <div class="big-blank"></div>
+    <div class="sign-row">
+      <div>
+        <div class="sign-line"></div>
+        <div class="sign-label">Customer Signature:</div>
+      </div>
+      <div>
+        <div class="sign-line"></div>
+        <div class="sign-label">Date:</div>
+      </div>
+    </div>
+
+    <div class="fine">
+      NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
+    </div>
   </div>
-
   <script>
-    window.onload = function() {
-      setTimeout(function() {
-        window.print();
-        window.close();
-      }, 150);
-    };
+    window.onload = function() { setTimeout(function(){ window.print(); window.close(); }, 150); };
   </script>
 </body>
 </html>`;
 
-    const w = window.open("", "_blank", "width=900,height=1000");
+    const w = window.open("", "_blank", "width=1000,height=1200");
     if (!w) {
       alert("Popup blocked. Please allow popups to print.");
       return;
@@ -227,7 +260,7 @@ export default function ViewWorkOrder() {
     w.document.close();
   };
 
-  // Handle new note submission
+  // ---------- notes & attachments ----------
   const handleAddNote = async () => {
     if (!newNote.trim()) return;
     try {
@@ -238,6 +271,23 @@ export default function ViewWorkOrder() {
     } catch (error) {
       console.error("⚠️ Error adding note:", error);
       alert("Failed to add note.");
+    }
+  };
+
+  // Upload attachments immediately on selection
+  const handleAttachmentChange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const formData = new FormData();
+    files.forEach((file) => formData.append("photoFile", file));
+    try {
+      await api.put(`/work-orders/${id}/edit`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error uploading attachments:", error);
+      alert("Failed to upload attachments.");
     }
   };
 
@@ -291,11 +341,11 @@ export default function ViewWorkOrder() {
           </li>
         </ul>
 
-        {/* Print-only phone fields (local only) */}
+        {/* NEW: Print-only phone fields (stored locally) */}
         <div className="section-card">
           <h3 className="section-header">Print Fields (local only)</h3>
-          <div className="print-fields" style={{ display: "grid", gap: "10px" }}>
-            <div className="print-field" style={{ display: "grid", gap: "6px" }}>
+          <div className="print-fields">
+            <div className="print-field">
               <label>Agreement Submitted To — Phone</label>
               <input
                 type="tel"
@@ -304,7 +354,7 @@ export default function ViewWorkOrder() {
                 placeholder="(###) ###-####"
               />
             </div>
-            <div className="print-field" style={{ display: "grid", gap: "6px" }}>
+            <div className="print-field">
               <label>Work To Be Performed At — Phone</label>
               <input
                 type="tel"
@@ -314,7 +364,7 @@ export default function ViewWorkOrder() {
               />
             </div>
           </div>
-          <p className="muted-note" style={{ color: "#6b7280", fontSize: 12, marginTop: 8 }}>
+          <p className="muted-note">
             These phone numbers are saved to your browser only and used in the printout. They are not stored on the server.
           </p>
         </div>
