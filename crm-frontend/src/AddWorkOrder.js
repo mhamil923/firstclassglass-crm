@@ -28,9 +28,7 @@ export default function AddWorkOrder() {
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
-    assignedTo: "",
-
-    // optional contact (not required)
+    assignedTo: "", // user id (string)
     customerPhone: "",
     customerEmail: "",
   });
@@ -49,99 +47,105 @@ export default function AddWorkOrder() {
   // google places
   const siteInputRef = useRef(null);
   const autocompleteRef = useRef(null);
+  const gmapsReadyRef = useRef(false);
 
-  // ---------- load reference data + Places script once
+  // ---------- load reference data
   useEffect(() => {
-    // Load customers and the "assignees" list (techs + Jeff & other extras)
-    Promise.all([
-      api.get("/customers"),
-      api.get("/users", { params: { assignees: 1 } }), // <-- ensures Jeff is included
-    ])
-      .then(([c, u]) => {
-        setCustomers(c.data || []);
-        setTechs(u.data || []);
+    // customers
+    api
+      .get("/customers")
+      .then((r) => setCustomers(r.data || []))
+      .catch((e) => console.error("Error loading customers:", e));
+
+    // assignees list (all techs + extra usernames) and hide Mark
+    api
+      .get("/users", { params: { assignees: 1 } })
+      .then((r) => {
+        const list = (r.data || []).filter((u) => u.username !== "Mark");
+        setTechs(list);
       })
-      .catch((e) => console.error("Error loading customers/users:", e));
+      .catch((e) => console.error("Error loading assignees:", e));
+  }, []);
 
-// ---------- load Google Places robustly (v=weekly + importLibrary) ----------
-useEffect(() => {
-  const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-  if (!key) {
-    console.warn("Google Maps API key missing; Places disabled.");
-    return;
-  }
+  // ---------- Google Maps Places loader (robust)
+  useEffect(() => {
+    const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
+    if (!key || key === "YOUR_ACTUAL_KEY_HERE") {
+      console.warn("Google Maps API key missing; Places autocomplete disabled.");
+      return;
+    }
 
-  const ensurePlacesAndInit = async () => {
-    // 1) load script if needed
-    if (!window.google || !window.google.maps) {
-      await new Promise((resolve, reject) => {
-        // avoid adding duplicates
-        const existing = document.querySelector('script[data-gmaps="1"]');
-        if (existing) {
-          existing.addEventListener('load', resolve, { once: true });
-          existing.addEventListener('error', reject, { once: true });
-          return;
-        }
-        const s = document.createElement("script");
-        s.src = `https://maps.googleapis.com/maps/api/js?key=${key}&v=weekly&libraries=places&loading=async`;
-        s.async = true;
-        s.defer = true;
-        s.dataset.gmaps = "1";
-        s.onload = resolve;
-        s.onerror = reject;
-        document.head.appendChild(s);
+    // already loaded?
+    if (window.google?.maps?.places?.Autocomplete) {
+      gmapsReadyRef.current = true;
+      initAutocomplete();
+      return;
+    }
+
+    // reuse any in-flight promise
+    if (!window.__gmapsPromise) {
+      window.__gmapsPromise = new Promise((resolve, reject) => {
+        window.__initGMaps = () => {
+          resolve();
+        };
+        const script = document.createElement("script");
+        script.id = "gmaps-script";
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async&callback=__initGMaps`;
+        script.async = true;
+        script.defer = true;
+        script.onerror = () => reject(new Error("Failed to load Google Maps script"));
+        document.body.appendChild(script);
+      }).then(() => {
+        delete window.__initGMaps;
       });
     }
 
-    // 2) explicitly import the Places lib (new pattern)
-    if (window.google?.maps?.importLibrary) {
-      await window.google.maps.importLibrary("places");
-    }
-
-    // 3) init
-    initAutocomplete();
-  };
-
-  ensurePlacesAndInit().catch((e) =>
-    console.error("Failed to load Google Maps:", e)
-  );
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, []);
+    window.__gmapsPromise
+      .then(() => {
+        gmapsReadyRef.current = true;
+        initAutocomplete();
+      })
+      .catch((err) => console.error(err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---------- wire up Google Places Autocomplete on the input
-function initAutocomplete(retry = 8) {
-  const el = siteInputRef.current;
-  const g = window.google;
-  if (!el) return;
+  function initAutocomplete() {
+    if (!gmapsReadyRef.current || !window.google?.maps?.places?.Autocomplete) return;
+    if (!siteInputRef.current) return;
 
-  if (!g?.maps?.places?.Autocomplete) {
-    if (retry > 0) {
-      // tiny backoff to wait for the library to hydrate
-      return setTimeout(() => initAutocomplete(retry - 1), 200);
+    try {
+      // destroy previous if any
+      if (autocompleteRef.current && autocompleteRef.current.unbindAll) {
+        autocompleteRef.current.unbindAll();
+      }
+
+      const ac = new window.google.maps.places.Autocomplete(siteInputRef.current, {
+        types: ["address"], // keeps results address-focused
+        fields: ["formatted_address", "name", "geometry"],
+      });
+
+      ac.addListener("place_changed", () => {
+        const place = ac.getPlace();
+        const addr =
+          (place && (place.formatted_address || place.name)) ||
+          siteInputRef.current.value ||
+          "";
+        setWorkOrder((prev) => ({ ...prev, siteLocation: addr }));
+      });
+
+      autocompleteRef.current = ac;
+    } catch (e) {
+      console.error("Failed to init Places Autocomplete:", e);
     }
-    console.error("Places Autocomplete not available.");
-    return;
   }
 
-  const ac = new g.maps.places.Autocomplete(el, {
-    // show addresses; you can also try ["geocode"]
-    types: ["address"],
-    // only ask for what we use (helps stability)
-    fields: ["formatted_address", "name", "place_id"],
-  });
-
-  ac.addListener("place_changed", () => {
-    const place = ac.getPlace();
-    const addr =
-      (place && (place.formatted_address || place.name)) ||
-      el.value ||
-      "";
-    setWorkOrder((prev) => ({ ...prev, siteLocation: addr }));
-  });
-
-  autocompleteRef.current = ac;
-}
+  // if user focuses before script finishes, try init again
+  const handleSiteFocus = () => {
+    if (!autocompleteRef.current) {
+      initAutocomplete();
+    }
+  };
 
   // ---------- helpers
   const extractCustomerFromBilling = (addr) => {
@@ -205,8 +209,6 @@ function initAutocomplete(retry = 8) {
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
     form.append("status", workOrder.status || "Needs to be Scheduled");
-
-    // optional
     form.append("customerPhone", workOrder.customerPhone || "");
     form.append("customerEmail", workOrder.customerEmail || "");
 
@@ -259,7 +261,7 @@ function initAutocomplete(retry = 8) {
           </datalist>
         </div>
 
-        {/* optional contact */}
+        {/* Optional contact fields */}
         <div className="form-group">
           <label className="form-label">Customer Phone (optional)</label>
           <input
@@ -326,6 +328,7 @@ function initAutocomplete(retry = 8) {
             ref={siteInputRef}
             value={workOrder.siteLocation}
             onChange={handleChange}
+            onFocus={handleSiteFocus}
             placeholder="Start typing address…"
             className="form-control-custom"
             autoComplete="off"

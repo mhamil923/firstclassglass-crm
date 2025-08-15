@@ -27,15 +27,15 @@ export default function EditWorkOrder() {
         setLoading(false);
       });
 
-    // fetch assignable users
+    // fetch assignees list (hide Mark)
     api
-      .get("/users", { params: { assignees: "1" } }) // techs + Jeff/tech1
-      .then((res) => setUsers(res.data || []))
+      .get("/users", { params: { assignees: 1 } })
+      .then((res) => setUsers((res.data || []).filter((u) => u.username !== "Mark")))
       .catch((err) => console.error("⚠️ Error fetching users:", err));
   }, [id]);
 
   const handleFileChange = (e) => {
-    setPdfFile(e.target.files[0] || null);
+    setPdfFile(e.target.files[0]);
   };
 
   const handleUpdate = (event) => {
@@ -50,8 +50,6 @@ export default function EditWorkOrder() {
     formData.append("problemDescription", workOrder.problemDescription || "");
     formData.append("status", workOrder.status || "Needs to be Scheduled");
     formData.append("assignedTo", workOrder.assignedTo || "");
-
-    // NEW: optional contact fields
     formData.append("customerPhone", workOrder.customerPhone || "");
     formData.append("customerEmail", workOrder.customerEmail || "");
 
@@ -85,11 +83,6 @@ export default function EditWorkOrder() {
   if (loading) return <p className="text-center mt-4">Loading…</p>;
   if (!workOrder) return <p className="text-center text-danger mt-4">Not found.</p>;
 
-  // prefer signed file resolver; falls back if not present
-  const currentPdfUrl = workOrder.pdfPath
-    ? `${API_BASE_URL}/files?key=${encodeURIComponent(workOrder.pdfPath)}`
-    : null;
-
   return (
     <div className="edit-container">
       <form onSubmit={handleUpdate} className="edit-card">
@@ -101,9 +94,7 @@ export default function EditWorkOrder() {
             type="text"
             className="form-control-custom"
             value={workOrder.poNumber || ""}
-            onChange={(e) =>
-              setWorkOrder({ ...workOrder, poNumber: e.target.value })
-            }
+            onChange={(e) => setWorkOrder({ ...workOrder, poNumber: e.target.value })}
           />
         </div>
 
@@ -114,23 +105,17 @@ export default function EditWorkOrder() {
             className="form-control-custom"
             required
             value={workOrder.customer || ""}
-            onChange={(e) =>
-              setWorkOrder({ ...workOrder, customer: e.target.value })
-            }
+            onChange={(e) => setWorkOrder({ ...workOrder, customer: e.target.value })}
           />
         </div>
 
-        {/* NEW: optional phone + email */}
         <div className="form-group">
           <label>Customer Phone (optional)</label>
           <input
             type="tel"
             className="form-control-custom"
-            placeholder="(###) ###-####"
             value={workOrder.customerPhone || ""}
-            onChange={(e) =>
-              setWorkOrder({ ...workOrder, customerPhone: e.target.value })
-            }
+            onChange={(e) => setWorkOrder({ ...workOrder, customerPhone: e.target.value })}
           />
         </div>
 
@@ -139,11 +124,8 @@ export default function EditWorkOrder() {
           <input
             type="email"
             className="form-control-custom"
-            placeholder="name@example.com"
             value={workOrder.customerEmail || ""}
-            onChange={(e) =>
-              setWorkOrder({ ...workOrder, customerEmail: e.target.value })
-            }
+            onChange={(e) => setWorkOrder({ ...workOrder, customerEmail: e.target.value })}
           />
         </div>
 
@@ -154,9 +136,7 @@ export default function EditWorkOrder() {
             rows="3"
             required
             value={workOrder.siteLocation || ""}
-            onChange={(e) =>
-              setWorkOrder({ ...workOrder, siteLocation: e.target.value })
-            }
+            onChange={(e) => setWorkOrder({ ...workOrder, siteLocation: e.target.value })}
           />
         </div>
 
@@ -167,9 +147,7 @@ export default function EditWorkOrder() {
             rows="3"
             required
             value={workOrder.billingAddress || ""}
-            onChange={(e) =>
-              setWorkOrder({ ...workOrder, billingAddress: e.target.value })
-            }
+            onChange={(e) => setWorkOrder({ ...workOrder, billingAddress: e.target.value })}
           />
         </div>
 
@@ -180,12 +158,7 @@ export default function EditWorkOrder() {
             rows="4"
             required
             value={workOrder.problemDescription || ""}
-            onChange={(e) =>
-              setWorkOrder({
-                ...workOrder,
-                problemDescription: e.target.value,
-              })
-            }
+            onChange={(e) => setWorkOrder({ ...workOrder, problemDescription: e.target.value })}
           />
         </div>
 
@@ -194,9 +167,7 @@ export default function EditWorkOrder() {
           <select
             className="form-select-custom"
             value={workOrder.status || "Needs to be Scheduled"}
-            onChange={(e) =>
-              setWorkOrder({ ...workOrder, status: e.target.value })
-            }
+            onChange={(e) => setWorkOrder({ ...workOrder, status: e.target.value })}
           >
             <option value="Needs to be Scheduled">Needs to be Scheduled</option>
             <option value="Scheduled">Scheduled</option>
@@ -211,9 +182,7 @@ export default function EditWorkOrder() {
           <select
             className="form-select-custom"
             value={workOrder.assignedTo || ""}
-            onChange={(e) =>
-              setWorkOrder({ ...workOrder, assignedTo: e.target.value })
-            }
+            onChange={(e) => setWorkOrder({ ...workOrder, assignedTo: e.target.value })}
           >
             <option value="">Unassigned</option>
             {users.map((u) => (
@@ -225,18 +194,22 @@ export default function EditWorkOrder() {
         </div>
 
         <div className="form-group">
-          <label>Replace Work Order PDF (optional)</label>
+          <label>Replace Work Order PDF (Optional)</label>
           <input
             type="file"
             className="form-file-custom"
             accept="application/pdf"
             onChange={handleFileChange}
           />
-          {currentPdfUrl && (
+          {workOrder.pdfPath && (
             <small className="text-muted">
-              Current PDF:&nbsp;
-              <a href={currentPdfUrl} target="_blank" rel="noopener noreferrer">
-                View current PDF
+              Current PDF:{" "}
+              <a
+                href={`${API_BASE_URL}/files?key=${encodeURIComponent(workOrder.pdfPath)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {workOrder.pdfPath}
               </a>
             </small>
           )}
@@ -246,11 +219,7 @@ export default function EditWorkOrder() {
           <button type="submit" className="btn-custom btn-save">
             Save Changes
           </button>
-          <button
-            type="button"
-            className="btn-custom btn-delete"
-            onClick={handleDelete}
-          >
+          <button type="button" className="btn-custom btn-delete" onClick={handleDelete}>
             Delete
           </button>
           <button
