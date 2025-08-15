@@ -207,7 +207,7 @@ export default function ViewWorkOrder() {
     </table>
 
  <!-- ✅ EXACTLY WHAT YOU ASKED: description text ABOVE the blank box -->
-    <div class="desc-title">Description: ${safe(problemDescription || "")}</div>
+    <div class="desc-title">Problem Description: ${safe(problemDescription || "")}</div>
     <div class="desc-box"></div>
 
     <div class="auth-title">AUTHORIZATION TO PAY</div>
