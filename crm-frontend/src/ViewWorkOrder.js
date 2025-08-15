@@ -15,10 +15,6 @@ export default function ViewWorkOrder() {
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
-  // NEW: print-only phone fields (persisted locally per work order)
-  const [billingPhone, setBillingPhone] = useState("");
-  const [sitePhone, setSitePhone] = useState("");
-
   // Fetch work order details
   const fetchWorkOrder = async () => {
     try {
@@ -31,27 +27,8 @@ export default function ViewWorkOrder() {
 
   useEffect(() => {
     fetchWorkOrder();
-    // load locally-saved phones for printing
-    try {
-      const saved = localStorage.getItem(`woPhones:${id}`);
-      if (saved) {
-        const obj = JSON.parse(saved);
-        if (obj.billingPhone) setBillingPhone(obj.billingPhone);
-        if (obj.sitePhone) setSitePhone(obj.sitePhone);
-      }
-    } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-
-  // persist phone fields whenever they change
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        `woPhones:${id}`,
-        JSON.stringify({ billingPhone, sitePhone })
-      );
-    } catch {}
-  }, [id, billingPhone, sitePhone]);
 
   if (!workOrder) {
     return (
@@ -84,10 +61,29 @@ export default function ViewWorkOrder() {
     }
   }
 
-  // File URLs (S3/local safe)
+  // Build safe URLs for files (works with S3 + local)
   const pdfUrl = pdfPath
     ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}`
     : null;
+
+  // Upload attachments immediately on selection (append photos)
+  const handleAttachmentChange = async (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+
+    const formData = new FormData();
+    files.forEach((file) => formData.append("photoFile", file));
+
+    try {
+      await api.put(`/work-orders/${id}/edit`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error uploading attachments:", error);
+      alert("Failed to upload attachments.");
+    }
+  };
 
   // Existing attachments (image keys joined by comma)
   const attachments = (photoPath || "")
@@ -95,162 +91,140 @@ export default function ViewWorkOrder() {
     .map((p) => p.trim())
     .filter((p) => p);
 
-  // ---------- PRINT helpers ----------
-  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put logo at /public/fcg-logo.png
-
-  // Pull out site "name" and "address" if user typed "Name - address" or "Name, 123…"
-  function parseSite(loc, fallbackName) {
-    const result = { name: fallbackName || "", address: "" };
-    if (!loc) return result;
-
-    const s = String(loc).trim();
-
-    if (s.includes(" - ")) {
-      const [n, ...rest] = s.split(" - ");
-      result.name = (n || "").trim() || result.name;
-      result.address = rest.join(" - ").trim();
-      return result;
-    }
-
-    const parts = s.split(",").map((x) => x.trim());
-    if (parts.length >= 2 && !/\d/.test(parts[0]) && /\d/.test(parts[1])) {
-      result.name = parts[0] || result.name;
-      result.address = parts.slice(1).join(", ");
-      return result;
-    }
-
-    result.address = s;
-    return result;
-  }
-
-  const safe = (x) =>
-    (x ?? "")
-      .toString()
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-
-  // -------- PRINT: open a new window with a clean template and print it
+  // -------- PRINT: single-page template; description box contains problem description
   const handlePrint = () => {
-    const siteParsed = parseSite(siteLocation, customer);
-    const siteName = siteParsed.name || customer || "";
-    const siteAddr = siteParsed.address || "";
+    const formattedDate = scheduledDate
+      ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
+      : "Not Scheduled";
 
-    const billingPhonePrint = billingPhone || "";
-    const sitePhonePrint = sitePhone || "";
+    const now = moment().format("YYYY-MM-DD HH:mm");
+
+    const safe = (s) =>
+      (s ?? "")
+        .toString()
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\r?\n/g, "<br/>");
+
+    const logoUrl = `${window.location.origin}/fcg-logo.png`; // put your logo at /public/fcg-logo.png
 
     const html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Agreement ${safe(poNumber || id)}</title>
+  <title>Work Order #${safe(poNumber || id)}</title>
   <style>
-    @page { size: Letter; margin: 0.5in; }
-    * { box-sizing: border-box; }
-    body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; -webkit-print-color-adjust: exact; }
-    .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; page-break-inside: avoid; }
+    @page { size: A4; margin: 0.5in; }
+    html, body { height: 100%; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: #111; }
+    .wrap { max-width: 800px; margin: 0 auto; }
+    .header { display:flex; align-items:center; justify-content: space-between; }
+    .brand { display:flex; align-items:center; gap: 12px; }
+    .brand img { height: 42px; width:auto; }
+    .brand-title { font-size: 18px; font-weight: 700; letter-spacing: .3px; }
+    .meta { text-align:right; font-size: 12px; color:#444; }
+    .title { margin: 10px 0 14px; font-size: 20px; font-weight: 700; letter-spacing:.2px; }
 
-    .hdr { display: grid; grid-template-columns: 120px 1fr 220px; align-items: center; column-gap: 12px; }
-    .logo { width: 100%; height: auto; }
-    .company h1 { margin: 0; font-size: 18px; font-weight: 700; }
-    .company .addr { margin-top: 2px; font-size: 10px; line-height: 1.2; }
-    .agree { text-align: right; }
-    .agree .title { font-size: 18px; font-weight: 700; text-transform: uppercase; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 2px; }
-    .agree .no { margin-top: 6px; font-size: 12px; }
+    .row { display:flex; gap: 14px; }
+    .col { flex: 1; }
+    .box { border: 1px solid #cfd6e0; border-radius: 6px; padding: 10px 12px; }
+    .box h3 { margin: 0 0 6px; font-size: 13px; color:#333; text-transform: uppercase; letter-spacing:.5px; }
+    .kv { margin: 0 0 3px; font-size: 13px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
 
-    .spacer-8 { height: 8px; }
+    .grid { width:100%; border-collapse: separate; border-spacing:0; margin-top:12px; }
+    .grid th { width: 190px; text-align:left; vertical-align: top; color:#333; padding: 8px 10px; border:1px solid #cfd6e0; background:#f5f7fb; font-size: 13px; }
+    .grid td { padding: 8px 10px; border:1px solid #cfd6e0; font-size: 13px; }
 
-    /* Two main blocks only */
-    table { border-collapse: collapse; width: 100%; }
-    .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
-    .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
-    .label { width: 18%; }
+    .desc { margin-top: 12px; }
+    .desc h3 { margin: 0 0 6px; font-size: 13px; color:#333; text-transform: uppercase; letter-spacing:.5px; }
+    .desc-box { border: 1px solid #cfd6e0; border-radius: 6px; padding: 12px; min-height: 160px; /* description lives inside this box */ }
+    .desc-box p { margin: 0; line-height: 1.45; }
 
-    .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: center; }
-    .desc-box { border: 1px solid #000; height: 6.0in; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; }
+    .sign-row { display:flex; gap: 20px; margin-top: 16px; }
+    .sign { flex:1; }
+    .sign .line { height: 26px; border-bottom:1px solid #999; margin-bottom: 6px; }
+    .sign .label { font-size: 12px; color:#555; }
 
-    .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 6px; }
-    .auth-note { font-size: 8.5px; text-align: center; margin-top: 4px; }
-    .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 16px; margin-top: 10px; align-items: end; }
-    .sign-line { border-bottom: 1px solid #000; height: 16px; }
-    .sign-label { font-size: 10px; margin-top: 2px; }
-    .fine { font-size: 8px; color: #000; margin-top: 6px; text-align: left; }
+    .footer { display:flex; justify-content: space-between; margin-top: 10px; font-size: 12px; color:#666; }
+
+    /* keep it to one page */
+    .wrap { page-break-inside: avoid; }
   </style>
 </head>
 <body>
-  <div class="sheet">
-    <div class="hdr">
-      <img class="logo" src="${safe(LOGO_URL)}" alt="First Class Glass logo" />
-      <div class="company">
-        <h1>First Class Glass &amp; Mirror, INC.</h1>
-        <div class="addr">
-          1513 Industrial Dr, Itasca, Illinois 60143 • 630-250-9777<br/>
-          FCG@FirstClassGlassMirror.com
-        </div>
+  <div class="wrap">
+    <div class="header">
+      <div class="brand">
+        <img src="${logoUrl}" alt="Logo"/>
+        <div class="brand-title">First Class Glass — Work Order</div>
       </div>
-      <div class="agree">
-        <div class="title">Agreement</div>
-        <div class="no">No. ${safe(poNumber || id)}</div>
+      <div class="meta">
+        Printed: <span class="mono">${safe(now)}</span><br/>
+        WO/PO: <span class="mono">${safe(poNumber || id)}</span>
       </div>
     </div>
 
-    <div class="spacer-8"></div>
+    <div class="title">Work Order Details</div>
 
-    <table class="two-col">
-      <tr>
-        <th colspan="2">Agreement Submitted To:</th>
-        <th colspan="2">Work To Be Performed At:</th>
-      </tr>
-      <tr>
-        <th class="label">Name</th>
-        <td>${safe(customer || "")}</td>
-        <th class="label">Name</th>
-        <td>${safe(siteName)}</td>
-      </tr>
-      <tr>
-        <th class="label">Address</th>
-        <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
-        <th class="label">Address</th>
-        <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
-      </tr>
-      <tr>
-        <th class="label">Phone</th>
-        <td>${safe(billingPhonePrint)}</td>
-        <th class="label">Phone</th>
-        <td>${safe(sitePhonePrint)}</td>
-      </tr>
+    <table class="grid">
+      <tr><th>WO/PO #</th><td class="mono">${safe(poNumber || id)}</td></tr>
+      <tr><th>Status</th><td>${safe(status)}</td></tr>
+      <tr><th>Scheduled Date</th><td class="mono">${safe(formattedDate)}</td></tr>
     </table>
 
-    <div class="desc-title">Description</div>
-    <div class="desc-box">${safe(problemDescription || "")}</div>
+    <div class="row" style="margin-top:12px">
+      <div class="col">
+        <div class="box">
+          <h3>Agreement Submitted To</h3>
+          <div class="kv"><strong>Name:</strong> ${safe(customer)}</div>
+          <div class="kv"><strong>Billing Address:</strong><br/><span class="mono">${safe(billingAddress)}</span></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="box">
+          <h3>Work To Be Performed At</h3>
+          <div class="kv"><strong>Location:</strong> ${safe(siteLocation)}</div>
+        </div>
+      </div>
+    </div>
 
-    <div class="auth-title">AUTHORIZATION TO PAY</div>
-    <div class="auth-note">
-      I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
+    <div class="desc">
+      <h3>Description</h3>
+      <div class="desc-box">
+        <p>${safe(problemDescription)}</p>
+      </div>
     </div>
 
     <div class="sign-row">
-      <div>
-        <div class="sign-line"></div>
-        <div class="sign-label">Customer Signature:</div>
+      <div class="sign">
+        <div class="line"></div>
+        <div class="label">Technician Signature</div>
       </div>
-      <div>
-        <div class="sign-line"></div>
-        <div class="sign-label">Date:</div>
+      <div class="sign">
+        <div class="line"></div>
+        <div class="label">Customer Signature</div>
       </div>
     </div>
 
-    <div class="fine">
-      NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
+    <div class="footer">
+      <div>Thank you for your business.</div>
+      <div>Page 1 of 1</div>
     </div>
   </div>
   <script>
-    window.onload = function() { setTimeout(function(){ window.print(); window.close(); }, 150); };
+    window.onload = function() {
+      setTimeout(function() {
+        window.print();
+        window.close();
+      }, 150);
+    };
   </script>
 </body>
 </html>`;
 
-    const w = window.open("", "_blank", "width=1000,height=1200");
+    const w = window.open("", "_blank", "width=900,height=1000");
     if (!w) {
       alert("Popup blocked. Please allow popups to print.");
       return;
@@ -260,7 +234,7 @@ export default function ViewWorkOrder() {
     w.document.close();
   };
 
-  // ---------- notes & attachments ----------
+  // Handle new note submission
   const handleAddNote = async () => {
     if (!newNote.trim()) return;
     try {
@@ -274,29 +248,12 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Upload attachments immediately on selection
-  const handleAttachmentChange = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-    const formData = new FormData();
-    files.forEach((file) => formData.append("photoFile", file));
-    try {
-      await api.put(`/work-orders/${id}/edit`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      fetchWorkOrder();
-    } catch (error) {
-      console.error("⚠️ Error uploading attachments:", error);
-      alert("Failed to upload attachments.");
-    }
-  };
-
   return (
     <div className="view-container">
       <div className="view-card">
-        <div className="view-header-row">
-          <h2 className="view-title">Work Order Details</h2>
-          <div className="view-actions">
+        <div className="view-header-row" style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px"}}>
+          <h2 className="view-title" style={{margin:0}}>Work Order Details</h2>
+          <div className="view-actions" style={{display:"flex", gap:"8px"}}>
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
             </button>
@@ -309,7 +266,7 @@ export default function ViewWorkOrder() {
         <ul className="detail-list">
           <li className="detail-item">
             <span className="detail-label">WO/PO #:</span>
-            <span className="detail-value">{poNumber || id || "—"}</span>
+            <span className="detail-value">{poNumber || "—"}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Customer:</span>
@@ -341,38 +298,14 @@ export default function ViewWorkOrder() {
           </li>
         </ul>
 
-        {/* NEW: Print-only phone fields (stored locally) */}
-        <div className="section-card">
-          <h3 className="section-header">Print Fields (local only)</h3>
-          <div className="print-fields">
-            <div className="print-field">
-              <label>Agreement Submitted To — Phone</label>
-              <input
-                type="tel"
-                value={billingPhone}
-                onChange={(e) => setBillingPhone(e.target.value)}
-                placeholder="(###) ###-####"
-              />
-            </div>
-            <div className="print-field">
-              <label>Work To Be Performed At — Phone</label>
-              <input
-                type="tel"
-                value={sitePhone}
-                onChange={(e) => setSitePhone(e.target.value)}
-                placeholder="(###) ###-####"
-              />
-            </div>
-          </div>
-          <p className="muted-note">
-            These phone numbers are saved to your browser only and used in the printout. They are not stored on the server.
-          </p>
-        </div>
-
         {pdfUrl && (
           <div className="view-card section-card">
             <h3 className="section-header">Work Order PDF</h3>
-            <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
+            <iframe
+              src={pdfUrl}
+              className="pdf-frame"
+              title="Work Order PDF"
+            />
             <div className="mt-2">
               <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
                 Open PDF in new tab
