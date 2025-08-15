@@ -23,6 +23,8 @@ const {
   JWT_SECRET  = 'supersecretjwtkey',
   S3_BUCKET,                // e.g. 'fcg-crm-migration'
   AWS_REGION = 'us-east-2',
+  // optional comma-separated usernames that can be assigned even if not "tech"
+  ASSIGNEE_EXTRA_USERNAMES = 'Jeff,tech1',
 } = process.env;
 
 if (!S3_BUCKET) {
@@ -61,6 +63,12 @@ async function ensureCols() {
     { name: 'pdfPath',       type: 'VARCHAR(255) NULL' },
     { name: 'photoPath',     type: 'TEXT NULL' },
     { name: 'notes',         type: 'TEXT NULL' },
+    // already added previously
+    { name: 'billingPhone',  type: 'VARCHAR(32) NULL' },
+    { name: 'sitePhone',     type: 'VARCHAR(32) NULL' },
+    // NEW — optional customer contact
+    { name: 'customerPhone', type: 'VARCHAR(32) NULL' },
+    { name: 'customerEmail', type: 'VARCHAR(255) NULL' },
   ];
 
   console.log(`🔍 Checking schema on DB "${DB_NAME}"`);
@@ -120,7 +128,7 @@ if (S3_BUCKET) {
   app.use('/uploads', express.static(localDir)); // local-only convenience
 }
 
-// ─── AUTHENTICATION ───────────────────────────────────────────────────────────
+// ─── AUTH & AUTHZ ────────────────────────────────────────────────────────────
 app.post('/auth/register', async (req, res) => {
   const { username, password, role } = req.body;
   if (!username || !password || !role) {
@@ -170,6 +178,14 @@ function authenticate(req, res, next) {
     res.status(401).json({ error: 'Invalid token' });
   }
 }
+function authorize(...roles) {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    next();
+  };
+}
 
 // ─── HEALTH & ROOT ───────────────────────────────────────────────────────────
 app.get('/',    (_, res) => res.send('API running'));
@@ -178,7 +194,36 @@ app.get('/ping',(_, res) => res.send('pong'));
 // ─── USERS ───────────────────────────────────────────────────────────────────
 app.get('/users', authenticate, async (req, res) => {
   try {
-    const [rows] = await db.execute('SELECT id, username FROM users');
+    const { role, assignees, include } = req.query;
+
+    if (assignees === '1') {
+      const extras = (include && String(include).length
+        ? include
+        : ASSIGNEE_EXTRA_USERNAMES
+      )
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+
+      let sql = 'SELECT id, username, role FROM users WHERE role = ?';
+      const params = ['tech'];
+
+      if (extras.length) {
+        sql += ` OR username IN (${extras.map(() => '?').join(',')})`;
+        params.push(...extras);
+      }
+
+      const [rows] = await db.execute(sql, params);
+      return res.json(rows);
+    }
+
+    let sql = 'SELECT id, username, role FROM users';
+    const params = [];
+    if (role) {
+      sql += ' WHERE role = ?';
+      params.push(role);
+    }
+    const [rows] = await db.execute(sql, params);
     res.json(rows);
   } catch (err) {
     console.error('Users list error:', err);
@@ -230,13 +275,20 @@ app.post('/customers', authenticate, async (req, res) => {
   }
 });
 
-// ─── WORK ORDERS ─────────────────────────────────────────────────────────────
+// ─── WORK ORDERS (RBAC applied) ──────────────────────────────────────────────
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
+    let where = '';
+    const params = [];
+    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
+      where = ' WHERE w.assignedTo = ?';
+      params.push(req.user.id);
+    }
     const [rows] = await db.execute(
       `SELECT w.*, u.username AS assignedToName
          FROM work_orders w
-         LEFT JOIN users u ON w.assignedTo = u.id`
+         LEFT JOIN users u ON w.assignedTo = u.id${where}`,
+      params
     );
     res.json(rows);
   } catch (err) {
@@ -248,14 +300,23 @@ app.get('/work-orders', authenticate, async (req, res) => {
 app.get('/work-orders/search', authenticate, async (req, res) => {
   const { customer = '', poNumber = '', siteLocation = '' } = req.query;
   try {
+    const params = [`%${customer}%`, `%${poNumber}%`, `%${siteLocation}%`];
+    let where =
+      ` WHERE w.customer LIKE ?
+        AND w.poNumber LIKE ?
+        AND w.siteLocation LIKE ?`;
+
+    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
+      where += ' AND w.assignedTo = ?';
+      params.push(req.user.id);
+    }
+
     const [rows] = await db.execute(
       `SELECT w.*, u.username AS assignedToName
          FROM work_orders w
          LEFT JOIN users u ON w.assignedTo = u.id
-        WHERE w.customer LIKE ?
-          AND w.poNumber LIKE ?
-          AND w.siteLocation LIKE ?`,
-      [`%${customer}%`, `%${poNumber}%`, `%${siteLocation}%`]
+         ${where}`,
+      params
     );
     res.json(rows);
   } catch (err) {
@@ -266,9 +327,14 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
 
 app.get('/work-orders/:id', authenticate, async (req, res) => {
   try {
-    const [rows] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
-    if (!rows.length) return res.status(404).json({ error: 'Not found.' });
-    res.json(rows[0]);
+    const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Not found.' });
+
+    if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && row.assignedTo !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    res.json(row);
   } catch (err) {
     console.error('Work-order get error:', err);
     res.status(500).json({ error: 'Failed to fetch work order.' });
@@ -279,6 +345,12 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
   const { status } = req.body;
   if (!status) return res.status(400).json({ error: 'status is required.' });
   try {
+    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
+      const [[row]] = await db.execute('SELECT assignedTo FROM work_orders WHERE id = ?', [req.params.id]);
+      if (!row || row.assignedTo !== req.user.id) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
     await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [status, req.params.id]);
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
     res.json(updated);
@@ -288,7 +360,7 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
   }
 });
 
-// CREATE (null-safe, S3/local, optional assignedTo)
+// CREATE — includes billingPhone/sitePhone (older) + NEW customerPhone/customerEmail
 app.post(
   '/work-orders',
   authenticate,
@@ -305,7 +377,15 @@ app.post(
         billingAddress,
         problemDescription,
         status = 'Needs to be Scheduled',
-        assignedTo
+        assignedTo,
+
+        // older fields (used by your print template)
+        billingPhone = null,
+        sitePhone = null,
+
+        // NEW customer contact
+        customerPhone = null,
+        customerEmail = null,
       } = req.body;
 
       if (!customer || !billingAddress || !problemDescription) {
@@ -320,21 +400,27 @@ app.post(
         ? (S3_BUCKET ? req.files.photoFile[0].key : req.files.photoFile[0].filename)
         : null;
 
-      const values = [poNumber, customer, siteLocation, billingAddress, problemDescription, status, pdfPath, photoPath];
-      let sql = `INSERT INTO work_orders
-                 (poNumber,customer,siteLocation,billingAddress,problemDescription,status,pdfPath,photoPath) 
-                 VALUES (?,?,?,?,?,?,?,?)`;
+      const cols = [
+        'poNumber','customer','siteLocation','billingAddress',
+        'problemDescription','status','pdfPath','photoPath',
+        'billingPhone','sitePhone','customerPhone','customerEmail'
+      ];
+      const vals = [
+        poNumber, customer, siteLocation, billingAddress,
+        problemDescription, status, pdfPath, photoPath,
+        billingPhone || null, sitePhone || null,
+        customerPhone || null, customerEmail || null
+      ];
 
-      // If table has assignedTo, include it
       if (SCHEMA.hasAssignedTo && assignedTo !== undefined && assignedTo !== '') {
         const assignedToVal = Number.isFinite(Number(assignedTo)) ? Number(assignedTo) : null;
-        sql = `INSERT INTO work_orders
-               (poNumber,customer,siteLocation,billingAddress,problemDescription,status,pdfPath,photoPath,assignedTo)
-               VALUES (?,?,?,?,?,?,?,?,?)`;
-        values.push(assignedToVal);
+        cols.push('assignedTo');
+        vals.push(assignedToVal);
       }
 
-      const [r] = await db.execute(sql, values);
+      const placeholders = cols.map(() => '?').join(',');
+      const sql = `INSERT INTO work_orders (${cols.join(',')}) VALUES (${placeholders})`;
+      const [r] = await db.execute(sql, vals);
       res.status(201).json({ workOrderId: r.insertId });
     } catch (err) {
       console.error('Work-order create error:', err);
@@ -343,7 +429,7 @@ app.post(
   }
 );
 
-// EDIT (handles replacing files; null-safe)
+// EDIT — updates phones/emails too
 app.put(
   '/work-orders/:id/edit',
   authenticate,
@@ -357,10 +443,13 @@ app.put(
       const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
       if (!existing) return res.status(404).json({ error: 'Not found.' });
 
+      if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && existing.assignedTo !== req.user.id) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
       // PDF
       let pdfPath = existing.pdfPath;
       if (req.files?.pdfFile?.[0]) {
-        // delete old
         if (pdfPath) {
           try {
             if (S3_BUCKET) {
@@ -389,22 +478,36 @@ app.put(
         billingAddress = existing.billingAddress,
         problemDescription = existing.problemDescription,
         status = existing.status,
-        assignedTo = existing.assignedTo
+        assignedTo = existing.assignedTo,
+
+        billingPhone = existing.billingPhone,
+        sitePhone = existing.sitePhone,
+
+        customerPhone = existing.customerPhone,
+        customerEmail = existing.customerEmail,
       } = req.body;
 
       let sql = `UPDATE work_orders
                  SET poNumber=?,customer=?,siteLocation=?,billingAddress=?,
-                     problemDescription=?,status=?,pdfPath=?,photoPath=?
+                     problemDescription=?,status=?,pdfPath=?,photoPath=?,
+                     billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?
                  WHERE id=?`;
-      const params = [poNumber, customer, siteLocation, billingAddress, problemDescription, status, pdfPath || null, merged.join(','), wid];
+      const params = [
+        poNumber, customer, siteLocation, billingAddress,
+        problemDescription, status, pdfPath || null, merged.join(','),
+        billingPhone || null, sitePhone || null,
+        customerPhone || null, customerEmail || null,
+        wid
+      ];
 
       if (SCHEMA.hasAssignedTo) {
         sql = `UPDATE work_orders
                SET poNumber=?,customer=?,siteLocation=?,billingAddress=?,
-                   problemDescription=?,status=?,pdfPath=?,photoPath=?,assignedTo=?
+                   problemDescription=?,status=?,pdfPath=?,photoPath=?,
+                   billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,assignedTo=?
                WHERE id=?`;
         const assignedToVal = (assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo);
-        params.splice(8, 0, assignedToVal); // insert before wid
+        params.splice(12, 0, assignedToVal); // insert before wid
       }
 
       await db.execute(sql, params);
@@ -417,14 +520,62 @@ app.put(
   }
 );
 
+// Assign work order (dispatcher/admin only)
+app.put('/work-orders/:id/assign', authenticate, authorize('dispatcher', 'admin'), express.json(), async (req, res) => {
+  try {
+    if (!SCHEMA.hasAssignedTo) return res.status(400).json({ error: 'assignedTo column missing' });
+    const { assignedTo } = req.body;
+    const val = (assignedTo === null || assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo);
+
+    if (val !== null) {
+      const [[u]] = await db.execute('SELECT id, role FROM users WHERE id = ?', [val]);
+      if (!u) return res.status(400).json({ error: 'Assignee not found' });
+      if (u.role !== 'tech') return res.status(400).json({ error: 'Assignee must be a tech' });
+    }
+
+    await db.execute('UPDATE work_orders SET assignedTo = ? WHERE id = ?', [val, req.params.id]);
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Assign error:', err);
+    res.status(500).json({ error: 'Failed to assign work order.' });
+  }
+});
+
+app.put('/work-orders/:id/update-date', authenticate, authorize('dispatcher', 'admin'), express.json(), async (req, res) => {
+  try {
+    const { scheduledDate, status } = req.body;
+    if (!scheduledDate) return res.status(400).json({ error: 'scheduledDate required' });
+
+    const params = [scheduledDate, req.params.id];
+    let sql = 'UPDATE work_orders SET scheduledDate = ? WHERE id = ?';
+    if (status) {
+      sql = 'UPDATE work_orders SET scheduledDate = ?, status = ? WHERE id = ?';
+      params.splice(1, 0, status);
+    }
+    await db.execute(sql, params);
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Update date error:', err);
+    res.status(500).json({ error: 'Failed to update date.' });
+  }
+});
+
 app.post('/work-orders/:id/notes', authenticate, express.json(), async (req, res) => {
   try {
     const wid = req.params.id;
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: 'Note text required.' });
-    const [[row]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [wid]);
-    const arr = row?.notes ? JSON.parse(row.notes) : [];
-    arr.push({ text, createdAt: new Date().toISOString() });
+
+    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
+      const [[row]] = await db.execute('SELECT assignedTo FROM work_orders WHERE id = ?', [wid]);
+      if (!row || row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const [[row2]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [wid]);
+    const arr = row2?.notes ? JSON.parse(row2.notes) : [];
+    arr.push({ text, createdAt: new Date().toISOString(), by: req.user.username });
     await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [JSON.stringify(arr), wid]);
     res.json({ notes: arr });
   } catch (err) {
@@ -439,7 +590,11 @@ app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (r
     const { photoPath } = req.body;
     if (!photoPath) return res.status(400).json({ error: 'photoPath required.' });
 
-    // delete file
+    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
+      const [[row]] = await db.execute('SELECT assignedTo FROM work_orders WHERE id = ?', [wid]);
+      if (!row || row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+    }
+
     try {
       if (S3_BUCKET) {
         await s3.deleteObject({ Bucket: S3_BUCKET, Key: photoPath }).promise();
@@ -451,7 +606,6 @@ app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (r
       console.warn('⚠️ Failed to delete file:', e.message);
     }
 
-    // update DB
     const [[existing]] = await db.execute('SELECT photoPath FROM work_orders WHERE id = ?', [wid]);
     const keep = (existing.photoPath || '')
       .split(',')
@@ -466,7 +620,7 @@ app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (r
   }
 });
 
-app.delete('/work-orders/:id', authenticate, async (req, res) => {
+app.delete('/work-orders/:id', authenticate, authorize('dispatcher', 'admin'), async (req, res) => {
   try {
     await db.execute('DELETE FROM work_orders WHERE id = ?', [req.params.id]);
     res.json({ message: 'Deleted.' });
@@ -482,13 +636,11 @@ app.get('/files', async (req, res) => {
     const key = req.query.key;
     if (!key) return res.status(400).json({ error: 'Missing ?key=' });
 
-    // Only allow keys under the uploads/ prefix
     if (!String(key).startsWith('uploads/')) {
       return res.status(400).json({ error: 'Invalid key' });
     }
 
     if (S3_BUCKET) {
-      // Pre-signed S3 URL good for 60 seconds
       const url = s3.getSignedUrl('getObject', {
         Bucket: S3_BUCKET,
         Key: key,
@@ -497,7 +649,6 @@ app.get('/files', async (req, res) => {
       return res.redirect(302, url);
     }
 
-    // Local disk fallback
     const uploadsDir = path.resolve(__dirname, 'uploads');
     const safePath = path.resolve(uploadsDir, key.replace(/^uploads\//, ''));
     if (!safePath.startsWith(uploadsDir)) {
