@@ -50,7 +50,7 @@ export default function ViewWorkOrder() {
     notes,
   } = workOrder;
 
-  // Parse notes from JSON/text
+  // Notes array
   let notesArray = [];
   if (notes) {
     try {
@@ -60,27 +60,26 @@ export default function ViewWorkOrder() {
     }
   }
 
-  // Files (S3/local safe URL)
-  const pdfUrl = pdfPath
-    ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}`
-    : null;
-
+  // File URLs (S3/local safe)
+  const pdfUrl = pdfPath ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}` : null;
   const attachments = (photoPath || "")
     .split(",")
     .map((p) => p.trim())
     .filter(Boolean);
 
   // ---------- PRINT helpers ----------
-  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // place file at /public/fcg-logo.png
+  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put file at /public/fcg-logo.png
 
-  // Heuristic: pull a place name from siteLocation when present, with the rest as address.
+  // Parse a "name + address" out of siteLocation
   function parseSite(loc) {
     const result = { name: customer || "", address: "" };
-    if (!loc) return { ...result, address: billingAddress || "" };
-
+    if (!loc) {
+      // No site => fall back to billing on left; keep right blank
+      return result;
+    }
     const s = String(loc).trim();
 
-    // pattern: "Name - 123 Main St, City ST"
+    // Pattern: "Name - 123 Main St, City ST"
     if (s.includes(" - ")) {
       const [namePart, ...rest] = s.split(" - ");
       result.name = namePart.trim() || result.name;
@@ -88,7 +87,7 @@ export default function ViewWorkOrder() {
       return result;
     }
 
-    // If first comma section looks like a name (no digits) and the next part looks like an address (has digits)
+    // If first segment looks like a place (no digits) and the next looks like an address (has digits)
     const parts = s.split(",").map((x) => x.trim());
     if (parts.length >= 2 && !/\d/.test(parts[0]) && /\d/.test(parts[1])) {
       result.name = parts[0] || result.name;
@@ -96,18 +95,16 @@ export default function ViewWorkOrder() {
       return result;
     }
 
-    // Otherwise, treat the whole thing as address
+    // Otherwise treat the whole thing as address
     result.address = s;
     return result;
   }
 
   const site = parseSite(siteLocation);
-  const rightAddress = site.address || billingAddress || "";
   const printDate = moment().format("MM/DD/YYYY");
-  const sched = scheduledDate ? moment(scheduledDate).format("MM/DD/YYYY HH:mm") : "";
 
-  const safe = (s) =>
-    (s ?? "")
+  const safe = (x) =>
+    (x ?? "")
       .toString()
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
@@ -135,7 +132,7 @@ export default function ViewWorkOrder() {
 
     .spacer-10 { height: 10px; }
 
-    /* Two-column info (no city/state rows) */
+    /* Two column table: only Name + Address on both sides, plus Date at top */
     .two-col { width: 100%; border-collapse: collapse; }
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
     .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
@@ -186,25 +183,16 @@ export default function ViewWorkOrder() {
         <td>${safe(customer || "")}</td>
         <th class="label">Name</th>
         <td>${safe(site.name || "")}</td>
-        <th class="label">Scheduled</th>
-        <td>${safe(sched)}</td>
-      </tr>
-
-      <tr>
-        <th class="label">Address</th>
-        <td><!-- intentionally blank --></td>
-        <th class="label">Address</th>
-        <td>${safe(rightAddress)}</td>
-        <th class="label">Phone</th>
+        <th class="label"></th>
         <td></td>
       </tr>
 
       <tr>
-        <th class="label">Email</th>
-        <td></td>
-        <th class="label">Billing Address</th>
+        <th class="label">Address</th>
         <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
-        <th class="label">Email</th>
+        <th class="label">Address</th>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(site.address || "")}</pre></td>
+        <th class="label"></th>
         <td></td>
       </tr>
     </table>
@@ -233,9 +221,7 @@ export default function ViewWorkOrder() {
     </div>
   </div>
   <script>
-    window.onload = function() {
-      setTimeout(function(){ window.print(); window.close(); }, 150);
-    };
+    window.onload = function() { setTimeout(function(){ window.print(); window.close(); }, 150); };
   </script>
 </body>
 </html>`;
@@ -250,7 +236,7 @@ export default function ViewWorkOrder() {
     w.document.close();
   };
 
-  // ---------- Notes / attachments ----------
+  // ---------- notes & attachments ----------
   const handleAddNote = async () => {
     if (!newNote.trim()) return;
     try {
@@ -286,46 +272,22 @@ export default function ViewWorkOrder() {
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
           <div className="view-actions">
-            <button className="btn btn-outline" onClick={handlePrint}>
-              🖨️ Print Work Order
-            </button>
-            <button className="back-btn" onClick={() => navigate("/work-orders")}>
-              ← Back to List
-            </button>
+            <button className="btn btn-outline" onClick={handlePrint}>🖨️ Print Work Order</button>
+            <button className="back-btn" onClick={() => navigate("/work-orders")}>← Back to List</button>
           </div>
         </div>
 
         <ul className="detail-list">
-          <li className="detail-item">
-            <span className="detail-label">WO/PO #:</span>
-            <span className="detail-value">{poNumber || id || "—"}</span>
-          </li>
-          <li className="detail-item">
-            <span className="detail-label">Customer:</span>
-            <span className="detail-value">{customer}</span>
-          </li>
-          <li className="detail-item">
-            <span className="detail-label">Site Location:</span>
-            <span className="detail-value">{siteLocation}</span>
-          </li>
-          <li className="detail-item">
-            <span className="detail-label">Billing Address:</span>
-            <span className="detail-value pre-wrap">{billingAddress}</span>
-          </li>
-          <li className="detail-item">
-            <span className="detail-label">Problem Description:</span>
-            <span className="detail-value pre-wrap">{problemDescription}</span>
-          </li>
-          <li className="detail-item">
-            <span className="detail-label">Status:</span>
-            <span className="detail-value">{status}</span>
-          </li>
+          <li className="detail-item"><span className="detail-label">WO/PO #:</span><span className="detail-value">{poNumber || id || "—"}</span></li>
+          <li className="detail-item"><span className="detail-label">Customer:</span><span className="detail-value">{customer}</span></li>
+          <li className="detail-item"><span className="detail-label">Site Location:</span><span className="detail-value">{siteLocation}</span></li>
+          <li className="detail-item"><span className="detail-label">Billing Address:</span><span className="detail-value pre-wrap">{billingAddress}</span></li>
+          <li className="detail-item"><span className="detail-label">Problem Description:</span><span className="detail-value pre-wrap">{problemDescription}</span></li>
+          <li className="detail-item"><span className="detail-label">Status:</span><span className="detail-value">{status}</span></li>
           <li className="detail-item">
             <span className="detail-label">Scheduled Date:</span>
             <span className="detail-value">
-              {scheduledDate
-                ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
-                : "Not Scheduled"}
+              {scheduledDate ? moment(scheduledDate).format("YYYY-MM-DD HH:mm") : "Not Scheduled"}
             </span>
           </li>
         </ul>
@@ -335,9 +297,7 @@ export default function ViewWorkOrder() {
             <h3 className="section-header">Work Order PDF</h3>
             <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
             <div className="mt-2">
-              <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
-                Open PDF in new tab
-              </a>
+              <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">Open PDF in new tab</a>
             </div>
           </div>
         )}
