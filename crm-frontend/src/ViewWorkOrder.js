@@ -98,7 +98,6 @@ export default function ViewWorkOrder() {
   // ---------- PRINT helpers ----------
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put logo at /public/fcg-logo.png
 
-  // Pull out site "name" and "address" if user typed "Name - address" or "Name, 123…"
   function parseSite(loc, fallbackName) {
     const result = { name: fallbackName || "", address: "" };
     if (!loc) return result;
@@ -160,7 +159,6 @@ export default function ViewWorkOrder() {
 
     .spacer-8 { height: 8px; }
 
-    /* Two main blocks only */
     table { border-collapse: collapse; width: 100%; }
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
     .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
@@ -221,9 +219,9 @@ export default function ViewWorkOrder() {
       </tr>
     </table>
 
-    <div class="desc-title">Description</div>
-    <!-- ✅ Problem Description printed inside the description box -->
-    <div class="desc-box">${safe(problemDescription || "")}</div>
+    <!-- ✅ EXACTLY WHAT YOU ASKED: description text ABOVE the blank box -->
+    <div class="desc-title">Description: ${safe(problemDescription || "")}</div>
+    <div class="desc-box"></div>
 
     <div class="auth-title">AUTHORIZATION TO PAY</div>
     <div class="auth-note">
@@ -297,7 +295,7 @@ export default function ViewWorkOrder() {
       <div className="view-card">
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
-          <div className="view-actions">
+        <div className="view-actions">
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
             </button>
@@ -342,7 +340,7 @@ export default function ViewWorkOrder() {
           </li>
         </ul>
 
-        {/* NEW: Print-only phone fields (stored locally) */}
+        {/* Print-only phone fields (stored locally) */}
         <div className="section-card">
           <h3 className="section-header">Print Fields (local only)</h3>
           <div className="print-fields">
