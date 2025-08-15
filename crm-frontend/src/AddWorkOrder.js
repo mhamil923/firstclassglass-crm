@@ -18,33 +18,40 @@ function decodeRoleFromJWT() {
 
 export default function AddWorkOrder() {
   const navigate = useNavigate();
-  const role = decodeRoleFromJWT(); // 'dispatcher' | 'admin' | 'tech'
+  const role = decodeRoleFromJWT(); // "dispatcher", "admin", "tech", etc.
 
+  // ---- form state
   const [workOrder, setWorkOrder] = useState({
     customer: "",
     poNumber: "",
-    siteLocation: "",
+    siteLocation: "",           // stays in state, but input is UNcontrolled
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
-    assignedTo: "",
+    assignedTo: "", // user id (string)
   });
 
+  // files
   const [pdfFile, setPdfFile] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
 
+  // lists
   const [customers, setCustomers] = useState([]);
   const [techs, setTechs] = useState([]);
+
+  // ui
   const [submitting, setSubmitting] = useState(false);
 
-  // refs for the Place Autocomplete Element
-  const placeElRef = useRef(null);
+  // google places (new Element API)
+  const pacRef = useRef(null);         // <gmpx-place-autocomplete>
+  const siteInputRef = useRef(null);   // the <input slot="input">
 
+  // ---------- load reference data + Places scripts once
   useEffect(() => {
-    // Load customers + techs
+    // customers + techs (dispatchers/admins see techs in dropdown)
     Promise.all([
       api.get("/customers"),
-      api.get("/users", { params: { assignees: 1 } }), // dispatcher list (techs + extras)
+      api.get("/users", { params: { assignees: "1" } }), // techs + allowed extras
     ])
       .then(([c, u]) => {
         setCustomers(c.data || []);
@@ -52,71 +59,105 @@ export default function AddWorkOrder() {
       })
       .catch((e) => console.error("Error loading customers/users:", e));
 
-    // Load Google Maps + Extended Component Library
+    // Google Places Element (modern)
     const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
     if (!key) {
-      console.warn("Google Maps key missing; Places autocomplete disabled.");
+      console.warn("Google Maps API key missing; Places autocomplete disabled.");
       return;
     }
 
-    const ensureScript = (id, src) =>
+    const ensureScript = ({ id, src, type }) =>
       new Promise((resolve, reject) => {
         const existing = document.getElementById(id);
         if (existing) return resolve();
         const s = document.createElement("script");
         s.id = id;
         s.src = src;
+        if (type) s.type = type;
         s.async = true;
-        s.defer = true;
         s.onload = resolve;
-        s.onerror = reject;
+        s.onerror = () => reject(new Error(`Failed to load ${src}`));
         document.body.appendChild(s);
       });
 
-    const mapsUrl = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async`;
-    const extUrl =
-      "https://unpkg.com/@googlemaps/extended-component-library@0.6/dist/extended-component-library.js";
+    // JS API (with places) + Extended Component Library (web components)
+    const jsApi = ensureScript({
+      id: "gmaps-js",
+      src: `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async`,
+    });
+    const elementsLib = ensureScript({
+      id: "gmpx-lib",
+      src: "https://unpkg.com/@googlemaps/extended-component-library@latest",
+      type: "module",
+    });
 
-    Promise.all([
-      ensureScript("gmaps-v3", mapsUrl),
-      ensureScript("gmpx-lib", extUrl),
-    ])
-      .then(() => customElements.whenDefined("gmpx-place-autocomplete"))
-      .then(() => {
-        // Wire events once element is in the DOM
-        const el = placeElRef.current;
-        if (!el) return;
+    Promise.all([jsApi, elementsLib])
+      .then(initAutocompleteElement)
+      .catch((err) => console.error("Google Maps load error:", err));
 
-        // Initialize with any existing value
-        el.value = workOrder.siteLocation || "";
-
-        // On selection from suggestions
-        el.addEventListener("gmpx-placechange", () => {
-          const place = el.getPlace?.();
-          const formatted =
-            place?.formattedAddress ||
-            place?.displayName ||
-            el.value ||
-            "";
-          setWorkOrder((prev) => ({ ...prev, siteLocation: formatted }));
-        });
-
-        // Keep state in sync while typing
-        el.addEventListener("input", () => {
-          setWorkOrder((prev) => ({ ...prev, siteLocation: el.value }));
-        });
-      })
-      .catch((e) => console.error("Maps/Places load failed:", e));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep element in sync if we programmatically change state
+  // Initialize the <gmpx-place-autocomplete> element
+  function initAutocompleteElement() {
+    const pacEl = pacRef.current;
+    const inputEl = siteInputRef.current;
+    if (!pacEl || !inputEl) return;
+
+    // Keep the <input> free-typing and sync to React state as the user types
+    const onInput = (e) => {
+      const val = e.target.value;
+      setWorkOrder((prev) => ({ ...prev, siteLocation: val }));
+    };
+    inputEl.addEventListener("input", onInput);
+
+    // When a place is selected, prefer "Name - formattedAddress"
+    const onPlace = () => {
+      try {
+        const place = pacEl.value; // new Element API
+        if (!place) return;
+        const name =
+          place.displayName?.text ||
+          place.displayName ||
+          place.name ||
+          ""; // try new fields first
+        const addr =
+          place.formattedAddress ||
+          place.formatted_address ||
+          inputEl.value ||
+          "";
+        const combined = name && addr && addr.indexOf(name) !== 0 ? `${name} - ${addr}` : addr;
+        // set input visually (uncontrolled) + update state
+        inputEl.value = combined;
+        setWorkOrder((prev) => ({ ...prev, siteLocation: combined }));
+      } catch (err) {
+        console.warn("placechange parse error:", err);
+      }
+    };
+    pacEl.addEventListener("gmpx-placechange", onPlace);
+
+    // seed input if we already have a siteLocation (e.g., user typed then navigated back)
+    if (workOrder.siteLocation) inputEl.value = workOrder.siteLocation;
+
+    // cleanup
+    return () => {
+      inputEl.removeEventListener("input", onInput);
+      pacEl.removeEventListener("gmpx-placechange", onPlace);
+    };
+  }
+
+  // if state changes (e.g., user picked a customer with stored address), reflect in the input once
   useEffect(() => {
-    const el = placeElRef.current;
-    if (el && el.value !== workOrder.siteLocation) {
-      el.value = workOrder.siteLocation || "";
+    if (siteInputRef.current && siteInputRef.current.value !== workOrder.siteLocation) {
+      // only update the DOM input if our state changed because of *non-typing* reasons
+      // (typing already updates both)
+      const el = siteInputRef.current;
+      const active = document.activeElement === el;
+      if (!active) el.value = workOrder.siteLocation || "";
     }
   }, [workOrder.siteLocation]);
 
+  // ---------- helpers
   const extractCustomerFromBilling = (addr) => {
     if (!addr) return "";
     const first = addr
@@ -140,6 +181,7 @@ export default function AddWorkOrder() {
 
       if (name === "billingAddress") {
         const first = extractCustomerFromBilling(value);
+        // only auto-fill customer if user hasn't set it explicitly
         const prevAuto = extractCustomerFromBilling(prev.billingAddress || "");
         if (!prev.customer || prev.customer === prevAuto) {
           upd.customer = first;
@@ -165,18 +207,25 @@ export default function AddWorkOrder() {
     return true;
   };
 
+  // ---------- submit
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
 
+    // Read current text directly from the DOM input (source of truth)
+    const siteLoc = siteInputRef.current?.value?.trim() || workOrder.siteLocation || "";
+
     const form = new FormData();
     form.append("customer", workOrder.customer);
     form.append("poNumber", workOrder.poNumber || "");
-    form.append("siteLocation", workOrder.siteLocation || "");
+    form.append("siteLocation", siteLoc);
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
     form.append("status", workOrder.status || "Needs to be Scheduled");
+
     if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
+
+    // IMPORTANT: field names must match server.js (pdfFile / photoFile)
     if (pdfFile) form.append("pdfFile", pdfFile);
     if (photoFile) form.append("photoFile", photoFile);
 
@@ -255,25 +304,20 @@ export default function AddWorkOrder() {
           />
         </div>
 
-        {/* Site Location (Place Autocomplete Element) */}
+        {/* Site Location (NEW: Place Autocomplete Element with an uncontrolled input) */}
         <div className="form-group">
           <label>Site Location</label>
-          {/* The custom element renders an <input> with Places suggestions */}
-          <gmpx-place-autocomplete
-            ref={placeElRef}
-            placeholder="Start typing address…"
-            style={{
-              display: "block",
-              width: "100%",
-              height: "40px",
-              border: "1px solid #ced4da",
-              borderRadius: "6px",
-              padding: "0 10px",
-              background: "#fff",
-            }}
-          ></gmpx-place-autocomplete>
-          <small className="help-text">
-            Start typing and choose a suggestion to auto-fill the full address.
+          <gmpx-place-autocomplete ref={pacRef} style={{ display: "block" }}>
+            <input
+              slot="input"
+              ref={siteInputRef}
+              className="form-control-custom"
+              placeholder="Start typing address…"
+              autoComplete="off"
+            />
+          </gmpx-place-autocomplete>
+          <small className="muted">
+            Start typing, then choose a suggestion. You can also type a free-form address.
           </small>
         </div>
 
@@ -331,7 +375,7 @@ export default function AddWorkOrder() {
           />
         </div>
 
-        {/* Photo Upload */}
+        {/* Photo Upload (optional, single) */}
         <div className="form-group">
           <label>Upload Photo</label>
           <input
