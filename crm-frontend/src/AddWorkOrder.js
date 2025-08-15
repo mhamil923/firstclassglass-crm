@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import api from "./api";
 import "./AddWorkOrder.css";
 
-/** Decode role from the JWT stored in localStorage (dispatcher/admin/tech) */
 function decodeRoleFromJWT() {
   try {
     const token = localStorage.getItem("jwt");
@@ -17,14 +16,14 @@ function decodeRoleFromJWT() {
   }
 }
 
-/** Load a script tag exactly once */
+// —— script helpers
 function ensureScript(id, src) {
   return new Promise((resolve, reject) => {
-    const existing = document.getElementById(id);
-    if (existing) {
-      if (existing.getAttribute("data-loaded") === "true") return resolve();
-      existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", (e) => reject(e));
+    const prev = document.getElementById(id);
+    if (prev) {
+      if (prev.getAttribute("data-loaded") === "true") return resolve();
+      prev.addEventListener("load", () => resolve());
+      prev.addEventListener("error", reject);
       return;
     }
     const s = document.createElement("script");
@@ -36,20 +35,18 @@ function ensureScript(id, src) {
       s.setAttribute("data-loaded", "true");
       resolve();
     };
-    s.onerror = (e) => reject(e);
+    s.onerror = reject;
     document.head.appendChild(s);
   });
 }
 
-/** Ensure Google Maps JS + Places lib + gmpx web components are available */
-async function ensureMapsAndGmpx() {
+async function loadMapsAndPlaces() {
   const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
   if (!key) {
-    console.warn("⚠️ REACT_APP_GOOGLE_MAPS_API_KEY missing; Places autocomplete disabled.");
+    console.warn("REACT_APP_GOOGLE_MAPS_API_KEY missing");
     return false;
   }
-
-  // 1) Google Maps JS (with Places)
+  // Load Maps JS (+ Places)
   if (!(window.google && window.google.maps && window.google.maps.places)) {
     await ensureScript(
       "gmaps-js",
@@ -58,22 +55,22 @@ async function ensureMapsAndGmpx() {
       )}&libraries=places&v=weekly&loading=async`
     );
   }
+  return true;
+}
 
-  // 2) Extended Component Library (registers <gmpx-place-autocomplete/>)
+async function loadGmpxIfNeeded() {
   if (!customElements.get("gmpx-place-autocomplete")) {
     await ensureScript(
       "gmpx-lib",
       "https://unpkg.com/@googlemaps/extended-component-library@latest/dist/extended-component-library.js"
     );
   }
-  return true;
 }
 
 export default function AddWorkOrder() {
   const navigate = useNavigate();
-  const role = decodeRoleFromJWT(); // "dispatcher", "admin", "tech", etc.
+  const role = decodeRoleFromJWT();
 
-  // ---- form state
   const [workOrder, setWorkOrder] = useState({
     customer: "",
     poNumber: "",
@@ -81,102 +78,109 @@ export default function AddWorkOrder() {
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
-    assignedTo: "", // user id (string)
+    assignedTo: "",
   });
 
-  // files
   const [pdfFile, setPdfFile] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
-
-  // lists
   const [customers, setCustomers] = useState([]);
-  const [assignees, setAssignees] = useState([]); // techs + allowed extras (Jeff, tech1)
-
-  // ui
+  const [assignees, setAssignees] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // refs for Places
   const siteInputRef = useRef(null);
+  const acRef = useRef(null);
   const gmpxRef = useRef(null);
 
-  // ---------- load reference data + Google Places Element once
+  // load data
   useEffect(() => {
-    // Load customers
-    api
-      .get("/customers")
-      .then((r) => setCustomers(r.data || []))
-      .catch((e) => console.error("Error loading customers:", e));
-
-    // Load assignable users (techs + Jeff, tech1; Mark excluded by backend)
-    api
-      .get("/users", { params: { assignees: 1 } })
-      .then((r) => setAssignees(r.data || []))
-      .catch((e) => console.error("Error loading assignees:", e));
-
-    // Ensure maps + gmpx are present and then bind autocomplete
-    (async () => {
-      const ok = await ensureMapsAndGmpx();
-      if (!ok) return;
-
-      // If the element is in the DOM, wire its event
-      const el = gmpxRef.current;
-      if (!el || !siteInputRef.current) return;
-
-      // Listen for place selection
-      const onPlace = (ev) => {
-        const place = ev?.detail?.place || {};
-        // New Places format uses camelCase keys; keep legacy fallbacks
-        const formatted =
-          place.formattedAddress ||
-          place.formatted_address ||
-          place.displayName?.text ||
-          siteInputRef.current.value ||
-          "";
-
-        setWorkOrder((prev) => ({
-          ...prev,
-          siteLocation: formatted,
-        }));
-      };
-
-      el.addEventListener("gmpx-placechange", onPlace);
-
-      // Clean up on unmount
-      return () => el.removeEventListener("gmpx-placechange", onPlace);
-    })();
+    api.get("/customers").then(r => setCustomers(r.data || [])).catch(console.error);
+    api.get("/users", { params: { assignees: 1 } })
+      .then(r => setAssignees(r.data || []))
+      .catch(console.error);
   }, []);
 
-  // ---------- helpers
+  // wire autocomplete (prefer legacy → fallback to gmpx)
+  useEffect(() => {
+    let cleanup = () => {};
+
+    (async () => {
+      const ok = await loadMapsAndPlaces();
+      if (!ok || !siteInputRef.current) return;
+
+      // 1) Try legacy Autocomplete first (this is what worked for you before)
+      const LegacyAuto = window.google?.maps?.places?.Autocomplete;
+      if (LegacyAuto) {
+        const ac = new LegacyAuto(siteInputRef.current, {
+          // 'geocode' gives broader address predictions than 'address'
+          types: ["geocode"],
+          fields: ["formatted_address", "name", "address_components", "geometry"],
+        });
+
+        // If you want to restrict to US/CA, uncomment:
+        // ac.setComponentRestrictions({ country: ["us", "ca"] });
+
+        const listener = ac.addListener("place_changed", () => {
+          const place = ac.getPlace() || {};
+          const formatted =
+            place.formatted_address ||
+            place.name ||
+            siteInputRef.current.value ||
+            "";
+          setWorkOrder(prev => ({ ...prev, siteLocation: formatted }));
+        });
+
+        acRef.current = ac;
+        cleanup = () => listener.remove();
+        return;
+      }
+
+      // 2) Fallback to the gmpx web component if legacy isn’t available
+      await loadGmpxIfNeeded();
+      const el = document.getElementById("gmpx-autocomplete-hook");
+      if (!el) return;
+
+      const onPlace = (ev) => {
+        const p = ev?.detail?.place || {};
+        const formatted =
+          p.formattedAddress ||
+          p.formatted_address ||
+          p.displayName?.text ||
+          siteInputRef.current.value ||
+          "";
+        setWorkOrder(prev => ({ ...prev, siteLocation: formatted }));
+      };
+      el.addEventListener("gmpx-placechange", onPlace);
+
+      cleanup = () => el.removeEventListener("gmpx-placechange", onPlace);
+    })();
+
+    return () => cleanup();
+  }, []);
+
+  // helpers
   const extractCustomerFromBilling = (addr) => {
     if (!addr) return "";
-    const first = addr
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean)[0];
+    const first = addr.split("\n").map(s => s.trim()).filter(Boolean)[0];
     return first || "";
-  };
+    };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setWorkOrder((prev) => {
+    setWorkOrder(prev => {
       const upd = { ...prev, [name]: value };
 
       if (name === "customer") {
-        const found = customers.find((c) => c.name === value);
-        if (found?.billingAddress) {
-          upd.billingAddress = found.billingAddress;
-        }
+        const found = customers.find(c => c.name === value);
+        if (found?.billingAddress) upd.billingAddress = found.billingAddress;
       }
 
       if (name === "billingAddress") {
         const first = extractCustomerFromBilling(value);
-        // only auto-fill customer if user hasn't set it explicitly
         const prevAuto = extractCustomerFromBilling(prev.billingAddress || "");
         if (!prev.customer || prev.customer === prevAuto) {
           upd.customer = first;
         }
       }
-
       return upd;
     });
   };
@@ -196,7 +200,6 @@ export default function AddWorkOrder() {
     return true;
   };
 
-  // ---------- submit
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
@@ -208,11 +211,7 @@ export default function AddWorkOrder() {
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
     form.append("status", workOrder.status || "Needs to be Scheduled");
-
-    // server supports assignedTo on create
     if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
-
-    // field names must match server.js (pdfFile / photoFile)
     if (pdfFile) form.append("pdfFile", pdfFile);
     if (photoFile) form.append("photoFile", photoFile);
 
@@ -223,11 +222,8 @@ export default function AddWorkOrder() {
       });
       navigate("/work-orders");
     } catch (err) {
-      const msg =
-        err?.response?.data?.error ||
-        err?.message ||
-        "Failed to save — check server logs";
-      console.error("⚠️ Error adding work order:", err);
+      const msg = err?.response?.data?.error || err?.message || "Failed to save — check server logs";
+      console.error("Add work order error:", err);
       alert(msg);
     } finally {
       setSubmitting(false);
@@ -291,7 +287,7 @@ export default function AddWorkOrder() {
           />
         </div>
 
-        {/* Site Location (Google Places Web Component) */}
+        {/* Site Location (Prefer legacy Places; fallback gmpx) */}
         <div className="form-group">
           <label>Site Location</label>
           <div style={{ position: "relative" }}>
@@ -305,16 +301,14 @@ export default function AddWorkOrder() {
               className="form-control-custom"
               autoComplete="off"
             />
-            {/* The suggestions UI is provided by this web component */}
+            {/* Fallback element; harmless if legacy Autocomplete is in use */}
             <gmpx-place-autocomplete
-              ref={gmpxRef}
+              id="gmpx-autocomplete-hook"
               for="siteLocationInput"
-              // optional: restrict to US/CA; remove if you want global
               country-codes="US,CA"
-              // positioning of the dropdown (end = bottom of the input)
               suggestions-overlay-position="end"
-              // show only addresses (not businesses). If you want both, remove this.
               type="address"
+              style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
             />
           </div>
         </div>
