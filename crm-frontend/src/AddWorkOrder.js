@@ -29,6 +29,10 @@ export default function AddWorkOrder() {
     problemDescription: "",
     status: "Needs to be Scheduled",
     assignedTo: "", // user id (string)
+
+    // NEW — optional customer contact (not required)
+    customerPhone: "",
+    customerEmail: "",
   });
 
   // files
@@ -37,88 +41,66 @@ export default function AddWorkOrder() {
 
   // lists
   const [customers, setCustomers] = useState([]);
-  const [assignees, setAssignees] = useState([]); // techs + allowed extras
+  const [techs, setTechs] = useState([]);
 
   // ui
   const [submitting, setSubmitting] = useState(false);
 
-  // Google Places (legacy Autocomplete) refs
+  // google places
   const siteInputRef = useRef(null);
   const autocompleteRef = useRef(null);
 
-  // ---------- load reference data + Google Places script once
+  // ---------- load reference data + Places script once
   useEffect(() => {
-    // Customers
-    api
-      .get("/customers")
-      .then((r) => setCustomers(r.data || []))
-      .catch((e) => console.error("Error loading customers:", e));
+    // Load customers and only TECH users
+    Promise.all([
+      api.get("/customers"),
+      api.get("/users", { params: { role: "tech" } }),
+    ])
+      .then(([c, u]) => {
+        setCustomers(c.data || []);
+        setTechs(u.data || []);
+      })
+      .catch((e) => console.error("Error loading customers/users:", e));
 
-    // Assignees (server: techs + allowlist); still hide Mark here
-    api
-      .get("/users", { params: { assignees: 1 } })
-      .then((r) => setAssignees((r.data || []).filter((u) => u.username !== "Mark")))
-      .catch((e) => console.error("Error loading assignees:", e));
-
-    // Google Places script
-    const key =
-      process.env.REACT_APP_GOOGLE_MAPS_API_KEY ||
-      // optional local override for troubleshooting ONLY:
-      (typeof window !== "undefined" ? window.__GMAPS_KEY__ : null);
-
-    if (!key) {
+    // google places script
+    const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
+    if (!key || key === "YOUR_ACTUAL_KEY_HERE") {
       console.warn("Google Maps API key missing; Places autocomplete disabled.");
       return;
     }
-
     const existing = document.getElementById("gmaps-script");
     if (existing) {
-      if (window.google?.maps?.places && siteInputRef.current) {
-        initAutocomplete();
-      } else {
-        existing.addEventListener("load", initAutocomplete, { once: true });
-      }
+      initAutocomplete();
       return;
     }
-
     const script = document.createElement("script");
     script.id = "gmaps-script";
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&v=weekly&loading=async`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async`;
     script.async = true;
-    script.defer = true;
     script.onload = initAutocomplete;
     script.onerror = () => console.error("Failed to load Google Maps script");
     document.body.appendChild(script);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------- initialize legacy Autocomplete on the plain input
+  // ---------- wire up Google Places Autocomplete on the input
   function initAutocomplete() {
-    try {
-      if (!window.google?.maps?.places || !siteInputRef.current) return;
+    if (!window.google || !siteInputRef.current) return;
 
-      // Destroy a previous instance if any
-      autocompleteRef.current = null;
-
-      const ac = new window.google.maps.places.Autocomplete(siteInputRef.current, {
-        types: ["address"],
-        fields: ["name", "formatted_address"], // what we need back
-      });
-
-      ac.addListener("place_changed", () => {
-        const place = ac.getPlace();
-        const name = place?.name || "";
-        const addr = place?.formatted_address || siteInputRef.current.value || "";
-        const combined =
-          name && addr && !addr.includes(name) ? `${name}, ${addr}` : addr || name;
-
-        setWorkOrder((prev) => ({ ...prev, siteLocation: combined }));
-      });
-
-      autocompleteRef.current = ac;
-    } catch (err) {
-      console.error("Autocomplete init failed:", err);
-    }
+    // Using classic Autocomplete (works for your account)
+    const ac = new window.google.maps.places.Autocomplete(siteInputRef.current, {
+      types: ["address"],
+    });
+    ac.addListener("place_changed", () => {
+      const place = ac.getPlace();
+      const addr =
+        (place && place.formatted_address) ||
+        siteInputRef.current.value ||
+        "";
+      setWorkOrder((prev) => ({ ...prev, siteLocation: addr }));
+    });
+    autocompleteRef.current = ac;
   }
 
   // ---------- helpers
@@ -145,6 +127,7 @@ export default function AddWorkOrder() {
 
       if (name === "billingAddress") {
         const first = extractCustomerFromBilling(value);
+        // only auto-fill customer if user hasn't set it explicitly
         const prevAuto = extractCustomerFromBilling(prev.billingAddress || "");
         if (!prev.customer || prev.customer === prevAuto) {
           upd.customer = first;
@@ -183,7 +166,14 @@ export default function AddWorkOrder() {
     form.append("problemDescription", workOrder.problemDescription);
     form.append("status", workOrder.status || "Needs to be Scheduled");
 
+    // NEW — optional customer contact
+    form.append("customerPhone", workOrder.customerPhone || "");
+    form.append("customerEmail", workOrder.customerEmail || "");
+
+    // server supports assignedTo on create
     if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
+
+    // field names must match server.js (pdfFile / photoFile)
     if (pdfFile) form.append("pdfFile", pdfFile);
     if (photoFile) form.append("photoFile", photoFile);
 
@@ -229,6 +219,32 @@ export default function AddWorkOrder() {
           </datalist>
         </div>
 
+        {/* NEW — optional customer contact */}
+        <div className="form-group">
+          <label className="form-label">Customer Phone (optional)</label>
+          <input
+            name="customerPhone"
+            value={workOrder.customerPhone}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="(###) ###-####"
+            autoComplete="tel"
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Customer Email (optional)</label>
+          <input
+            name="customerEmail"
+            type="email"
+            value={workOrder.customerEmail}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="name@example.com"
+            autoComplete="email"
+          />
+        </div>
+
         {/* Assign to Tech (hide for tech users) */}
         {role !== "tech" && (
           <div className="form-group">
@@ -240,7 +256,7 @@ export default function AddWorkOrder() {
               className="form-select-custom"
             >
               <option value="">— Unassigned —</option>
-              {assignees.map((u) => (
+              {techs.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.username}
                 </option>
@@ -262,17 +278,17 @@ export default function AddWorkOrder() {
           />
         </div>
 
-        {/* Site Location (legacy Google Places Autocomplete) */}
+        {/* Site Location (Google Places) */}
         <div className="form-group">
           <label className="form-label">Site Location</label>
           <input
-            ref={siteInputRef}
             name="siteLocation"
+            ref={siteInputRef}
             value={workOrder.siteLocation}
             onChange={handleChange}
             placeholder="Start typing address…"
             className="form-control-custom"
-            autoComplete="street-address"
+            autoComplete="off"
           />
         </div>
 
@@ -325,7 +341,7 @@ export default function AddWorkOrder() {
           <input
             type="file"
             accept="application/pdf"
-            onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
+            onChange={handlePdfChange}
             className="form-file-custom"
           />
         </div>
@@ -336,7 +352,7 @@ export default function AddWorkOrder() {
           <input
             type="file"
             accept="image/*"
-            onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+            onChange={handlePhotoChange}
             className="form-file-custom"
           />
         </div>

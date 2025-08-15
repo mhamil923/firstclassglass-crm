@@ -15,7 +15,7 @@ export default function ViewWorkOrder() {
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
-  // NEW: print-only phone fields (persisted locally per work order)
+  // print-only phone fields (persisted locally per work order)
   const [billingPhone, setBillingPhone] = useState("");
   const [sitePhone, setSitePhone] = useState("");
 
@@ -72,6 +72,10 @@ export default function ViewWorkOrder() {
     pdfPath,
     photoPath,
     notes,
+
+    // NEW from backend
+    customerPhone,
+    customerEmail,
   } = workOrder;
 
   // Parse existing notes
@@ -129,7 +133,7 @@ export default function ViewWorkOrder() {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-  // -------- PRINT: open a new window with a clean template and print it
+  // -------- PRINT: open a new window with your existing template and print it
   const handlePrint = () => {
     const siteParsed = parseSite(siteLocation, customer);
     const siteName = siteParsed.name || customer || "";
@@ -219,9 +223,8 @@ export default function ViewWorkOrder() {
       </tr>
     </table>
 
-    <!-- ✅ EXACTLY WHAT YOU ASKED: description text ABOVE the blank box -->
-    <div class="desc-title">Description: ${safe(problemDescription || "")}</div>
-    <div class="desc-box"></div>
+    <div class="desc-title">Problem Description</div>
+    <div class="desc-box">${safe(problemDescription || "")}</div>
 
     <div class="auth-title">AUTHORIZATION TO PAY</div>
     <div class="auth-note">
@@ -273,7 +276,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Upload attachments immediately on selection
   const handleAttachmentChange = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -295,7 +297,7 @@ export default function ViewWorkOrder() {
       <div className="view-card">
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
-        <div className="view-actions">
+          <div className="view-actions">
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
             </button>
@@ -314,6 +316,17 @@ export default function ViewWorkOrder() {
             <span className="detail-label">Customer:</span>
             <span className="detail-value">{customer}</span>
           </li>
+
+          {/* NEW — show saved customer phone/email */}
+          <li className="detail-item">
+            <span className="detail-label">Customer Phone:</span>
+            <span className="detail-value">{customerPhone || "—"}</span>
+          </li>
+          <li className="detail-item">
+            <span className="detail-label">Customer Email:</span>
+            <span className="detail-value">{customerEmail || "—"}</span>
+          </li>
+
           <li className="detail-item">
             <span className="detail-label">Site Location:</span>
             <span className="detail-value">{siteLocation}</span>
@@ -340,7 +353,7 @@ export default function ViewWorkOrder() {
           </li>
         </ul>
 
-        {/* Print-only phone fields (stored locally) */}
+        {/* Print-only phone fields (local only for template phones) */}
         <div className="section-card">
           <h3 className="section-header">Print Fields (local only)</h3>
           <div className="print-fields">
