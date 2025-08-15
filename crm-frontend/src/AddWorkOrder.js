@@ -16,61 +16,11 @@ function decodeRoleFromJWT() {
   }
 }
 
-// —— script helpers
-function ensureScript(id, src) {
-  return new Promise((resolve, reject) => {
-    const prev = document.getElementById(id);
-    if (prev) {
-      if (prev.getAttribute("data-loaded") === "true") return resolve();
-      prev.addEventListener("load", () => resolve());
-      prev.addEventListener("error", reject);
-      return;
-    }
-    const s = document.createElement("script");
-    s.id = id;
-    s.src = src;
-    s.async = true;
-    s.defer = true;
-    s.onload = () => {
-      s.setAttribute("data-loaded", "true");
-      resolve();
-    };
-    s.onerror = reject;
-    document.head.appendChild(s);
-  });
-}
-
-async function loadMapsAndPlaces() {
-  const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-  if (!key) {
-    console.warn("REACT_APP_GOOGLE_MAPS_API_KEY missing");
-    return false;
-  }
-  // Load Maps JS (+ Places)
-  if (!(window.google && window.google.maps && window.google.maps.places)) {
-    await ensureScript(
-      "gmaps-js",
-      `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(
-        key
-      )}&libraries=places&v=weekly&loading=async`
-    );
-  }
-  return true;
-}
-
-async function loadGmpxIfNeeded() {
-  if (!customElements.get("gmpx-place-autocomplete")) {
-    await ensureScript(
-      "gmpx-lib",
-      "https://unpkg.com/@googlemaps/extended-component-library@latest/dist/extended-component-library.js"
-    );
-  }
-}
-
 export default function AddWorkOrder() {
   const navigate = useNavigate();
-  const role = decodeRoleFromJWT();
+  const role = decodeRoleFromJWT(); // "dispatcher", "admin", "tech", etc.
 
+  // ---- form state
   const [workOrder, setWorkOrder] = useState({
     customer: "",
     poNumber: "",
@@ -78,100 +28,119 @@ export default function AddWorkOrder() {
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
-    assignedTo: "",
+    assignedTo: "", // user id (string)
   });
 
+  // files
   const [pdfFile, setPdfFile] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
+
+  // lists
   const [customers, setCustomers] = useState([]);
-  const [assignees, setAssignees] = useState([]);
+  const [assignees, setAssignees] = useState([]); // techs + allowed extras
+
+  // ui
   const [submitting, setSubmitting] = useState(false);
 
+  // Google Places (legacy Autocomplete) refs
   const siteInputRef = useRef(null);
-  const acRef = useRef(null);
-  const gmpxRef = useRef(null);
+  const autocompleteRef = useRef(null);
 
-  // load data
+  // ---------- load reference data + Google Places script once
   useEffect(() => {
-    api.get("/customers").then(r => setCustomers(r.data || [])).catch(console.error);
-    api.get("/users", { params: { assignees: 1 } })
-      .then(r => setAssignees(r.data || []))
-      .catch(console.error);
-  }, []);
+    // Customers
+    api
+      .get("/customers")
+      .then((r) => setCustomers(r.data || []))
+      .catch((e) => console.error("Error loading customers:", e));
 
-  // wire autocomplete (prefer legacy → fallback to gmpx)
-  useEffect(() => {
-    let cleanup = () => {};
+    // Assignees (server: techs + allowlist); still hide Mark here
+    api
+      .get("/users", { params: { assignees: 1 } })
+      .then((r) => setAssignees((r.data || []).filter((u) => u.username !== "Mark")))
+      .catch((e) => console.error("Error loading assignees:", e));
 
-    (async () => {
-      const ok = await loadMapsAndPlaces();
-      if (!ok || !siteInputRef.current) return;
+    // Google Places script
+    const key =
+      process.env.REACT_APP_GOOGLE_MAPS_API_KEY ||
+      // optional local override for troubleshooting ONLY:
+      (typeof window !== "undefined" ? window.__GMAPS_KEY__ : null);
 
-      // 1) Try legacy Autocomplete first (this is what worked for you before)
-      const LegacyAuto = window.google?.maps?.places?.Autocomplete;
-      if (LegacyAuto) {
-        const ac = new LegacyAuto(siteInputRef.current, {
-          // 'geocode' gives broader address predictions than 'address'
-          types: ["geocode"],
-          fields: ["formatted_address", "name", "address_components", "geometry"],
-        });
+    if (!key) {
+      console.warn("Google Maps API key missing; Places autocomplete disabled.");
+      return;
+    }
 
-        // If you want to restrict to US/CA, uncomment:
-        // ac.setComponentRestrictions({ country: ["us", "ca"] });
-
-        const listener = ac.addListener("place_changed", () => {
-          const place = ac.getPlace() || {};
-          const formatted =
-            place.formatted_address ||
-            place.name ||
-            siteInputRef.current.value ||
-            "";
-          setWorkOrder(prev => ({ ...prev, siteLocation: formatted }));
-        });
-
-        acRef.current = ac;
-        cleanup = () => listener.remove();
-        return;
+    const existing = document.getElementById("gmaps-script");
+    if (existing) {
+      if (window.google?.maps?.places && siteInputRef.current) {
+        initAutocomplete();
+      } else {
+        existing.addEventListener("load", initAutocomplete, { once: true });
       }
+      return;
+    }
 
-      // 2) Fallback to the gmpx web component if legacy isn’t available
-      await loadGmpxIfNeeded();
-      const el = document.getElementById("gmpx-autocomplete-hook");
-      if (!el) return;
-
-      const onPlace = (ev) => {
-        const p = ev?.detail?.place || {};
-        const formatted =
-          p.formattedAddress ||
-          p.formatted_address ||
-          p.displayName?.text ||
-          siteInputRef.current.value ||
-          "";
-        setWorkOrder(prev => ({ ...prev, siteLocation: formatted }));
-      };
-      el.addEventListener("gmpx-placechange", onPlace);
-
-      cleanup = () => el.removeEventListener("gmpx-placechange", onPlace);
-    })();
-
-    return () => cleanup();
+    const script = document.createElement("script");
+    script.id = "gmaps-script";
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&v=weekly&loading=async`;
+    script.async = true;
+    script.defer = true;
+    script.onload = initAutocomplete;
+    script.onerror = () => console.error("Failed to load Google Maps script");
+    document.body.appendChild(script);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // helpers
+  // ---------- initialize legacy Autocomplete on the plain input
+  function initAutocomplete() {
+    try {
+      if (!window.google?.maps?.places || !siteInputRef.current) return;
+
+      // Destroy a previous instance if any
+      autocompleteRef.current = null;
+
+      const ac = new window.google.maps.places.Autocomplete(siteInputRef.current, {
+        types: ["address"],
+        fields: ["name", "formatted_address"], // what we need back
+      });
+
+      ac.addListener("place_changed", () => {
+        const place = ac.getPlace();
+        const name = place?.name || "";
+        const addr = place?.formatted_address || siteInputRef.current.value || "";
+        const combined =
+          name && addr && !addr.includes(name) ? `${name}, ${addr}` : addr || name;
+
+        setWorkOrder((prev) => ({ ...prev, siteLocation: combined }));
+      });
+
+      autocompleteRef.current = ac;
+    } catch (err) {
+      console.error("Autocomplete init failed:", err);
+    }
+  }
+
+  // ---------- helpers
   const extractCustomerFromBilling = (addr) => {
     if (!addr) return "";
-    const first = addr.split("\n").map(s => s.trim()).filter(Boolean)[0];
+    const first = addr
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)[0];
     return first || "";
-    };
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setWorkOrder(prev => {
+    setWorkOrder((prev) => {
       const upd = { ...prev, [name]: value };
 
       if (name === "customer") {
-        const found = customers.find(c => c.name === value);
-        if (found?.billingAddress) upd.billingAddress = found.billingAddress;
+        const found = customers.find((c) => c.name === value);
+        if (found?.billingAddress) {
+          upd.billingAddress = found.billingAddress;
+        }
       }
 
       if (name === "billingAddress") {
@@ -181,6 +150,7 @@ export default function AddWorkOrder() {
           upd.customer = first;
         }
       }
+
       return upd;
     });
   };
@@ -200,6 +170,7 @@ export default function AddWorkOrder() {
     return true;
   };
 
+  // ---------- submit
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
@@ -211,6 +182,7 @@ export default function AddWorkOrder() {
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
     form.append("status", workOrder.status || "Needs to be Scheduled");
+
     if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
     if (pdfFile) form.append("pdfFile", pdfFile);
     if (photoFile) form.append("photoFile", photoFile);
@@ -222,8 +194,11 @@ export default function AddWorkOrder() {
       });
       navigate("/work-orders");
     } catch (err) {
-      const msg = err?.response?.data?.error || err?.message || "Failed to save — check server logs";
-      console.error("Add work order error:", err);
+      const msg =
+        err?.response?.data?.error ||
+        err?.message ||
+        "Failed to save — check server logs";
+      console.error("⚠️ Error adding work order:", err);
       alert(msg);
     } finally {
       setSubmitting(false);
@@ -237,7 +212,7 @@ export default function AddWorkOrder() {
 
         {/* Customer */}
         <div className="form-group">
-          <label>Customer Name</label>
+          <label className="form-label">Customer Name</label>
           <input
             name="customer"
             list="customers-list"
@@ -257,7 +232,7 @@ export default function AddWorkOrder() {
         {/* Assign to Tech (hide for tech users) */}
         {role !== "tech" && (
           <div className="form-group">
-            <label>Assign To</label>
+            <label className="form-label">Assign To</label>
             <select
               name="assignedTo"
               value={workOrder.assignedTo}
@@ -276,7 +251,7 @@ export default function AddWorkOrder() {
 
         {/* PO Number */}
         <div className="form-group">
-          <label>PO Number</label>
+          <label className="form-label">PO Number</label>
           <input
             name="poNumber"
             value={workOrder.poNumber}
@@ -287,35 +262,23 @@ export default function AddWorkOrder() {
           />
         </div>
 
-        {/* Site Location (Prefer legacy Places; fallback gmpx) */}
+        {/* Site Location (legacy Google Places Autocomplete) */}
         <div className="form-group">
-          <label>Site Location</label>
-          <div style={{ position: "relative" }}>
-            <input
-              id="siteLocationInput"
-              name="siteLocation"
-              ref={siteInputRef}
-              value={workOrder.siteLocation}
-              onChange={handleChange}
-              placeholder="Start typing address…"
-              className="form-control-custom"
-              autoComplete="off"
-            />
-            {/* Fallback element; harmless if legacy Autocomplete is in use */}
-            <gmpx-place-autocomplete
-              id="gmpx-autocomplete-hook"
-              for="siteLocationInput"
-              country-codes="US,CA"
-              suggestions-overlay-position="end"
-              type="address"
-              style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
-            />
-          </div>
+          <label className="form-label">Site Location</label>
+          <input
+            ref={siteInputRef}
+            name="siteLocation"
+            value={workOrder.siteLocation}
+            onChange={handleChange}
+            placeholder="Start typing address…"
+            className="form-control-custom"
+            autoComplete="street-address"
+          />
         </div>
 
         {/* Billing Address */}
         <div className="form-group">
-          <label>Billing Address</label>
+          <label className="form-label">Billing Address</label>
           <textarea
             name="billingAddress"
             rows={3}
@@ -328,7 +291,7 @@ export default function AddWorkOrder() {
 
         {/* Problem Description */}
         <div className="form-group">
-          <label>Problem Description</label>
+          <label className="form-label">Problem Description</label>
           <textarea
             name="problemDescription"
             rows={4}
@@ -341,7 +304,7 @@ export default function AddWorkOrder() {
 
         {/* Status */}
         <div className="form-group">
-          <label>Status</label>
+          <label className="form-label">Status</label>
           <select
             name="status"
             value={workOrder.status}
@@ -358,22 +321,22 @@ export default function AddWorkOrder() {
 
         {/* PDF Upload */}
         <div className="form-group">
-          <label>Upload PDF</label>
+          <label className="form-label">Upload PDF</label>
           <input
             type="file"
             accept="application/pdf"
-            onChange={handlePdfChange}
+            onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
             className="form-file-custom"
           />
         </div>
 
         {/* Photo Upload (optional, single) */}
         <div className="form-group">
-          <label>Upload Photo</label>
+          <label className="form-label">Upload Photo</label>
           <input
             type="file"
             accept="image/*"
-            onChange={handlePhotoChange}
+            onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
             className="form-file-custom"
           />
         </div>
