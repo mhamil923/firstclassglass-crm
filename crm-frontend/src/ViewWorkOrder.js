@@ -15,6 +15,7 @@ export default function ViewWorkOrder() {
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
+  // Fetch work order details
   const fetchWorkOrder = async () => {
     try {
       const response = await api.get(`/work-orders/${id}`);
@@ -50,7 +51,7 @@ export default function ViewWorkOrder() {
     notes,
   } = workOrder;
 
-  // Notes array
+  // Parse existing notes
   let notesArray = [];
   if (notes) {
     try {
@@ -61,25 +62,29 @@ export default function ViewWorkOrder() {
   }
 
   // File URLs (S3/local safe)
-  const pdfUrl = pdfPath ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}` : null;
+  const pdfUrl = pdfPath
+    ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}`
+    : null;
+
+  // Existing attachments (image keys joined by comma)
   const attachments = (photoPath || "")
     .split(",")
     .map((p) => p.trim())
-    .filter(Boolean);
+    .filter((p) => p);
 
   // ---------- PRINT helpers ----------
-  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // place file at /public/fcg-logo.png
+  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put logo at /public/fcg-logo.png
 
-  // Parse a "name + address" out of siteLocation
-  function parseSite(loc) {
-    const result = { name: customer || "", address: "" };
+  // Pull out site "name" and "address" if user typed "Name - address" or "Name, 123…"
+  function parseSite(loc, fallbackName) {
+    const result = { name: fallbackName || "", address: "" };
     if (!loc) return result;
 
     const s = String(loc).trim();
 
     if (s.includes(" - ")) {
-      const [namePart, ...rest] = s.split(" - ");
-      result.name = namePart.trim() || result.name;
+      const [n, ...rest] = s.split(" - ");
+      result.name = (n || "").trim() || result.name;
       result.address = rest.join(" - ").trim();
       return result;
     }
@@ -95,8 +100,6 @@ export default function ViewWorkOrder() {
     return result;
   }
 
-  const site = parseSite(siteLocation);
-
   const safe = (x) =>
     (x ?? "")
       .toString()
@@ -104,8 +107,12 @@ export default function ViewWorkOrder() {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
+  // -------- PRINT: open a new window with a clean template and print it
   const handlePrint = () => {
-    // Single-page Letter, no right-side Date column
+    const siteParsed = parseSite(siteLocation, customer);
+    const siteName = siteParsed.name || customer || "";
+    const siteAddr = siteParsed.address || "";
+
     const html = `<!doctype html>
 <html>
 <head>
@@ -114,7 +121,6 @@ export default function ViewWorkOrder() {
   <style>
     @page { size: Letter; margin: 0.5in; }
     * { box-sizing: border-box; }
-    html, body { height: auto; }
     body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; -webkit-print-color-adjust: exact; }
     .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; page-break-inside: avoid; }
 
@@ -128,14 +134,13 @@ export default function ViewWorkOrder() {
 
     .spacer-8 { height: 8px; }
 
-    /* Two main blocks only: Agreement Submitted To (left) and Work To Be Performed At (right) */
+    /* Two main blocks only */
     .two-col { width: 100%; border-collapse: collapse; }
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
     .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
     .two-col .label { width: 18%; }
 
     .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: center; }
-    /* Height tuned so the whole thing fits one Letter page with 0.5in margins */
     .desc-box { border: 1px solid #000; height: 5.5in; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; }
 
     .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 8px; }
@@ -170,19 +175,17 @@ export default function ViewWorkOrder() {
         <th colspan="2">Agreement Submitted To:</th>
         <th colspan="2">Work To Be Performed At:</th>
       </tr>
-
       <tr>
         <th class="label">Name</th>
         <td>${safe(customer || "")}</td>
         <th class="label">Name</th>
-        <td>${safe(${JSON.stringify(parseSite(siteLocation).name || customer || "")})}</td>
+        <td>${safe(siteName)}</td>
       </tr>
-
       <tr>
         <th class="label">Address</th>
         <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
         <th class="label">Address</th>
-        <td><pre style="margin:0;white-space:pre-wrap">${safe(${JSON.stringify(parseSite(siteLocation).address || "")})}</pre></td>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
       </tr>
     </table>
 
@@ -239,6 +242,7 @@ export default function ViewWorkOrder() {
     }
   };
 
+  // Upload attachments immediately on selection
   const handleAttachmentChange = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -261,22 +265,46 @@ export default function ViewWorkOrder() {
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
           <div className="view-actions">
-            <button className="btn btn-outline" onClick={handlePrint}>🖨️ Print Work Order</button>
-            <button className="back-btn" onClick={() => navigate("/work-orders")}>← Back to List</button>
+            <button className="btn btn-outline" onClick={handlePrint}>
+              🖨️ Print Work Order
+            </button>
+            <button className="back-btn" onClick={() => navigate("/work-orders")}>
+              ← Back to List
+            </button>
           </div>
         </div>
 
         <ul className="detail-list">
-          <li className="detail-item"><span className="detail-label">WO/PO #:</span><span className="detail-value">{poNumber || id || "—"}</span></li>
-          <li className="detail-item"><span className="detail-label">Customer:</span><span className="detail-value">{customer}</span></li>
-          <li className="detail-item"><span className="detail-label">Site Location:</span><span className="detail-value">{siteLocation}</span></li>
-          <li className="detail-item"><span className="detail-label">Billing Address:</span><span className="detail-value pre-wrap">{billingAddress}</span></li>
-          <li className="detail-item"><span className="detail-label">Problem Description:</span><span className="detail-value pre-wrap">{problemDescription}</span></li>
-          <li className="detail-item"><span className="detail-label">Status:</span><span className="detail-value">{status}</span></li>
+          <li className="detail-item">
+            <span className="detail-label">WO/PO #:</span>
+            <span className="detail-value">{poNumber || id || "—"}</span>
+          </li>
+          <li className="detail-item">
+            <span className="detail-label">Customer:</span>
+            <span className="detail-value">{customer}</span>
+          </li>
+          <li className="detail-item">
+            <span className="detail-label">Site Location:</span>
+            <span className="detail-value">{siteLocation}</span>
+          </li>
+          <li className="detail-item">
+            <span className="detail-label">Billing Address:</span>
+            <span className="detail-value pre-wrap">{billingAddress}</span>
+          </li>
+          <li className="detail-item">
+            <span className="detail-label">Problem Description:</span>
+            <span className="detail-value pre-wrap">{problemDescription}</span>
+          </li>
+          <li className="detail-item">
+            <span className="detail-label">Status:</span>
+            <span className="detail-value">{status}</span>
+          </li>
           <li className="detail-item">
             <span className="detail-label">Scheduled Date:</span>
             <span className="detail-value">
-              {scheduledDate ? moment(scheduledDate).format("YYYY-MM-DD HH:mm") : "Not Scheduled"}
+              {scheduledDate
+                ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
+                : "Not Scheduled"}
             </span>
           </li>
         </ul>
@@ -286,7 +314,9 @@ export default function ViewWorkOrder() {
             <h3 className="section-header">Work Order PDF</h3>
             <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
             <div className="mt-2">
-              <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">Open PDF in new tab</a>
+              <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
+                Open PDF in new tab
+              </a>
             </div>
           </div>
         )}
@@ -310,7 +340,11 @@ export default function ViewWorkOrder() {
 
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
-          <button className="toggle-note-btn" onClick={() => setShowNoteInput((v) => !v)}>
+
+          <button
+            className="toggle-note-btn"
+            onClick={() => setShowNoteInput((v) => !v)}
+          >
             {showNoteInput ? "Cancel" : "Add Note"}
           </button>
 
