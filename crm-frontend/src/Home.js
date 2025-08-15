@@ -15,8 +15,8 @@ export default function Home() {
     api
       .get("/work-orders")
       .then((response) => {
-        const data = response.data;
-        setOrders(Array.isArray(data) ? data : []);
+        const data = Array.isArray(response.data) ? response.data : [];
+        setOrders(data);
       })
       .catch((error) => {
         console.error("Error fetching work orders:", error);
@@ -24,50 +24,40 @@ export default function Home() {
       });
   }, []);
 
-  // initial load
   useEffect(() => {
     fetchOrders();
-  }, [fetchOrders]);
-
-  // refresh on window focus / tab visibility + periodic poll
-  useEffect(() => {
+    // refresh when coming back to this tab/window
     const onFocus = () => fetchOrders();
-    const onVis = () => {
-      if (document.visibilityState === "visible") fetchOrders();
-    };
     window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVis);
-
-    const interval = setInterval(fetchOrders, 30000); // 30s
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVis);
-      clearInterval(interval);
-    };
+    return () => window.removeEventListener("focus", onFocus);
   }, [fetchOrders]);
 
   const handleClick = (orderId) => {
     navigate(`/view-work-order/${orderId}`);
   };
 
-  // Use local timezone and day granularity
+  // Helper: interpret DB datetime as UTC then convert to local date string
+  const toLocalDateStr = (dt) =>
+    moment.utc(dt).local().format("YYYY-MM-DD");
+
+  const toLocalDateTimeStr = (dt) =>
+    moment.utc(dt).local().format("YYYY-MM-DD HH:mm");
+
+  const todayStr = moment().format("YYYY-MM-DD");
+
   const agendaOrders = orders.filter(
-    (o) =>
-      o.scheduledDate &&
-      moment(o.scheduledDate).local().isSame(moment(), "day")
+    (o) => o.scheduledDate && toLocalDateStr(o.scheduledDate) === todayStr
   );
 
   const upcomingOrders = orders.filter(
     (o) =>
       o.scheduledDate &&
-      moment(o.scheduledDate).local().isAfter(moment(), "day")
+      moment.utc(o.scheduledDate).local().isAfter(moment(), "day")
   );
 
   const waitingForApprovalOrders = orders.filter(
     (o) => o.status === "Waiting for Approval"
   );
-
-  const todayStr = moment().format("YYYY-MM-DD");
 
   return (
     <div className="home-container">
@@ -79,7 +69,13 @@ export default function Home() {
           Agenda for Today&nbsp;({todayStr})
         </h3>
         {agendaOrders.length > 0 ? (
-          <Table striped bordered={false} hover responsive className="styled-table">
+          <Table
+            striped
+            bordered={false}
+            hover
+            responsive
+            className="styled-table"
+          >
             <thead>
               <tr>
                 <th>PO #</th>
@@ -100,17 +96,15 @@ export default function Home() {
                   <td>{o.customer}</td>
                   <td>{o.siteLocation}</td>
                   <td>{o.problemDescription}</td>
-                  <td>
-                    {o.scheduledDate
-                      ? moment(o.scheduledDate).local().format("HH:mm")
-                      : ""}
-                  </td>
+                  <td>{toLocalDateTimeStr(o.scheduledDate)}</td>
                 </tr>
               ))}
             </tbody>
           </Table>
         ) : (
-          <p className="empty-text">No work orders scheduled for today.</p>
+          <p className="empty-text">
+            No work orders scheduled for today.
+          </p>
         )}
       </div>
 
@@ -118,7 +112,13 @@ export default function Home() {
       <div className="section-card">
         <h3 className="section-title">Upcoming Work Orders</h3>
         {upcomingOrders.length > 0 ? (
-          <Table striped bordered={false} hover responsive className="styled-table">
+          <Table
+            striped
+            bordered={false}
+            hover
+            responsive
+            className="styled-table"
+          >
             <thead>
               <tr>
                 <th>PO #</th>
@@ -139,11 +139,7 @@ export default function Home() {
                   <td>{o.customer}</td>
                   <td>{o.siteLocation}</td>
                   <td>{o.problemDescription}</td>
-                  <td>
-                    {o.scheduledDate
-                      ? moment(o.scheduledDate).local().format("YYYY-MM-DD HH:mm")
-                      : ""}
-                  </td>
+                  <td>{toLocalDateTimeStr(o.scheduledDate)}</td>
                 </tr>
               ))}
             </tbody>
@@ -155,9 +151,17 @@ export default function Home() {
 
       {/* Work Orders Waiting for Approval */}
       <div className="section-card">
-        <h3 className="section-title">Work Orders Waiting for Approval</h3>
+        <h3 className="section-title">
+          Work Orders Waiting for Approval
+        </h3>
         {waitingForApprovalOrders.length > 0 ? (
-          <Table striped bordered={false} hover responsive className="styled-table">
+          <Table
+            striped
+            bordered={false}
+            hover
+            responsive
+            className="styled-table"
+          >
             <thead>
               <tr>
                 <th>PO #</th>
@@ -184,7 +188,9 @@ export default function Home() {
             </tbody>
           </Table>
         ) : (
-          <p className="empty-text">No work orders waiting for approval.</p>
+          <p className="empty-text">
+            No work orders waiting for approval.
+          </p>
         )}
       </div>
     </div>
