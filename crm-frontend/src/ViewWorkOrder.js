@@ -222,6 +222,7 @@ export default function ViewWorkOrder() {
     </table>
 
     <div class="desc-title">Description</div>
+    <!-- ✅ Problem Description printed inside the description box -->
     <div class="desc-box">${safe(problemDescription || "")}</div>
 
     <div class="auth-title">AUTHORIZATION TO PAY</div>
