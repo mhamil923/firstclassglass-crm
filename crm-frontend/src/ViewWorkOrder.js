@@ -68,18 +68,15 @@ export default function ViewWorkOrder() {
     .filter(Boolean);
 
   // ---------- PRINT helpers ----------
-  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put file at /public/fcg-logo.png
+  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // place file at /public/fcg-logo.png
 
   // Parse a "name + address" out of siteLocation
   function parseSite(loc) {
     const result = { name: customer || "", address: "" };
-    if (!loc) {
-      // No site => fall back to billing on left; keep right blank
-      return result;
-    }
+    if (!loc) return result;
+
     const s = String(loc).trim();
 
-    // Pattern: "Name - 123 Main St, City ST"
     if (s.includes(" - ")) {
       const [namePart, ...rest] = s.split(" - ");
       result.name = namePart.trim() || result.name;
@@ -87,7 +84,6 @@ export default function ViewWorkOrder() {
       return result;
     }
 
-    // If first segment looks like a place (no digits) and the next looks like an address (has digits)
     const parts = s.split(",").map((x) => x.trim());
     if (parts.length >= 2 && !/\d/.test(parts[0]) && /\d/.test(parts[1])) {
       result.name = parts[0] || result.name;
@@ -95,13 +91,11 @@ export default function ViewWorkOrder() {
       return result;
     }
 
-    // Otherwise treat the whole thing as address
     result.address = s;
     return result;
   }
 
   const site = parseSite(siteLocation);
-  const printDate = moment().format("MM/DD/YYYY");
 
   const safe = (x) =>
     (x ?? "")
@@ -111,6 +105,7 @@ export default function ViewWorkOrder() {
       .replace(/>/g, "&gt;");
 
   const handlePrint = () => {
+    // Single-page Letter, no right-side Date column
     const html = `<!doctype html>
 <html>
 <head>
@@ -119,8 +114,9 @@ export default function ViewWorkOrder() {
   <style>
     @page { size: Letter; margin: 0.5in; }
     * { box-sizing: border-box; }
-    body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; }
-    .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; }
+    html, body { height: auto; }
+    body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; -webkit-print-color-adjust: exact; }
+    .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; page-break-inside: avoid; }
 
     .hdr { display: grid; grid-template-columns: 120px 1fr 220px; align-items: center; column-gap: 12px; }
     .logo { width: 100%; height: auto; }
@@ -130,25 +126,24 @@ export default function ViewWorkOrder() {
     .agree .title { font-size: 18px; font-weight: 700; text-transform: uppercase; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 2px; }
     .agree .no { margin-top: 6px; font-size: 12px; }
 
-    .spacer-10 { height: 10px; }
+    .spacer-8 { height: 8px; }
 
-    /* Two column table: only Name + Address on both sides, plus Date at top */
+    /* Two main blocks only: Agreement Submitted To (left) and Work To Be Performed At (right) */
     .two-col { width: 100%; border-collapse: collapse; }
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
     .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
     .two-col .label { width: 18%; }
-    .two-col .date-label { width: 10%; white-space: nowrap; }
-    .two-col .date-val { width: 16%; }
 
     .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: center; }
-    .desc-box { border: 1px solid #000; height: 6.5in; padding: 10px; white-space: pre-wrap; font-size: 12px; }
+    /* Height tuned so the whole thing fits one Letter page with 0.5in margins */
+    .desc-box { border: 1px solid #000; height: 5.5in; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; }
 
-    .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 10px; }
+    .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 8px; }
     .auth-note { font-size: 9px; text-align: center; margin-top: 6px; }
-    .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 20px; margin-top: 14px; align-items: end; }
+    .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 20px; margin-top: 12px; align-items: end; }
     .sign-line { border-bottom: 1px solid #000; height: 18px; }
     .sign-label { font-size: 10px; margin-top: 2px; }
-    .fine { font-size: 8px; color: #000; margin-top: 10px; text-align: left; }
+    .fine { font-size: 8px; color: #000; margin-top: 8px; text-align: left; }
   </style>
 </head>
 <body>
@@ -168,32 +163,26 @@ export default function ViewWorkOrder() {
       </div>
     </div>
 
-    <div class="spacer-10"></div>
+    <div class="spacer-8"></div>
 
     <table class="two-col">
       <tr>
         <th colspan="2">Agreement Submitted To:</th>
         <th colspan="2">Work To Be Performed At:</th>
-        <th class="date-label">Date:</th>
-        <td class="date-val">${safe(printDate)}</td>
       </tr>
 
       <tr>
         <th class="label">Name</th>
         <td>${safe(customer || "")}</td>
         <th class="label">Name</th>
-        <td>${safe(site.name || "")}</td>
-        <th class="label"></th>
-        <td></td>
+        <td>${safe(${JSON.stringify(parseSite(siteLocation).name || customer || "")})}</td>
       </tr>
 
       <tr>
         <th class="label">Address</th>
         <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
         <th class="label">Address</th>
-        <td><pre style="margin:0;white-space:pre-wrap">${safe(site.address || "")}</pre></td>
-        <th class="label"></th>
-        <td></td>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(${JSON.stringify(parseSite(siteLocation).address || "")})}</pre></td>
       </tr>
     </table>
 
