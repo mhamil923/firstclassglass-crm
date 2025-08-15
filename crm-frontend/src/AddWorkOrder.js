@@ -63,43 +63,85 @@ export default function AddWorkOrder() {
       })
       .catch((e) => console.error("Error loading customers/users:", e));
 
-    // google places script
-    const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-    if (!key || key === "YOUR_ACTUAL_KEY_HERE") {
-      console.warn("Google Maps API key missing; Places autocomplete disabled.");
-      return;
+// ---------- load Google Places robustly (v=weekly + importLibrary) ----------
+useEffect(() => {
+  const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
+  if (!key) {
+    console.warn("Google Maps API key missing; Places disabled.");
+    return;
+  }
+
+  const ensurePlacesAndInit = async () => {
+    // 1) load script if needed
+    if (!window.google || !window.google.maps) {
+      await new Promise((resolve, reject) => {
+        // avoid adding duplicates
+        const existing = document.querySelector('script[data-gmaps="1"]');
+        if (existing) {
+          existing.addEventListener('load', resolve, { once: true });
+          existing.addEventListener('error', reject, { once: true });
+          return;
+        }
+        const s = document.createElement("script");
+        s.src = `https://maps.googleapis.com/maps/api/js?key=${key}&v=weekly&libraries=places&loading=async`;
+        s.async = true;
+        s.defer = true;
+        s.dataset.gmaps = "1";
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
     }
-    const existing = document.getElementById("gmaps-script");
-    if (existing) {
-      initAutocomplete();
-      return;
+
+    // 2) explicitly import the Places lib (new pattern)
+    if (window.google?.maps?.importLibrary) {
+      await window.google.maps.importLibrary("places");
     }
-    const script = document.createElement("script");
-    script.id = "gmaps-script";
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async`;
-    script.async = true;
-    script.onload = initAutocomplete;
-    script.onerror = () => console.error("Failed to load Google Maps script");
-    document.body.appendChild(script);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+    // 3) init
+    initAutocomplete();
+  };
+
+  ensurePlacesAndInit().catch((e) =>
+    console.error("Failed to load Google Maps:", e)
+  );
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
 
   // ---------- wire up Google Places Autocomplete on the input
-  function initAutocomplete() {
-    if (!window.google || !siteInputRef.current) return;
-    const ac = new window.google.maps.places.Autocomplete(siteInputRef.current, {
-      types: ["address"],
-    });
-    ac.addListener("place_changed", () => {
-      const place = ac.getPlace();
-      const addr =
-        (place && place.formatted_address) ||
-        siteInputRef.current.value ||
-        "";
-      setWorkOrder((prev) => ({ ...prev, siteLocation: addr }));
-    });
-    autocompleteRef.current = ac;
+function initAutocomplete(retry = 8) {
+  const el = siteInputRef.current;
+  const g = window.google;
+  if (!el) return;
+
+  if (!g?.maps?.places?.Autocomplete) {
+    if (retry > 0) {
+      // tiny backoff to wait for the library to hydrate
+      return setTimeout(() => initAutocomplete(retry - 1), 200);
+    }
+    console.error("Places Autocomplete not available.");
+    return;
   }
+
+  const ac = new g.maps.places.Autocomplete(el, {
+    // show addresses; you can also try ["geocode"]
+    types: ["address"],
+    // only ask for what we use (helps stability)
+    fields: ["formatted_address", "name", "place_id"],
+  });
+
+  ac.addListener("place_changed", () => {
+    const place = ac.getPlace();
+    const addr =
+      (place && (place.formatted_address || place.name)) ||
+      el.value ||
+      "";
+    setWorkOrder((prev) => ({ ...prev, siteLocation: addr }));
+  });
+
+  autocompleteRef.current = ac;
+}
 
   // ---------- helpers
   const extractCustomerFromBilling = (addr) => {
