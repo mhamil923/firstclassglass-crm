@@ -15,6 +15,10 @@ export default function ViewWorkOrder() {
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
+  // NEW: print-only phone fields (persisted locally per work order)
+  const [billingPhone, setBillingPhone] = useState("");
+  const [sitePhone, setSitePhone] = useState("");
+
   // Fetch work order details
   const fetchWorkOrder = async () => {
     try {
@@ -27,8 +31,27 @@ export default function ViewWorkOrder() {
 
   useEffect(() => {
     fetchWorkOrder();
+    // load locally-saved phones for printing
+    try {
+      const saved = localStorage.getItem(`woPhones:${id}`);
+      if (saved) {
+        const obj = JSON.parse(saved);
+        if (obj.billingPhone) setBillingPhone(obj.billingPhone);
+        if (obj.sitePhone) setSitePhone(obj.sitePhone);
+      }
+    } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // persist phone fields whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        `woPhones:${id}`,
+        JSON.stringify({ billingPhone, sitePhone })
+      );
+    } catch {}
+  }, [id, billingPhone, sitePhone]);
 
   if (!workOrder) {
     return (
@@ -113,6 +136,9 @@ export default function ViewWorkOrder() {
     const siteName = siteParsed.name || customer || "";
     const siteAddr = siteParsed.address || "";
 
+    const billingPhonePrint = billingPhone || "";
+    const sitePhonePrint = sitePhone || "";
+
     const html = `<!doctype html>
 <html>
 <head>
@@ -135,20 +161,20 @@ export default function ViewWorkOrder() {
     .spacer-8 { height: 8px; }
 
     /* Two main blocks only */
-    .two-col { width: 100%; border-collapse: collapse; }
+    table { border-collapse: collapse; width: 100%; }
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
     .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
-    .two-col .label { width: 18%; }
+    .label { width: 18%; }
 
     .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: center; }
-    .desc-box { border: 1px solid #000; height: 5.5in; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; }
+    .desc-box { border: 1px solid #000; height: 6.0in; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; }
 
-    .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 8px; }
-    .auth-note { font-size: 9px; text-align: center; margin-top: 6px; }
-    .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 20px; margin-top: 12px; align-items: end; }
-    .sign-line { border-bottom: 1px solid #000; height: 18px; }
+    .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 6px; }
+    .auth-note { font-size: 8.5px; text-align: center; margin-top: 4px; }
+    .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 16px; margin-top: 10px; align-items: end; }
+    .sign-line { border-bottom: 1px solid #000; height: 16px; }
     .sign-label { font-size: 10px; margin-top: 2px; }
-    .fine { font-size: 8px; color: #000; margin-top: 8px; text-align: left; }
+    .fine { font-size: 8px; color: #000; margin-top: 6px; text-align: left; }
   </style>
 </head>
 <body>
@@ -186,6 +212,12 @@ export default function ViewWorkOrder() {
         <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
         <th class="label">Address</th>
         <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
+      </tr>
+      <tr>
+        <th class="label">Phone</th>
+        <td>${safe(billingPhonePrint)}</td>
+        <th class="label">Phone</th>
+        <td>${safe(sitePhonePrint)}</td>
       </tr>
     </table>
 
@@ -308,6 +340,34 @@ export default function ViewWorkOrder() {
             </span>
           </li>
         </ul>
+
+        {/* NEW: Print-only phone fields (stored locally) */}
+        <div className="section-card">
+          <h3 className="section-header">Print Fields (local only)</h3>
+          <div className="print-fields">
+            <div className="print-field">
+              <label>Agreement Submitted To — Phone</label>
+              <input
+                type="tel"
+                value={billingPhone}
+                onChange={(e) => setBillingPhone(e.target.value)}
+                placeholder="(###) ###-####"
+              />
+            </div>
+            <div className="print-field">
+              <label>Work To Be Performed At — Phone</label>
+              <input
+                type="tel"
+                value={sitePhone}
+                onChange={(e) => setSitePhone(e.target.value)}
+                placeholder="(###) ###-####"
+              />
+            </div>
+          </div>
+          <p className="muted-note">
+            These phone numbers are saved to your browser only and used in the printout. They are not stored on the server.
+          </p>
+        </div>
 
         {pdfUrl && (
           <div className="view-card section-card">
