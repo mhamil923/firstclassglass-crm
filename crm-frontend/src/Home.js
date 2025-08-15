@@ -26,7 +26,6 @@ export default function Home() {
 
   useEffect(() => {
     fetchOrders();
-    // refresh when coming back to this tab/window
     const onFocus = () => fetchOrders();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
@@ -36,28 +35,43 @@ export default function Home() {
     navigate(`/view-work-order/${orderId}`);
   };
 
-  // Helper: interpret DB datetime as UTC then convert to local date string
-  const toLocalDateStr = (dt) =>
-    moment.utc(dt).local().format("YYYY-MM-DD");
-
-  const toLocalDateTimeStr = (dt) =>
-    moment.utc(dt).local().format("YYYY-MM-DD HH:mm");
+  /**
+   * Parse scheduledDate correctly:
+   * - If it has a timezone marker (Z or +hh:mm), moment will honor it and we convert to local.
+   * - If it has no timezone (e.g. "YYYY-MM-DD" or "YYYY-MM-DD HH:mm"), treat it as already local.
+   */
+  const parseAsLocal = (dt) => {
+    if (!dt) return null;
+    const s = String(dt);
+    const hasZone = /[zZ]|[+\-]\d\d:?\d\d$/.test(s);
+    return hasZone ? moment(s).local() : moment(s);
+  };
 
   const todayStr = moment().format("YYYY-MM-DD");
 
-  const agendaOrders = orders.filter(
-    (o) => o.scheduledDate && toLocalDateStr(o.scheduledDate) === todayStr
-  );
+  const agendaOrders = orders.filter((o) => {
+    if (!o.scheduledDate) return false;
+    const m = parseAsLocal(o.scheduledDate);
+    if (!m.isValid()) return false;
+    return m.format("YYYY-MM-DD") === todayStr;
+  });
 
-  const upcomingOrders = orders.filter(
-    (o) =>
-      o.scheduledDate &&
-      moment.utc(o.scheduledDate).local().isAfter(moment(), "day")
-  );
+  const upcomingOrders = orders.filter((o) => {
+    if (!o.scheduledDate) return false;
+    const m = parseAsLocal(o.scheduledDate);
+    if (!m.isValid()) return false;
+    // strictly after today (next calendar day or later)
+    return m.isAfter(moment(), "day");
+  });
 
   const waitingForApprovalOrders = orders.filter(
     (o) => o.status === "Waiting for Approval"
   );
+
+  const fmtDateTime = (dt) => {
+    const m = parseAsLocal(dt);
+    return m && m.isValid() ? m.format("YYYY-MM-DD HH:mm") : "";
+  };
 
   return (
     <div className="home-container">
@@ -65,17 +79,9 @@ export default function Home() {
 
       {/* Agenda for Today */}
       <div className="section-card">
-        <h3 className="section-title">
-          Agenda for Today&nbsp;({todayStr})
-        </h3>
+        <h3 className="section-title">Agenda for Today&nbsp;({todayStr})</h3>
         {agendaOrders.length > 0 ? (
-          <Table
-            striped
-            bordered={false}
-            hover
-            responsive
-            className="styled-table"
-          >
+          <Table striped bordered={false} hover responsive className="styled-table">
             <thead>
               <tr>
                 <th>PO #</th>
@@ -96,15 +102,13 @@ export default function Home() {
                   <td>{o.customer}</td>
                   <td>{o.siteLocation}</td>
                   <td>{o.problemDescription}</td>
-                  <td>{toLocalDateTimeStr(o.scheduledDate)}</td>
+                  <td>{fmtDateTime(o.scheduledDate)}</td>
                 </tr>
               ))}
             </tbody>
           </Table>
         ) : (
-          <p className="empty-text">
-            No work orders scheduled for today.
-          </p>
+          <p className="empty-text">No work orders scheduled for today.</p>
         )}
       </div>
 
@@ -112,13 +116,7 @@ export default function Home() {
       <div className="section-card">
         <h3 className="section-title">Upcoming Work Orders</h3>
         {upcomingOrders.length > 0 ? (
-          <Table
-            striped
-            bordered={false}
-            hover
-            responsive
-            className="styled-table"
-          >
+          <Table striped bordered={false} hover responsive className="styled-table">
             <thead>
               <tr>
                 <th>PO #</th>
@@ -139,7 +137,7 @@ export default function Home() {
                   <td>{o.customer}</td>
                   <td>{o.siteLocation}</td>
                   <td>{o.problemDescription}</td>
-                  <td>{toLocalDateTimeStr(o.scheduledDate)}</td>
+                  <td>{fmtDateTime(o.scheduledDate)}</td>
                 </tr>
               ))}
             </tbody>
@@ -151,17 +149,9 @@ export default function Home() {
 
       {/* Work Orders Waiting for Approval */}
       <div className="section-card">
-        <h3 className="section-title">
-          Work Orders Waiting for Approval
-        </h3>
+        <h3 className="section-title">Work Orders Waiting for Approval</h3>
         {waitingForApprovalOrders.length > 0 ? (
-          <Table
-            striped
-            bordered={false}
-            hover
-            responsive
-            className="styled-table"
-          >
+          <Table striped bordered={false} hover responsive className="styled-table">
             <thead>
               <tr>
                 <th>PO #</th>
@@ -188,9 +178,7 @@ export default function Home() {
             </tbody>
           </Table>
         ) : (
-          <p className="empty-text">
-            No work orders waiting for approval.
-          </p>
+          <p className="empty-text">No work orders waiting for approval.</p>
         )}
       </div>
     </div>
