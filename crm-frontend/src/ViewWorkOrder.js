@@ -15,6 +15,22 @@ export default function ViewWorkOrder() {
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
+  // Local-only phone fields for printing
+  const [billingPhone, setBillingPhone] = useState(
+    localStorage.getItem("print_billingPhone") || ""
+  );
+  const [sitePhone, setSitePhone] = useState(
+    localStorage.getItem("print_sitePhone") || ""
+  );
+
+  useEffect(() => {
+    localStorage.setItem("print_billingPhone", billingPhone || "");
+  }, [billingPhone]);
+
+  useEffect(() => {
+    localStorage.setItem("print_sitePhone", sitePhone || "");
+  }, [sitePhone]);
+
   // Fetch work order details
   const fetchWorkOrder = async () => {
     try {
@@ -91,7 +107,7 @@ export default function ViewWorkOrder() {
     .map((p) => p.trim())
     .filter((p) => p);
 
-  // -------- PRINT: keep same template, but put Problem Description in the small DESCRIPTION box
+  // ---- PRINT TEMPLATE: put problemDescription into the small DESCRIPTION box; keep big blank box
   const handlePrint = () => {
     const formattedDate = scheduledDate
       ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
@@ -105,21 +121,16 @@ export default function ViewWorkOrder() {
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;");
 
-    // Try to split a “name” vs “address” if the Site Location includes both
     function parseSite(loc) {
       const s = (loc || "").trim();
       if (!s) return { name: "", address: "" };
-      // split on dash / en-dash / em-dash / colon if present
       const m = s.match(/(.+?)\s*[-–—:]\s*(.+)/);
       if (m) return { name: m[1].trim(), address: m[2].trim() };
-      // split on first comma if there are digits (street number) after it
       const i = s.indexOf(",");
       if (i > 0 && /\d/.test(s.slice(i + 1))) {
         return { name: s.slice(0, i).trim(), address: s.slice(i + 1).trim() };
       }
-      // if it starts with a number, assume only address
       if (/^\d/.test(s)) return { name: "", address: s };
-      // otherwise treat all as name
       return { name: s, address: "" };
     }
 
@@ -135,12 +146,12 @@ export default function ViewWorkOrder() {
     * { box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: #111; }
     .page { width: 100%; max-width: 8.5in; margin: 0 auto; }
-    .header { display:flex; align-items:center; gap: 12px; margin-bottom: 10px; }
+
+    .header { display:flex; align-items:center; gap: 12px; margin-bottom: 8px; }
     .logo { width: 120px; height: auto; object-fit: contain; }
     .head-right { flex:1; text-align:right; font-size: 12px; color:#555; }
-    .title { font-weight: 800; font-size: 18px; margin: 4px 0; }
+    .title { font-weight: 800; font-size: 18px; margin: 4px 0 8px; }
 
-    /* Top two boxes */
     .two-col { display:flex; gap: 12px; margin-top: 6px; }
     .box { flex:1; border: 2px solid #000; padding: 10px; min-height: 150px; }
     .box-title { font-weight: 800; font-size: 14px; margin-bottom: 6px; text-transform: uppercase; }
@@ -148,18 +159,12 @@ export default function ViewWorkOrder() {
     .label { width: 80px; font-weight: 600; font-size: 12px; }
     .value { flex:1; font-size: 12px; white-space: pre-wrap; }
 
-    /* Small DESCRIPTION box (Problem Description goes here) */
     .desc-small { margin-top: 12px; border: 2px solid #000; padding: 8px; }
     .desc-title { font-weight: 800; font-size: 13px; margin-bottom: 4px; }
     .desc-body { min-height: 70px; font-size: 12px; white-space: pre-wrap; }
 
-    /* Big blank area box — intentionally empty for handwriting */
     .big-blank { margin-top: 10px; border: 2px solid #000; height: 360px; }
 
-    /* footer signature lines if needed later (kept but not used) */
-    .muted { color:#666; font-size: 11px; }
-
-    /* keep everything on one page */
     .page { page-break-inside: avoid; }
   </style>
 </head>
@@ -181,13 +186,13 @@ export default function ViewWorkOrder() {
         <div class="box-title">Agreement Submitted To:</div>
         <div class="row"><div class="label">Name</div><div class="value">${safe(customer)}</div></div>
         <div class="row"><div class="label">Address</div><div class="value"><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress)}</pre></div></div>
-        <div class="row"><div class="label">Phone</div><div class="value">__________________________</div></div>
+        <div class="row"><div class="label">Phone</div><div class="value">${safe(billingPhone)}</div></div>
       </div>
       <div class="box">
         <div class="box-title">Work To Be Performed At:</div>
         <div class="row"><div class="label">Name</div><div class="value">${safe(site.name)}</div></div>
         <div class="row"><div class="label">Address</div><div class="value">${safe(site.address || siteLocation || "")}</div></div>
-        <div class="row"><div class="label">Phone</div><div class="value">__________________________</div></div>
+        <div class="row"><div class="label">Phone</div><div class="value">${safe(sitePhone)}</div></div>
       </div>
     </div>
 
@@ -239,9 +244,9 @@ export default function ViewWorkOrder() {
   return (
     <div className="view-container">
       <div className="view-card">
-        <div className="view-header-row" style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:"12px"}}>
-          <h2 className="view-title" style={{margin:0}}>Work Order Details</h2>
-          <div className="view-actions" style={{display:"flex", gap:"8px"}}>
+        <div className="view-header-row">
+          <h2 className="view-title">Work Order Details</h2>
+          <div className="view-actions">
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
             </button>
@@ -254,7 +259,7 @@ export default function ViewWorkOrder() {
         <ul className="detail-list">
           <li className="detail-item">
             <span className="detail-label">WO/PO #:</span>
-            <span className="detail-value">{poNumber || "—"}</span>
+            <span className="detail-value">{poNumber || id || "—"}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Customer:</span>
@@ -286,14 +291,38 @@ export default function ViewWorkOrder() {
           </li>
         </ul>
 
+        {/* Print-only phone fields (local only) */}
+        <div className="section-card">
+          <h3 className="section-header">Print Fields (local only)</h3>
+          <div className="print-fields" style={{ display: "grid", gap: "10px" }}>
+            <div className="print-field" style={{ display: "grid", gap: "6px" }}>
+              <label>Agreement Submitted To — Phone</label>
+              <input
+                type="tel"
+                value={billingPhone}
+                onChange={(e) => setBillingPhone(e.target.value)}
+                placeholder="(###) ###-####"
+              />
+            </div>
+            <div className="print-field" style={{ display: "grid", gap: "6px" }}>
+              <label>Work To Be Performed At — Phone</label>
+              <input
+                type="tel"
+                value={sitePhone}
+                onChange={(e) => setSitePhone(e.target.value)}
+                placeholder="(###) ###-####"
+              />
+            </div>
+          </div>
+          <p className="muted-note" style={{ color: "#6b7280", fontSize: 12, marginTop: 8 }}>
+            These phone numbers are saved to your browser only and used in the printout. They are not stored on the server.
+          </p>
+        </div>
+
         {pdfUrl && (
           <div className="view-card section-card">
             <h3 className="section-header">Work Order PDF</h3>
-            <iframe
-              src={pdfUrl}
-              className="pdf-frame"
-              title="Work Order PDF"
-            />
+            <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
             <div className="mt-2">
               <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
                 Open PDF in new tab
@@ -322,7 +351,6 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
 
-          {/* Toggle note form */}
           <button
             className="toggle-note-btn"
             onClick={() => setShowNoteInput((v) => !v)}
