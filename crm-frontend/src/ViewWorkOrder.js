@@ -15,7 +15,6 @@ export default function ViewWorkOrder() {
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
-  // Fetch work order details
   const fetchWorkOrder = async () => {
     try {
       const response = await api.get(`/work-orders/${id}`);
@@ -51,7 +50,7 @@ export default function ViewWorkOrder() {
     notes,
   } = workOrder;
 
-  // Parse existing notes
+  // Parse notes from JSON/text
   let notesArray = [];
   if (notes) {
     try {
@@ -61,88 +60,60 @@ export default function ViewWorkOrder() {
     }
   }
 
-  // Build safe URLs for files (works with S3 + local)
+  // Files (S3/local safe URL)
   const pdfUrl = pdfPath
     ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}`
     : null;
 
-  // Existing attachments (image keys joined by comma)
   const attachments = (photoPath || "")
     .split(",")
     .map((p) => p.trim())
-    .filter((p) => p);
+    .filter(Boolean);
 
-  // ---------- helpers for printing template ----------
-  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // <- put your logo here: /public/fcg-logo.png
+  // ---------- PRINT helpers ----------
+  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // place file at /public/fcg-logo.png
 
-  // Try to pull "name" and address lines out of the billingAddress for the left column
-  function splitBillingAddress(addr) {
-    if (!addr) return { name: "", line1: "", city: "", state: "", zip: "" };
-    const lines = String(addr)
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
+  // Heuristic: pull a place name from siteLocation when present, with the rest as address.
+  function parseSite(loc) {
+    const result = { name: customer || "", address: "" };
+    if (!loc) return { ...result, address: billingAddress || "" };
 
-    const name = lines[0] || customer || "";
-    const line1 = lines[1] || "";
-    const cityStateZip = lines[2] || "";
+    const s = String(loc).trim();
 
-    let city = "";
-    let state = "";
-    let zip = "";
-    const m = cityStateZip.match(
-      /^(.+?)[,\s]+([A-Z]{2})(?:\s+(\d{5}(?:-\d{4})?))?$/i
-    );
-    if (m) {
-      city = m[1] || "";
-      state = (m[2] || "").toUpperCase();
-      zip = m[3] || "";
+    // pattern: "Name - 123 Main St, City ST"
+    if (s.includes(" - ")) {
+      const [namePart, ...rest] = s.split(" - ");
+      result.name = namePart.trim() || result.name;
+      result.address = rest.join(" - ").trim();
+      return result;
     }
 
-    return { name, line1, city, state, zip };
-  }
-
-  function splitSiteAddress(addr) {
-    if (!addr) return { name: "", line1: "", city: "", state: "", zip: "" };
-    // siteLocation is typically a single formatted line; do our best:
-    const parts = String(addr).split(",").map((s) => s.trim());
-    // Heuristic: last two parts might be "City" and "ST ZIP"
-    let city = "";
-    let state = "";
-    let zip = "";
-    let line1 = parts[0] || addr;
-
-    if (parts.length >= 3) {
-      city = parts[parts.length - 2] || "";
-      const stZip = parts[parts.length - 1] || "";
-      const m = stZip.match(/^([A-Z]{2})\s+(\d{5}(?:-\d{4})?)?$/i);
-      if (m) {
-        state = (m[1] || "").toUpperCase();
-        zip = m[2] || "";
-        line1 = parts.slice(0, parts.length - 2).join(", ");
-      }
+    // If first comma section looks like a name (no digits) and the next part looks like an address (has digits)
+    const parts = s.split(",").map((x) => x.trim());
+    if (parts.length >= 2 && !/\d/.test(parts[0]) && /\d/.test(parts[1])) {
+      result.name = parts[0] || result.name;
+      result.address = parts.slice(1).join(", ");
+      return result;
     }
 
-    return { name: customer || "", line1, city, state, zip };
+    // Otherwise, treat the whole thing as address
+    result.address = s;
+    return result;
   }
 
-  const leftAddr = splitBillingAddress(billingAddress);
-  const rightAddr = splitSiteAddress(siteLocation);
+  const site = parseSite(siteLocation);
+  const rightAddress = site.address || billingAddress || "";
+  const printDate = moment().format("MM/DD/YYYY");
+  const sched = scheduledDate ? moment(scheduledDate).format("MM/DD/YYYY HH:mm") : "";
 
-  // -------- PRINT: open a new window with the Agreement template and print it
+  const safe = (s) =>
+    (s ?? "")
+      .toString()
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
   const handlePrint = () => {
-    const printDate = moment().format("MM/DD/YYYY");
-    const sched = scheduledDate
-      ? moment(scheduledDate).format("MM/DD/YYYY HH:mm")
-      : "";
-
-    const safe = (s) =>
-      (s ?? "")
-        .toString()
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-
     const html = `<!doctype html>
 <html>
 <head>
@@ -154,7 +125,6 @@ export default function ViewWorkOrder() {
     body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; }
     .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; }
 
-    /* Header */
     .hdr { display: grid; grid-template-columns: 120px 1fr 220px; align-items: center; column-gap: 12px; }
     .logo { width: 100%; height: auto; }
     .company h1 { margin: 0; font-size: 18px; font-weight: 700; }
@@ -162,36 +132,30 @@ export default function ViewWorkOrder() {
     .agree { text-align: right; }
     .agree .title { font-size: 18px; font-weight: 700; text-transform: uppercase; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 2px; }
     .agree .no { margin-top: 6px; font-size: 12px; }
-    .agree .no b { display: inline-block; min-width: 22px; border-bottom: 1px solid #000; padding: 0 4px; }
 
-    .spacer-8 { height: 8px; }
     .spacer-10 { height: 10px; }
 
-    /* Two-column info table */
+    /* Two-column info (no city/state rows) */
     .two-col { width: 100%; border-collapse: collapse; }
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
     .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
-    .two-col .small { width: 16%; }
-    .two-col .mid { width: 18%; }
+    .two-col .label { width: 18%; }
+    .two-col .date-label { width: 10%; white-space: nowrap; }
+    .two-col .date-val { width: 16%; }
 
-    /* Description big box */
     .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: center; }
     .desc-box { border: 1px solid #000; height: 6.5in; padding: 10px; white-space: pre-wrap; font-size: 12px; }
 
-    /* Footer: Authorization + signatures */
     .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 10px; }
     .auth-note { font-size: 9px; text-align: center; margin-top: 6px; }
-    .sign-row { display: grid; grid-template-columns: 1fr 120px; gap: 20px; margin-top: 14px; align-items: end; }
+    .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 20px; margin-top: 14px; align-items: end; }
     .sign-line { border-bottom: 1px solid #000; height: 18px; }
     .sign-label { font-size: 10px; margin-top: 2px; }
     .fine { font-size: 8px; color: #000; margin-top: 10px; text-align: left; }
-
-    .muted { color: #333; }
   </style>
 </head>
 <body>
   <div class="sheet">
-    <!-- Header -->
     <div class="hdr">
       <img class="logo" src="${safe(LOGO_URL)}" alt="First Class Glass logo" />
       <div class="company">
@@ -203,57 +167,45 @@ export default function ViewWorkOrder() {
       </div>
       <div class="agree">
         <div class="title">Agreement</div>
-        <div class="no">No. <b>${safe(poNumber || id)}</b></div>
+        <div class="no">No. ${safe(poNumber || id)}</div>
       </div>
     </div>
 
     <div class="spacer-10"></div>
 
-    <!-- Two column info -->
     <table class="two-col">
       <tr>
-        <th colspan="3">Agreement Submitted To:</th>
-        <th colspan="3">Work To Be Performed At:</th>
-        <th class="small">Date:</th>
-        <td class="small">${safe(printDate)}</td>
+        <th colspan="2">Agreement Submitted To:</th>
+        <th colspan="2">Work To Be Performed At:</th>
+        <th class="date-label">Date:</th>
+        <td class="date-val">${safe(printDate)}</td>
       </tr>
 
       <tr>
-        <th class="small">Name:</th>
-        <td colspan="2">${safe(leftAddr.name)}</td>
-        <th class="small">Name:</th>
-        <td colspan="2">${safe(rightAddr.name)}</td>
-        <th class="small">Scheduled:</th>
-        <td class="small">${safe(sched)}</td>
+        <th class="label">Name</th>
+        <td>${safe(customer || "")}</td>
+        <th class="label">Name</th>
+        <td>${safe(site.name || "")}</td>
+        <th class="label">Scheduled</th>
+        <td>${safe(sched)}</td>
       </tr>
 
       <tr>
-        <th>Address</th>
-        <td colspan="2">${safe(leftAddr.line1)}</td>
-        <th>Address</th>
-        <td colspan="4">${safe(rightAddr.line1)}</td>
+        <th class="label">Address</th>
+        <td><!-- intentionally blank --></td>
+        <th class="label">Address</th>
+        <td>${safe(rightAddress)}</td>
+        <th class="label">Phone</th>
+        <td></td>
       </tr>
 
       <tr>
-        <th class="small">City</th>
-        <td class="mid">${safe(leftAddr.city)}</td>
-        <th class="small">State</th>
-        <td class="small">${safe(leftAddr.state)}</td>
-        <th class="small">City</th>
-        <td class="mid">${safe(rightAddr.city)}</td>
-        <th class="small">State</th>
-        <td class="small">${safe(rightAddr.state)}</td>
-      </tr>
-
-      <tr>
-        <th class="small">Phone No.</th>
-        <td class="mid"></td>
-        <th class="small">Email</th>
-        <td class="mid"></td>
-        <th class="small">Phone No.</th>
-        <td class="mid"></td>
-        <th class="small">Email</th>
-        <td class="mid"></td>
+        <th class="label">Email</th>
+        <td></td>
+        <th class="label">Billing Address</th>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
+        <th class="label">Email</th>
+        <td></td>
       </tr>
     </table>
 
@@ -280,14 +232,9 @@ export default function ViewWorkOrder() {
       NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
     </div>
   </div>
-
   <script>
-    // Print automatically, then close
     window.onload = function() {
-      setTimeout(function() {
-        window.print();
-        window.close();
-      }, 150);
+      setTimeout(function(){ window.print(); window.close(); }, 150);
     };
   </script>
 </body>
@@ -303,7 +250,7 @@ export default function ViewWorkOrder() {
     w.document.close();
   };
 
-  // ---------- Notes + attachments handlers ----------
+  // ---------- Notes / attachments ----------
   const handleAddNote = async () => {
     if (!newNote.trim()) return;
     try {
@@ -317,14 +264,11 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Upload attachments immediately on selection (append to photos)
   const handleAttachmentChange = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
-
     const formData = new FormData();
     files.forEach((file) => formData.append("photoFile", file));
-
     try {
       await api.put(`/work-orders/${id}/edit`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -389,11 +333,7 @@ export default function ViewWorkOrder() {
         {pdfUrl && (
           <div className="view-card section-card">
             <h3 className="section-header">Work Order PDF</h3>
-            <iframe
-              src={pdfUrl}
-              className="pdf-frame"
-              title="Work Order PDF"
-            />
+            <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
             <div className="mt-2">
               <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
                 Open PDF in new tab
@@ -405,7 +345,7 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Attachments</h3>
           <div className="attachments">
-            {(attachments || []).map((relPath, i) => {
+            {attachments.map((relPath, i) => {
               const url = `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
               return (
                 <a key={i} href={url} target="_blank" rel="noopener noreferrer">
@@ -421,12 +361,7 @@ export default function ViewWorkOrder() {
 
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
-
-          {/* Toggle note form */}
-          <button
-            className="toggle-note-btn"
-            onClick={() => setShowNoteInput((v) => !v)}
-          >
+          <button className="toggle-note-btn" onClick={() => setShowNoteInput((v) => !v)}>
             {showNoteInput ? "Cancel" : "Add Note"}
           </button>
 
