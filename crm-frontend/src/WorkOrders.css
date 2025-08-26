@@ -1,6 +1,6 @@
 /* File: src/WorkOrders.css */
 
-/* your page container */
+/* Page container */
 .home-container {
   min-height: 100vh;              /* fill full viewport height */
   background-color: #F1F5F9;       /* light grey page background */
@@ -8,7 +8,7 @@
   box-sizing: border-box;
 }
 
-/* each “card” section */
+/* Each “card” section */
 .section-card {
   background: #ffffff;
   border-radius: 8px;
@@ -17,7 +17,7 @@
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
 }
 
-/* header row with title + add button */
+/* Header row with title + add button */
 .header-row {
   display: flex;
   justify-content: space-between;
@@ -25,33 +25,103 @@
   margin-bottom: 1rem;
 }
 
-/* filter row */
-.filter-row {
-  display: flex;
+/* Optional: heading color used by <h2 class="text-primary"> */
+.text-primary {
+  color: #2B2D42;
+  margin: 0;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   STATUS BUTTONS (new)
+   - Used for All, Parts In, Scheduled, Waiting for Approval, Waiting on Parts, Completed
+   - Buttons show a badge with counts
+   - Responsive and keyboard accessible
+   ────────────────────────────────────────────────────────────── */
+
+.status-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 1rem;
-  margin-bottom: 1rem;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;       /* light border */
+  border-radius: 8px;
+  font-weight: 600;
+  color: #111827;                  /* near-black text */
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.status-btn:hover {
+  background: #f9fafb;
+}
+
+.status-btn:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+}
+
+.status-btn.active {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+}
+
+.status-btn .badge {
+  display: inline-block;
+  min-width: 28px;
+  text-align: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #111827;   /* dark badge */
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.25rem;
+}
+
+/* If you decide to wrap the buttons in a container, these help.
+   (WorkOrders.js currently uses inline styles for the row.) */
+.status-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   (Legacy) Filter row — no longer used but kept for compatibility
+   ────────────────────────────────────────────────────────────── */
+.filter-row {
+  display: none; /* Hide the old dropdown filter row */
 }
 .filter-label {
   font-weight: 500;
   color: #3D5A80;
 }
 
-/* styled table */
+/* ──────────────────────────────────────────────────────────────
+   Styled table
+   ────────────────────────────────────────────────────────────── */
 .styled-table {
   width: 100%;
   border-collapse: separate; /* allow spacing between rows */
   border-spacing: 0 1rem;    /* vertical gap between “cards” */
 }
+
 .styled-table thead th {
   background: #2B2D42;
   color: #ffffff;
   border: none;
   padding: 0.75rem;
+  text-align: left;
+  font-weight: 600;
 }
+
 .styled-table tbody {
   background: transparent;
 }
+
 .styled-table tbody tr {
   background: #ffffff;              /* white card background */
   outline: 2px solid #3D5A80;       /* colored outline */
@@ -59,26 +129,39 @@
   border-radius: 6px;               /* rounded corners on outline */
   transition: background 0.2s, outline-color 0.2s;
 }
+
 .styled-table tbody tr:hover {
-  background: #98C379;              /* hover bg */
+  background: #E9F5FF;              /* subtle hover bg */
   outline-color: #2B2D42;           /* darker outline on hover */
 }
+
 .styled-table tbody tr td {
   border: none !important;          /* remove default cell borders */
   padding: 0.75rem 1rem;
+  vertical-align: top;
 }
 
-/* link-style cells */
+/* Link-style cells */
 .link-text {
   text-decoration: underline;
   color: #007bff;
   cursor: pointer;
 }
 
-/* empty state */
+/* Empty state */
 .empty-text {
   text-align: center;
   color: #8D99AE;
   font-style: italic;
   margin-top: 1rem;
+}
+
+/* Small responsive tweaks */
+@media (max-width: 768px) {
+  .home-container {
+    padding: 1rem;
+  }
+  .section-card {
+    padding: 1rem;
+  }
 }

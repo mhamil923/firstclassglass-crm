@@ -13,6 +13,9 @@ const multerS3   = require('multer-s3');
 const bcrypt     = require('bcrypt');
 const jwt        = require('jsonwebtoken');
 
+// Pin the Node.js process timezone (helps anything we timestamp server-side)
+process.env.TZ = process.env.APP_TZ || 'America/Chicago';
+
 // ─── CONFIG: env‐backed DB, JWT & S3 ──────────────────────────────────────────
 const {
   DB_HOST     = 'localhost',
@@ -27,26 +30,37 @@ const {
   ASSIGNEE_EXTRA_USERNAMES = 'Jeff,tech1',
 } = process.env;
 
-if (!S3_BUCKET) {
-  console.warn('⚠️ S3_BUCKET not set; using local disk for uploads.');
-} else {
+// Upload limits (server-side) — keep them generous but bounded
+const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || 25); // per file
+const MAX_FILES        = Number(process.env.MAX_FILES || 40);        // per request
+const MAX_FIELDS       = Number(process.env.MAX_FIELDS || 200);
+
+if (S3_BUCKET) {
   AWS.config.update({ region: AWS_REGION });
+} else {
+  console.warn('⚠️ S3_BUCKET not set; using local disk for uploads.');
 }
 const s3 = new AWS.S3();
 
 // ─── EXPRESS SETUP ───────────────────────────────────────────────────────────
 const app = express();
+app.set('trust proxy', true);
 app.use(cors({ origin: true, credentials: true }));
-app.use(bodyParser.json({ limit: '50mb' }));
-app.use(bodyParser.urlencoded({ extended: true }));
+// Raise JSON / URL-encoded limits for large metadata payloads (not used for multipart)
+app.use(bodyParser.json({ limit: '100mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '100mb' }));
 
 // ─── MYSQL POOL ───────────────────────────────────────────────────────────────
+// IMPORTANT: dateStrings keeps DATETIME/TIMESTAMP as plain strings (no UTC shifts)
 const db = mysql.createPool({
   host:     DB_HOST,
   user:     DB_USER,
   password: DB_PASS,
   database: DB_NAME,
   port:     Number(DB_PORT),
+  waitForConnections: true,
+  connectionLimit: 10,
+  dateStrings: true,
 });
 
 // ─── SCHEMA HELPERS ──────────────────────────────────────────────────────────
@@ -63,10 +77,8 @@ async function ensureCols() {
     { name: 'pdfPath',       type: 'VARCHAR(255) NULL' },
     { name: 'photoPath',     type: 'TEXT NULL' },
     { name: 'notes',         type: 'TEXT NULL' },
-    // already added previously
     { name: 'billingPhone',  type: 'VARCHAR(32) NULL' },
     { name: 'sitePhone',     type: 'VARCHAR(32) NULL' },
-    // NEW — optional customer contact
     { name: 'customerPhone', type: 'VARCHAR(32) NULL' },
     { name: 'customerEmail', type: 'VARCHAR(255) NULL' },
   ];
@@ -97,22 +109,42 @@ ensureCols()
   .catch(err => console.warn('⚠️ Initial schema check failed (continuing):', err.message));
 
 // ─── MULTER CONFIG (S3 or LOCAL) ──────────────────────────────────────────────
-let upload;
-if (S3_BUCKET) {
-  upload = multer({
-    storage: multerS3({
-      s3,
-      bucket: S3_BUCKET,
-      acl: 'private',
-      contentType: multerS3.AUTO_CONTENT_TYPE,
-      key: (req, file, cb) => {
-        const base = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-        const ext  = path.extname(file.originalname) || '';
-        cb(null, `uploads/${base}${ext}`);
-      }
-    })
-  });
-} else {
+const allowMime = (m) => {
+  if (!m) return false;
+  // allow images + pdf
+  return /^image\//.test(m) || m === 'application/pdf';
+};
+
+function makeUploader() {
+  const limits = {
+    fileSize: MAX_FILE_SIZE_MB * 1024 * 1024,
+    files:    MAX_FILES,
+    fields:   MAX_FIELDS,
+  };
+  const fileFilter = (req, file, cb) => {
+    const ok = allowMime(file.mimetype);
+    if (!ok) console.warn('🚫 Rejecting file type:', file.mimetype);
+    cb(null, ok);
+  };
+
+  if (S3_BUCKET) {
+    return multer({
+      storage: multerS3({
+        s3,
+        bucket: S3_BUCKET,
+        acl: 'private',
+        contentType: multerS3.AUTO_CONTENT_TYPE,
+        key: (req, file, cb) => {
+          const base = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+          const ext  = path.extname(file.originalname || '');
+          cb(null, `uploads/${base}${ext}`);
+        }
+      }),
+      limits,
+      fileFilter,
+    });
+  }
+
   const localDir = path.resolve(__dirname, 'uploads');
   if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
 
@@ -120,12 +152,40 @@ if (S3_BUCKET) {
     destination: (req, file, cb) => cb(null, localDir),
     filename: (req, file, cb) => {
       const base = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-      const ext  = path.extname(file.originalname) || '';
+      const ext  = path.extname(file.originalname || '');
       cb(null, `${base}${ext}`);
     }
   });
-  upload = multer({ storage });
-  app.use('/uploads', express.static(localDir)); // local-only convenience
+
+  return multer({ storage, limits, fileFilter });
+}
+
+const upload = makeUploader();
+
+// Convenience (local only) to view files
+if (!S3_BUCKET) {
+  const localDir = path.resolve(__dirname, 'uploads');
+  app.use('/uploads', express.static(localDir));
+}
+
+// Helper to wrap multer errors cleanly
+function withMulter(handler) {
+  return (req, res, next) => {
+    handler(req, res, (err) => {
+      if (!err) return next();
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({ error: `File too large (>${MAX_FILE_SIZE_MB}MB)` });
+      }
+      if (err.code === 'LIMIT_FILE_COUNT') {
+        return res.status(413).json({ error: `Too many files (max ${MAX_FILES})` });
+      }
+      if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+        return res.status(400).json({ error: 'Unexpected file field' });
+      }
+      console.error('Upload error:', err);
+      return res.status(400).json({ error: 'Upload failed: ' + err.message });
+    });
+  };
 }
 
 // ─── AUTH & AUTHZ ────────────────────────────────────────────────────────────
@@ -187,9 +247,15 @@ function authorize(...roles) {
   };
 }
 
+// Who am I? (helps mobile show Jeff-only UI)
+app.get('/auth/me', authenticate, (req, res) => {
+  res.json(req.user); // { id, username, role, iat, exp }
+});
+
 // ─── HEALTH & ROOT ───────────────────────────────────────────────────────────
 app.get('/',    (_, res) => res.send('API running'));
 app.get('/ping',(_, res) => res.send('pong'));
+app.get('/health', (_, res) => res.status(200).json({ ok: true }));
 
 // ─── USERS ───────────────────────────────────────────────────────────────────
 app.get('/users', authenticate, async (req, res) => {
@@ -360,14 +426,14 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
   }
 });
 
-// CREATE — includes billingPhone/sitePhone (older) + NEW customerPhone/customerEmail
+// CREATE — includes billing/site + NEW customer contact
 app.post(
   '/work-orders',
   authenticate,
-  upload.fields([
+  withMulter(upload.fields([
     { name: 'pdfFile',   maxCount: 1 },
-    { name: 'photoFile', maxCount: 1 }
-  ]),
+    { name: 'photoFile', maxCount: MAX_FILES }
+  ])),
   async (req, res) => {
     try {
       const {
@@ -376,14 +442,12 @@ app.post(
         siteLocation = '',
         billingAddress,
         problemDescription,
-        status = 'Needs to be Scheduled',
+        status = 'Parts In', // default requested
         assignedTo,
 
-        // older fields (used by your print template)
         billingPhone = null,
         sitePhone = null,
 
-        // NEW customer contact
         customerPhone = null,
         customerEmail = null,
       } = req.body;
@@ -429,14 +493,14 @@ app.post(
   }
 );
 
-// EDIT — updates phones/emails too
+// EDIT — append photos and/or replace PDF; also updates phones/emails
 app.put(
   '/work-orders/:id/edit',
   authenticate,
-  upload.fields([
+  withMulter(upload.fields([
     { name: 'pdfFile',   maxCount: 1 },
-    { name: 'photoFile', maxCount: 20 }
-  ]),
+    { name: 'photoFile', maxCount: MAX_FILES }
+  ])),
   async (req, res) => {
     try {
       const wid = req.params.id;
@@ -447,30 +511,31 @@ app.put(
         return res.status(403).json({ error: 'Forbidden' });
       }
 
-      // PDF
+      // Replace PDF if provided
       let pdfPath = existing.pdfPath;
       if (req.files?.pdfFile?.[0]) {
-        if (pdfPath) {
-          try {
+        // delete old (best effort)
+        try {
+          if (pdfPath && /^uploads\//.test(pdfPath)) {
             if (S3_BUCKET) {
               await s3.deleteObject({ Bucket: S3_BUCKET, Key: pdfPath }).promise();
             } else {
-              const full = path.resolve(__dirname, 'uploads', pdfPath);
+              const full = path.resolve(__dirname, 'uploads', pdfPath.replace(/^uploads\//, ''));
               if (fs.existsSync(full)) fs.unlinkSync(full);
             }
-          } catch (e) {
-            console.warn('⚠️ Failed to delete old PDF:', e.message);
           }
+        } catch (e) {
+          console.warn('⚠️ Failed to delete old PDF:', e.message);
         }
         pdfPath = S3_BUCKET ? req.files.pdfFile[0].key : req.files.pdfFile[0].filename;
       }
 
-      // Photos (append)
+      // Append photos if provided
       const oldPhotos = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
       const newPhotos = (req.files?.photoFile || []).map(f => (S3_BUCKET ? f.key : f.filename));
       const merged    = [...oldPhotos, ...newPhotos];
 
-      // Fields
+      // Fields (fall back to existing if not provided)
       const {
         poNumber = existing.poNumber,
         customer = existing.customer,
@@ -516,6 +581,35 @@ app.put(
     } catch (err) {
       console.error('Work-order edit error:', err);
       res.status(500).json({ error: 'Failed to update work order.' });
+    }
+  }
+);
+
+// Extra: single-photo append endpoint (helps avoid large multi-part payloads if needed)
+app.post(
+  '/work-orders/:id/append-photo',
+  authenticate,
+  withMulter(upload.single('photoFile')),
+  async (req, res) => {
+    try {
+      const wid = req.params.id;
+      const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+      if (!existing) return res.status(404).json({ error: 'Not found.' });
+
+      if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && existing.assignedTo !== req.user.id) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      const oldPhotos = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
+      const newKey = req.file ? (S3_BUCKET ? req.file.key : req.file.filename) : null;
+      const merged = newKey ? [...oldPhotos, newKey] : oldPhotos;
+
+      await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [merged.join(','), wid]);
+      const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+      res.json(updated);
+    } catch (err) {
+      console.error('Append-photo error:', err);
+      res.status(500).json({ error: 'Failed to append photo.' });
     }
   }
 );
@@ -599,7 +693,7 @@ app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (r
       if (S3_BUCKET) {
         await s3.deleteObject({ Bucket: S3_BUCKET, Key: photoPath }).promise();
       } else {
-        const full = path.resolve(__dirname, 'uploads', photoPath);
+        const full = path.resolve(__dirname, 'uploads', photoPath.replace(/^uploads\//, ''));
         if (fs.existsSync(full)) fs.unlinkSync(full);
       }
     } catch (e) {
@@ -630,36 +724,72 @@ app.delete('/work-orders/:id', authenticate, authorize('dispatcher', 'admin'), a
   }
 });
 
-// ─── FILE RESOLVER (S3 or local) ─────────────────────────────────────────────
+// ─── FILE RESOLVER (S3 or local) — tolerant & inline-friendly ───────────────
 app.get('/files', async (req, res) => {
   try {
-    const key = req.query.key;
-    if (!key) return res.status(400).json({ error: 'Missing ?key=' });
+    const raw = req.query.key;
+    if (!raw) return res.status(400).json({ error: 'Missing ?key=' });
 
-    if (!String(key).startsWith('uploads/')) {
-      return res.status(400).json({ error: 'Invalid key' });
+    // tolerate URL-encoded keys and bare filenames
+    let key = decodeURIComponent(String(raw));
+    if (!key.startsWith('uploads/')) {
+      key = `uploads/${key.replace(/^\/+/, '')}`;
     }
+
+    // basic content-type guess
+    const ext = path.extname(key).toLowerCase();
+    const mimeMap = {
+      '.pdf':  'application/pdf',
+      '.jpg':  'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png':  'image/png',
+      '.gif':  'image/gif',
+      '.webp': 'image/webp',
+      '.heic': 'image/heic'
+    };
+    const contentType = mimeMap[ext] || 'application/octet-stream';
+    const filename = path.basename(key);
 
     if (S3_BUCKET) {
       const url = s3.getSignedUrl('getObject', {
         Bucket: S3_BUCKET,
         Key: key,
-        Expires: 60,
+        Expires: 60, // short-lived
+        ResponseContentType: contentType,
+        // force inline so WKWebView will render PDFs/images instead of "downloading"
+        ResponseContentDisposition: `inline; filename="${filename}"`,
       });
       return res.redirect(302, url);
     }
 
+    // local disk
     const uploadsDir = path.resolve(__dirname, 'uploads');
-    const safePath = path.resolve(uploadsDir, key.replace(/^uploads\//, ''));
+    const safeRel  = key.replace(/^uploads\//, '');
+    const safePath = path.resolve(uploadsDir, safeRel);
     if (!safePath.startsWith(uploadsDir)) {
       return res.status(400).json({ error: 'Bad path' });
     }
     if (!fs.existsSync(safePath)) return res.sendStatus(404);
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
     return res.sendFile(safePath);
   } catch (err) {
     console.error('File resolver error:', err);
     res.status(500).json({ error: 'Failed to resolve file' });
   }
+});
+
+// ─── GLOBAL ERROR HANDLER FOR OVERSIZED BODIES ────────────────────────────────
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Payload too large' });
+  }
+  if (err) {
+    console.error('Unhandled error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+  next();
 });
 
 // ─── START SERVER ───────────────────────────────────────────────────────────
