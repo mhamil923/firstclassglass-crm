@@ -1,23 +1,23 @@
 /* File: src/WorkOrders.css */
 
-/* Page container */
+/* page container */
 .home-container {
-  min-height: 100vh;              /* fill full viewport height */
-  background-color: #F1F5F9;       /* light grey page background */
-  padding: 2rem;                   /* consistent gutter */
+  min-height: 100vh;
+  background-color: #F1F5F9;
+  padding: 2rem;
   box-sizing: border-box;
 }
 
-/* Each “card” section */
+/* card wrapper */
 .section-card {
   background: #ffffff;
-  border-radius: 8px;
-  padding: 1.5rem;
+  border-radius: 10px;
+  padding: 1.25rem;
   margin-bottom: 2rem;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
 }
 
-/* Header row with title + add button */
+/* header row with title + add button */
 .header-row {
   display: flex;
   justify-content: space-between;
@@ -25,88 +25,80 @@
   margin-bottom: 1rem;
 }
 
-/* Optional: heading color used by <h2 class="text-primary"> */
-.text-primary {
-  color: #2B2D42;
-  margin: 0;
+/* ===== Status chips ===== */
+:root {
+  --chip-bg: #ffffff;
+  --chip-border: #cbd5e1;   /* slate-300 */
+  --chip-text: #334155;     /* slate-700 */
+  --chip-active-bg: #e2e8f0;  /* slate-200 */
+  --chip-active-text: #0f172a; /* slate-900 */
 }
 
-/* ──────────────────────────────────────────────────────────────
-   STATUS BUTTONS (new)
-   - Used for All, Parts In, Scheduled, Waiting for Approval, Waiting on Parts, Completed
-   - Buttons show a badge with counts
-   - Responsive and keyboard accessible
-   ────────────────────────────────────────────────────────────── */
+.status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
 
-.status-btn {
+.status-chip {
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;       /* light border */
-  border-radius: 8px;
-  font-weight: 600;
-  color: #111827;                  /* near-black text */
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
-}
-
-.status-btn:hover {
-  background: #f9fafb;
-}
-
-.status-btn:focus {
-  outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
-}
-
-.status-btn.active {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
-}
-
-.status-btn .badge {
-  display: inline-block;
-  min-width: 28px;
-  text-align: center;
-  padding: 2px 8px;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
   border-radius: 999px;
-  background: #111827;   /* dark badge */
-  color: #fff;
-  font-size: 12px;
+  border: 1px solid var(--chip-border);
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  font-weight: 600;
+  font-size: 0.92rem;
+  cursor: pointer;
+  box-shadow: 0 1px 1px rgba(2, 6, 23, 0.04);
+  user-select: none;
+  transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.status-chip:hover {
+  transform: translateY(-1px);
+  background: #f1f5f9;
+}
+
+.status-chip.active {
+  background: var(--chip-active-bg);
+  color: var(--chip-active-text);
+  border-color: #94a3b8;
+}
+
+.chip-label {
+  white-space: nowrap;
+}
+
+.chip-count {
+  padding: 0.05rem 0.45rem;
+  min-width: 1.25rem;
+  text-align: center;
+  border-radius: 999px;
+  background: #e2e8f0;
+  font-weight: 700;
+  font-size: 0.78rem;
   line-height: 1.25rem;
 }
 
-/* If you decide to wrap the buttons in a container, these help.
-   (WorkOrders.js currently uses inline styles for the row.) */
-.status-bar {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px;
-}
+/* subtle color accents per status (border tone) */
+.chip-needs { border-color: #f59e0b; }      /* amber */
+.chip-scheduled { border-color: #38bdf8; }  /* sky */
+.chip-approval { border-color: #a78bfa; }   /* violet */
+.chip-parts { border-color: #f97316; }      /* orange */
+.chip-partsin { border-color: #22c55e; }    /* green */
+.chip-done { border-color: #10b981; }       /* emerald */
+.chip-today { border-color: #818cf8; }      /* indigo */
+.chip-all { border-color: #94a3b8; }        /* slate */
 
-/* ──────────────────────────────────────────────────────────────
-   (Legacy) Filter row — no longer used but kept for compatibility
-   ────────────────────────────────────────────────────────────── */
-.filter-row {
-  display: none; /* Hide the old dropdown filter row */
-}
-.filter-label {
-  font-weight: 500;
-  color: #3D5A80;
-}
-
-/* ──────────────────────────────────────────────────────────────
-   Styled table
-   ────────────────────────────────────────────────────────────── */
+/* ===== Table ===== */
 .styled-table {
   width: 100%;
-  border-collapse: separate; /* allow spacing between rows */
-  border-spacing: 0 1rem;    /* vertical gap between “cards” */
+  border-collapse: separate;
+  border-spacing: 0 0.75rem;
 }
 
 .styled-table thead th {
@@ -114,54 +106,48 @@
   color: #ffffff;
   border: none;
   padding: 0.75rem;
-  text-align: left;
-  font-weight: 600;
-}
-
-.styled-table tbody {
-  background: transparent;
 }
 
 .styled-table tbody tr {
-  background: #ffffff;              /* white card background */
-  outline: 2px solid #3D5A80;       /* colored outline */
-  outline-offset: -1px;             /* tighten outline */
-  border-radius: 6px;               /* rounded corners on outline */
+  background: #ffffff;
+  outline: 2px solid #3D5A80;
+  outline-offset: -1px;
+  border-radius: 8px;
   transition: background 0.2s, outline-color 0.2s;
 }
 
 .styled-table tbody tr:hover {
-  background: #E9F5FF;              /* subtle hover bg */
-  outline-color: #2B2D42;           /* darker outline on hover */
+  background: #E8F5E9;
+  outline-color: #2B2D42;
 }
 
 .styled-table tbody tr td {
-  border: none !important;          /* remove default cell borders */
+  border: none !important;
   padding: 0.75rem 1rem;
-  vertical-align: top;
 }
 
-/* Link-style cells */
+/* link-style cells */
 .link-text {
   text-decoration: underline;
-  color: #007bff;
+  color: #0ea5e9;
   cursor: pointer;
 }
 
-/* Empty state */
+/* selects inside table */
+.form-select {
+  width: 100%;
+}
+
+/* empty state */
 .empty-text {
   text-align: center;
   color: #8D99AE;
   font-style: italic;
-  margin-top: 1rem;
+  padding: 1rem 0;
 }
 
-/* Small responsive tweaks */
-@media (max-width: 768px) {
-  .home-container {
-    padding: 1rem;
-  }
-  .section-card {
-    padding: 1rem;
-  }
+/* small utility buttons (if you use .btn, .btn-primary elsewhere keep them) */
+.btn-sm {
+  padding: 0.35rem 0.6rem !important;
+  font-size: 0.85rem !important;
 }

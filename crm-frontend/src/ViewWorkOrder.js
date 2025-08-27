@@ -14,7 +14,6 @@ export default function ViewWorkOrder() {
   const [workOrder, setWorkOrder] = useState(null);
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
-  const [busy, setBusy] = useState(false);
 
   // Fetch work order details
   const fetchWorkOrder = async () => {
@@ -31,23 +30,27 @@ export default function ViewWorkOrder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Safely parse & sort notes (newest first). Hook must be unconditional.
-  const notesArray = useMemo(() => {
-    const raw = workOrder?.notes;
-    if (!raw) return [];
+  // Parse existing notes (original order from DB) safely
+  const originalNotes = useMemo(() => {
     try {
-      const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
-      if (!Array.isArray(arr)) return [];
-      // newest first by createdAt
-      return [...arr].sort((a, b) => {
-        const ta = new Date(a?.createdAt || 0).getTime();
-        const tb = new Date(b?.createdAt || 0).getTime();
-        return tb - ta;
-      });
+      const raw = workOrder?.notes;
+      const arr = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return Array.isArray(arr) ? arr : [];
     } catch {
       return [];
     }
-  }, [workOrder?.notes]);
+  }, [workOrder]);
+
+  // Display newest first, but keep a pointer to the original index so deletion hits the right item
+  const displayNotes = useMemo(() => {
+    return originalNotes
+      .map((n, idx) => ({ ...n, __origIndex: idx }))
+      .sort((a, b) => {
+        const ta = Date.parse(a.createdAt || 0);
+        const tb = Date.parse(b.createdAt || 0);
+        return tb - ta; // newest first
+      });
+  }, [originalNotes]);
 
   if (!workOrder) {
     return (
@@ -79,7 +82,7 @@ export default function ViewWorkOrder() {
 
   // File URLs (S3/local safe)
   const pdfUrl = pdfPath
-    ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}`
+    ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}#page=1&view=FitH`
     : null;
 
   // Existing attachments (image keys joined by comma)
@@ -91,9 +94,11 @@ export default function ViewWorkOrder() {
   // ---------- PRINT helpers ----------
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put logo at /public/fcg-logo.png
 
+  // Pull out site "name" and "address" if user typed "Name - address" or "Name, 123…"
   function parseSite(loc, fallbackName) {
     const result = { name: fallbackName || "", address: "" };
     if (!loc) return result;
+
     const s = String(loc).trim();
 
     if (s.includes(" - ")) {
@@ -121,11 +126,13 @@ export default function ViewWorkOrder() {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
+  // -------- PRINT: open a new window with your existing template and print it
   const handlePrint = () => {
     const siteParsed = parseSite(siteLocation, customer);
     const siteName = siteParsed.name || customer || "";
     const siteAddr = siteParsed.address || "";
 
+    // No more local-only fields; use DB values if present
     const billingPhonePrint = customerPhone || billingPhone || "";
     const sitePhonePrint = sitePhone || "";
 
@@ -253,30 +260,24 @@ export default function ViewWorkOrder() {
   const handleAddNote = async () => {
     if (!newNote.trim()) return;
     try {
-      setBusy(true);
       await api.post(`/work-orders/${id}/notes`, { text: newNote });
       setNewNote("");
       setShowNoteInput(false);
-      await fetchWorkOrder();
+      fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error adding note:", error);
       alert("Failed to add note.");
-    } finally {
-      setBusy(false);
     }
   };
 
-  const handleDeleteNote = async (noteIndex) => {
+  const handleDeleteNote = async (origIndex) => {
     if (!window.confirm("Delete this note?")) return;
     try {
-      setBusy(true);
-      await api.delete(`/work-orders/${id}/notes/${noteIndex}`);
-      await fetchWorkOrder();
-    } catch (err) {
-      console.error("⚠️ Error deleting note:", err);
+      await api.delete(`/work-orders/${id}/notes/${origIndex}`);
+      fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error deleting note:", error);
       alert("Failed to delete note.");
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -286,16 +287,13 @@ export default function ViewWorkOrder() {
     const formData = new FormData();
     files.forEach((file) => formData.append("photoFile", file));
     try {
-      setBusy(true);
       await api.put(`/work-orders/${id}/edit`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      await fetchWorkOrder();
+      fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error uploading attachments:", error);
       alert("Failed to upload attachments.");
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -395,7 +393,6 @@ export default function ViewWorkOrder() {
           <button
             className="toggle-note-btn"
             onClick={() => setShowNoteInput((v) => !v)}
-            disabled={busy}
           >
             {showNoteInput ? "Cancel" : "Add Note"}
           </button>
@@ -409,30 +406,33 @@ export default function ViewWorkOrder() {
                 placeholder="Write your note here..."
                 rows={3}
               />
-              <button className="toggle-note-btn" onClick={handleAddNote} disabled={busy}>
+              <button className="toggle-note-btn" onClick={handleAddNote}>
                 Submit Note
               </button>
             </div>
           )}
 
-          {notesArray.length > 0 ? (
+          {displayNotes.length > 0 ? (
             <ul className="notes-list">
-              {notesArray.map((n, idx) => (
-                <li key={idx} className="note-item">
-                  <div className="note-head">
+              {displayNotes.map((n, idx) => (
+                <li key={`${n.createdAt || "na"}-${idx}`} className="note-item">
+                  <div className="note-header">
                     <small className="note-timestamp">
                       {moment(n.createdAt).format("YYYY-MM-DD HH:mm")}
                       {n.by ? ` — ${n.by}` : ""}
                     </small>
+
+                    {/* small delete button on far right; passes ORIGINAL index */}
                     <button
-                      className="btn btn-danger btn-xs"
-                      onClick={() => handleDeleteNote(n._index ?? idx)}
+                      type="button"
+                      className="note-delete-btn"
                       title="Delete note"
-                      disabled={busy}
+                      onClick={() => handleDeleteNote(n.__origIndex)}
                     >
-                      Delete
+                      ✕
                     </button>
                   </div>
+
                   <p className="note-text">{n.text}</p>
                 </li>
               ))}

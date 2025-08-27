@@ -17,15 +17,27 @@
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
 }
 
+.view-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.view-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 .view-title {
-  margin-top: 0;
+  margin: 0;
   color: #2B2D42;
   font-size: 1.75rem;
   font-weight: 600;
-  text-align: center;
-  margin-bottom: 1.5rem;
 }
 
+/* details list */
 .detail-list {
   list-style: none;
   padding: 0;
@@ -48,6 +60,11 @@
   color: #2B2D42;
 }
 
+.pre-wrap {
+  white-space: pre-wrap;
+}
+
+/* sections */
 .section-card {
   margin-top: 2rem;
   background: #ffffff;
@@ -57,20 +74,21 @@
 }
 
 .section-header {
-  margin-top: 0;
+  margin: 0 0 1rem 0;
   color: #3D5A80;
   font-size: 1.25rem;
   font-weight: 500;
-  margin-bottom: 1rem;
 }
 
+/* PDF viewer — tall, continuous scroll inside the frame */
 .pdf-frame {
   width: 100%;
-  height: 600px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  min-height: 75vh;
+  border: none;
+  border-radius: 8px;
 }
 
+/* attachments */
 .attachments {
   display: flex;
   flex-wrap: wrap;
@@ -82,7 +100,7 @@
   height: 150px;
   object-fit: cover;
   border: 1px solid #ccc;
-  border-radius: 4px;
+  border-radius: 6px;
   transition: transform 0.2s;
 }
 
@@ -90,7 +108,7 @@
   transform: scale(1.05);
 }
 
-/* New: Attachment upload area */
+/* attachment upload */
 .attachment-upload {
   margin-top: 1rem;
   display: flex;
@@ -102,41 +120,56 @@
   cursor: pointer;
 }
 
-.attachment-upload button {
-  background: #17a2b8;
-  color: #ffffff;
-  border: none;
-  border-radius: 4px;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-  font-size: 1rem;
-}
-
-.attachment-upload button:hover {
-  background: #145c6f;
-}
-
+/* notes */
 .notes-list {
   list-style: none;
   padding: 0;
   margin: 0;
+  display: grid;
+  gap: 0.75rem;
 }
 
 .note-item {
-  background: #f9f9f9;
-  border-radius: 4px;
-  padding: 1rem;
-  margin-bottom: 0.5rem;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem 0.9rem 0.9rem;
+}
+
+.note-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between; /* delete button on far right */
+  gap: 0.5rem;
 }
 
 .note-timestamp {
-  color: #8D99AE;
+  color: #64748b;
   font-size: 0.85rem;
 }
 
+/* small, subtle delete button */
+.note-delete-btn {
+  appearance: none;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #334155;
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  line-height: 1;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.note-delete-btn:hover {
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+}
+
 .note-text {
-  margin: 0.25rem 0 0;
+  margin: 0.4rem 0 0;
   color: #2B2D42;
+  white-space: pre-wrap;
 }
 
 .empty-text {
@@ -146,50 +179,46 @@
   margin: 1rem 0;
 }
 
-/* New: Toggle note button */
+/* add / toggle note */
 .toggle-note-btn {
   background: #17a2b8;
   color: #ffffff;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 0.5rem 1rem;
   cursor: pointer;
   font-size: 1rem;
   margin-bottom: 1rem;
 }
-
 .toggle-note-btn:hover {
   background: #145c6f;
 }
 
-/* New: Add-note form */
 .add-note {
   display: flex;
   flex-direction: column;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
 }
 
 .note-input {
   width: 100%;
   padding: 0.75rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
   margin-bottom: 0.5rem;
   font-size: 1rem;
 }
 
+/* back button */
 .back-btn {
-  display: block;
-  margin: 2rem auto 0;
   background: #3D5A80;
   color: #ffffff;
-  padding: 0.75rem 1.5rem;
+  padding: 0.6rem 1.1rem;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
-
 .back-btn:hover {
   background: #2B2D42;
 }

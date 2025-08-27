@@ -30,6 +30,9 @@ const {
   ASSIGNEE_EXTRA_USERNAMES = 'Jeff,tech1',
 } = process.env;
 
+// Signed URL TTL (seconds) for /files endpoint (increase to avoid RN/WebView download expiry)
+const S3_SIGNED_TTL = Number(process.env.S3_SIGNED_TTL || 900); // 15 minutes default
+
 // Upload limits (server-side) — keep them generous but bounded
 const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || 25); // per file
 const MAX_FILES        = Number(process.env.MAX_FILES || 40);        // per request
@@ -822,10 +825,11 @@ app.get('/files', async (req, res) => {
       const url = s3.getSignedUrl('getObject', {
         Bucket: S3_BUCKET,
         Key: key,
-        Expires: 60, // short-lived
+        Expires: S3_SIGNED_TTL, // ⬅️ increased from 60s to 900s (15 min)
         ResponseContentType: contentType,
         // force inline so WKWebView will render PDFs/images instead of "downloading"
         ResponseContentDisposition: `inline; filename="${filename}"`,
+        ResponseCacheControl: `private, max-age=${S3_SIGNED_TTL}`,
       });
       return res.redirect(302, url);
     }
