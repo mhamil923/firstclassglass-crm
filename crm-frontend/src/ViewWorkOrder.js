@@ -1,4 +1,5 @@
 // File: src/ViewWorkOrder.js
+
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "./api";
@@ -13,6 +14,7 @@ export default function ViewWorkOrder() {
   const [workOrder, setWorkOrder] = useState(null);
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   // Fetch work order details
   const fetchWorkOrder = async () => {
@@ -28,6 +30,24 @@ export default function ViewWorkOrder() {
     fetchWorkOrder();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Safely parse & sort notes (newest first). Hook must be unconditional.
+  const notesArray = useMemo(() => {
+    const raw = workOrder?.notes;
+    if (!raw) return [];
+    try {
+      const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
+      if (!Array.isArray(arr)) return [];
+      // newest first by createdAt
+      return [...arr].sort((a, b) => {
+        const ta = new Date(a?.createdAt || 0).getTime();
+        const tb = new Date(b?.createdAt || 0).getTime();
+        return tb - ta;
+      });
+    } catch {
+      return [];
+    }
+  }, [workOrder?.notes]);
 
   if (!workOrder) {
     return (
@@ -47,7 +67,6 @@ export default function ViewWorkOrder() {
     scheduledDate,
     pdfPath,
     photoPath,
-    notes,
 
     // optional contact from DB
     customerPhone,
@@ -57,16 +76,6 @@ export default function ViewWorkOrder() {
     billingPhone,
     sitePhone,
   } = workOrder;
-
-  // Parse existing notes (keep original order so indices match server)
-  const notesArray = useMemo(() => {
-    if (!notes) return [];
-    try {
-      return typeof notes === "string" ? JSON.parse(notes) : notes;
-    } catch {
-      return [];
-    }
-  }, [notes]);
 
   // File URLs (S3/local safe)
   const pdfUrl = pdfPath
@@ -85,7 +94,6 @@ export default function ViewWorkOrder() {
   function parseSite(loc, fallbackName) {
     const result = { name: fallbackName || "", address: "" };
     if (!loc) return result;
-
     const s = String(loc).trim();
 
     if (s.includes(" - ")) {
@@ -245,34 +253,30 @@ export default function ViewWorkOrder() {
   const handleAddNote = async () => {
     if (!newNote.trim()) return;
     try {
+      setBusy(true);
       await api.post(`/work-orders/${id}/notes`, { text: newNote });
       setNewNote("");
       setShowNoteInput(false);
-      fetchWorkOrder();
+      await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error adding note:", error);
       alert("Failed to add note.");
+    } finally {
+      setBusy(false);
     }
   };
 
-  // ❌ Delete a single note by index
-  const handleDeleteNote = async (index) => {
-    if (!window.confirm("Delete this note? This cannot be undone.")) return;
+  const handleDeleteNote = async (noteIndex) => {
+    if (!window.confirm("Delete this note?")) return;
     try {
-      // Preferred RESTful route (requires server support):
-      await api.delete(`/work-orders/${id}/notes/${index}`);
+      setBusy(true);
+      await api.delete(`/work-orders/${id}/notes/${noteIndex}`);
       await fetchWorkOrder();
-    } catch (err1) {
-      // Fallback pattern if server uses a body on DELETE:
-      try {
-        await api.delete(`/work-orders/${id}/notes`, { data: { index } });
-        await fetchWorkOrder();
-      } catch (err2) {
-        console.error("⚠️ Error deleting note:", err2);
-        alert(
-          "Failed to delete note. Make sure the server has a DELETE /work-orders/:id/notes/:index (or body index) route."
-        );
-      }
+    } catch (err) {
+      console.error("⚠️ Error deleting note:", err);
+      alert("Failed to delete note.");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -282,13 +286,16 @@ export default function ViewWorkOrder() {
     const formData = new FormData();
     files.forEach((file) => formData.append("photoFile", file));
     try {
+      setBusy(true);
       await api.put(`/work-orders/${id}/edit`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      fetchWorkOrder();
+      await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error uploading attachments:", error);
       alert("Failed to upload attachments.");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -388,6 +395,7 @@ export default function ViewWorkOrder() {
           <button
             className="toggle-note-btn"
             onClick={() => setShowNoteInput((v) => !v)}
+            disabled={busy}
           >
             {showNoteInput ? "Cancel" : "Add Note"}
           </button>
@@ -401,7 +409,7 @@ export default function ViewWorkOrder() {
                 placeholder="Write your note here..."
                 rows={3}
               />
-              <button className="toggle-note-btn" onClick={handleAddNote}>
+              <button className="toggle-note-btn" onClick={handleAddNote} disabled={busy}>
                 Submit Note
               </button>
             </div>
@@ -417,9 +425,10 @@ export default function ViewWorkOrder() {
                       {n.by ? ` — ${n.by}` : ""}
                     </small>
                     <button
-                      className="btn btn-danger btn-xs delete-note-btn"
-                      onClick={() => handleDeleteNote(idx)}
+                      className="btn btn-danger btn-xs"
+                      onClick={() => handleDeleteNote(n._index ?? idx)}
                       title="Delete note"
+                      disabled={busy}
                     >
                       Delete
                     </button>
