@@ -1,5 +1,3 @@
-// File: src/WorkOrders.js
-
 import React, { useEffect, useMemo, useState } from "react";
 import api from "./api";
 import { Link, useNavigate } from "react-router-dom";
@@ -7,12 +5,11 @@ import moment from "moment";
 import { jwtDecode } from "jwt-decode";
 import "./WorkOrders.css";
 
-const ALL_STATUSES = [
+const STATUS_LIST = [
   "Needs to be Scheduled",
   "Scheduled",
   "Waiting for Approval",
   "Waiting on Parts",
-  // Legacy status some rows may still have:
   "Parts In",
   "Completed",
 ];
@@ -20,39 +17,26 @@ const ALL_STATUSES = [
 export default function WorkOrders() {
   const navigate = useNavigate();
 
+  // auth / role (controls assignment column)
   const token = localStorage.getItem("jwt");
   let userRole = null;
-  let userId = null;
-
   if (token) {
     try {
-      const decoded = jwtDecode(token);
-      userRole = decoded.role || null; // 'dispatcher', 'admin', or 'tech'
-      userId = decoded.id || null;
+      userRole = jwtDecode(token).role; // 'dispatcher', 'admin', or 'tech'
     } catch {
       console.warn("Invalid JWT");
     }
   }
 
   const [workOrders, setWorkOrders] = useState([]);
-  const [selectedStatus, setSelectedStatus] = useState("All");
+  const [filteredOrders, setFilteredOrders] = useState([]);
+  const [selectedFilter, setSelectedFilter] = useState("All"); // 'All' | 'Today' | one of STATUS_LIST
   const [techUsers, setTechUsers] = useState([]);
-  const googleMapsApiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
 
-  // Fetch list
-  const fetchWorkOrders = async () => {
-    try {
-      const res = await api.get("/work-orders");
-      setWorkOrders(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      console.error("Error fetching work orders:", err);
-    }
-  };
-
-  // Initial load + tech list for assigners
   useEffect(() => {
     fetchWorkOrders();
 
+    // Dispatcher/Admin can assign; fetch assignable users (techs + extras)
     if (userRole !== "tech") {
       api
         .get("/users", { params: { assignees: 1 } })
@@ -62,25 +46,58 @@ export default function WorkOrders() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Derived: apply filter on each data or filter change
-  const filteredOrders = useMemo(() => {
-    if (selectedStatus === "All") return workOrders;
-    if (selectedStatus === "Today") {
-      const today = moment().format("YYYY-MM-DD");
-      return workOrders.filter(
-        (o) =>
-          o.scheduledDate &&
-          moment(o.scheduledDate).format("YYYY-MM-DD") === today
-      );
-    }
-    return workOrders.filter((o) => o.status === selectedStatus);
-  }, [workOrders, selectedStatus]);
-
-  const handleFilter = (e) => {
-    setSelectedStatus(e.target.value);
+  const fetchWorkOrders = () => {
+    api
+      .get("/work-orders")
+      .then((res) => {
+        const data = Array.isArray(res.data) ? res.data : [];
+        setWorkOrders(data);
+      })
+      .catch((err) => console.error("Error fetching work orders:", err));
   };
 
-  // Optimistic status update with rollback + RBAC-aware UI
+  // Recompute filtered list anytime the source or filter changes
+  useEffect(() => {
+    const todayStr = moment().format("YYYY-MM-DD");
+    let rows = workOrders;
+
+    if (selectedFilter === "Today") {
+      rows = workOrders.filter(
+        (o) =>
+          o.scheduledDate &&
+          moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr
+      );
+    } else if (selectedFilter !== "All") {
+      rows = workOrders.filter((o) => o.status === selectedFilter);
+    }
+
+    setFilteredOrders(rows);
+  }, [workOrders, selectedFilter]);
+
+  // Live counts for the chip bar
+  const chipCounts = useMemo(() => {
+    const counts = Object.fromEntries(STATUS_LIST.map((s) => [s, 0]));
+    let today = 0;
+    const todayStr = moment().format("YYYY-MM-DD");
+    for (const o of workOrders) {
+      if (o.status && counts[o.status] !== undefined) counts[o.status]++;
+      if (
+        o.scheduledDate &&
+        moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr
+      ) {
+        today++;
+      }
+    }
+    return {
+      All: workOrders.length,
+      Today: today,
+      ...counts,
+    };
+  }, [workOrders]);
+
+  const setFilter = (value) => setSelectedFilter(value);
+
+  // optimistic status update for a row
   const handleStatusChange = async (e, id) => {
     e.stopPropagation();
     const newStatus = e.target.value;
@@ -92,34 +109,23 @@ export default function WorkOrders() {
 
     try {
       await api.put(`/work-orders/${id}`, { status: newStatus });
-      // Optionally re-fetch to be 100% up-to-date from DB:
-      // await fetchWorkOrders();
     } catch (err) {
       console.error("Error updating status:", err);
       // rollback
       setWorkOrders(prev);
-      const message =
-        err?.response?.data?.error ||
-        (err?.response?.status === 403
-          ? "You’re not allowed to change the status for this work order."
-          : "Failed to update status.");
-      alert(message);
+      alert(err?.response?.data?.error || "Failed to update status.");
     }
   };
 
-  const assignToTech = async (orderId, techId, e) => {
+  const assignToTech = (orderId, techId, e) => {
     e.stopPropagation();
-    try {
-      await api.put(`/work-orders/${orderId}/assign`, { assignedTo: techId });
-      fetchWorkOrders();
-    } catch (err) {
-      console.error("Error assigning tech:", err);
-      alert(
-        err?.response?.data?.error || "Failed to assign work order to technician."
-      );
-    }
+    api
+      .put(`/work-orders/${orderId}/assign`, { assignedTo: techId })
+      .then(fetchWorkOrders)
+      .catch((err) => console.error("Error assigning tech:", err));
   };
 
+  const googleMapsApiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
   const handleLocationClick = (e, loc) => {
     e.stopPropagation();
     const url = `https://www.google.com/maps/embed/v1/place?key=${googleMapsApiKey}&q=${encodeURIComponent(
@@ -127,9 +133,6 @@ export default function WorkOrders() {
     )}`;
     window.open(url, "_blank", "width=800,height=600");
   };
-
-  const canChangeStatus = (order) =>
-    userRole !== "tech" || (userId && order.assignedTo === userId);
 
   return (
     <div className="home-container">
@@ -144,23 +147,27 @@ export default function WorkOrders() {
         </Link>
       </div>
 
+      {/* Status chip bar w/ counts */}
       <div className="section-card">
-        <div className="filter-row">
-          <label className="filter-label">Filter by Status:</label>
-          <select
-            className="form-select"
-            value={selectedStatus}
-            onChange={handleFilter}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <option value="All">All Work Orders</option>
-            <option value="Today">Today</option>
-            {ALL_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+        <div className="chips-row" role="tablist" aria-label="Work order filters">
+          {[
+            { key: "All", label: "All", count: chipCounts.All },
+            { key: "Today", label: "Today", count: chipCounts.Today },
+            ...STATUS_LIST.map((s) => ({ key: s, label: s, count: chipCounts[s] })),
+          ].map(({ key, label, count }) => {
+            const active = selectedFilter === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                className={`chip ${active ? "active" : ""}`}
+                onClick={() => setFilter(key)}
+              >
+                <span className="chip-label">{label}</span>
+                <span className="chip-count">{count ?? 0}</span>
+              </button>
+            );
+          })}
         </div>
 
         <table className="styled-table">
@@ -177,84 +184,73 @@ export default function WorkOrders() {
             </tr>
           </thead>
           <tbody>
-            {filteredOrders.map((order) => {
-              const statusDisabled = !canChangeStatus(order);
+            {filteredOrders.map((order) => (
+              <tr
+                key={order.id}
+                onClick={() => navigate(`/view-work-order/${order.id}`)}
+              >
+                <td>{order.poNumber || "N/A"}</td>
+                <td>{order.customer || "N/A"}</td>
+                <td title={order.billingAddress}>{order.billingAddress}</td>
+                <td>
+                  <span
+                    className="link-text"
+                    onClick={(e) => handleLocationClick(e, order.siteLocation)}
+                  >
+                    {order.siteLocation}
+                  </span>
+                </td>
+                <td title={order.problemDescription}>
+                  {order.problemDescription}
+                </td>
+                <td>
+                  <select
+                    className="form-select"
+                    value={order.status || ""}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => handleStatusChange(e, order.id)}
+                  >
+                    {STATUS_LIST.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </td>
 
-              return (
-                <tr
-                  key={order.id}
-                  onClick={() => navigate(`/view-work-order/${order.id}`)}
-                >
-                  <td>{order.poNumber || "N/A"}</td>
-                  <td>{order.customer || "N/A"}</td>
-                  <td title={order.billingAddress}>{order.billingAddress}</td>
-                  <td>
-                    <span
-                      className="link-text"
-                      onClick={(e) => handleLocationClick(e, order.siteLocation)}
-                    >
-                      {order.siteLocation}
-                    </span>
-                  </td>
-                  <td title={order.problemDescription}>
-                    {order.problemDescription}
-                  </td>
-
+                {userRole !== "tech" && (
                   <td>
                     <select
                       className="form-select"
-                      value={order.status || ""}
-                      disabled={statusDisabled}
+                      value={order.assignedTo || ""}
                       onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => handleStatusChange(e, order.id)}
+                      onChange={(e) => assignToTech(order.id, e.target.value, e)}
                     >
-                      {ALL_STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
+                      <option value="">-- assign tech --</option>
+                      {techUsers.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.username}
                         </option>
                       ))}
                     </select>
-                    {statusDisabled && (
-                      <div className="muted tiny-hint">
-                        Only the assigned tech or dispatcher/admin can change.
-                      </div>
-                    )}
                   </td>
+                )}
 
-                  {userRole !== "tech" && (
-                    <td>
-                      <select
-                        className="form-select"
-                        value={order.assignedTo || ""}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => assignToTech(order.id, e.target.value, e)}
-                      >
-                        <option value="">-- assign tech --</option>
-                        {techUsers.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.username}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  )}
-
-                  <td>
-                    <Link
-                      to={`/edit-work-order/${order.id}`}
-                      className="btn btn-warning btn-sm"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      Edit
-                    </Link>
-                  </td>
-                </tr>
-              );
-            })}
+                <td>
+                  <Link
+                    to={`/edit-work-order/${order.id}`}
+                    className="btn btn-warning btn-sm"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Edit
+                  </Link>
+                </td>
+              </tr>
+            ))}
             {filteredOrders.length === 0 && (
               <tr>
                 <td colSpan={userRole !== "tech" ? 8 : 7}>
-                  <div className="empty-state">No work orders to display.</div>
+                  <div className="empty-state">No work orders for this filter.</div>
                 </td>
               </tr>
             )}

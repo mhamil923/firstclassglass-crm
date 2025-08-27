@@ -34,6 +34,7 @@
   --chip-active-text: #0f172a; /* slate-900 */
 }
 
+/* Your original class names */
 .status-chips {
   display: flex;
   flex-wrap: wrap;
@@ -84,15 +85,61 @@
   line-height: 1.25rem;
 }
 
-/* subtle color accents per status (border tone) */
-.chip-needs { border-color: #f59e0b; }      /* amber */
-.chip-scheduled { border-color: #38bdf8; }  /* sky */
-.chip-approval { border-color: #a78bfa; }   /* violet */
-.chip-parts { border-color: #f97316; }      /* orange */
-.chip-partsin { border-color: #22c55e; }    /* green */
-.chip-done { border-color: #10b981; }       /* emerald */
-.chip-today { border-color: #818cf8; }      /* indigo */
-.chip-all { border-color: #94a3b8; }        /* slate */
+/* subtle color accents per status (border tone) — optional */
+.status-chip.chip-needs { border-color: #f59e0b; }      /* amber */
+.status-chip.chip-scheduled { border-color: #38bdf8; }  /* sky */
+.status-chip.chip-approval { border-color: #a78bfa; }   /* violet */
+.status-chip.chip-parts { border-color: #f97316; }      /* orange */
+.status-chip.chip-partsin { border-color: #22c55e; }    /* green */
+.status-chip.chip-done { border-color: #10b981; }       /* emerald */
+.status-chip.chip-today { border-color: #818cf8; }      /* indigo */
+.status-chip.chip-all { border-color: #94a3b8; }        /* slate */
+
+/* ===== Aliases so new component class names render the same ===== */
+.chips-row {              /* maps to .status-chips */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.chip {                   /* maps to .status-chip */
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--chip-border);
+  background: var(--chip-bg);
+  color: var(--chip-text);
+  font-weight: 600;
+  font-size: 0.92rem;
+  cursor: pointer;
+  box-shadow: 0 1px 1px rgba(2, 6, 23, 0.04);
+  user-select: none;
+  transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.chip:hover {
+  transform: translateY(-1px);
+  background: #f1f5f9;
+}
+
+.chip.active {
+  background: var(--chip-active-bg);
+  color: var(--chip-active-text);
+  border-color: #94a3b8;
+}
+
+/* keep same token classes if you ever apply them to .chip elements */
+.chip.chip-needs { border-color: #f59e0b; }
+.chip.chip-scheduled { border-color: #38bdf8; }
+.chip.chip-approval { border-color: #a78bfa; }
+.chip.chip-parts { border-color: #f97316; }
+.chip.chip-partsin { border-color: #22c55e; }
+.chip.chip-done { border-color: #10b981; }
+.chip.chip-today { border-color: #818cf8; }
+.chip.chip-all { border-color: #94a3b8; }
 
 /* ===== Table ===== */
 .styled-table {
@@ -138,15 +185,16 @@
   width: 100%;
 }
 
-/* empty state */
-.empty-text {
+/* empty states (support both class names used) */
+.empty-text,
+.empty-state {
   text-align: center;
   color: #8D99AE;
   font-style: italic;
   padding: 1rem 0;
 }
 
-/* small utility buttons (if you use .btn, .btn-primary elsewhere keep them) */
+/* small utility buttons */
 .btn-sm {
   padding: 0.35rem 0.6rem !important;
   font-size: 0.85rem !important;
