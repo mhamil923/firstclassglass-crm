@@ -361,7 +361,7 @@ export default function AddWorkOrder() {
           />
         </div>
 
-        {/* Status */}
+        {/* Status (✅ added "Parts In") */}
         <div className="form-group">
           <label className="form-label">Status</label>
           <select
@@ -374,6 +374,7 @@ export default function AddWorkOrder() {
             <option>Scheduled</option>
             <option>Waiting for Approval</option>
             <option>Waiting on Parts</option>
+            <option>Parts In</option>
             <option>Completed</option>
           </select>
         </div>

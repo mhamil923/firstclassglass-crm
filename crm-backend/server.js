@@ -442,7 +442,7 @@ app.post(
         siteLocation = '',
         billingAddress,
         problemDescription,
-        status = 'Parts In', // default requested
+        status = 'Parts In', // default requested earlier (can be overridden by client)
         assignedTo,
 
         billingPhone = null,
@@ -668,13 +668,81 @@ app.post('/work-orders/:id/notes', authenticate, express.json(), async (req, res
     }
 
     const [[row2]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [wid]);
-    const arr = row2?.notes ? JSON.parse(row2.notes) : [];
+    let arr = [];
+    try { arr = row2?.notes ? JSON.parse(row2.notes) : []; } catch { arr = []; }
     arr.push({ text, createdAt: new Date().toISOString(), by: req.user.username });
     await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [JSON.stringify(arr), wid]);
     res.json({ notes: arr });
   } catch (err) {
     console.error('Add note error:', err);
     res.status(500).json({ error: 'Failed to add note.' });
+  }
+});
+
+// ✅ DELETE a note by index (preferred URL form)
+app.delete('/work-orders/:id/notes/:index', authenticate, async (req, res) => {
+  try {
+    const wid = req.params.id;
+    const idx = Number(req.params.index);
+
+    if (!Number.isInteger(idx) || idx < 0) {
+      return res.status(400).json({ error: 'Invalid note index' });
+    }
+
+    const [[row]] = await db.execute('SELECT assignedTo, notes FROM work_orders WHERE id = ?', [wid]);
+    if (!row) return res.status(404).json({ error: 'Not found.' });
+
+    if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && row.assignedTo !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    let arr = [];
+    try { arr = row.notes ? JSON.parse(row.notes) : []; } catch { arr = []; }
+
+    if (idx >= arr.length) {
+      return res.status(400).json({ error: 'Note index out of range' });
+    }
+
+    arr.splice(idx, 1);
+    await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [JSON.stringify(arr), wid]);
+    res.json({ notes: arr });
+  } catch (err) {
+    console.error('Delete note error:', err);
+    res.status(500).json({ error: 'Failed to delete note.' });
+  }
+});
+
+// ✅ DELETE a note by index (fallback body form)
+app.delete('/work-orders/:id/notes', authenticate, express.json(), async (req, res) => {
+  try {
+    const wid = req.params.id;
+    const { index } = req.body;
+    const idx = Number(index);
+
+    if (!Number.isInteger(idx) || idx < 0) {
+      return res.status(400).json({ error: 'Invalid note index' });
+    }
+
+    const [[row]] = await db.execute('SELECT assignedTo, notes FROM work_orders WHERE id = ?', [wid]);
+    if (!row) return res.status(404).json({ error: 'Not found.' });
+
+    if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && row.assignedTo !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    let arr = [];
+    try { arr = row.notes ? JSON.parse(row.notes) : []; } catch { arr = []; }
+
+    if (idx >= arr.length) {
+      return res.status(400).json({ error: 'Note index out of range' });
+    }
+
+    arr.splice(idx, 1);
+    await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [JSON.stringify(arr), wid]);
+    res.json({ notes: arr });
+  } catch (err) {
+    console.error('Delete note (body) error:', err);
+    res.status(500).json({ error: 'Failed to delete note.' });
   }
 });
 

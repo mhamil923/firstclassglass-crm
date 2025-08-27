@@ -1,3 +1,5 @@
+// File: src/WorkOrders.js
+
 import React, { useEffect, useMemo, useState } from "react";
 import api from "./api";
 import { Link, useNavigate } from "react-router-dom";
@@ -5,27 +7,19 @@ import moment from "moment";
 import { jwtDecode } from "jwt-decode";
 import "./WorkOrders.css";
 
-/**
- * New canonical statuses for the web app.
- * We normalize legacy "Needs to be Scheduled" -> "Parts In" for display, counts, and filtering.
- */
-const STATUSES = [
-  "Parts In",
+const STATUS_LIST = [
+  "Needs to be Scheduled",
   "Scheduled",
   "Waiting for Approval",
   "Waiting on Parts",
+  "Parts In",
   "Completed",
 ];
-
-function normalizeStatus(s = "") {
-  const trimmed = String(s || "").trim();
-  if (/^needs to be scheduled$/i.test(trimmed)) return "Parts In";
-  return trimmed;
-}
 
 export default function WorkOrders() {
   const navigate = useNavigate();
   const token = localStorage.getItem("jwt");
+
   let userRole = null;
   if (token) {
     try {
@@ -43,8 +37,9 @@ export default function WorkOrders() {
   useEffect(() => {
     fetchWorkOrders();
 
+    // Anyone who is NOT a tech should be able to assign (dispatcher/admin)
     if (userRole !== "tech") {
-      // assignees=1 returns techs plus any allow-listed usernames
+      // IMPORTANT: use assignees=1 to get techs + allow-list (e.g., Jeff, tech1)
       api
         .get("/users", { params: { assignees: 1 } })
         .then((r) => setTechUsers(r.data || []))
@@ -56,49 +51,56 @@ export default function WorkOrders() {
   const fetchWorkOrders = () => {
     api
       .get("/work-orders")
-      .then((res) => {
-        const rows = Array.isArray(res.data) ? res.data : [];
-        // Keep raw data, but we will normalize when displaying/filtering
-        setWorkOrders(rows);
-      })
+      .then((res) => setWorkOrders(Array.isArray(res.data) ? res.data : []))
       .catch((err) => console.error("Error fetching work orders:", err));
   };
 
-  // Build counts per status (using normalized values)
-  const counts = useMemo(() => {
-    const c = { All: workOrders.length };
-    for (const s of STATUSES) c[s] = 0;
+  // Counts for each status + Today + All
+  const { statusCounts, todayCount, totalCount } = useMemo(() => {
+    const counts = {};
+    let today = 0;
+    const todayStr = moment().format("YYYY-MM-DD");
+
     for (const o of workOrders) {
-      const ns = normalizeStatus(o.status);
-      if (STATUSES.includes(ns)) c[ns] = (c[ns] || 0) + 1;
+      if (o?.status) counts[o.status] = (counts[o.status] || 0) + 1;
+      if (
+        o?.scheduledDate &&
+        moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr
+      ) {
+        today++;
+      }
     }
-    return c;
+
+    return {
+      statusCounts: counts,
+      todayCount: today,
+      totalCount: workOrders.length,
+    };
   }, [workOrders]);
 
-  // Derive filtered list according to selected status
+  // Filtered list based on selected chip
   const filteredOrders = useMemo(() => {
     if (selectedStatus === "All") return workOrders;
-    return workOrders.filter((o) => normalizeStatus(o.status) === selectedStatus);
+    if (selectedStatus === "Today") {
+      const today = moment().format("YYYY-MM-DD");
+      return workOrders.filter(
+        (o) =>
+          o.scheduledDate &&
+          moment(o.scheduledDate).format("YYYY-MM-DD") === today
+      );
+    }
+    return workOrders.filter((o) => o.status === selectedStatus);
   }, [workOrders, selectedStatus]);
 
-  const handleStatusChange = (e, id, original) => {
+  const applyFilter = (value) => setSelectedStatus(value);
+
+  const handleStatusChange = (e, id) => {
     e.stopPropagation();
     const newStatus = e.target.value;
-    // Optimistic UI update
-    const prev = workOrders;
-    const next = prev.map((w) =>
-      w.id === id ? { ...w, status: newStatus } : w
-    );
-    setWorkOrders(next);
-
     api
       .put(`/work-orders/${id}`, { status: newStatus })
       .then(fetchWorkOrders)
-      .catch((err) => {
-        console.error("Error updating status:", err);
-        // rollback on error
-        setWorkOrders(prev);
-      });
+      .catch((err) => console.error("Error updating status:", err));
   };
 
   const assignToTech = (orderId, techId, e) => {
@@ -112,7 +114,7 @@ export default function WorkOrders() {
   const handleLocationClick = (e, loc) => {
     e.stopPropagation();
     const url = `https://www.google.com/maps/embed/v1/place?key=${googleMapsApiKey}&q=${encodeURIComponent(
-      loc || ""
+      loc
     )}`;
     window.open(url, "_blank", "width=800,height=600");
   };
@@ -121,6 +123,8 @@ export default function WorkOrders() {
     <div className="home-container">
       <div className="header-row">
         <h2 className="text-primary">Work Orders Dashboard</h2>
+
+        {/* web CRM keeps the Add button visible (field app restriction was separate) */}
         <Link
           to="/add-work-order"
           className="btn btn-primary"
@@ -130,66 +134,68 @@ export default function WorkOrders() {
         </Link>
       </div>
 
-      {/* Status buttons with counts (evenly across) */}
-      <div
-        className="section-card"
-        style={{ paddingTop: 12, paddingBottom: 12, marginBottom: 16 }}
-      >
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-            justifyContent: "space-between",
-          }}
-        >
-          {/* "All" button */}
+      {/* Status chips / counters */}
+      <div className="section-card">
+        <div className="status-bar">
+          {/* All */}
           <button
-            type="button"
-            onClick={() => setSelectedStatus("All")}
-            className={`status-btn ${selectedStatus === "All" ? "active" : ""}`}
-            style={{ flex: 1, minWidth: 120 }}
+            className={`status-pill ${
+              selectedStatus === "All" ? "active" : ""
+            }`}
+            onClick={() => applyFilter("All")}
           >
-            <span>All</span>
-            <span className="badge">{counts.All || 0}</span>
+            <span className="label">All</span>
+            <span className="count">{totalCount}</span>
           </button>
 
-          {STATUSES.map((s) => (
+          {/* Today */}
+          <button
+            className={`status-pill ${
+              selectedStatus === "Today" ? "active" : ""
+            }`}
+            onClick={() => applyFilter("Today")}
+          >
+            <span className="label">Today</span>
+            <span className="count">{todayCount}</span>
+          </button>
+
+          {/* Each status (now includes BOTH "Needs to be Scheduled" AND "Parts In") */}
+          {STATUS_LIST.map((label) => (
             <button
-              key={s}
-              type="button"
-              onClick={() => setSelectedStatus(s)}
-              className={`status-btn ${
-                selectedStatus === s ? "active" : ""
+              key={label}
+              className={`status-pill ${
+                selectedStatus === label ? "active" : ""
               }`}
-              style={{ flex: 1, minWidth: 160 }}
+              onClick={() => applyFilter(label)}
+              title={label}
             >
-              <span>{s}</span>
-              <span className="badge">{counts[s] || 0}</span>
+              <span className="label">{label}</span>
+              <span className="count">{statusCounts[label] || 0}</span>
             </button>
           ))}
         </div>
       </div>
 
+      {/* Table */}
       <div className="section-card">
-        <table className="styled-table">
-          <thead>
-            <tr>
-              <th>WO/PO #</th>
-              <th>Customer</th>
-              <th>Billing Address</th>
-              <th>Site Location</th>
-              <th>Problem Description</th>
-              <th>Scheduled</th>
-              <th>Status</th>
-              {userRole !== "tech" && <th>Assigned To</th>}
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredOrders.map((order) => {
-              const displayStatus = normalizeStatus(order.status);
-              return (
+        {filteredOrders.length === 0 ? (
+          <div className="empty-text">No work orders to display.</div>
+        ) : (
+          <table className="styled-table">
+            <thead>
+              <tr>
+                <th>WO/PO #</th>
+                <th>Customer</th>
+                <th>Billing Address</th>
+                <th>Site Location</th>
+                <th>Problem Description</th>
+                <th>Status</th>
+                {userRole !== "tech" && <th>Assigned To</th>}
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredOrders.map((order) => (
                 <tr
                   key={order.id}
                   onClick={() => navigate(`/view-work-order/${order.id}`)}
@@ -211,20 +217,13 @@ export default function WorkOrders() {
                     {order.problemDescription}
                   </td>
                   <td>
-                    {order.scheduledDate
-                      ? moment(order.scheduledDate).format("YYYY-MM-DD HH:mm")
-                      : "Not Scheduled"}
-                  </td>
-                  <td>
                     <select
                       className="form-select"
-                      value={displayStatus}
+                      value={order.status || ""}
                       onClick={(e) => e.stopPropagation()}
-                      onChange={(e) =>
-                        handleStatusChange(e, order.id, order.status)
-                      }
+                      onChange={(e) => handleStatusChange(e, order.id)}
                     >
-                      {STATUSES.map((s) => (
+                      {STATUS_LIST.map((s) => (
                         <option key={s} value={s}>
                           {s}
                         </option>
@@ -262,17 +261,10 @@ export default function WorkOrders() {
                     </Link>
                   </td>
                 </tr>
-              );
-            })}
-            {filteredOrders.length === 0 && (
-              <tr>
-                <td colSpan={userRole !== "tech" ? 9 : 8} style={{ textAlign: "center", color: "#666" }}>
-                  No work orders in this category.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

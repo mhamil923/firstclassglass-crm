@@ -1,6 +1,5 @@
 // File: src/ViewWorkOrder.js
-
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "./api";
 import moment from "moment";
@@ -59,15 +58,15 @@ export default function ViewWorkOrder() {
     sitePhone,
   } = workOrder;
 
-  // Parse existing notes
-  let notesArray = [];
-  if (notes) {
+  // Parse existing notes (keep original order so indices match server)
+  const notesArray = useMemo(() => {
+    if (!notes) return [];
     try {
-      notesArray = typeof notes === "string" ? JSON.parse(notes) : notes;
+      return typeof notes === "string" ? JSON.parse(notes) : notes;
     } catch {
-      notesArray = [];
+      return [];
     }
-  }
+  }, [notes]);
 
   // File URLs (S3/local safe)
   const pdfUrl = pdfPath
@@ -83,7 +82,6 @@ export default function ViewWorkOrder() {
   // ---------- PRINT helpers ----------
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put logo at /public/fcg-logo.png
 
-  // Pull out site "name" and "address" if user typed "Name - address" or "Name, 123…"
   function parseSite(loc, fallbackName) {
     const result = { name: fallbackName || "", address: "" };
     if (!loc) return result;
@@ -115,15 +113,13 @@ export default function ViewWorkOrder() {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-  // -------- PRINT: open a new window with your existing template and print it
   const handlePrint = () => {
     const siteParsed = parseSite(siteLocation, customer);
     const siteName = siteParsed.name || customer || "";
     const siteAddr = siteParsed.address || "";
 
-    // No more local-only fields; use DB values if present
-    const billingPhonePrint = (customerPhone || billingPhone || "");
-    const sitePhonePrint = (sitePhone || "");
+    const billingPhonePrint = customerPhone || billingPhone || "";
+    const sitePhonePrint = sitePhone || "";
 
     const html = `<!doctype html>
 <html>
@@ -206,7 +202,6 @@ export default function ViewWorkOrder() {
       </tr>
     </table>
 
- <!-- ✅ EXACTLY WHAT YOU ASKED: description text ABOVE the blank box -->
     <div class="desc-title">Problem Description: ${safe(problemDescription || "")}</div>
     <div class="desc-box"></div>
 
@@ -257,6 +252,27 @@ export default function ViewWorkOrder() {
     } catch (error) {
       console.error("⚠️ Error adding note:", error);
       alert("Failed to add note.");
+    }
+  };
+
+  // ❌ Delete a single note by index
+  const handleDeleteNote = async (index) => {
+    if (!window.confirm("Delete this note? This cannot be undone.")) return;
+    try {
+      // Preferred RESTful route (requires server support):
+      await api.delete(`/work-orders/${id}/notes/${index}`);
+      await fetchWorkOrder();
+    } catch (err1) {
+      // Fallback pattern if server uses a body on DELETE:
+      try {
+        await api.delete(`/work-orders/${id}/notes`, { data: { index } });
+        await fetchWorkOrder();
+      } catch (err2) {
+        console.error("⚠️ Error deleting note:", err2);
+        alert(
+          "Failed to delete note. Make sure the server has a DELETE /work-orders/:id/notes/:index (or body index) route."
+        );
+      }
     }
   };
 
@@ -395,10 +411,19 @@ export default function ViewWorkOrder() {
             <ul className="notes-list">
               {notesArray.map((n, idx) => (
                 <li key={idx} className="note-item">
-                  <small className="note-timestamp">
-                    {moment(n.createdAt).format("YYYY-MM-DD HH:mm")}
-                    {n.by ? ` — ${n.by}` : ""}
-                  </small>
+                  <div className="note-head">
+                    <small className="note-timestamp">
+                      {moment(n.createdAt).format("YYYY-MM-DD HH:mm")}
+                      {n.by ? ` — ${n.by}` : ""}
+                    </small>
+                    <button
+                      className="btn btn-danger btn-xs delete-note-btn"
+                      onClick={() => handleDeleteNote(idx)}
+                      title="Delete note"
+                    >
+                      Delete
+                    </button>
+                  </div>
                   <p className="note-text">{n.text}</p>
                 </li>
               ))}
