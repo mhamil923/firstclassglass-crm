@@ -1,6 +1,5 @@
 // File: src/CalendarPage.js
-
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import api from "./api";
 import { Calendar, momentLocalizer } from "react-big-calendar";
 import moment from "moment";
@@ -15,17 +14,25 @@ import "./Calendar.css";
 const localizer = momentLocalizer(moment);
 const DnDCalendar = withDragAndDrop(Calendar);
 
-// Normalize a JS Date coming from rbc to a YYYY-MM-DD HH:mm:ss string at local noon
-function toMiddayString(dateLike) {
-  return moment(dateLike).startOf("day").add(12, "hours").format("YYYY-MM-DD HH:mm:ss");
+// ---------- date helpers (preserve time, seconds=0) ----------
+function toDbString(dateLike) {
+  return moment(dateLike).seconds(0).milliseconds(0).format("YYYY-MM-DD HH:mm:ss");
+}
+function fromDbString(dbString) {
+  // Accept "YYYY-MM-DD HH:mm:ss" or just "YYYY-MM-DD"
+  if (!dbString) return null;
+  const m =
+    dbString.trim().length <= 10
+      ? moment(dbString, "YYYY-MM-DD").startOf("day")
+      : moment(dbString, "YYYY-MM-DD HH:mm:ss");
+  return m.toDate();
+}
+// default 60 minutes so events have visible height in Day/Week
+function plus60(date) {
+  return moment(date).add(60, "minutes").toDate();
 }
 
-// Safely build a JS Date for rbc from a DB string (treat as local, then set to noon)
-function toMiddayDate(dbString) {
-  // dbString like "2025-08-15 00:00:00" (no timezone). Treat as local.
-  return moment(dbString, "YYYY-MM-DD HH:mm:ss").startOf("day").add(12, "hours").toDate();
-}
-
+// ---------- event bubble ----------
 function CustomEvent({ event }) {
   const popover = (
     <Popover id={`popover-${event.id}`}>
@@ -36,6 +43,12 @@ function CustomEvent({ event }) {
         <div><strong>PO#:</strong> {event.poNumber || event.id}</div>
         {event.siteLocation ? <div><strong>Site:</strong> {event.siteLocation}</div> : null}
         {event.problemDescription ? <div><strong>Problem:</strong> {event.problemDescription}</div> : null}
+        {event.scheduledDate ? (
+          <div style={{ marginTop: 6 }}>
+            <strong>When:</strong>{" "}
+            {moment(event.scheduledDate).format("YYYY-MM-DD HH:mm")}
+          </div>
+        ) : null}
       </Popover.Body>
     </Popover>
   );
@@ -49,180 +62,343 @@ function CustomEvent({ event }) {
 export default function WorkOrderCalendar() {
   const [workOrders, setWorkOrders] = useState([]);
   const [unscheduledOrders, setUnscheduledOrders] = useState([]);
-  const [dragItem, setDragItem] = useState(null);
+
   const [view, setView] = useState("month");
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [showModal, setShowModal] = useState(false);
-  const [selectedDayOrders, setSelectedDayOrders] = useState([]);
-  const [modalTitle, setModalTitle] = useState("");
 
-  useEffect(fetchWorkOrders, []);
+  // Day list modal
+  const [dayModalOpen, setDayModalOpen] = useState(false);
+  const [dayModalTitle, setDayModalTitle] = useState("");
+  const [dayOrders, setDayOrders] = useState([]);
+  const [dayForModal, setDayForModal] = useState(null);
+
+  // Quick edit modal
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editOrder, setEditOrder] = useState(null);
+  const [editDate, setEditDate] = useState(""); // yyyy-mm-dd
+  const [editTime, setEditTime] = useState(""); // HH:mm
+
+  // Drag from Unscheduled
+  const [dragItem, setDragItem] = useState(null);
+
+  useEffect(() => {
+    fetchWorkOrders();
+  }, []);
 
   function fetchWorkOrders() {
     api
       .get("/work-orders")
       .then((res) => {
-        const scheduled = (res.data || []).filter((o) => o.scheduledDate);
-        const unscheduled = (res.data || []).filter((o) => !o.scheduledDate);
-        setWorkOrders(scheduled);
-        setUnscheduledOrders(unscheduled);
+        const list = Array.isArray(res.data) ? res.data : [];
+        setWorkOrders(list.filter((o) => o.scheduledDate));
+        setUnscheduledOrders(list.filter((o) => !o.scheduledDate));
       })
       .catch((err) => console.error("⚠️ Error fetching work orders:", err));
   }
 
-  // Drag within calendar
+  // ---------- schedule update helpers ----------
+  async function updateSchedule(orderId, jsDate) {
+    const payload = {
+      scheduledDate: jsDate ? toDbString(jsDate) : null,
+      status: jsDate ? "Scheduled" : "Needs to be Scheduled",
+    };
+    await api.put(`/work-orders/${orderId}/update-date`, payload);
+  }
+
+  function openEditModal(order, fallbackDate) {
+    const d = fromDbString(order?.scheduledDate) || fallbackDate || new Date();
+    setEditOrder(order);
+    setEditDate(moment(d).format("YYYY-MM-DD"));
+    setEditTime(moment(d).format("HH:mm"));
+    setEditModalOpen(true);
+  }
+
+  async function saveEditModal() {
+    if (!editOrder) return;
+    const composed = moment(`${editDate} ${editTime}`, "YYYY-MM-DD HH:mm").toDate();
+    try {
+      await updateSchedule(editOrder.id, composed);
+      setEditModalOpen(false);
+      fetchWorkOrders();
+    } catch (e) {
+      console.error("⚠️ Error saving schedule:", e);
+      alert("Failed to save schedule.");
+    }
+  }
+
+  async function unschedule(orderId) {
+    if (!window.confirm("Remove this work order from the calendar?")) return;
+    try {
+      await updateSchedule(orderId, null);
+      setEditModalOpen(false);
+      fetchWorkOrders();
+    } catch (e) {
+      console.error("⚠️ Error unscheduling:", e);
+      alert("Failed to unschedule.");
+    }
+  }
+
+  // ---------- rbc interactions ----------
   function handleEventDrop({ event, start }) {
-    const formatted = toMiddayString(start);
-    api
-      .put(`/work-orders/${event.id}/update-date`, {
-        scheduledDate: formatted,
-        status: "Scheduled",
-      })
+    // drag to a new day/time
+    updateSchedule(event.id, start)
       .then(() =>
         setWorkOrders((prev) =>
           prev.map((o) =>
-            o.id === event.id
-              ? { ...o, scheduledDate: formatted, status: "Scheduled" }
-              : o
+            o.id === event.id ? { ...o, scheduledDate: toDbString(start) } : o
           )
         )
       )
       .catch((e) => console.error("⚠️ Error updating work order date:", e));
   }
 
-  // Drag from "Unscheduled" list onto the calendar
+  function handleEventResize({ event, start, end }) {
+    // we only persist the start time (single-slot jobs). end is visual only.
+    updateSchedule(event.id, start)
+      .then(() =>
+        setWorkOrders((prev) =>
+          prev.map((o) =>
+            o.id === event.id ? { ...o, scheduledDate: toDbString(start) } : o
+          )
+        )
+      )
+      .catch((e) => console.error("⚠️ Error resizing event:", e));
+  }
+
   function handleDropFromOutside({ start }) {
     if (!dragItem) return;
-    const formatted = toMiddayString(start);
-    api
-      .put(`/work-orders/${dragItem.id}/update-date`, {
-        scheduledDate: formatted,
-        status: "Scheduled",
-      })
+    updateSchedule(dragItem.id, start)
       .then(() => {
-        fetchWorkOrders();
         setDragItem(null);
+        fetchWorkOrders();
       })
       .catch((e) => console.error("⚠️ Error scheduling work order:", e));
+  }
+
+  function onSelectEvent(event) {
+    const full = workOrders.find((o) => o.id === event.id) || event;
+    openEditModal(full);
+  }
+
+  function onSelectSlot(slotInfo) {
+    // Month click => open list for that day with quick reschedule actions
+    const day = moment(slotInfo.start).startOf("day");
+    const list = workOrders.filter((o) =>
+      moment(o.scheduledDate, "YYYY-MM-DD HH:mm:ss").isSame(day, "day")
+    );
+    setDayOrders(list);
+    setDayForModal(day.toDate());
+    setDayModalTitle(`Work Orders for ${day.format("LL")}`);
+    setDayModalOpen(true);
   }
 
   function navigateToView(id) {
     window.location.href = `/view-work-order/${id}`;
   }
 
-  function handleDayClick({ start }) {
-    const day = moment(start).format("YYYY-MM-DD");
-    const list = workOrders.filter(
-      (o) => moment(o.scheduledDate, "YYYY-MM-DD HH:mm:ss").format("YYYY-MM-DD") === day
-    );
-    setSelectedDayOrders(list);
-    setModalTitle(`Work Orders for ${moment(start).format("LL")}`);
-    setShowModal(true);
-  }
-
-  // Build calendar events with stable midday times + richer titles
-  const events = workOrders.map((o) => ({
-    id: o.id,
-    title: o.customer ? `${o.customer} — ${o.poNumber || `WO ${o.id}`}` : (o.poNumber || `WO ${o.id}`),
-    poNumber: o.poNumber,
-    customer: o.customer,
-    siteLocation: o.siteLocation,
-    problemDescription: o.problemDescription,
-    start: toMiddayDate(o.scheduledDate),
-    end: toMiddayDate(o.scheduledDate),
-    allDay: false,
-  }));
+  // ---------- build rbc events ----------
+  const events = useMemo(
+    () =>
+      workOrders.map((o) => {
+        const start = fromDbString(o.scheduledDate) || new Date();
+        return {
+          id: o.id,
+          title: o.customer
+            ? `${o.customer} — ${o.poNumber || `WO ${o.id}`}`
+            : o.poNumber || `WO ${o.id}`,
+          poNumber: o.poNumber,
+          customer: o.customer,
+          siteLocation: o.siteLocation,
+          problemDescription: o.problemDescription,
+          scheduledDate: start,
+          start,
+          end: plus60(start),
+          allDay: false,
+        };
+      }),
+    [workOrders]
+  );
 
   return (
-    <>
-      <div className="calendar-page">
-        <div className="container-fluid p-0">
-          <h2 className="calendar-title">Work Order Calendar</h2>
+    <div className="calendar-page">
+      <div className="container-fluid p-0">
+        <h2 className="calendar-title">Work Order Calendar</h2>
 
-          {/* Unscheduled sidebar */}
-          <div className="unscheduled-container">
-            <h4>Unscheduled Work Orders</h4>
-            <div className="unscheduled-list">
-              {unscheduledOrders.map((order) => (
-                <div
-                  key={order.id}
-                  className="unscheduled-item"
-                  draggable
-                  onDragStart={() => setDragItem(order)}
-                  onClick={() => navigateToView(order.id)}
-                  title={order.problemDescription || ""}
-                >
-                  <strong>
-                    {order.customer ? `${order.customer}` : `WO ${order.id}`}
-                  </strong>
-                  {order.poNumber ? <> — {order.poNumber}</> : null}
-                  <br />
-                  <small>{order.problemDescription}</small>
+        {/* Unscheduled strip you can drag from */}
+        <div className="unscheduled-container">
+          <h4>Unscheduled Work Orders</h4>
+          <div className="unscheduled-list">
+            {unscheduledOrders.map((order) => (
+              <div
+                key={order.id}
+                className="unscheduled-item"
+                draggable
+                onDragStart={() => setDragItem(order)}
+                title={order.problemDescription || ""}
+              >
+                <strong>
+                  {order.customer ? `${order.customer}` : `WO ${order.id}`}
+                </strong>
+                {order.poNumber ? <> — {order.poNumber}</> : null}
+                <br />
+                <small className="truncate">{order.problemDescription}</small>
+                <div className="unscheduled-actions">
+                  <button
+                    className="btn btn-xs btn-outline-light me-1"
+                    onClick={() => openEditModal(order, currentDate)}
+                  >
+                    Schedule…
+                  </button>
+                  <button
+                    className="btn btn-xs btn-light"
+                    onClick={() => navigateToView(order.id)}
+                  >
+                    Open
+                  </button>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Calendar */}
-          <div className="calendar-container">
-            <DnDCalendar
-              localizer={localizer}
-              events={events}
-              startAccessor="start"
-              endAccessor="end"
-              style={{ height: "calc(100vh - 200px)" }}
-              components={{ event: CustomEvent }}
-              draggableAccessor={() => true}
-              onEventDrop={handleEventDrop}
-              dragFromOutsideItem={() => dragItem}
-              onDropFromOutside={handleDropFromOutside}
-              onSelectEvent={(event) => navigateToView(event.id)}
-              onDoubleClickEvent={(event) => navigateToView(event.id)}
-              onSelectSlot={handleDayClick}
-              selectable
-              views={["month", "week", "day", "agenda"]}
-              view={view}
-              onView={(v) => setView(v)}
-              date={currentDate}
-              onNavigate={(d) => setCurrentDate(d)}
-            />
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Simple modal */}
-        {showModal && (
-          <div className="modal-overlay">
-            <div className="modal-content">
-              <h4>{modalTitle}</h4>
+        {/* Calendar */}
+        <div className="calendar-container">
+          <DnDCalendar
+            localizer={localizer}
+            events={events}
+            startAccessor="start"
+            endAccessor="end"
+            step={15}
+            timeslots={4}
+            min={moment().startOf("day").add(6, "hours").toDate()}   // 6 AM
+            max={moment().startOf("day").add(21, "hours").toDate()}  // 9 PM
+            popup
+            popupOffset={20}
+            resizable
+            selectable
+            components={{ event: CustomEvent }}
+            draggableAccessor={() => true}
+            onEventDrop={handleEventDrop}
+            onEventResize={handleEventResize}
+            dragFromOutsideItem={() => dragItem}
+            onDropFromOutside={handleDropFromOutside}
+            onSelectEvent={onSelectEvent}
+            onDoubleClickEvent={(e) => navigateToView(e.id)}
+            onSelectSlot={onSelectSlot}
+            view={view}
+            onView={(v) => setView(v)}
+            date={currentDate}
+            onNavigate={(d) => setCurrentDate(d)}
+            style={{ height: "calc(100vh - 220px)" }}
+          />
+        </div>
+      </div>
+
+      {/* ---------- Day list modal ---------- */}
+      {dayModalOpen && (
+        <div className="modal-overlay" onClick={() => setDayModalOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h4 className="mb-3">{dayModalTitle}</h4>
+            {dayOrders.length ? (
               <ul className="list-group">
-                {selectedDayOrders.length > 0 ? (
-                  selectedDayOrders.map((o) => (
-                    <li
-                      key={o.id}
-                      className="list-group-item"
-                      onClick={() => navigateToView(o.id)}
-                      style={{ cursor: "pointer" }}
-                    >
-                      {o.customer ? `${o.customer}` : `WO ${o.id}`}
-                      {o.poNumber ? ` — ${o.poNumber}` : ""}
-                      {" — "}
-                      {o.problemDescription}
-                    </li>
-                  ))
-                ) : (
-                  <p className="empty-text">No work orders scheduled on this day.</p>
-                )}
+                {dayOrders.map((o) => (
+                  <li key={o.id} className="list-group-item d-flex justify-content-between align-items-start">
+                    <div className="me-2">
+                      <div className="fw-bold">
+                        {o.customer ? `${o.customer}` : `WO ${o.id}`}
+                        {o.poNumber ? ` — ${o.poNumber}` : ""}
+                      </div>
+                      <small className="text-muted">{o.problemDescription}</small>
+                      <div>
+                        <small>
+                          {moment(o.scheduledDate, "YYYY-MM-DD HH:mm:ss").format("hh:mm A")}
+                        </small>
+                      </div>
+                    </div>
+                    <div className="d-flex align-items-center">
+                      <button
+                        className="btn btn-sm btn-primary me-2"
+                        onClick={() => openEditModal(o, dayForModal)}
+                      >
+                        Edit Time…
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline-secondary me-2"
+                        onClick={() => navigateToView(o.id)}
+                      >
+                        Open
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline-danger"
+                        onClick={() => unschedule(o.id)}
+                      >
+                        Unschedule
+                      </button>
+                    </div>
+                  </li>
+                ))}
               </ul>
-              <button
-                className="btn btn-secondary mt-3"
-                onClick={() => setShowModal(false)}
-              >
+            ) : (
+              <p className="empty-text mb-0">No work orders scheduled on this day.</p>
+            )}
+            <div className="text-end mt-3">
+              <button className="btn btn-secondary" onClick={() => setDayModalOpen(false)}>
                 Close
               </button>
             </div>
           </div>
-        )}
-      </div>
-    </>
+        </div>
+      )}
+
+      {/* ---------- Quick Edit modal ---------- */}
+      {editModalOpen && (
+        <div className="modal-overlay" onClick={() => setEditModalOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h4 className="mb-3">Edit Schedule</h4>
+            {editOrder && (
+              <>
+                <div className="mb-2">
+                  <div className="fw-bold">
+                    {editOrder.customer ? `${editOrder.customer}` : `WO ${editOrder.id}`}
+                    {editOrder.poNumber ? ` — ${editOrder.poNumber}` : ""}
+                  </div>
+                  <small className="text-muted">{editOrder.problemDescription}</small>
+                </div>
+
+                <div className="row g-2">
+                  <div className="col-7">
+                    <label className="form-label small">Date</label>
+                    <input
+                      className="form-control"
+                      type="date"
+                      value={editDate}
+                      onChange={(e) => setEditDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="col-5">
+                    <label className="form-label small">Time</label>
+                    <input
+                      className="form-control"
+                      type="time"
+                      value={editTime}
+                      onChange={(e) => setEditTime(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="d-flex justify-content-end mt-3">
+                  <button className="btn btn-outline-danger me-2" onClick={() => unschedule(editOrder.id)}>
+                    Unschedule
+                  </button>
+                  <button className="btn btn-primary" onClick={saveEditModal}>
+                    Save
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

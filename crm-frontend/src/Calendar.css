@@ -1,35 +1,36 @@
-/* Calendar.css */
+/* File: src/Calendar.css */
 
 /* palette */
 :root {
-  --color-bg:      #F1F5F9;  /* light grey */
-  --color-primary: #3D5A80;  /* deep blue */
-  --color-secondary:#98C379; /* green accent */
-  --color-accent:  #2B2D42;  /* dark slate */
-  --color-white:   #ffffff;
+  --color-bg:       #F1F5F9;  /* light grey */
+  --color-primary:  #3D5A80;  /* deep blue */
+  --color-secondary:#98C379;  /* green accent */
+  --color-accent:   #2B2D42;  /* dark slate */
+  --color-white:    #ffffff;
 }
 
-/* page wrapper fills to navbar */
 .calendar-page {
   background: var(--color-bg);
-  min-height: calc(100vh - 56px); /* adjust if your navbar height differs */
+  min-height: calc(100vh - 56px);
   padding-top: 1rem;
 }
 
-/* title styling */
 .calendar-title {
   text-align: center;
   color: var(--color-accent);
   margin: 1rem 0;
 }
 
-/* Unscheduled sidebar */
+/* ---------- Unscheduled strip ---------- */
 .unscheduled-container {
   background: var(--color-white);
   padding: 1rem;
-  border-bottom: 1px solid var(--color-primary);
+  border-bottom: 1px solid rgba(0,0,0,.06);
   overflow-x: auto;
   white-space: nowrap;
+}
+.unscheduled-container h4 {
+  margin: 0 0 .5rem 0;
 }
 .unscheduled-list {
   display: inline-flex;
@@ -38,23 +39,39 @@
 .unscheduled-item {
   background: var(--color-secondary);
   color: var(--color-white);
-  padding: 0.75rem 1rem;
-  border-radius: 6px;
+  padding: 0.75rem 0.9rem;
+  border-radius: 8px;
   cursor: grab;
-  min-width: 140px;
-  text-align: center;
+  min-width: 210px;
+  text-align: left;
+  box-shadow: 0 2px 6px rgba(0,0,0,.06);
 }
-.unscheduled-item:active {
-  cursor: grabbing;
+.unscheduled-item:active { cursor: grabbing; }
+.unscheduled-item .truncate {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.unscheduled-actions {
+  margin-top: .5rem;
+  display: flex;
+  gap: .35rem;
+}
+.btn.btn-xs {
+  padding: .15rem .4rem;
+  font-size: .75rem;
+  line-height: 1.2;
+  border-radius: .25rem;
 }
 
-/* Calendar container */
+/* ---------- Calendar shell ---------- */
 .calendar-container {
   margin: 1rem;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
   background: var(--color-white);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.06);
 }
 
 /* BigCalendar full width */
@@ -63,58 +80,67 @@
   max-width: none !important;
 }
 
-/* events */
-.rbc-event {
-  background: var(--color-secondary) !important;
-  border-radius: 4px;
-  padding: 4px 6px;
-  color: var(--color-white);
-  font-size: 0.9rem;
-  cursor: grab;
-}
-.rbc-event:hover {
-  background: var(--color-primary) !important;
-}
-
 /* toolbar buttons */
 .rbc-toolbar button {
   background: var(--color-primary);
   color: var(--color-white);
   border: none;
   margin: 2px;
-  padding: 4px 8px;
-  border-radius: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
   cursor: pointer;
 }
-.rbc-toolbar button:hover {
-  background: var(--color-accent);
+.rbc-toolbar button:hover { background: var(--color-accent); }
+
+/* events */
+.rbc-event {
+  background: var(--color-secondary) !important;
+  border-radius: 6px;
+  padding: 4px 6px;
+  color: var(--color-white);
+  font-size: 0.9rem;
+  cursor: grab;
+  border: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+.rbc-event:hover { background: var(--color-primary) !important; }
+
+/* better week/day slots visibility */
+.rbc-time-view .rbc-time-content {
+  border-top: 1px solid rgba(0,0,0,.06);
+}
+.rbc-timeslot-group {
+  min-height: 36px; /* taller rows for readability */
 }
 
-/* modal overlay */
+/* month popup “+X more” list: make roomy */
+.rbc-overlay {
+  z-index: 1500;
+  max-height: 70vh;
+  overflow: auto;
+  border-radius: 8px;
+  box-shadow: 0 10px 20px rgba(0,0,0,.15);
+}
+
+/* ---------- modal ---------- */
 .modal-overlay {
   position: fixed;
   top: 56px; /* height of your navbar */
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0,0,0,0.3);
+  left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.35);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2000;
 }
-
-/* modal content */
 .modal-content {
   background: var(--color-white);
-  padding: 1.5rem;
-  border-radius: 8px;
-  width: 90%;
-  max-width: 500px;
-  box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+  padding: 1.25rem 1.25rem 1rem 1.25rem;
+  border-radius: 10px;
+  width: 92%;
+  max-width: 640px;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.12);
 }
-
-/* empty list text */
 .empty-text {
   text-align: center;
   color: #6c757d;

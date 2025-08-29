@@ -7,6 +7,15 @@ import moment from "moment";
 import API_BASE_URL from "./config";
 import "./ViewWorkOrder.css";
 
+const STATUS_OPTIONS = [
+  "Needs to be Scheduled",
+  "Scheduled",
+  "Waiting for Approval",
+  "Waiting on Parts",
+  "Parts In",
+  "Completed",
+];
+
 export default function ViewWorkOrder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -15,11 +24,20 @@ export default function ViewWorkOrder() {
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
+  // Replace PDF UI state
+  const [busyReplace, setBusyReplace] = useState(false);
+  const [keepOldInAttachments, setKeepOldInAttachments] = useState(true);
+
+  // Status state
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [localStatus, setLocalStatus] = useState("");
+
   // Fetch work order details
   const fetchWorkOrder = async () => {
     try {
       const response = await api.get(`/work-orders/${id}`);
-      setWorkOrder(response.data);
+      setWorkOrder(response.data || null);
+      setLocalStatus(response.data?.status || "");
     } catch (error) {
       console.error("⚠️ Error fetching work order:", error);
     }
@@ -30,7 +48,7 @@ export default function ViewWorkOrder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  // Parse existing notes (original order from DB) safely
+  // Parse existing notes safely
   const originalNotes = useMemo(() => {
     try {
       const raw = workOrder?.notes;
@@ -41,14 +59,14 @@ export default function ViewWorkOrder() {
     }
   }, [workOrder]);
 
-  // Display newest first, but keep a pointer to the original index so deletion hits the right item
+  // Newest first for display
   const displayNotes = useMemo(() => {
     return originalNotes
       .map((n, idx) => ({ ...n, __origIndex: idx }))
       .sort((a, b) => {
         const ta = Date.parse(a.createdAt || 0);
         const tb = Date.parse(b.createdAt || 0);
-        return tb - ta; // newest first
+        return tb - ta;
       });
   }, [originalNotes]);
 
@@ -74,10 +92,6 @@ export default function ViewWorkOrder() {
     // optional contact from DB
     customerPhone,
     customerEmail,
-
-    // legacy DB fields (if present)
-    billingPhone,
-    sitePhone,
   } = workOrder;
 
   // File URLs (S3/local safe)
@@ -85,16 +99,15 @@ export default function ViewWorkOrder() {
     ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}#page=1&view=FitH`
     : null;
 
-  // Existing attachments (image keys joined by comma)
+  // Existing attachments (can include images or PDFs)
   const attachments = (photoPath || "")
     .split(",")
     .map((p) => p.trim())
-    .filter((p) => p);
+    .filter(Boolean);
 
   // ---------- PRINT helpers ----------
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put logo at /public/fcg-logo.png
 
-  // Pull out site "name" and "address" if user typed "Name - address" or "Name, 123…"
   function parseSite(loc, fallbackName) {
     const result = { name: fallbackName || "", address: "" };
     if (!loc) return result;
@@ -126,15 +139,10 @@ export default function ViewWorkOrder() {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-  // -------- PRINT: open a new window with your existing template and print it
   const handlePrint = () => {
     const siteParsed = parseSite(siteLocation, customer);
     const siteName = siteParsed.name || customer || "";
     const siteAddr = siteParsed.address || "";
-
-    // No more local-only fields; use DB values if present
-    const billingPhonePrint = customerPhone || billingPhone || "";
-    const sitePhonePrint = sitePhone || "";
 
     const html = `<!doctype html>
 <html>
@@ -211,9 +219,9 @@ export default function ViewWorkOrder() {
       </tr>
       <tr>
         <th class="label">Phone</th>
-        <td>${safe(billingPhonePrint)}</td>
+        <td>${safe(customerPhone || "")}</td>
         <th class="label">Phone</th>
-        <td>${safe(sitePhonePrint)}</td>
+        <td></td>
       </tr>
     </table>
 
@@ -285,7 +293,7 @@ export default function ViewWorkOrder() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     const formData = new FormData();
-    files.forEach((file) => formData.append("photoFile", file));
+    files.forEach((file) => formData.append("photoFile", file)); // backend already supports 'photoFile'
     try {
       await api.put(`/work-orders/${id}/edit`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -294,8 +302,71 @@ export default function ViewWorkOrder() {
     } catch (error) {
       console.error("⚠️ Error uploading attachments:", error);
       alert("Failed to upload attachments.");
+    } finally {
+      e.target.value = "";
     }
   };
+
+  // ---------- replace signed PDF ----------
+  const handleReplacePdfUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      alert("Please choose a PDF file.");
+      e.target.value = "";
+      return;
+    }
+    setBusyReplace(true);
+    try {
+      const form = new FormData();
+      form.append("pdfFile", file);
+      // Flags your backend can use to move old pdf to attachments and replace the active pdf
+      form.append("replacePdf", "1");
+      if (keepOldInAttachments) form.append("keepOldInAttachments", "1");
+
+      await api.put(`/work-orders/${id}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      await fetchWorkOrder();
+      alert("PDF replaced successfully.");
+    } catch (error) {
+      console.error("⚠️ Error replacing PDF:", error);
+      alert(error?.response?.data?.error || "Failed to replace PDF.");
+    } finally {
+      setBusyReplace(false);
+      e.target.value = "";
+    }
+  };
+
+  // ---------- change status on page ----------
+  const handleStatusChange = async (e) => {
+    const newStatus = e.target.value;
+    setLocalStatus(newStatus);
+    setStatusSaving(true);
+    try {
+      // Preferred: dedicated status endpoint
+      try {
+        await api.put(`/work-orders/${id}/status`, { status: newStatus });
+      } catch {
+        // Fallback: edit endpoint
+        const form = new FormData();
+        form.append("status", newStatus);
+        await api.put(`/work-orders/${id}/edit`, form, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+      }
+      await fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error updating status:", error);
+      alert("Failed to update status.");
+    } finally {
+      setStatusSaving(false);
+    }
+  };
+
+  // ---------- helpers ----------
+  const isPdfKey = (key) => /\.pdf(\?|$)/i.test(key);
 
   return (
     <div className="view-container">
@@ -317,12 +388,33 @@ export default function ViewWorkOrder() {
             <span className="detail-label">WO/PO #:</span>
             <span className="detail-value">{poNumber || id || "—"}</span>
           </li>
+
           <li className="detail-item">
-            <span className="detail-label">Customer:</span>
-            <span className="detail-value">{customer}</span>
+            <span className="detail-label">Status:</span>
+            <span className="detail-value">
+              <select
+                value={localStatus}
+                onChange={handleStatusChange}
+                disabled={statusSaving}
+                style={{ padding: 6 }}
+              >
+                <option value="" disabled>
+                  Select status…
+                </option>
+                {STATUS_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
+              {statusSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
+            </span>
           </li>
 
-          {/* shows saved customer phone/email when present */}
+          <li className="detail-item">
+            <span className="detail-label">Customer:</span>
+            <span className="detail-value">{customer || "—"}</span>
+          </li>
           <li className="detail-item">
             <span className="detail-label">Customer Phone:</span>
             <span className="detail-value">{customerPhone || "—"}</span>
@@ -334,19 +426,15 @@ export default function ViewWorkOrder() {
 
           <li className="detail-item">
             <span className="detail-label">Site Location:</span>
-            <span className="detail-value">{siteLocation}</span>
+            <span className="detail-value">{siteLocation || "—"}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Billing Address:</span>
-            <span className="detail-value pre-wrap">{billingAddress}</span>
+            <span className="detail-value pre-wrap">{billingAddress || "—"}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Problem Description:</span>
-            <span className="detail-value pre-wrap">{problemDescription}</span>
-          </li>
-          <li className="detail-item">
-            <span className="detail-label">Status:</span>
-            <span className="detail-value">{status}</span>
+            <span className="detail-value pre-wrap">{problemDescription || "—"}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Scheduled Date:</span>
@@ -358,35 +446,98 @@ export default function ViewWorkOrder() {
           </li>
         </ul>
 
-        {pdfUrl && (
-          <div className="view-card section-card">
-            <h3 className="section-header">Work Order PDF</h3>
-            <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
-            <div className="mt-2">
-              <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
-                Open PDF in new tab
-              </a>
-            </div>
-          </div>
-        )}
+        {/* Current Work Order PDF + Replace control */}
+        <div className="section-card">
+          <h3 className="section-header">Work Order PDF</h3>
 
+          {pdfUrl ? (
+            <>
+              <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
+              <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
+                  Open PDF in new tab
+                </a>
+
+                <label className="btn">
+                  {busyReplace ? "Replacing…" : "Replace Signed PDF"}
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    onChange={handleReplacePdfUpload}
+                    style={{ display: "none" }}
+                    disabled={busyReplace}
+                  />
+                </label>
+
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={keepOldInAttachments}
+                    onChange={(e) => setKeepOldInAttachments(e.target.checked)}
+                  />
+                  Move existing signed PDF to attachments
+                </label>
+              </div>
+            </>
+          ) : (
+            <div>
+              <p className="empty-text">No PDF attached.</p>
+              <label className="btn">
+                {busyReplace ? "Uploading…" : "Upload PDF"}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleReplacePdfUpload}
+                  style={{ display: "none" }}
+                  disabled={busyReplace}
+                />
+              </label>
+            </div>
+          )}
+        </div>
+
+        {/* Attachments – supports images & PDFs */}
         <div className="section-card">
           <h3 className="section-header">Attachments</h3>
-          <div className="attachments">
-            {attachments.map((relPath, i) => {
-              const url = `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
-              return (
-                <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-                  <img src={url} alt={`attachment-${i}`} className="attachment-img" />
-                </a>
-              );
-            })}
-          </div>
+
+          {attachments.length ? (
+            <div className="attachments">
+              {attachments.map((relPath, i) => {
+                const url = `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
+                const pdf = isPdfKey(relPath);
+                return pdf ? (
+                  <a
+                    key={i}
+                    href={url}
+                    className="attachment-chip"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`Open PDF: ${relPath.split("/").pop()}`}
+                  >
+                    📄 {relPath.split("/").pop() || "attachment.pdf"}
+                  </a>
+                ) : (
+                  <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                    <img src={url} alt={`attachment-${i}`} className="attachment-img" />
+                  </a>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="empty-text">No attachments.</p>
+          )}
+
           <div className="attachment-upload">
-            <input type="file" multiple onChange={handleAttachmentChange} />
+            <input
+              type="file"
+              multiple
+              accept="image/*,application/pdf"
+              onChange={handleAttachmentChange}
+            />
           </div>
         </div>
 
+        {/* Notes */}
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
 
@@ -421,8 +572,6 @@ export default function ViewWorkOrder() {
                       {moment(n.createdAt).format("YYYY-MM-DD HH:mm")}
                       {n.by ? ` — ${n.by}` : ""}
                     </small>
-
-                    {/* small delete button on far right; passes ORIGINAL index */}
                     <button
                       type="button"
                       className="note-delete-btn"
@@ -432,7 +581,6 @@ export default function ViewWorkOrder() {
                       ✕
                     </button>
                   </div>
-
                   <p className="note-text">{n.text}</p>
                 </li>
               ))}
