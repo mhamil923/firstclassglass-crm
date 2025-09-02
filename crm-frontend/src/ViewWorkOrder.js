@@ -244,7 +244,7 @@ export default function ViewWorkOrder() {
       </div>
     </div>
 
-    <div class="fine">
+    <div className="fine">
       NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
     </div>
   </div>
@@ -307,6 +307,20 @@ export default function ViewWorkOrder() {
     }
   };
 
+  // NEW: delete a single attachment (image or PDF) by its stored key
+  const handleDeleteAttachment = async (relPath) => {
+    if (!window.confirm("Delete this attachment?")) return;
+    try {
+      await api.delete(`/work-orders/${id}/attachment`, {
+        data: { photoPath: relPath },
+      });
+      await fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error deleting attachment:", error);
+      alert(error?.response?.data?.error || "Failed to delete attachment.");
+    }
+  };
+
   // ---------- replace signed PDF ----------
   const handleReplacePdfUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -323,7 +337,7 @@ export default function ViewWorkOrder() {
       // Explicitly mark this as a replacement
       form.append("replacePdf", "1");
       if (keepOldInAttachments) {
-        // ✅ send both keys; backend accepts either
+        // send both keys; backend accepts either
         form.append("keepOldPdfInAttachments", "1");
         form.append("keepOldInAttachments", "1");
       }
@@ -377,7 +391,7 @@ export default function ViewWorkOrder() {
       <div className="view-card">
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
-          <div className="view-actions">
+        <div className="view-actions">
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
             </button>
@@ -509,21 +523,60 @@ export default function ViewWorkOrder() {
               {attachments.map((relPath, i) => {
                 const url = `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
                 const pdf = isPdfKey(relPath);
-                return pdf ? (
-                  <a
-                    key={i}
-                    href={url}
-                    className="attachment-chip"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={`Open PDF: ${relPath.split("/").pop()}`}
+
+                // common wrapper so we can overlay a small X button
+                return (
+                  <div
+                    key={`${relPath}-${i}`}
+                    className="attachment-item"
+                    style={{
+                      position: "relative",
+                      display: "inline-block",
+                      margin: 6,
+                    }}
                   >
-                    📄 {relPath.split("/").pop() || "attachment.pdf"}
-                  </a>
-                ) : (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-                    <img src={url} alt={`attachment-${i}`} className="attachment-img" />
-                  </a>
+                    {pdf ? (
+                      <a
+                        href={url}
+                        className="attachment-chip"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`Open PDF: ${relPath.split("/").pop()}`}
+                      >
+                        📄 {relPath.split("/").pop() || "attachment.pdf"}
+                      </a>
+                    ) : (
+                      <a href={url} target="_blank" rel="noopener noreferrer">
+                        <img src={url} alt={`attachment-${i}`} className="attachment-img" />
+                      </a>
+                    )}
+
+                    {/* little X delete button */}
+                    <button
+                      type="button"
+                      title="Delete attachment"
+                      aria-label="Delete attachment"
+                      onClick={() => handleDeleteAttachment(relPath)}
+                      style={{
+                        position: "absolute",
+                        top: -6,
+                        right: -6,
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        border: "none",
+                        background: "#e33",
+                        color: "#fff",
+                        fontWeight: 700,
+                        lineHeight: "18px",
+                        cursor: "pointer",
+                        zIndex: 5,
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                      }}
+                    >
+                      &times;
+                    </button>
+                  </div>
                 );
               })}
             </div>
