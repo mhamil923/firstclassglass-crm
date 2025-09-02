@@ -134,7 +134,6 @@ function withMulter(handler) {
   return (req, res, next) => {
     handler(req, res, (err) => {
       if (!err) return next();
-      // If this error came from Multer limits, 413 is appropriate.
       const MULTER_413 = new Set([
         'LIMIT_FILE_SIZE','LIMIT_FILE_COUNT','LIMIT_FIELD_COUNT',
         'LIMIT_PART_COUNT','LIMIT_FIELD_VALUE','LIMIT_FIELD_KEY'
@@ -148,7 +147,6 @@ function withMulter(handler) {
           'Request too large';
         return res.status(413).json({ error: msg, code: err.code });
       }
-      // IMPORTANT: Unexpected field should be a 400, not 413.
       if (err.code === 'LIMIT_UNEXPECTED_FILE') {
         return res.status(400).json({ error: 'Unexpected file field', code: err.code });
       }
@@ -314,6 +312,12 @@ function enforceImageCountOr413(res, images) {
   }
   return true;
 }
+const isTruthy = (v) => {
+  if (v === true) return true;
+  const s = String(v || '').trim().toLowerCase();
+  return ['1','true','on','yes','y','checked'].includes(s);
+};
+const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
 
 // CREATE — any field names; one PDF (optional) + images
 app.post(
@@ -390,25 +394,62 @@ app.put(
       const { pdf, images } = splitFilesAny(req.files || []);
       if (!enforceImageCountOr413(res, images)) return;
 
-      // Replace PDF if provided
+      // Current attachments list
+      let attachments = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
+
+      // Flags:
+      // - keepOldInAttachments: sent by the UI; keep legacy aliases for safety
+      const moveOldPdf =
+        isTruthy(req.body.keepOldInAttachments) ||         // ✅ from UI
+        isTruthy(req.body.keepOldPdfInAttachments) ||       // legacy
+        isTruthy(req.body.moveOldPdfToAttachments) ||       // legacy
+        isTruthy(req.body.moveOldPdf) ||                    // legacy
+        isTruthy(req.body.moveExistingPdfToAttachments);    // legacy
+
+      // - replacePdf: when true, a provided PDF *replaces* the main pdfPath.
+      //   If false/absent, a provided PDF is appended to attachments instead.
+      const wantReplacePdf =
+        isTruthy(req.body.replacePdf) ||
+        isTruthy(req.body.setAsPrimaryPdf) ||               // optional alias
+        isTruthy(req.body.isPdfReplacement);                // optional alias
+
       let pdfPath = existing.pdfPath;
+
       if (pdf) {
-        try {
-          if (pdfPath && /^uploads\//.test(pdfPath)) {
-            if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: pdfPath }).promise();
-            else {
-              const full = path.resolve(__dirname, 'uploads', pdfPath.replace(/^uploads\//, ''));
-              if (fs.existsSync(full)) fs.unlinkSync(full);
+        const newPdfPath = fileKey(pdf);
+        const oldPdfPath = existing.pdfPath;
+
+        if (wantReplacePdf) {
+          // Replace the main PDF
+          if (oldPdfPath) {
+            if (moveOldPdf) {
+              // Keep old PDF as an attachment
+              if (!attachments.includes(oldPdfPath)) attachments.push(oldPdfPath);
+            } else {
+              // Delete the old PDF asset
+              try {
+                if (/^uploads\//.test(oldPdfPath)) {
+                  if (S3_BUCKET) {
+                    await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPdfPath }).promise();
+                  } else {
+                    const full = path.resolve(__dirname, 'uploads', oldPdfPath.replace(/^uploads\//, ''));
+                    if (fs.existsSync(full)) fs.unlinkSync(full);
+                  }
+                }
+              } catch (e) { console.warn('⚠️ PDF delete old:', e.message); }
             }
           }
-        } catch (e) { console.warn('⚠️ PDF delete old:', e.message); }
-        pdfPath = fileKey(pdf);
+          // Set new primary PDF
+          pdfPath = newPdfPath;
+        } else {
+          // No replacement flag => treat uploaded PDF as an *attachment*
+          attachments.push(newPdfPath);
+        }
       }
 
-      // Append images
-      const oldPhotos = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
+      // Append any newly uploaded images to attachments
       const newPhotos = images.map(fileKey);
-      const merged    = [...oldPhotos, ...newPhotos];
+      attachments = uniq([...attachments, ...newPhotos]);
 
       const {
         poNumber = existing.poNumber,
@@ -431,7 +472,7 @@ app.put(
                  WHERE id=?`;
       const params = [
         poNumber, customer, siteLocation, billingAddress,
-        problemDescription, status, pdfPath || null, merged.join(','),
+        problemDescription, status, pdfPath || null, attachments.join(','),
         billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null,
         wid
       ];
@@ -472,7 +513,7 @@ app.post(
       if (!images.length) return res.status(400).json({ error: 'No image provided.' });
 
       const oldPhotos = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
-      const merged = [...oldPhotos, fileKey(images[0])];
+      const merged = uniq([...oldPhotos, fileKey(images[0])]);
 
       await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [merged.join(','), wid]);
       const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
@@ -499,7 +540,7 @@ app.post(
       if (!images.length) return res.status(400).json({ error: 'No images provided.' });
 
       const oldPhotos = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
-      const merged = [...oldPhotos, ...images.map(fileKey)];
+      const merged = uniq([...oldPhotos, ...images.map(fileKey)]);
 
       await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [merged.join(','), wid]);
       const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
@@ -551,7 +592,10 @@ app.post('/work-orders/:id/notes', authenticate, express.json(), async (req, res
     arr.push({ text, createdAt: new Date().toISOString(), by: req.user.username });
     await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [JSON.stringify(arr), wid]);
     res.json({ notes: arr });
-  } catch (err) { console.error('Add note error:', err); res.status(500).json({ error: 'Failed to add note.' }); }
+  } catch (err) {
+    console.error('Add note error:', err);
+    res.status(500).json({ error: 'Failed to add note.' });
+  }
 });
 
 app.delete('/work-orders/:id/notes/:index', authenticate, async (req, res) => {

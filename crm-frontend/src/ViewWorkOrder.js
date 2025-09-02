@@ -320,9 +320,13 @@ export default function ViewWorkOrder() {
     try {
       const form = new FormData();
       form.append("pdfFile", file);
-      // Flags your backend can use to move old pdf to attachments and replace the active pdf
+      // Explicitly mark this as a replacement
       form.append("replacePdf", "1");
-      if (keepOldInAttachments) form.append("keepOldInAttachments", "1");
+      if (keepOldInAttachments) {
+        // ✅ send both keys; backend accepts either
+        form.append("keepOldPdfInAttachments", "1");
+        form.append("keepOldInAttachments", "1");
+      }
 
       await api.put(`/work-orders/${id}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data" },
