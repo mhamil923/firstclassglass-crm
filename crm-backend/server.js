@@ -1,3 +1,4 @@
+
 // File: server.js
 
 // ─── IMPORTS ─────────────────────────────────────────────────────────────────
@@ -26,8 +27,10 @@ const {
   S3_BUCKET,
   AWS_REGION = 'us-east-2',
   ASSIGNEE_EXTRA_USERNAMES = 'Jeff,tech1',
+  DEFAULT_WINDOW_MINUTES = '120', // ➕ default arrival window if end not provided
 } = process.env;
 
+const DEFAULT_WINDOW = Math.max(15, Number(DEFAULT_WINDOW_MINUTES) || 120);
 const S3_SIGNED_TTL = Number(process.env.S3_SIGNED_TTL || 900);
 
 // ⬆️ Limits (env overridable)
@@ -55,34 +58,110 @@ const db = mysql.createPool({
 
 // ─── SMALL UTILITIES ─────────────────────────────────────────────────────────
 const pad2 = n => String(n).padStart(2, '0');
-function toSqlDateTime(d) {
-  // Expects JS Date in local TZ (TZ env set above). Returns 'YYYY-MM-DD HH:mm:ss'
-  const Y = d.getFullYear();
-  const M = pad2(d.getMonth()+1);
-  const D = pad2(d.getDate());
-  const h = pad2(d.getHours());
-  const m = pad2(d.getMinutes());
-  const s = pad2(d.getSeconds());
-  return `${Y}-${M}-${D} ${h}:${m}:${s}`;
+function toSqlDateTimeFromParts(Y, M, D, h = 0, m = 0, s = 0) {
+  return `${Y}-${pad2(M)}-${pad2(D)} ${pad2(h)}:${pad2(m)}:${pad2(s)}`;
 }
-function parseScheduledInput({ scheduledDate, date, time }) {
-  // Returns { sql: 'YYYY-MM-DD HH:mm:ss' } or { sql: null } for unschedule
-  // Accepts either scheduledDate (string or null/empty) or date/time.
-  if (scheduledDate === null || scheduledDate === undefined || String(scheduledDate).trim() === '') {
-    return { sql: null };
+function addMinutesToSql(sqlStr, minutes) {
+  // sqlStr is 'YYYY-MM-DD HH:mm:ss'
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(sqlStr);
+  if (!m) return sqlStr;
+  const Y = Number(m[1]), Mo = Number(m[2]), D = Number(m[3]);
+  const h = Number(m[4]), mi = Number(m[5]), s = Number(m[6] || 0);
+  const d = new Date(Y, Mo - 1, D, h, mi, s);
+  d.setMinutes(d.getMinutes() + minutes);
+  return toSqlDateTimeFromParts(
+    d.getFullYear(), d.getMonth() + 1, d.getDate(),
+    d.getHours(), d.getMinutes(), d.getSeconds()
+  );
+}
+
+function parseDateTimeFlexible(input) {
+  // Accepts:
+  //  - 'YYYY-MM-DD'
+  //  - 'YYYY-MM-DD HH:mm' or 'YYYY-MM-DD HH:mm:ss'
+  //  - 'YYYY-MM-DDTHH:mm' or 'YYYY-MM-DDTHH:mm:ss'
+  if (input == null) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+
+  // Date only
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m) {
+    const [ , Y, Mo, D ] = m.map(Number);
+    return toSqlDateTimeFromParts(Y, Mo, D, 8, 0, 0); // default 08:00
   }
-  let dtStr = String(scheduledDate).trim();
-  if (!dtStr && date) {
-    const t = time && String(time).trim() ? String(time).trim() : '08:00';
-    dtStr = `${date} ${t}`;
+
+  // Date + time (space or T, optional seconds)
+  m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+  if (m) {
+    const Y  = Number(m[1]);
+    const Mo = Number(m[2]);
+    const D  = Number(m[3]);
+    const h  = Number(m[4]);
+    const mi = Number(m[5]);
+    const se = Number(m[6] || 0);
+    return toSqlDateTimeFromParts(Y, Mo, D, h, mi, se);
   }
-  if (!dtStr && !date) return { sql: null };
-  // Allow 'YYYY-MM-DD' (no time) → default 08:00
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dtStr)) dtStr += ' 08:00';
-  // Normalize into Date in local TZ
-  const p = new Date(dtStr); // TZ already set to America/Chicago at process level
-  if (isNaN(p.getTime())) return { sql: null };
-  return { sql: toSqlDateTime(p) };
+
+  return null; // unknown format
+}
+
+function parseHHmm(s) {
+  if (!s) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s).trim());
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+  return { h, m: mi };
+}
+
+function windowSql({ dateSql, endTime, timeWindow }) {
+  // dateSql: 'YYYY-MM-DD HH:mm:ss' (start)
+  // endTime: 'HH:mm' OR timeWindow: 'HH:mm-HH:mm'
+  if (!dateSql) return { startSql: null, endSql: null };
+
+  const datePartMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateSql);
+  const datePart = datePartMatch ? `${datePartMatch[1]}-${datePartMatch[2]}-${datePartMatch[3]}` : null;
+
+  let endSql = null;
+
+  if (timeWindow && datePart) {
+    const tw = String(timeWindow).trim();
+    const wm = /^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/.exec(tw);
+    if (wm) {
+      const startHm = parseHHmm(wm[1]);
+      const endHm   = parseHHmm(wm[2]);
+      if (startHm && endHm) {
+        // Force startSql to the window start; but we keep caller's start
+        // We only set endSql here; caller already decided startSql
+        endSql = toSqlDateTimeFromParts(
+          Number(datePart.slice(0,4)),
+          Number(datePart.slice(5,7)),
+          Number(datePart.slice(8,10)),
+          endHm.h, endHm.m, 0
+        );
+      }
+    }
+  }
+
+  if (!endSql && endTime && datePart) {
+    const hm = parseHHmm(endTime);
+    if (hm) {
+      endSql = toSqlDateTimeFromParts(
+        Number(datePart.slice(0,4)),
+        Number(datePart.slice(5,7)),
+        Number(datePart.slice(8,10)),
+        hm.h, hm.m, 0
+      );
+    }
+  }
+
+  if (!endSql) {
+    // default window
+    endSql = addMinutesToSql(dateSql, DEFAULT_WINDOW);
+  }
+
+  return { startSql: dateSql, endSql };
 }
 
 // ─── SCHEMA HELPERS ─────────────────────────────────────────────────────────
@@ -94,6 +173,7 @@ async function columnExists(table, col) {
 async function ensureCols() {
   const colsToEnsure = [
     { name: 'scheduledDate', type: 'DATETIME NULL' },
+    { name: 'scheduledEnd',  type: 'DATETIME NULL' }, // ➕ arrival window end
     { name: 'pdfPath',       type: 'VARCHAR(255) NULL' },
     { name: 'photoPath',     type: 'TEXT NULL' },
     { name: 'notes',         type: 'TEXT NULL' },
@@ -101,7 +181,7 @@ async function ensureCols() {
     { name: 'sitePhone',     type: 'VARCHAR(32) NULL' },
     { name: 'customerPhone', type: 'VARCHAR(32) NULL' },
     { name: 'customerEmail', type: 'VARCHAR(255) NULL' },
-    { name: 'dayOrder',      type: 'INT NULL' }, // ➕ for drag ordering within a day
+    { name: 'dayOrder',      type: 'INT NULL' },       // for drag ordering within a day
   ];
   for (const { name, type } of colsToEnsure) {
     try {
@@ -440,20 +520,17 @@ app.put(
       let attachments = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
 
       // Flags:
-      // - keepOldInAttachments: sent by the UI; keep legacy aliases for safety
       const moveOldPdf =
-        isTruthy(req.body.keepOldInAttachments) ||         // ✅ from UI
-        isTruthy(req.body.keepOldPdfInAttachments) ||       // legacy
-        isTruthy(req.body.moveOldPdfToAttachments) ||       // legacy
-        isTruthy(req.body.moveOldPdf) ||                    // legacy
-        isTruthy(req.body.moveExistingPdfToAttachments);    // legacy
+        isTruthy(req.body.keepOldInAttachments) ||
+        isTruthy(req.body.keepOldPdfInAttachments) ||
+        isTruthy(req.body.moveOldPdfToAttachments) ||
+        isTruthy(req.body.moveOldPdf) ||
+        isTruthy(req.body.moveExistingPdfToAttachments);
 
-      // - replacePdf: when true, a provided PDF *replaces* the main pdfPath.
-      //   If false/absent, a provided PDF is appended to attachments instead.
       const wantReplacePdf =
         isTruthy(req.body.replacePdf) ||
-        isTruthy(req.body.setAsPrimaryPdf) ||               // optional alias
-        isTruthy(req.body.isPdfReplacement);                // optional alias
+        isTruthy(req.body.setAsPrimaryPdf) ||
+        isTruthy(req.body.isPdfReplacement);
 
       let pdfPath = existing.pdfPath;
 
@@ -462,13 +539,10 @@ app.put(
         const oldPdfPath = existing.pdfPath;
 
         if (wantReplacePdf) {
-          // Replace the main PDF
           if (oldPdfPath) {
             if (moveOldPdf) {
-              // Keep old PDF as an attachment
               if (!attachments.includes(oldPdfPath)) attachments.push(oldPdfPath);
             } else {
-              // Delete the old PDF asset
               try {
                 if (/^uploads\//.test(oldPdfPath)) {
                   if (S3_BUCKET) {
@@ -481,15 +555,13 @@ app.put(
               } catch (e) { console.warn('⚠️ PDF delete old:', e.message); }
             }
           }
-          // Set new primary PDF
           pdfPath = newPdfPath;
         } else {
-          // No replacement flag => treat uploaded PDF as an *attachment*
           attachments.push(newPdfPath);
         }
       }
 
-      // Append any newly uploaded images to attachments
+      // Append images
       const newPhotos = images.map(fileKey);
       attachments = uniq([...attachments, ...newPhotos]);
 
@@ -593,11 +665,12 @@ app.post(
 
 // ─── CALENDAR / SCHEDULING ENDPOINTS ─────────────────────────────────────────
 
-// Update (or clear) scheduled date/time. Also can update status if provided.
-// Accepts:
-//   { scheduledDate: 'YYYY-MM-DD HH:mm' }  OR
-//   { date: 'YYYY-MM-DD', time: 'HH:mm' }  OR
-//   { scheduledDate: null } to unschedule
+// Update (or clear) scheduled date/time (+ optional end/window).
+// Accepts body examples:
+//   { scheduledDate: 'YYYY-MM-DD HH:mm[:ss]', scheduledEnd: 'YYYY-MM-DD HH:mm[:ss]' }
+//   { date: 'YYYY-MM-DD', time: 'HH:mm', endTime: 'HH:mm' }
+//   { scheduledDate: null }  // unschedule
+//   { date: 'YYYY-MM-DD', time: '10:00', timeWindow: '10:00-12:00' }
 app.put('/work-orders/:id/update-date',
   authenticate,
   authorize('dispatcher','admin'),
@@ -605,26 +678,50 @@ app.put('/work-orders/:id/update-date',
   async (req, res) => {
     try {
       const wid = req.params.id;
-      const { status, scheduledDate, date, time } = req.body;
+      const { status, scheduledDate, scheduledEnd, date, time, endTime, timeWindow } = req.body || {};
 
       const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
       if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-      const parsed = parseScheduledInput({ scheduledDate, date, time });
+      // Determine start SQL
+      let startSql = parseDateTimeFlexible(scheduledDate);
+      if (!startSql && date) {
+        const d = String(date).trim();
+        const hm = parseHHmm(time) || { h: 8, m: 0 };
+        startSql = toSqlDateTimeFromParts(
+          Number(d.slice(0,4)), Number(d.slice(5,7)), Number(d.slice(8,10)),
+          hm.h, hm.m, 0
+        );
+      }
 
-      if (parsed.sql === null) {
-        // UNSCHEDULE
+      if (scheduledDate === null) {
+        // Explicit unschedule
         const nextStatus = (status !== undefined && status !== null && String(status).length)
           ? status
           : 'Needs to be Scheduled';
-        await db.execute('UPDATE work_orders SET scheduledDate = NULL, dayOrder = NULL, status = ? WHERE id = ?',
-          [nextStatus, wid]);
+        await db.execute(
+          'UPDATE work_orders SET scheduledDate = NULL, scheduledEnd = NULL, dayOrder = NULL, status = ? WHERE id = ?',
+          [nextStatus, wid]
+        );
+      } else if (!startSql) {
+        return res.status(400).json({ error: 'Invalid or missing date/time.' });
       } else {
+        // End SQL
+        let endSql = parseDateTimeFlexible(scheduledEnd);
+        if (!endSql) {
+          const w = windowSql({ dateSql: startSql, endTime, timeWindow });
+          endSql = w.endSql;
+          // If timeWindow specified and also implies a different start, keep caller's start (CalendarPage will send correct start)
+        }
+
         const nextStatus = (status !== undefined && status !== null && String(status).length)
           ? status
           : (existing.status && existing.status !== 'Needs to be Scheduled' ? existing.status : 'Scheduled');
-        await db.execute('UPDATE work_orders SET scheduledDate = ?, status = ? WHERE id = ?',
-          [parsed.sql, nextStatus, wid]);
+
+        await db.execute(
+          'UPDATE work_orders SET scheduledDate = ?, scheduledEnd = ?, status = ?, dayOrder = NULL WHERE id = ?',
+          [startSql, endSql, nextStatus, wid]
+        );
       }
 
       const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
@@ -645,8 +742,10 @@ app.put('/work-orders/:id/unschedule',
       const wid = req.params.id;
       const { status } = req.body || {};
       const nextStatus = (status && String(status).length) ? status : 'Needs to be Scheduled';
-      await db.execute('UPDATE work_orders SET scheduledDate = NULL, dayOrder = NULL, status = ? WHERE id = ?',
-        [nextStatus, wid]);
+      await db.execute(
+        'UPDATE work_orders SET scheduledDate = NULL, scheduledEnd = NULL, dayOrder = NULL, status = ? WHERE id = ?',
+        [nextStatus, wid]
+      );
       const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
       res.json(fresh);
     } catch (err) {
@@ -719,8 +818,8 @@ app.put('/calendar/day-order',
   }
 );
 
-// Bulk schedule/reschedule items (e.g., drag from "+N more" modal to another day)
-// Body: { items: [{ id, scheduledDate } | { id, date, time } , ...] }
+// Bulk schedule/reschedule items (drag from "+N more", etc.)
+// Body items support: { id, scheduledDate }  OR { id, date, time, endTime }  OR { id, date, time, timeWindow }
 app.put('/calendar/bulk-schedule',
   authenticate,
   authorize('dispatcher','admin'),
@@ -734,18 +833,36 @@ app.put('/calendar/bulk-schedule',
       for (const it of items) {
         const id = Number(it.id);
         if (!Number.isFinite(id)) continue;
-        const parsed = parseScheduledInput({ scheduledDate: it.scheduledDate, date: it.date, time: it.time });
-        if (parsed.sql === null) {
+
+        // Start
+        let startSql = parseDateTimeFlexible(it.scheduledDate);
+        if (!startSql && it.date) {
+          const d = String(it.date).trim();
+          const hm = parseHHmm(it.time) || { h: 8, m: 0 };
+          startSql = toSqlDateTimeFromParts(
+            Number(d.slice(0,4)), Number(d.slice(5,7)), Number(d.slice(8,10)),
+            hm.h, hm.m, 0
+          );
+        }
+
+        if (it.scheduledDate === null || !startSql) {
           await db.execute(
-            'UPDATE work_orders SET scheduledDate = NULL, dayOrder = NULL, status = ? WHERE id = ?',
+            'UPDATE work_orders SET scheduledDate = NULL, scheduledEnd = NULL, dayOrder = NULL, status = ? WHERE id = ?',
             ['Needs to be Scheduled', id]
           );
         } else {
+          // End/window
+          let endSql = parseDateTimeFlexible(it.scheduledEnd);
+          if (!endSql) {
+            const w = windowSql({ dateSql: startSql, endTime: it.endTime, timeWindow: it.timeWindow });
+            endSql = w.endSql;
+          }
           await db.execute(
-            'UPDATE work_orders SET scheduledDate = ?, status = COALESCE(NULLIF(status,""), "Scheduled"), dayOrder = NULL WHERE id = ?',
-            [parsed.sql, id]
+            'UPDATE work_orders SET scheduledDate = ?, scheduledEnd = ?, status = COALESCE(NULLIF(status,""), "Scheduled"), dayOrder = NULL WHERE id = ?',
+            [startSql, endSql, id]
           );
         }
+
         const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [id]);
         results.push(fresh);
       }
@@ -758,7 +875,7 @@ app.put('/calendar/bulk-schedule',
   }
 );
 
-// Assign / date / notes / delete endpoints (unchanged from earlier sections except where noted) ─────
+// Assign / notes / delete endpoints (unchanged)
 app.put('/work-orders/:id/assign', authenticate, authorize('dispatcher', 'admin'), express.json(), async (req, res) => {
   try {
     if (!SCHEMA.hasAssignedTo) return res.status(400).json({ error: 'assignedTo column missing' });

@@ -14,25 +14,33 @@ import "./Calendar.css";
 const localizer = momentLocalizer(moment);
 const DnDCalendar = withDragAndDrop(Calendar);
 
-// ---------- date helpers (preserve time, seconds=0) ----------
-function toDbString(dateLike) {
-  return moment(dateLike).seconds(0).milliseconds(0).format("YYYY-MM-DD HH:mm:ss");
-}
+// Keep this in sync with server DEFAULT_WINDOW_MINUTES
+const DEFAULT_WINDOW_MIN = 120;
+
+// ---------- date helpers ----------
 function fromDbString(dbString) {
   if (!dbString) return null;
   const m =
     dbString.trim().length <= 10
       ? moment(dbString, "YYYY-MM-DD").startOf("day")
-      : moment(dbString, "YYYY-MM-DD HH:mm:ss");
+      : moment(dbString.replace("T", " "), "YYYY-MM-DD HH:mm:ss");
   return m.toDate();
 }
-// default 60 minutes so events have visible height in Day/Week
-function plus60(date) {
-  return moment(date).add(60, "minutes").toDate();
-}
+const fmtDate = (d) => moment(d).format("YYYY-MM-DD");
+const fmtTime = (d) => moment(d).format("HH:mm");
+
+// compute minutes between two JS Dates
+const diffMinutes = (a, b) => Math.max(0, Math.round((+b - +a) / 60000));
 
 // ---------- event bubble ----------
 function CustomEvent({ event }) {
+  const when =
+    event.start && event.end
+      ? `${moment(event.start).format("YYYY-MM-DD HH:mm")} – ${moment(event.end).format("HH:mm")}`
+      : event.start
+      ? moment(event.start).format("YYYY-MM-DD HH:mm")
+      : "";
+
   const popover = (
     <Popover id={`popover-${event.id}`}>
       <Popover.Header as="h3">
@@ -42,12 +50,7 @@ function CustomEvent({ event }) {
         <div><strong>PO#:</strong> {event.poNumber || event.id}</div>
         {event.siteLocation ? <div><strong>Site:</strong> {event.siteLocation}</div> : null}
         {event.problemDescription ? <div><strong>Problem:</strong> {event.problemDescription}</div> : null}
-        {event.scheduledDate ? (
-          <div style={{ marginTop: 6 }}>
-            <strong>When:</strong>{" "}
-            {moment(event.scheduledDate).format("YYYY-MM-DD HH:mm")}
-          </div>
-        ) : null}
+        {when ? <div style={{ marginTop: 6 }}><strong>When:</strong> {when}</div> : null}
       </Popover.Body>
     </Popover>
   );
@@ -74,8 +77,9 @@ export default function WorkOrderCalendar() {
   // Quick edit modal
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editOrder, setEditOrder] = useState(null);
-  const [editDate, setEditDate] = useState(""); // yyyy-mm-dd
-  const [editTime, setEditTime] = useState(""); // HH:mm
+  const [editDate, setEditDate] = useState("");   // yyyy-mm-dd
+  const [editTime, setEditTime] = useState("");   // HH:mm
+  const [editEndTime, setEditEndTime] = useState(""); // HH:mm (window end)
 
   // Drag from Unscheduled OR Day modal → calendar
   const [dragItem, setDragItem] = useState(null);
@@ -99,30 +103,58 @@ export default function WorkOrderCalendar() {
       .catch((err) => console.error("⚠️ Error fetching work orders:", err));
   }, []);
 
-  // ---------- schedule update helpers ----------
-  async function updateSchedule(orderId, jsDate) {
-    const payload = {
-      scheduledDate: jsDate ? toDbString(jsDate) : null,
-      status: jsDate ? "Scheduled" : "Needs to be Scheduled",
-    };
+  // ---------- schedule helpers (server expects date/time + optional endTime) ----------
+  async function setSchedulePayload(orderId, payload) {
+    // payload example: { date:'YYYY-MM-DD', time:'HH:mm', endTime:'HH:mm' }
+    // to unschedule:   { scheduledDate: null }
     await api.put(`/work-orders/${orderId}/update-date`, payload);
   }
 
+  // For drag/drop: preserve current duration if available
+  function minutesWindowForOrder(orderLike) {
+    const start = fromDbString(orderLike.scheduledDate);
+    const end = fromDbString(orderLike.scheduledEnd);
+    if (start && end) return Math.max(15, diffMinutes(start, end));
+    return DEFAULT_WINDOW_MIN; // fallback
+  }
+
+  // ---------- edit modal wiring ----------
   function openEditModal(order, fallbackDate) {
-    const d = fromDbString(order?.scheduledDate) || fallbackDate || new Date();
+    const start = fromDbString(order?.scheduledDate) || fallbackDate || new Date();
+    const end =
+      fromDbString(order?.scheduledEnd) ||
+      moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
+
     setEditOrder(order);
-    setEditDate(moment(d).format("YYYY-MM-DD"));
-    setEditTime(moment(d).format("HH:mm"));
+    setEditDate(fmtDate(start));
+    setEditTime(fmtTime(start));
+    setEditEndTime(fmtTime(end));
     setEditModalOpen(true);
   }
 
   async function saveEditModal() {
     if (!editOrder) return;
-    const composed = moment(`${editDate} ${editTime}`, "YYYY-MM-DD HH:mm").toDate();
+
+    // Guard: both start and end must be valid and end after start
+    const start = moment(`${editDate} ${editTime}`, "YYYY-MM-DD HH:mm");
+    const end   = moment(`${editDate} ${editEndTime}`, "YYYY-MM-DD HH:mm");
+    if (!start.isValid() || !end.isValid()) {
+      alert("Please enter a valid start and end time.");
+      return;
+    }
+    if (end.isSameOrBefore(start)) {
+      alert("End time must be after start time.");
+      return;
+    }
+
     try {
-      await updateSchedule(editOrder.id, composed);
+      await setSchedulePayload(editOrder.id, {
+        date: editDate,
+        time: editTime,
+        endTime: editEndTime,
+        status: "Scheduled",
+      });
       setEditModalOpen(false);
-      // if we have a day modal open for this day, refresh it too
       if (dayForModal) await openDayModal(dayForModal);
       fetchWorkOrders();
     } catch (e) {
@@ -134,7 +166,7 @@ export default function WorkOrderCalendar() {
   async function unschedule(orderId) {
     if (!window.confirm("Remove this work order from the calendar?")) return;
     try {
-      await updateSchedule(orderId, null);
+      await setSchedulePayload(orderId, { scheduledDate: null });
       setEditModalOpen(false);
       if (dayForModal) await openDayModal(dayForModal);
       fetchWorkOrders();
@@ -169,7 +201,6 @@ export default function WorkOrderCalendar() {
       await api.put("/calendar/day-order", { date: dateStr, orderedIds });
     } catch (e) {
       console.error("⚠️ Error saving order:", e);
-      // no alert spam; order still works visually
     }
   }
 
@@ -198,9 +229,17 @@ export default function WorkOrderCalendar() {
   }
 
   // ---------- rbc interactions ----------
-  function handleEventDrop({ event, start }) {
-    // drag existing event to a new day/time
-    updateSchedule(event.id, start)
+  function handleEventDrop({ event, start, end }) {
+    // Preserve window length if RBC doesn't provide end
+    let minutes = end ? diffMinutes(start, end) : minutesWindowForOrder(event);
+    if (!Number.isFinite(minutes) || minutes <= 0) minutes = DEFAULT_WINDOW_MIN;
+
+    setSchedulePayload(event.id, {
+      date: fmtDate(start),
+      time: fmtTime(start),
+      endTime: fmtTime(moment(start).add(minutes, "minutes").toDate()),
+      status: "Scheduled",
+    })
       .then(() => {
         fetchWorkOrders();
         if (dayForModal) openDayModal(dayForModal);
@@ -208,9 +247,15 @@ export default function WorkOrderCalendar() {
       .catch((e) => console.error("⚠️ Error updating work order date:", e));
   }
 
-  function handleEventResize({ event, start }) {
-    // we only persist the start time (single-slot jobs)
-    updateSchedule(event.id, start)
+  function handleEventResize({ event, start, end }) {
+    // When resizing, RBC gives us the new end — use it.
+    const minutes = end ? diffMinutes(start, end) : minutesWindowForOrder(event);
+    setSchedulePayload(event.id, {
+      date: fmtDate(start),
+      time: fmtTime(start),
+      endTime: fmtTime(moment(start).add(minutes, "minutes").toDate()),
+      status: "Scheduled",
+    })
       .then(() => {
         fetchWorkOrders();
         if (dayForModal) openDayModal(dayForModal);
@@ -220,7 +265,13 @@ export default function WorkOrderCalendar() {
 
   function handleDropFromOutside({ start }) {
     if (!dragItem) return;
-    updateSchedule(dragItem.id, start)
+    const minutes = minutesWindowForOrder(dragItem);
+    setSchedulePayload(dragItem.id, {
+      date: fmtDate(start),
+      time: fmtTime(start),
+      endTime: fmtTime(moment(start).add(minutes, "minutes").toDate()),
+      status: "Scheduled",
+    })
       .then(() => {
         endGlobalDrag();
         fetchWorkOrders();
@@ -248,11 +299,14 @@ export default function WorkOrderCalendar() {
     window.location.href = `/view-work-order/${id}`;
   }
 
-  // ---------- build rbc events ----------
+  // ---------- build rbc events (honor scheduledEnd/window) ----------
   const events = useMemo(
     () =>
       workOrders.map((o) => {
         const start = fromDbString(o.scheduledDate) || new Date();
+        const end =
+          fromDbString(o.scheduledEnd) ||
+          moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
         return {
           id: o.id,
           title: o.customer
@@ -262,9 +316,10 @@ export default function WorkOrderCalendar() {
           customer: o.customer,
           siteLocation: o.siteLocation,
           problemDescription: o.problemDescription,
-          scheduledDate: start,
+          scheduledDate: o.scheduledDate,
+          scheduledEnd: o.scheduledEnd,
           start,
-          end: plus60(start),
+          end,
           allDay: false,
         };
       }),
@@ -324,7 +379,7 @@ export default function WorkOrderCalendar() {
             timeslots={4}
             min={moment().startOf("day").add(6, "hours").toDate()}   // 6 AM
             max={moment().startOf("day").add(21, "hours").toDate()}  // 9 PM
-            popup={false} // use our own day modal instead of RBC popup
+            popup={false} // our own day modal instead of RBC popup
             resizable
             selectable
             components={{ event: CustomEvent }}
@@ -353,57 +408,63 @@ export default function WorkOrderCalendar() {
             <h4 className="mb-3">{dayModalTitle}</h4>
             {dayOrders.length ? (
               <ul className="list-group">
-                {dayOrders.map((o, idx) => (
-                  <li
-                    key={o.id}
-                    className="list-group-item d-flex justify-content-between align-items-start"
-                    draggable
-                    onDragStart={() => handleDayDragStart(idx, o)}
-                    onDragOver={(e) => handleDayDragOver(e, idx)}
-                    onDrop={(e) => handleDayDrop(e, idx)}
-                    style={{
-                      cursor: "grab",
-                      background:
-                        overIndex === idx && dragIndex !== null
-                          ? "#f1f5f9"
-                          : "white",
-                    }}
-                    title="Drag to reorder or drag out onto the calendar"
-                  >
-                    <div className="me-2">
-                      <div className="fw-bold">
-                        {o.customer ? `${o.customer}` : `WO ${o.id}`}
-                        {o.poNumber ? ` — ${o.poNumber}` : ""}
+                {dayOrders.map((o, idx) => {
+                  const s = fromDbString(o.scheduledDate);
+                  const e = fromDbString(o.scheduledEnd);
+                  const label =
+                    s && e
+                      ? `${moment(s).format("hh:mm A")} – ${moment(e).format("hh:mm A")}`
+                      : s
+                      ? `${moment(s).format("hh:mm A")} – ${moment(s).add(DEFAULT_WINDOW_MIN, "minutes").format("hh:mm A")}`
+                      : "";
+                  return (
+                    <li
+                      key={o.id}
+                      className="list-group-item d-flex justify-content-between align-items-start"
+                      draggable
+                      onDragStart={() => handleDayDragStart(idx, o)}
+                      onDragOver={(ev) => handleDayDragOver(ev, idx)}
+                      onDrop={(ev) => handleDayDrop(ev, idx)}
+                      style={{
+                        cursor: "grab",
+                        background:
+                          overIndex === idx && dragIndex !== null
+                            ? "#f1f5f9"
+                            : "white",
+                      }}
+                      title="Drag to reorder or drag out onto the calendar"
+                    >
+                      <div className="me-2">
+                        <div className="fw-bold">
+                          {o.customer ? `${o.customer}` : `WO ${o.id}`}
+                          {o.poNumber ? ` — ${o.poNumber}` : ""}
+                        </div>
+                        <small className="text-muted">{o.problemDescription}</small>
+                        <div><small>{label}</small></div>
                       </div>
-                      <small className="text-muted">{o.problemDescription}</small>
-                      <div>
-                        <small>
-                          {moment(o.scheduledDate, "YYYY-MM-DD HH:mm:ss").format("hh:mm A")}
-                        </small>
+                      <div className="d-flex align-items-center">
+                        <button
+                          className="btn btn-sm btn-primary me-2"
+                          onClick={() => openEditModal(o, dayForModal)}
+                        >
+                          Edit Time…
+                        </button>
+                        <button
+                          className="btn btn-sm btn-outline-secondary me-2"
+                          onClick={() => navigateToView(o.id)}
+                        >
+                          Open
+                        </button>
+                        <button
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={() => unschedule(o.id)}
+                        >
+                          Unschedule
+                        </button>
                       </div>
-                    </div>
-                    <div className="d-flex align-items-center">
-                      <button
-                        className="btn btn-sm btn-primary me-2"
-                        onClick={() => openEditModal(o, dayForModal)}
-                      >
-                        Edit Time…
-                      </button>
-                      <button
-                        className="btn btn-sm btn-outline-secondary me-2"
-                        onClick={() => navigateToView(o.id)}
-                      >
-                        Open
-                      </button>
-                      <button
-                        className="btn btn-sm btn-outline-danger"
-                        onClick={() => unschedule(o.id)}
-                      >
-                        Unschedule
-                      </button>
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="empty-text mb-0">No work orders scheduled on this day.</p>
@@ -417,7 +478,7 @@ export default function WorkOrderCalendar() {
         </div>
       )}
 
-      {/* ---------- Quick Edit modal ---------- */}
+      {/* ---------- Quick Edit modal (start + end time) ---------- */}
       {editModalOpen && (
         <div className="modal-overlay" onClick={() => setEditModalOpen(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -433,7 +494,7 @@ export default function WorkOrderCalendar() {
                 </div>
 
                 <div className="row g-2">
-                  <div className="col-7">
+                  <div className="col-5">
                     <label className="form-label small">Date</label>
                     <input
                       className="form-control"
@@ -442,13 +503,22 @@ export default function WorkOrderCalendar() {
                       onChange={(e) => setEditDate(e.target.value)}
                     />
                   </div>
-                  <div className="col-5">
-                    <label className="form-label small">Time</label>
+                  <div className="col-3">
+                    <label className="form-label small">Start</label>
                     <input
                       className="form-control"
                       type="time"
                       value={editTime}
                       onChange={(e) => setEditTime(e.target.value)}
+                    />
+                  </div>
+                  <div className="col-4">
+                    <label className="form-label small">End</label>
+                    <input
+                      className="form-control"
+                      type="time"
+                      value={editEndTime}
+                      onChange={(e) => setEditEndTime(e.target.value)}
                     />
                   </div>
                 </div>
