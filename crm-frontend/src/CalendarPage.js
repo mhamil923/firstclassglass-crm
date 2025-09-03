@@ -1,5 +1,5 @@
 // File: src/CalendarPage.js
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import api from "./api";
 import { Calendar, momentLocalizer } from "react-big-calendar";
 import moment from "moment";
@@ -19,7 +19,6 @@ function toDbString(dateLike) {
   return moment(dateLike).seconds(0).milliseconds(0).format("YYYY-MM-DD HH:mm:ss");
 }
 function fromDbString(dbString) {
-  // Accept "YYYY-MM-DD HH:mm:ss" or just "YYYY-MM-DD"
   if (!dbString) return null;
   const m =
     dbString.trim().length <= 10
@@ -78,14 +77,18 @@ export default function WorkOrderCalendar() {
   const [editDate, setEditDate] = useState(""); // yyyy-mm-dd
   const [editTime, setEditTime] = useState(""); // HH:mm
 
-  // Drag from Unscheduled
+  // Drag from Unscheduled OR Day modal → calendar
   const [dragItem, setDragItem] = useState(null);
+
+  // Reorder within day modal
+  const [dragIndex, setDragIndex] = useState(null);
+  const [overIndex, setOverIndex] = useState(null);
 
   useEffect(() => {
     fetchWorkOrders();
   }, []);
 
-  function fetchWorkOrders() {
+  const fetchWorkOrders = useCallback(() => {
     api
       .get("/work-orders")
       .then((res) => {
@@ -94,7 +97,7 @@ export default function WorkOrderCalendar() {
         setUnscheduledOrders(list.filter((o) => !o.scheduledDate));
       })
       .catch((err) => console.error("⚠️ Error fetching work orders:", err));
-  }
+  }, []);
 
   // ---------- schedule update helpers ----------
   async function updateSchedule(orderId, jsDate) {
@@ -119,6 +122,8 @@ export default function WorkOrderCalendar() {
     try {
       await updateSchedule(editOrder.id, composed);
       setEditModalOpen(false);
+      // if we have a day modal open for this day, refresh it too
+      if (dayForModal) await openDayModal(dayForModal);
       fetchWorkOrders();
     } catch (e) {
       console.error("⚠️ Error saving schedule:", e);
@@ -131,6 +136,7 @@ export default function WorkOrderCalendar() {
     try {
       await updateSchedule(orderId, null);
       setEditModalOpen(false);
+      if (dayForModal) await openDayModal(dayForModal);
       fetchWorkOrders();
     } catch (e) {
       console.error("⚠️ Error unscheduling:", e);
@@ -138,30 +144,77 @@ export default function WorkOrderCalendar() {
     }
   }
 
+  // ---------- Day modal helpers ----------
+  async function openDayModal(dateLike) {
+    const day = moment(dateLike).startOf("day");
+    const dateStr = day.format("YYYY-MM-DD");
+    try {
+      const { data } = await api.get("/calendar/day", { params: { date: dateStr } });
+      const list = Array.isArray(data) ? data : [];
+      setDayOrders(list);
+      setDayForModal(day.toDate());
+      setDayModalTitle(`Work Orders for ${day.format("LL")}`);
+      setDayModalOpen(true);
+    } catch (e) {
+      console.error("⚠️ Error loading day:", e);
+      alert("Failed to load that day.");
+    }
+  }
+
+  async function saveDayOrder() {
+    if (!dayForModal || !dayOrders.length) return;
+    const dateStr = moment(dayForModal).format("YYYY-MM-DD");
+    const orderedIds = dayOrders.map((o) => o.id);
+    try {
+      await api.put("/calendar/day-order", { date: dateStr, orderedIds });
+    } catch (e) {
+      console.error("⚠️ Error saving order:", e);
+      // no alert spam; order still works visually
+    }
+  }
+
+  // HTML5 drag reorder inside day modal
+  function handleDayDragStart(index, item) {
+    setDragIndex(index);
+    setDragItem(item); // also allow dragging out to calendar
+  }
+  function handleDayDragOver(e, index) {
+    e.preventDefault();
+    setOverIndex(index);
+  }
+  async function handleDayDrop(e, dropIndex) {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === dropIndex) return;
+    const next = [...dayOrders];
+    const [moved] = next.splice(dragIndex, 1);
+    next.splice(dropIndex, 0, moved);
+    setDayOrders(next);
+    setDragIndex(null);
+    setOverIndex(null);
+    await saveDayOrder();
+  }
+  function endGlobalDrag() {
+    setDragItem(null);
+  }
+
   // ---------- rbc interactions ----------
   function handleEventDrop({ event, start }) {
-    // drag to a new day/time
+    // drag existing event to a new day/time
     updateSchedule(event.id, start)
-      .then(() =>
-        setWorkOrders((prev) =>
-          prev.map((o) =>
-            o.id === event.id ? { ...o, scheduledDate: toDbString(start) } : o
-          )
-        )
-      )
+      .then(() => {
+        fetchWorkOrders();
+        if (dayForModal) openDayModal(dayForModal);
+      })
       .catch((e) => console.error("⚠️ Error updating work order date:", e));
   }
 
-  function handleEventResize({ event, start, end }) {
-    // we only persist the start time (single-slot jobs). end is visual only.
+  function handleEventResize({ event, start }) {
+    // we only persist the start time (single-slot jobs)
     updateSchedule(event.id, start)
-      .then(() =>
-        setWorkOrders((prev) =>
-          prev.map((o) =>
-            o.id === event.id ? { ...o, scheduledDate: toDbString(start) } : o
-          )
-        )
-      )
+      .then(() => {
+        fetchWorkOrders();
+        if (dayForModal) openDayModal(dayForModal);
+      })
       .catch((e) => console.error("⚠️ Error resizing event:", e));
   }
 
@@ -169,8 +222,9 @@ export default function WorkOrderCalendar() {
     if (!dragItem) return;
     updateSchedule(dragItem.id, start)
       .then(() => {
-        setDragItem(null);
+        endGlobalDrag();
         fetchWorkOrders();
+        if (dayForModal) openDayModal(dayForModal);
       })
       .catch((e) => console.error("⚠️ Error scheduling work order:", e));
   }
@@ -181,15 +235,13 @@ export default function WorkOrderCalendar() {
   }
 
   function onSelectSlot(slotInfo) {
-    // Month click => open list for that day with quick reschedule actions
-    const day = moment(slotInfo.start).startOf("day");
-    const list = workOrders.filter((o) =>
-      moment(o.scheduledDate, "YYYY-MM-DD HH:mm:ss").isSame(day, "day")
-    );
-    setDayOrders(list);
-    setDayForModal(day.toDate());
-    setDayModalTitle(`Work Orders for ${day.format("LL")}`);
-    setDayModalOpen(true);
+    // open day modal for clicked day
+    openDayModal(slotInfo.start);
+  }
+
+  function onShowMore(events, date) {
+    // Replace the default RBC popup with our modal
+    openDayModal(date);
   }
 
   function navigateToView(id) {
@@ -220,7 +272,7 @@ export default function WorkOrderCalendar() {
   );
 
   return (
-    <div className="calendar-page">
+    <div className="calendar-page" onDragEnd={endGlobalDrag}>
       <div className="container-fluid p-0">
         <h2 className="calendar-title">Work Order Calendar</h2>
 
@@ -272,8 +324,7 @@ export default function WorkOrderCalendar() {
             timeslots={4}
             min={moment().startOf("day").add(6, "hours").toDate()}   // 6 AM
             max={moment().startOf("day").add(21, "hours").toDate()}  // 9 PM
-            popup
-            popupOffset={20}
+            popup={false} // use our own day modal instead of RBC popup
             resizable
             selectable
             components={{ event: CustomEvent }}
@@ -285,6 +336,7 @@ export default function WorkOrderCalendar() {
             onSelectEvent={onSelectEvent}
             onDoubleClickEvent={(e) => navigateToView(e.id)}
             onSelectSlot={onSelectSlot}
+            onShowMore={onShowMore}
             view={view}
             onView={(v) => setView(v)}
             date={currentDate}
@@ -294,15 +346,30 @@ export default function WorkOrderCalendar() {
         </div>
       </div>
 
-      {/* ---------- Day list modal ---------- */}
+      {/* ---------- Day list modal (draggable & reorderable) ---------- */}
       {dayModalOpen && (
         <div className="modal-overlay" onClick={() => setDayModalOpen(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h4 className="mb-3">{dayModalTitle}</h4>
             {dayOrders.length ? (
               <ul className="list-group">
-                {dayOrders.map((o) => (
-                  <li key={o.id} className="list-group-item d-flex justify-content-between align-items-start">
+                {dayOrders.map((o, idx) => (
+                  <li
+                    key={o.id}
+                    className="list-group-item d-flex justify-content-between align-items-start"
+                    draggable
+                    onDragStart={() => handleDayDragStart(idx, o)}
+                    onDragOver={(e) => handleDayDragOver(e, idx)}
+                    onDrop={(e) => handleDayDrop(e, idx)}
+                    style={{
+                      cursor: "grab",
+                      background:
+                        overIndex === idx && dragIndex !== null
+                          ? "#f1f5f9"
+                          : "white",
+                    }}
+                    title="Drag to reorder or drag out onto the calendar"
+                  >
                     <div className="me-2">
                       <div className="fw-bold">
                         {o.customer ? `${o.customer}` : `WO ${o.id}`}

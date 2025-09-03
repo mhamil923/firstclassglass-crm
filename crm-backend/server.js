@@ -53,6 +53,38 @@ const db = mysql.createPool({
   port: Number(DB_PORT), waitForConnections: true, connectionLimit: 10, dateStrings: true,
 });
 
+// ─── SMALL UTILITIES ─────────────────────────────────────────────────────────
+const pad2 = n => String(n).padStart(2, '0');
+function toSqlDateTime(d) {
+  // Expects JS Date in local TZ (TZ env set above). Returns 'YYYY-MM-DD HH:mm:ss'
+  const Y = d.getFullYear();
+  const M = pad2(d.getMonth()+1);
+  const D = pad2(d.getDate());
+  const h = pad2(d.getHours());
+  const m = pad2(d.getMinutes());
+  const s = pad2(d.getSeconds());
+  return `${Y}-${M}-${D} ${h}:${m}:${s}`;
+}
+function parseScheduledInput({ scheduledDate, date, time }) {
+  // Returns { sql: 'YYYY-MM-DD HH:mm:ss' } or { sql: null } for unschedule
+  // Accepts either scheduledDate (string or null/empty) or date/time.
+  if (scheduledDate === null || scheduledDate === undefined || String(scheduledDate).trim() === '') {
+    return { sql: null };
+  }
+  let dtStr = String(scheduledDate).trim();
+  if (!dtStr && date) {
+    const t = time && String(time).trim() ? String(time).trim() : '08:00';
+    dtStr = `${date} ${t}`;
+  }
+  if (!dtStr && !date) return { sql: null };
+  // Allow 'YYYY-MM-DD' (no time) → default 08:00
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dtStr)) dtStr += ' 08:00';
+  // Normalize into Date in local TZ
+  const p = new Date(dtStr); // TZ already set to America/Chicago at process level
+  if (isNaN(p.getTime())) return { sql: null };
+  return { sql: toSqlDateTime(p) };
+}
+
 // ─── SCHEMA HELPERS ─────────────────────────────────────────────────────────
 const SCHEMA = { hasAssignedTo: false };
 async function columnExists(table, col) {
@@ -69,6 +101,7 @@ async function ensureCols() {
     { name: 'sitePhone',     type: 'VARCHAR(32) NULL' },
     { name: 'customerPhone', type: 'VARCHAR(32) NULL' },
     { name: 'customerEmail', type: 'VARCHAR(255) NULL' },
+    { name: 'dayOrder',      type: 'INT NULL' }, // ➕ for drag ordering within a day
   ];
   for (const { name, type } of colsToEnsure) {
     try {
@@ -256,6 +289,15 @@ app.get('/work-orders', authenticate, async (req, res) => {
     );
     res.json(rows);
   } catch (err) { console.error('Work-orders list error:', err); res.status(500).json({ error: 'Failed to fetch work orders.' }); }
+});
+
+app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      'SELECT * FROM work_orders WHERE scheduledDate IS NULL ORDER BY id DESC'
+    );
+    res.json(rows);
+  } catch (err) { console.error('Unscheduled list error:', err); res.status(500).json({ error: 'Failed to fetch unscheduled.' }); }
 });
 
 app.get('/work-orders/search', authenticate, async (req, res) => {
@@ -549,7 +591,174 @@ app.post(
   }
 );
 
-// Assign / date / notes / delete endpoints (unchanged) ───────────────────────
+// ─── CALENDAR / SCHEDULING ENDPOINTS ─────────────────────────────────────────
+
+// Update (or clear) scheduled date/time. Also can update status if provided.
+// Accepts:
+//   { scheduledDate: 'YYYY-MM-DD HH:mm' }  OR
+//   { date: 'YYYY-MM-DD', time: 'HH:mm' }  OR
+//   { scheduledDate: null } to unschedule
+app.put('/work-orders/:id/update-date',
+  authenticate,
+  authorize('dispatcher','admin'),
+  express.json(),
+  async (req, res) => {
+    try {
+      const wid = req.params.id;
+      const { status, scheduledDate, date, time } = req.body;
+
+      const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+      if (!existing) return res.status(404).json({ error: 'Not found.' });
+
+      const parsed = parseScheduledInput({ scheduledDate, date, time });
+
+      if (parsed.sql === null) {
+        // UNSCHEDULE
+        const nextStatus = (status !== undefined && status !== null && String(status).length)
+          ? status
+          : 'Needs to be Scheduled';
+        await db.execute('UPDATE work_orders SET scheduledDate = NULL, dayOrder = NULL, status = ? WHERE id = ?',
+          [nextStatus, wid]);
+      } else {
+        const nextStatus = (status !== undefined && status !== null && String(status).length)
+          ? status
+          : (existing.status && existing.status !== 'Needs to be Scheduled' ? existing.status : 'Scheduled');
+        await db.execute('UPDATE work_orders SET scheduledDate = ?, status = ? WHERE id = ?',
+          [parsed.sql, nextStatus, wid]);
+      }
+
+      const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+      res.json(fresh);
+    } catch (err) {
+      console.error('Update-date error:', err);
+      res.status(500).json({ error: 'Failed to update date.' });
+    }
+  }
+);
+
+// Explicit unschedule helper
+app.put('/work-orders/:id/unschedule',
+  authenticate,
+  authorize('dispatcher','admin'),
+  async (req, res) => {
+    try {
+      const wid = req.params.id;
+      const { status } = req.body || {};
+      const nextStatus = (status && String(status).length) ? status : 'Needs to be Scheduled';
+      await db.execute('UPDATE work_orders SET scheduledDate = NULL, dayOrder = NULL, status = ? WHERE id = ?',
+        [nextStatus, wid]);
+      const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+      res.json(fresh);
+    } catch (err) {
+      console.error('Unschedule error:', err);
+      res.status(500).json({ error: 'Failed to unschedule.' });
+    }
+  }
+);
+
+// Return all WOs on a given day (YYYY-MM-DD), ordered by time then dayOrder
+app.get('/calendar/day', authenticate, async (req, res) => {
+  try {
+    const date = String(req.query.date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'date (YYYY-MM-DD) required' });
+    }
+    const [rows] = await db.execute(
+      `SELECT *
+         FROM work_orders
+        WHERE DATE(scheduledDate) = ?
+        ORDER BY TIME(scheduledDate) ASC, COALESCE(dayOrder, 999999) ASC, id ASC`,
+      [date]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Calendar day fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch day.' });
+  }
+});
+
+// Save drag order for a day
+// Body: { date: 'YYYY-MM-DD', orderedIds: [ ... ] }
+app.put('/calendar/day-order',
+  authenticate,
+  authorize('dispatcher','admin'),
+  express.json(),
+  async (req, res) => {
+    try {
+      const { date, orderedIds } = req.body || {};
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '')))
+        return res.status(400).json({ error: 'date (YYYY-MM-DD) required' });
+      if (!Array.isArray(orderedIds))
+        return res.status(400).json({ error: 'orderedIds array required' });
+
+      // Reset dayOrder for the day
+      await db.execute('UPDATE work_orders SET dayOrder = NULL WHERE DATE(scheduledDate) = ?', [date]);
+
+      // Apply new order (1..n)
+      for (let i = 0; i < orderedIds.length; i++) {
+        const id = Number(orderedIds[i]);
+        if (!Number.isFinite(id)) continue;
+        await db.execute(
+          'UPDATE work_orders SET dayOrder = ? WHERE id = ? AND DATE(scheduledDate) = ?',
+          [i + 1, id, date]
+        );
+      }
+
+      const [rows] = await db.execute(
+        `SELECT *
+           FROM work_orders
+          WHERE DATE(scheduledDate) = ?
+          ORDER BY TIME(scheduledDate) ASC, COALESCE(dayOrder, 999999) ASC, id ASC`,
+        [date]
+      );
+      res.json({ ok: true, items: rows });
+    } catch (err) {
+      console.error('Day-order error:', err);
+      res.status(500).json({ error: 'Failed to save order.' });
+    }
+  }
+);
+
+// Bulk schedule/reschedule items (e.g., drag from "+N more" modal to another day)
+// Body: { items: [{ id, scheduledDate } | { id, date, time } , ...] }
+app.put('/calendar/bulk-schedule',
+  authenticate,
+  authorize('dispatcher','admin'),
+  express.json(),
+  async (req, res) => {
+    try {
+      const items = Array.isArray(req.body?.items) ? req.body.items : [];
+      if (!items.length) return res.status(400).json({ error: 'items required' });
+
+      const results = [];
+      for (const it of items) {
+        const id = Number(it.id);
+        if (!Number.isFinite(id)) continue;
+        const parsed = parseScheduledInput({ scheduledDate: it.scheduledDate, date: it.date, time: it.time });
+        if (parsed.sql === null) {
+          await db.execute(
+            'UPDATE work_orders SET scheduledDate = NULL, dayOrder = NULL, status = ? WHERE id = ?',
+            ['Needs to be Scheduled', id]
+          );
+        } else {
+          await db.execute(
+            'UPDATE work_orders SET scheduledDate = ?, status = COALESCE(NULLIF(status,""), "Scheduled"), dayOrder = NULL WHERE id = ?',
+            [parsed.sql, id]
+          );
+        }
+        const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [id]);
+        results.push(fresh);
+      }
+
+      res.json({ ok: true, items: results });
+    } catch (err) {
+      console.error('Bulk-schedule error:', err);
+      res.status(500).json({ error: 'Failed to bulk schedule.' });
+    }
+  }
+);
+
+// Assign / date / notes / delete endpoints (unchanged from earlier sections except where noted) ─────
 app.put('/work-orders/:id/assign', authenticate, authorize('dispatcher', 'admin'), express.json(), async (req, res) => {
   try {
     if (!SCHEMA.hasAssignedTo) return res.status(400).json({ error: 'assignedTo column missing' });
@@ -564,19 +773,6 @@ app.put('/work-orders/:id/assign', authenticate, authorize('dispatcher', 'admin'
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
     res.json(updated);
   } catch (err) { console.error('Assign error:', err); res.status(500).json({ error: 'Failed to assign work order.' }); }
-});
-
-app.put('/work-orders/:id/update-date', authenticate, authorize('dispatcher', 'admin'), express.json(), async (req, res) => {
-  try {
-    const { scheduledDate, status } = req.body;
-    if (!scheduledDate) return res.status(400).json({ error: 'scheduledDate required' });
-    const params = [scheduledDate, req.params.id];
-    let sql = 'UPDATE work_orders SET scheduledDate = ? WHERE id = ?';
-    if (status) { sql = 'UPDATE work_orders SET scheduledDate = ?, status = ? WHERE id = ?'; params.splice(1, 0, status); }
-    await db.execute(sql, params);
-    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
-    res.json(updated);
-  } catch (err) { console.error('Update date error:', err); res.status(500).json({ error: 'Failed to update date.' }); }
 });
 
 app.post('/work-orders/:id/notes', authenticate, express.json(), async (req, res) => {
