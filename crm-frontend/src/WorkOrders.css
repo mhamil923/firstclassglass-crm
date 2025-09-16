@@ -21,7 +21,7 @@
   align-items: center;
   height: 34px;
   padding: 0 10px;
-  border: 1px solid #0ea5b7;     /* teal border */
+  border: 1px solid #0ea5b7;          /* teal border */
   border-radius: 999px;
   background: #fff;
   color: #0ea5b7;
@@ -31,6 +31,21 @@
   text-decoration: none;
   line-height: 1;
   user-select: none;
+  margin-right: 8px;                   /* spacing between chips */
+  margin-bottom: 8px;                  /* wrap spacing */
+}
+
+.chips-toolbar > .chip:hover,
+.chips-toolbar > .status-chip:hover,
+.chips-toolbar > .wo-chip:hover {
+  background: #f0fdff;
+}
+
+.chips-toolbar > .chip:focus-visible,
+.chips-toolbar > .status-chip:focus-visible,
+.chips-toolbar > .wo-chip:focus-visible {
+  outline: 3px solid #99f6e4;
+  outline-offset: 2px;
 }
 
 /* Count bubble inside pill */
@@ -79,10 +94,10 @@
 }
 
 /* ===========================
-   Work Orders table
+   Work Orders — table or card
    =========================== */
 
-/* A wrapper that restores the “boxed” card look around the whole table */
+/* When you wrap tables/lists, this gives a boxed look */
 .wo-table-wrap,
 .workorders-table-wrap,
 .work-orders .table-wrap {
@@ -92,15 +107,16 @@
   overflow: hidden; /* round the corners on the table */
 }
 
-/* Target common table class names as well as generic table inside the page */
+/* TABLE MODE (robust selectors) */
 .wo-table,
 .workorders-table,
 .work-orders .table-wrap table,
 .work-orders table.wo,
 .work-orders table {
   width: 100%;
-  border-collapse: separate; /* so we can show the outer border nicely */
+  border-collapse: separate;   /* preserve outer border radius */
   border-spacing: 0;
+  background: #fff;
 }
 
 .wo-table thead th,
@@ -129,22 +145,52 @@
   vertical-align: top;
   color: #0f172a;
   border-top: 1px solid #e2e8f0; /* row dividers */
+  background: #fff;
 }
 
-/* Make “Actions” and small cells stay compact on narrow screens */
+/* Compact actions column */
 .wo-table td.actions,
 .workorders-table td.actions,
 .work-orders table td.actions {
   white-space: nowrap;
 }
 
-/* Optional: zebra stripes for readability (uncomment if you like)
+/* Optional zebra stripes (uncomment if you like)
 .wo-table tbody tr:nth-child(odd) td,
 .workorders-table tbody tr:nth-child(odd) td,
-.work-orders table tbody tr:nth-child(odd) td {
-  background: #fafafa;
-}
+.work-orders table tbody tr:nth-child(odd) td { background: #fafafa; }
 */
+
+/* CARD/LIST MODE (if you render divs instead of a table) */
+.wo-list,
+.workorders-list,
+.work-orders .wo-list {
+  display: grid;
+  gap: 12px;
+}
+
+.wo-card,
+.wo-item,
+.work-order,
+.workorders-list .item,
+.work-orders .wo-row,
+.work-orders .wo-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;   /* <-- clear borders between orders */
+  border-radius: 10px;
+  padding: 12px;
+}
+
+/* Header row inside cards (optional) */
+.wo-card .header,
+.work-order .header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 -12px 8px;
+  padding: 0 12px 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
 
 /* Status <select> in table cells */
 .wo-status-select,
@@ -299,7 +345,6 @@
   font-weight: 700;
   cursor: pointer;
 }
-
 .btn-parts:disabled {
   opacity: 0.6;
   cursor: not-allowed;
