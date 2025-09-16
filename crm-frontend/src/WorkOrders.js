@@ -14,6 +14,9 @@ const STATUS_LIST = [
   "Completed",
 ];
 
+const PARTS_WAITING = "Waiting on Parts";
+const PARTS_IN = "Parts In";
+
 export default function WorkOrders() {
   const navigate = useNavigate();
 
@@ -32,6 +35,12 @@ export default function WorkOrders() {
   const [filteredOrders, setFilteredOrders] = useState([]);
   const [selectedFilter, setSelectedFilter] = useState("All"); // 'All' | 'Today' | one of STATUS_LIST
   const [techUsers, setTechUsers] = useState([]);
+
+  // Bulk "Parts In" modal state
+  const [isPartsModalOpen, setIsPartsModalOpen] = useState(false);
+  const [poSearch, setPoSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [isUpdatingParts, setIsUpdatingParts] = useState(false);
 
   useEffect(() => {
     fetchWorkOrders();
@@ -134,6 +143,83 @@ export default function WorkOrders() {
     window.open(url, "_blank", "width=800,height=600");
   };
 
+  // -------- Bulk Parts-In modal helpers --------
+  const openPartsModal = () => {
+    // preselect all visible rows under Waiting on Parts
+    const preselected = new Set(filteredOrders.map((o) => o.id));
+    setSelectedIds(preselected);
+    setPoSearch("");
+    setIsPartsModalOpen(true);
+  };
+
+  const closePartsModal = () => {
+    setIsPartsModalOpen(false);
+    setSelectedIds(new Set());
+    setPoSearch("");
+  };
+
+  const toggleId = (id) => {
+    const copy = new Set(selectedIds);
+    if (copy.has(id)) copy.delete(id);
+    else copy.add(id);
+    setSelectedIds(copy);
+  };
+
+  const setAll = (checked, visibleRows) => {
+    if (checked) {
+      setSelectedIds(new Set(visibleRows.map((o) => o.id)));
+    } else {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const visibleWaitingRows = useMemo(() => {
+    if (selectedFilter !== PARTS_WAITING) return [];
+    const q = poSearch.trim().toLowerCase();
+    const rows = filteredOrders;
+    if (!q) return rows;
+    return rows.filter((o) => {
+      const po = String(o.poNumber || "").toLowerCase();
+      const cust = String(o.customer || "").toLowerCase();
+      const site = String(o.siteLocation || "").toLowerCase();
+      return po.includes(q) || cust.includes(q) || site.includes(q);
+    });
+  }, [filteredOrders, selectedFilter, poSearch]);
+
+  const markSelectedAsPartsIn = async () => {
+    if (!selectedIds.size) return;
+    setIsUpdatingParts(true);
+
+    // optimistic update
+    const ids = Array.from(selectedIds);
+    const prev = workOrders;
+    const next = prev.map((o) =>
+      ids.includes(o.id) ? { ...o, status: PARTS_IN } : o
+    );
+    setWorkOrders(next);
+
+    try {
+      // Update server (sequential for clearer error handling)
+      for (const id of ids) {
+        // ignore rows that already got changed by someone else
+        const row = prev.find((r) => r.id === id);
+        if (row && row.status !== PARTS_IN) {
+          await api.put(`/work-orders/${id}`, { status: PARTS_IN });
+        }
+      }
+      closePartsModal();
+    } catch (err) {
+      console.error("Bulk update failed:", err);
+      alert(
+        err?.response?.data?.error ||
+          "Failed to mark selected POs as Parts In. Restoring previous state."
+      );
+      setWorkOrders(prev); // rollback
+    } finally {
+      setIsUpdatingParts(false);
+    }
+  };
+
   return (
     <div className="home-container">
       <div className="header-row">
@@ -147,27 +233,39 @@ export default function WorkOrders() {
         </Link>
       </div>
 
-      {/* Status chip bar w/ counts */}
+      {/* Status chip bar w/ counts + conditional Parts-In button */}
       <div className="section-card">
-        <div className="chips-row" role="tablist" aria-label="Work order filters">
-          {[
-            { key: "All", label: "All", count: chipCounts.All },
-            { key: "Today", label: "Today", count: chipCounts.Today },
-            ...STATUS_LIST.map((s) => ({ key: s, label: s, count: chipCounts[s] })),
-          ].map(({ key, label, count }) => {
-            const active = selectedFilter === key;
-            return (
-              <button
-                key={key}
-                type="button"
-                className={`chip ${active ? "active" : ""}`}
-                onClick={() => setFilter(key)}
-              >
-                <span className="chip-label">{label}</span>
-                <span className="chip-count">{count ?? 0}</span>
-              </button>
-            );
-          })}
+        <div className="chips-toolbar">
+          <div className="chips-row" role="tablist" aria-label="Work order filters">
+            {[
+              { key: "All", label: "All", count: chipCounts.All },
+              { key: "Today", label: "Today", count: chipCounts.Today },
+              ...STATUS_LIST.map((s) => ({ key: s, label: s, count: chipCounts[s] })),
+            ].map(({ key, label, count }) => {
+              const active = selectedFilter === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className={`chip ${active ? "active" : ""}`}
+                  onClick={() => setFilter(key)}
+                >
+                  <span className="chip-label">{label}</span>
+                  <span className="chip-count">{count ?? 0}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedFilter === PARTS_WAITING && filteredOrders.length > 0 && (
+            <button
+              type="button"
+              className="btn btn-parts"
+              onClick={openPartsModal}
+            >
+              Mark Parts In
+            </button>
+          )}
         </div>
 
         <table className="styled-table">
@@ -257,6 +355,96 @@ export default function WorkOrders() {
           </tbody>
         </table>
       </div>
+
+      {/* ---------- Parts In Modal ---------- */}
+      {isPartsModalOpen && (
+        <div className="modal-overlay" onClick={closePartsModal} role="dialog" aria-modal="true">
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Mark Parts as Received</h3>
+              <button className="modal-close" onClick={closePartsModal} aria-label="Close">×</button>
+            </div>
+
+            <div className="modal-body">
+              <div className="modal-controls">
+                <input
+                  className="modal-input"
+                  type="text"
+                  placeholder="Search PO #, customer, or site…"
+                  value={poSearch}
+                  onChange={(e) => setPoSearch(e.target.value)}
+                />
+                <div className="modal-actions-inline">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setAll(true, visibleWaitingRows)}
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setAll(false, visibleWaitingRows)}
+                  >
+                    Select None
+                  </button>
+                </div>
+              </div>
+
+              <div className="modal-list">
+                {visibleWaitingRows.length === 0 ? (
+                  <div className="empty-state">No POs in “Waiting on Parts”.</div>
+                ) : (
+                  <table className="mini-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 42 }}></th>
+                        <th>PO #</th>
+                        <th>Customer</th>
+                        <th>Site</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleWaitingRows.map((o) => {
+                        const checked = selectedIds.has(o.id);
+                        return (
+                          <tr key={o.id}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleId(o.id)}
+                              />
+                            </td>
+                            <td>{o.poNumber || "—"}</td>
+                            <td>{o.customer || "—"}</td>
+                            <td title={o.siteLocation}>{o.siteLocation || "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-parts"
+                disabled={isUpdatingParts || selectedIds.size === 0}
+                onClick={markSelectedAsPartsIn}
+              >
+                {isUpdatingParts ? "Updating…" : `Mark Parts In (${selectedIds.size})`}
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={closePartsModal}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

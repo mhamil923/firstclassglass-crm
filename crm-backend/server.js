@@ -1,4 +1,3 @@
-
 // File: server.js
 
 // ─── IMPORTS ─────────────────────────────────────────────────────────────────
@@ -27,7 +26,7 @@ const {
   S3_BUCKET,
   AWS_REGION = 'us-east-2',
   ASSIGNEE_EXTRA_USERNAMES = 'Jeff,tech1',
-  DEFAULT_WINDOW_MINUTES = '120', // ➕ default arrival window if end not provided
+  DEFAULT_WINDOW_MINUTES = '120', // default arrival window if end not provided
 } = process.env;
 
 const DEFAULT_WINDOW = Math.max(15, Number(DEFAULT_WINDOW_MINUTES) || 120);
@@ -62,7 +61,6 @@ function toSqlDateTimeFromParts(Y, M, D, h = 0, m = 0, s = 0) {
   return `${Y}-${pad2(M)}-${pad2(D)} ${pad2(h)}:${pad2(m)}:${pad2(s)}`;
 }
 function addMinutesToSql(sqlStr, minutes) {
-  // sqlStr is 'YYYY-MM-DD HH:mm:ss'
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(sqlStr);
   if (!m) return sqlStr;
   const Y = Number(m[1]), Mo = Number(m[2]), D = Number(m[3]);
@@ -73,6 +71,24 @@ function addMinutesToSql(sqlStr, minutes) {
     d.getFullYear(), d.getMonth() + 1, d.getDate(),
     d.getHours(), d.getMinutes(), d.getSeconds()
   );
+}
+function roundUpDateToHour(d) {
+  // d is JS Date in local tz
+  const r = new Date(d.getTime());
+  if (r.getMinutes() > 0 || r.getSeconds() > 0 || r.getMilliseconds() > 0) {
+    r.setHours(r.getHours() + 1);
+  }
+  r.setMinutes(0, 0, 0);
+  return r;
+}
+function roundSqlUpToHour(sqlStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(sqlStr || '');
+  if (!m) return sqlStr;
+  const Y = Number(m[1]), Mo = Number(m[2]), D = Number(m[3]);
+  const h = Number(m[4]), mi = Number(m[5]), s = Number(m[6] || 0);
+  const d = new Date(Y, Mo - 1, D, h, mi, s);
+  const r = roundUpDateToHour(d);
+  return toSqlDateTimeFromParts(r.getFullYear(), r.getMonth()+1, r.getDate(), r.getHours(), r.getMinutes(), r.getSeconds());
 }
 
 function parseDateTimeFlexible(input) {
@@ -88,77 +104,80 @@ function parseDateTimeFlexible(input) {
   let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (m) {
     const [ , Y, Mo, D ] = m.map(Number);
-    return toSqlDateTimeFromParts(Y, Mo, D, 8, 0, 0); // default 08:00
+    // default 08:00 (on the hour already)
+    return toSqlDateTimeFromParts(Y, Mo, D, 8, 0, 0);
   }
 
   // Date + time (space or T, optional seconds)
-  m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+  m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2})(?::(\d{2})(?::(\d{2}))?)?$/.exec(s);
   if (m) {
     const Y  = Number(m[1]);
     const Mo = Number(m[2]);
     const D  = Number(m[3]);
     const h  = Number(m[4]);
-    const mi = Number(m[5]);
+    const mi = Number(m[5] || 0);
     const se = Number(m[6] || 0);
     return toSqlDateTimeFromParts(Y, Mo, D, h, mi, se);
   }
 
   return null; // unknown format
 }
-
 function parseHHmm(s) {
   if (!s) return null;
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s).trim());
-  if (!m) return null;
-  const h = Number(m[1]), mi = Number(m[2]);
-  if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
-  return { h, m: mi };
+  const v = String(s).trim();
+  // allow "HH", "H", "HH:mm"
+  let m = /^(\d{1,2})$/.exec(v);
+  if (m) {
+    const h = Number(m[1]);
+    if (h >= 0 && h <= 23) return { h, m: 0 };
+    return null;
+  }
+  m = /^(\d{1,2}):(\d{2})$/.exec(v);
+  if (m) {
+    const h = Number(m[1]), mi = Number(m[2]);
+    if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+    return { h, m: mi };
+  }
+  return null;
 }
-
 function windowSql({ dateSql, endTime, timeWindow }) {
   // dateSql: 'YYYY-MM-DD HH:mm:ss' (start)
-  // endTime: 'HH:mm' OR timeWindow: 'HH:mm-HH:mm'
+  // endTime: 'HH' or 'HH:mm' OR timeWindow: 'HH[:mm]-HH[:mm]'
   if (!dateSql) return { startSql: null, endSql: null };
 
   const datePartMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateSql);
-  const datePart = datePartMatch ? `${datePartMatch[1]}-${datePartMatch[2]}-${datePartMatch[3]}` : null;
+  const Y = datePartMatch ? Number(datePartMatch[1]) : null;
+  const Mo = datePartMatch ? Number(datePartMatch[2]) : null;
+  const D = datePartMatch ? Number(datePartMatch[3]) : null;
 
   let endSql = null;
 
-  if (timeWindow && datePart) {
+  if (timeWindow && Y) {
     const tw = String(timeWindow).trim();
-    const wm = /^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/.exec(tw);
+    const wm = /^(\d{1,2}(?::\d{2})?)\s*-\s*(\d{1,2}(?::\d{2})?)$/.exec(tw);
     if (wm) {
       const startHm = parseHHmm(wm[1]);
       const endHm   = parseHHmm(wm[2]);
       if (startHm && endHm) {
-        // Force startSql to the window start; but we keep caller's start
-        // We only set endSql here; caller already decided startSql
-        endSql = toSqlDateTimeFromParts(
-          Number(datePart.slice(0,4)),
-          Number(datePart.slice(5,7)),
-          Number(datePart.slice(8,10)),
-          endHm.h, endHm.m, 0
-        );
+        // end from window (rounded up)
+        const endD = roundUpDateToHour(new Date(Y, Mo - 1, D, endHm.h, endHm.m, 0));
+        endSql = toSqlDateTimeFromParts(endD.getFullYear(), endD.getMonth()+1, endD.getDate(), endD.getHours(), 0, 0);
       }
     }
   }
 
-  if (!endSql && endTime && datePart) {
+  if (!endSql && endTime && Y) {
     const hm = parseHHmm(endTime);
     if (hm) {
-      endSql = toSqlDateTimeFromParts(
-        Number(datePart.slice(0,4)),
-        Number(datePart.slice(5,7)),
-        Number(datePart.slice(8,10)),
-        hm.h, hm.m, 0
-      );
+      const endD = roundUpDateToHour(new Date(Y, Mo - 1, D, hm.h, hm.m, 0));
+      endSql = toSqlDateTimeFromParts(endD.getFullYear(), endD.getMonth()+1, endD.getDate(), endD.getHours(), 0, 0);
     }
   }
 
   if (!endSql) {
-    // default window
+    // default window from (already-rounded) start
     endSql = addMinutesToSql(dateSql, DEFAULT_WINDOW);
+    endSql = roundSqlUpToHour(endSql);
   }
 
   return { startSql: dateSql, endSql };
@@ -170,10 +189,14 @@ async function columnExists(table, col) {
   const [rows] = await db.query(`SHOW COLUMNS FROM \`${table}\` LIKE ?`, [col]);
   return rows.length > 0;
 }
+async function getColumnType(table, col) {
+  const [rows] = await db.query(`SHOW COLUMNS FROM \`${table}\` LIKE ?`, [col]);
+  return rows.length ? String(rows[0].Type || '').toLowerCase() : null;
+}
 async function ensureCols() {
   const colsToEnsure = [
     { name: 'scheduledDate', type: 'DATETIME NULL' },
-    { name: 'scheduledEnd',  type: 'DATETIME NULL' }, // ➕ arrival window end
+    { name: 'scheduledEnd',  type: 'DATETIME NULL' }, // arrival window end
     { name: 'pdfPath',       type: 'VARCHAR(255) NULL' },
     { name: 'photoPath',     type: 'TEXT NULL' },
     { name: 'notes',         type: 'TEXT NULL' },
@@ -186,7 +209,22 @@ async function ensureCols() {
   for (const { name, type } of colsToEnsure) {
     try {
       const [found] = await db.query(`SHOW COLUMNS FROM \`work_orders\` LIKE ?`, [name]);
-      if (!found.length) await db.query(`ALTER TABLE \`work_orders\` ADD COLUMN \`${name}\` ${type}`);
+      if (!found.length) {
+        await db.query(`ALTER TABLE \`work_orders\` ADD COLUMN \`${name}\` ${type}`);
+      } else {
+        // if scheduledDate/End exist but are DATE, upgrade to DATETIME
+        if ((name === 'scheduledDate' || name === 'scheduledEnd')) {
+          try {
+            const t = await getColumnType('work_orders', name);
+            if (t && /^date(?!time)/.test(t)) {
+              await db.query(`ALTER TABLE \`work_orders\` MODIFY COLUMN \`${name}\` DATETIME NULL`);
+              console.log(`ℹ️ Upgraded column ${name} to DATETIME`);
+            }
+          } catch (e) {
+            console.warn(`⚠️ Type check/upgrade failed for ${name}:`, e.message);
+          }
+        }
+      }
     } catch (e) { console.warn(`⚠️ Schema check '${name}':`, e.message); }
   }
   try { SCHEMA.hasAssignedTo = await columnExists('work_orders', 'assignedTo'); }
@@ -200,7 +238,7 @@ const allowMime = (m) => m && (/^image\//.test(m) || m === 'application/pdf');
 function makeUploader() {
   const limits = {
     fileSize: MAX_FILE_SIZE_MB * 1024 * 1024,
-    files: MAX_FILES + 5, // wiggle room, we still enforce ourselves
+    files: MAX_FILES + 5,
     fields: MAX_FIELDS,
     parts:  MAX_PARTS,
   };
@@ -251,18 +289,14 @@ function withMulter(handler) {
         'LIMIT_FILE_SIZE','LIMIT_FILE_COUNT','LIMIT_FIELD_COUNT',
         'LIMIT_PART_COUNT','LIMIT_FIELD_VALUE','LIMIT_FIELD_KEY'
       ]);
-      if (MULTER_413.has(err.code)) {
-        const msg =
-          err.code === 'LIMIT_FILE_SIZE'   ? `File too large (>${MAX_FILE_SIZE_MB}MB)` :
-          err.code === 'LIMIT_FILE_COUNT'   ? `Too many files (max ${MAX_FILES})` :
-          err.code === 'LIMIT_PART_COUNT'   ? `Too many parts in form-data` :
-          err.code === 'LIMIT_FIELD_COUNT'  ? `Too many fields (max ${MAX_FIELDS})` :
-          'Request too large';
-        return res.status(413).json({ error: msg, code: err.code });
-      }
-      if (err.code === 'LIMIT_UNEXPECTED_FILE') {
-        return res.status(400).json({ error: 'Unexpected file field', code: err.code });
-      }
+      const msg =
+        err.code === 'LIMIT_FILE_SIZE'   ? `File too large (>${MAX_FILE_SIZE_MB}MB)` :
+        err.code === 'LIMIT_FILE_COUNT'  ? `Too many files (max ${MAX_FILES})` :
+        err.code === 'LIMIT_PART_COUNT'  ? `Too many parts in form-data` :
+        err.code === 'LIMIT_FIELD_COUNT' ? `Too many fields (max ${MAX_FIELDS})` :
+        'Request too large';
+      if (MULTER_413.has(err.code)) return res.status(413).json({ error: msg, code: err.code });
+      if (err.code === 'LIMIT_UNEXPECTED_FILE') return res.status(400).json({ error: 'Unexpected file field', code: err.code });
       console.error('Upload error:', err);
       return res.status(400).json({ error: 'Upload failed: ' + err.message, code: err.code });
     });
@@ -668,9 +702,9 @@ app.post(
 // Update (or clear) scheduled date/time (+ optional end/window).
 // Accepts body examples:
 //   { scheduledDate: 'YYYY-MM-DD HH:mm[:ss]', scheduledEnd: 'YYYY-MM-DD HH:mm[:ss]' }
-//   { date: 'YYYY-MM-DD', time: 'HH:mm', endTime: 'HH:mm' }
+//   { date: 'YYYY-MM-DD', time: 'HH[:mm]', endTime: 'HH[:mm]' }
 //   { scheduledDate: null }  // unschedule
-//   { date: 'YYYY-MM-DD', time: '10:00', timeWindow: '10:00-12:00' }
+//   { date: 'YYYY-MM-DD', time: '10', timeWindow: '10-12' }
 app.put('/work-orders/:id/update-date',
   authenticate,
   authorize('dispatcher','admin'),
@@ -683,7 +717,7 @@ app.put('/work-orders/:id/update-date',
       const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
       if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-      // Determine start SQL
+      // Determine start SQL then round up to the hour
       let startSql = parseDateTimeFlexible(scheduledDate);
       if (!startSql && date) {
         const d = String(date).trim();
@@ -693,6 +727,7 @@ app.put('/work-orders/:id/update-date',
           hm.h, hm.m, 0
         );
       }
+      if (startSql) startSql = roundSqlUpToHour(startSql);
 
       if (scheduledDate === null) {
         // Explicit unschedule
@@ -706,12 +741,13 @@ app.put('/work-orders/:id/update-date',
       } else if (!startSql) {
         return res.status(400).json({ error: 'Invalid or missing date/time.' });
       } else {
-        // End SQL
+        // End SQL (round up as well)
         let endSql = parseDateTimeFlexible(scheduledEnd);
-        if (!endSql) {
+        if (endSql) {
+          endSql = roundSqlUpToHour(endSql);
+        } else {
           const w = windowSql({ dateSql: startSql, endTime, timeWindow });
           endSql = w.endSql;
-          // If timeWindow specified and also implies a different start, keep caller's start (CalendarPage will send correct start)
         }
 
         const nextStatus = (status !== undefined && status !== null && String(status).length)
@@ -777,7 +813,6 @@ app.get('/calendar/day', authenticate, async (req, res) => {
 });
 
 // Save drag order for a day
-// Body: { date: 'YYYY-MM-DD', orderedIds: [ ... ] }
 app.put('/calendar/day-order',
   authenticate,
   authorize('dispatcher','admin'),
@@ -790,10 +825,8 @@ app.put('/calendar/day-order',
       if (!Array.isArray(orderedIds))
         return res.status(400).json({ error: 'orderedIds array required' });
 
-      // Reset dayOrder for the day
       await db.execute('UPDATE work_orders SET dayOrder = NULL WHERE DATE(scheduledDate) = ?', [date]);
 
-      // Apply new order (1..n)
       for (let i = 0; i < orderedIds.length; i++) {
         const id = Number(orderedIds[i]);
         if (!Number.isFinite(id)) continue;
@@ -818,8 +851,7 @@ app.put('/calendar/day-order',
   }
 );
 
-// Bulk schedule/reschedule items (drag from "+N more", etc.)
-// Body items support: { id, scheduledDate }  OR { id, date, time, endTime }  OR { id, date, time, timeWindow }
+// Bulk schedule/reschedule items
 app.put('/calendar/bulk-schedule',
   authenticate,
   authorize('dispatcher','admin'),
@@ -834,7 +866,7 @@ app.put('/calendar/bulk-schedule',
         const id = Number(it.id);
         if (!Number.isFinite(id)) continue;
 
-        // Start
+        // Start (then round)
         let startSql = parseDateTimeFlexible(it.scheduledDate);
         if (!startSql && it.date) {
           const d = String(it.date).trim();
@@ -844,6 +876,7 @@ app.put('/calendar/bulk-schedule',
             hm.h, hm.m, 0
           );
         }
+        if (startSql) startSql = roundSqlUpToHour(startSql);
 
         if (it.scheduledDate === null || !startSql) {
           await db.execute(
@@ -851,8 +884,9 @@ app.put('/calendar/bulk-schedule',
             ['Needs to be Scheduled', id]
           );
         } else {
-          // End/window
+          // End/window (round as well)
           let endSql = parseDateTimeFlexible(it.scheduledEnd);
+          if (endSql) endSql = roundSqlUpToHour(endSql);
           if (!endSql) {
             const w = windowSql({ dateSql: startSql, endTime: it.endTime, timeWindow: it.timeWindow });
             endSql = w.endSql;

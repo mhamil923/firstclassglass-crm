@@ -1,201 +1,141 @@
-/* File: src/WorkOrders.css */
-
-/* page container */
-.home-container {
-  min-height: 100vh;
-  background-color: #F1F5F9;
-  padding: 2rem;
-  box-sizing: border-box;
-}
-
-/* card wrapper */
-.section-card {
-  background: #ffffff;
-  border-radius: 10px;
-  padding: 1.25rem;
-  margin-bottom: 2rem;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
-}
-
-/* header row with title + add button */
-.header-row {
+/* Chips + Button toolbar */
+.chips-toolbar {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
+  gap: 0.75rem;
   margin-bottom: 1rem;
 }
 
-/* ===== Status chips ===== */
-:root {
-  --chip-bg: #ffffff;
-  --chip-border: #cbd5e1;   /* slate-300 */
-  --chip-text: #334155;     /* slate-700 */
-  --chip-active-bg: #e2e8f0;  /* slate-200 */
-  --chip-active-text: #0f172a; /* slate-900 */
+/* ---- Modal ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.45);
+  display: grid;
+  place-items: center;
+  z-index: 50;
 }
 
-/* Your original class names */
-.status-chips {
+.modal-card {
+  width: min(900px, 92vw);
+  background: #ffffff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 16px 40px rgba(2, 6, 23, 0.25);
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  flex-direction: column;
+  max-height: 85vh;
 }
 
-.status-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.75rem;
-  border-radius: 999px;
-  border: 1px solid var(--chip-border);
-  background: var(--chip-bg);
-  color: var(--chip-text);
-  font-weight: 600;
-  font-size: 0.92rem;
-  cursor: pointer;
-  box-shadow: 0 1px 1px rgba(2, 6, 23, 0.04);
-  user-select: none;
-  transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease;
-}
-
-.status-chip:hover {
-  transform: translateY(-1px);
-  background: #f1f5f9;
-}
-
-.status-chip.active {
-  background: var(--chip-active-bg);
-  color: var(--chip-active-text);
-  border-color: #94a3b8;
-}
-
-.chip-label {
-  white-space: nowrap;
-}
-
-.chip-count {
-  padding: 0.05rem 0.45rem;
-  min-width: 1.25rem;
-  text-align: center;
-  border-radius: 999px;
-  background: #e2e8f0;
-  font-weight: 700;
-  font-size: 0.78rem;
-  line-height: 1.25rem;
-}
-
-/* subtle color accents per status (border tone) — optional */
-.status-chip.chip-needs { border-color: #f59e0b; }      /* amber */
-.status-chip.chip-scheduled { border-color: #38bdf8; }  /* sky */
-.status-chip.chip-approval { border-color: #a78bfa; }   /* violet */
-.status-chip.chip-parts { border-color: #f97316; }      /* orange */
-.status-chip.chip-partsin { border-color: #22c55e; }    /* green */
-.status-chip.chip-done { border-color: #10b981; }       /* emerald */
-.status-chip.chip-today { border-color: #818cf8; }      /* indigo */
-.status-chip.chip-all { border-color: #94a3b8; }        /* slate */
-
-/* ===== Aliases so new component class names render the same ===== */
-.chips-row {              /* maps to .status-chips */
+.modal-header {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-.chip {                   /* maps to .status-chip */
-  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.75rem;
-  border-radius: 999px;
-  border: 1px solid var(--chip-border);
-  background: var(--chip-bg);
-  color: var(--chip-text);
-  font-weight: 600;
-  font-size: 0.92rem;
+  justify-content: space-between;
+  padding: 0.9rem 1.1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #0f172a;
+}
+
+.modal-close {
+  border: none;
+  background: transparent;
+  font-size: 1.5rem;
+  line-height: 1;
   cursor: pointer;
-  box-shadow: 0 1px 1px rgba(2, 6, 23, 0.04);
-  user-select: none;
-  transition: transform 0.06s ease, background 0.15s ease, border-color 0.15s ease;
+  color: #334155;
 }
 
-.chip:hover {
-  transform: translateY(-1px);
-  background: #f1f5f9;
+.modal-body {
+  padding: 0.9rem 1.1rem;
+  overflow: auto;
 }
 
-.chip.active {
-  background: var(--chip-active-bg);
-  color: var(--chip-active-text);
-  border-color: #94a3b8;
+.modal-controls {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
 }
 
-/* keep same token classes if you ever apply them to .chip elements */
-.chip.chip-needs { border-color: #f59e0b; }
-.chip.chip-scheduled { border-color: #38bdf8; }
-.chip.chip-approval { border-color: #a78bfa; }
-.chip.chip-parts { border-color: #f97316; }
-.chip.chip-partsin { border-color: #22c55e; }
-.chip.chip-done { border-color: #10b981; }
-.chip.chip-today { border-color: #818cf8; }
-.chip.chip-all { border-color: #94a3b8; }
+.modal-input {
+  flex: 1 1 320px;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  outline: none;
+}
 
-/* ===== Table ===== */
-.styled-table {
+.modal-actions-inline {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.modal-list {
+  max-height: 56vh;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.mini-table {
   width: 100%;
   border-collapse: separate;
-  border-spacing: 0 0.75rem;
+  border-spacing: 0;
 }
 
-.styled-table thead th {
-  background: #2B2D42;
-  color: #ffffff;
-  border: none;
-  padding: 0.75rem;
+.mini-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  color: #0f172a;
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  z-index: 1;
 }
 
-.styled-table tbody tr {
-  background: #ffffff;
-  outline: 2px solid #3D5A80;
-  outline-offset: -1px;
+.mini-table tbody td {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  padding: 0.9rem 1.1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+/* Buttons for modal */
+.btn-parts {
+  background: #22c55e;
+  color: #fff;
+  border: 1px solid #16a34a;
+  padding: 0.5rem 0.9rem;
   border-radius: 8px;
-  transition: background 0.2s, outline-color 0.2s;
-}
-
-.styled-table tbody tr:hover {
-  background: #E8F5E9;
-  outline-color: #2B2D42;
-}
-
-.styled-table tbody tr td {
-  border: none !important;
-  padding: 0.75rem 1rem;
-}
-
-/* link-style cells */
-.link-text {
-  text-decoration: underline;
-  color: #0ea5e9;
+  font-weight: 700;
   cursor: pointer;
 }
 
-/* selects inside table */
-.form-select {
-  width: 100%;
+.btn-parts:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
-/* empty states (support both class names used) */
-.empty-text,
-.empty-state {
-  text-align: center;
-  color: #8D99AE;
-  font-style: italic;
-  padding: 1rem 0;
-}
-
-/* small utility buttons */
-.btn-sm {
-  padding: 0.35rem 0.6rem !important;
-  font-size: 0.85rem !important;
+.btn-ghost {
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
 }
