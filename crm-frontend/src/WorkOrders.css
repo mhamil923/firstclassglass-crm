@@ -1,13 +1,188 @@
-/* Chips + Button toolbar */
+/* ===========================
+   Toolbar (chips + actions)
+   =========================== */
+
 .chips-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 1rem;
+  flex-wrap: wrap; /* keep pills from squishing */
 }
 
-/* ---- Modal ---- */
+/* Pill-style status chips (robust selectors to match common markup) */
+.chips-toolbar > .chip,
+.chips-toolbar > .status-chip,
+.chips-toolbar > a.chip,
+.chips-toolbar > button.chip,
+.chips-toolbar > .wo-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #0ea5b7;     /* teal border */
+  border-radius: 999px;
+  background: #fff;
+  color: #0ea5b7;
+  font-weight: 600;
+  gap: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  line-height: 1;
+  user-select: none;
+}
+
+/* Count bubble inside pill */
+.chips-toolbar > .chip .count,
+.chips-toolbar > .status-chip .count,
+.chips-toolbar > .wo-chip .count {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid #0ea5b7;
+  background: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* Active pill */
+.chips-toolbar > .chip.active,
+.chips-toolbar > .status-chip.active,
+.chips-toolbar > .wo-chip.active {
+  background: #0ea5b7;
+  color: #fff;
+  border-color: #0ea5b7;
+}
+.chips-toolbar > .chip.active .count,
+.chips-toolbar > .status-chip.active .count,
+.chips-toolbar > .wo-chip.active .count {
+  background: #0b7682;
+  border-color: #0b7682;
+  color: #fff;
+}
+
+/* Keep the green “Mark Parts In” looking like a primary button */
+.chips-toolbar .btn-parts {
+  background: #22c55e;
+  color: #fff;
+  border: 1px solid #16a34a;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ===========================
+   Work Orders table
+   =========================== */
+
+/* A wrapper that restores the “boxed” card look around the whole table */
+.wo-table-wrap,
+.workorders-table-wrap,
+.work-orders .table-wrap {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden; /* round the corners on the table */
+}
+
+/* Target common table class names as well as generic table inside the page */
+.wo-table,
+.workorders-table,
+.work-orders .table-wrap table,
+.work-orders table.wo,
+.work-orders table {
+  width: 100%;
+  border-collapse: separate; /* so we can show the outer border nicely */
+  border-spacing: 0;
+}
+
+.wo-table thead th,
+.workorders-table thead th,
+.work-orders .table-wrap table thead th,
+.work-orders table.wo thead th,
+.work-orders table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: #0f172a;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.wo-table tbody td,
+.workorders-table tbody td,
+.work-orders .table-wrap table tbody td,
+.work-orders table.wo tbody td,
+.work-orders table tbody td {
+  padding: 10px 12px;
+  vertical-align: top;
+  color: #0f172a;
+  border-top: 1px solid #e2e8f0; /* row dividers */
+}
+
+/* Make “Actions” and small cells stay compact on narrow screens */
+.wo-table td.actions,
+.workorders-table td.actions,
+.work-orders table td.actions {
+  white-space: nowrap;
+}
+
+/* Optional: zebra stripes for readability (uncomment if you like)
+.wo-table tbody tr:nth-child(odd) td,
+.workorders-table tbody tr:nth-child(odd) td,
+.work-orders table tbody tr:nth-child(odd) td {
+  background: #fafafa;
+}
+*/
+
+/* Status <select> in table cells */
+.wo-status-select,
+.work-orders select.status,
+.workorders-table select.status {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  height: 36px;
+  line-height: 36px;
+  padding: 0 32px 0 10px;
+  color: #0f172a;
+  font-weight: 600;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2362748B' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+/* Keep “Edit” buttons visually consistent but scoped */
+.wo-table .btn-edit,
+.work-orders .btn-edit {
+  background: #f59e0b;
+  color: #fff;
+  border: 1px solid #d97706;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ===========================
+   Modal (scoped to avoid leaks)
+   =========================== */
+
 .modal-overlay {
   position: fixed;
   inset: 0;
