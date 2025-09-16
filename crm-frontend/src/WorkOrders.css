@@ -11,12 +11,19 @@
   flex-wrap: wrap; /* keep pills from squishing */
 }
 
-/* Pill-style status chips (robust selectors to match common markup) */
-.chips-toolbar > .chip,
-.chips-toolbar > .status-chip,
-.chips-toolbar > a.chip,
-.chips-toolbar > button.chip,
-.chips-toolbar > .wo-chip {
+/* Ensure the inner row lays chips nicely */
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Pill-style status chips (use descendant selector, not direct child) */
+.chips-toolbar .chip,
+.chips-toolbar .status-chip,
+.chips-toolbar a.chip,
+.chips-toolbar button.chip,
+.chips-toolbar .wo-chip {
   display: inline-flex;
   align-items: center;
   height: 34px;
@@ -31,27 +38,25 @@
   text-decoration: none;
   line-height: 1;
   user-select: none;
-  margin-right: 8px;                   /* spacing between chips */
-  margin-bottom: 8px;                  /* wrap spacing */
 }
 
-.chips-toolbar > .chip:hover,
-.chips-toolbar > .status-chip:hover,
-.chips-toolbar > .wo-chip:hover {
+.chips-toolbar .chip:hover,
+.chips-toolbar .status-chip:hover,
+.chips-toolbar .wo-chip:hover {
   background: #f0fdff;
 }
 
-.chips-toolbar > .chip:focus-visible,
-.chips-toolbar > .status-chip:focus-visible,
-.chips-toolbar > .wo-chip:focus-visible {
+.chips-toolbar .chip:focus-visible,
+.chips-toolbar .status-chip:focus-visible,
+.chips-toolbar .wo-chip:focus-visible {
   outline: 3px solid #99f6e4;
   outline-offset: 2px;
 }
 
-/* Count bubble inside pill */
-.chips-toolbar > .chip .count,
-.chips-toolbar > .status-chip .count,
-.chips-toolbar > .wo-chip .count {
+/* Count bubble inside pill — match your JSX's .chip-count */
+.chips-toolbar .chip .chip-count,
+.chips-toolbar .status-chip .chip-count,
+.chips-toolbar .wo-chip .chip-count {
   min-width: 20px;
   height: 20px;
   padding: 0 6px;
@@ -67,16 +72,16 @@
 }
 
 /* Active pill */
-.chips-toolbar > .chip.active,
-.chips-toolbar > .status-chip.active,
-.chips-toolbar > .wo-chip.active {
+.chips-toolbar .chip.active,
+.chips-toolbar .status-chip.active,
+.chips-toolbar .wo-chip.active {
   background: #0ea5b7;
   color: #fff;
   border-color: #0ea5b7;
 }
-.chips-toolbar > .chip.active .count,
-.chips-toolbar > .status-chip.active .count,
-.chips-toolbar > .wo-chip.active .count {
+.chips-toolbar .chip.active .chip-count,
+.chips-toolbar .status-chip.active .chip-count,
+.chips-toolbar .wo-chip.active .chip-count {
   background: #0b7682;
   border-color: #0b7682;
   color: #fff;
@@ -94,36 +99,33 @@
 }
 
 /* ===========================
-   Work Orders — table or card
+   Section card + table wrap
    =========================== */
 
-/* When you wrap tables/lists, this gives a boxed look */
-.wo-table-wrap,
-.workorders-table-wrap,
-.work-orders .table-wrap {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+/* Your JSX already uses .section-card – give it a boxed look */
+.section-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;   /* <-- restores the box/border */
   border-radius: 10px;
-  overflow: hidden; /* round the corners on the table */
+  padding: 12px;
 }
 
-/* TABLE MODE (robust selectors) */
-.wo-table,
-.workorders-table,
-.work-orders .table-wrap table,
-.work-orders table.wo,
-.work-orders table {
+/* ===========================
+   Work Orders — table
+   =========================== */
+
+/* Match your <table class="styled-table"> */
+.styled-table {
   width: 100%;
-  border-collapse: separate;   /* preserve outer border radius */
+  border-collapse: separate;   /* preserve outer radius */
   border-spacing: 0;
   background: #fff;
+  border: 1px solid #e2e8f0;   /* add a clean border around the table itself */
+  border-radius: 10px;         /* visually rounds in supporting browsers */
+  overflow: hidden;            /* ensure radius on top row */
 }
 
-.wo-table thead th,
-.workorders-table thead th,
-.work-orders .table-wrap table thead th,
-.work-orders table.wo thead th,
-.work-orders table thead th {
+.styled-table thead th {
   position: sticky;
   top: 0;
   z-index: 1;
@@ -136,11 +138,7 @@
   white-space: nowrap;
 }
 
-.wo-table tbody td,
-.workorders-table tbody td,
-.work-orders .table-wrap table tbody td,
-.work-orders table.wo tbody td,
-.work-orders table tbody td {
+.styled-table tbody td {
   padding: 10px 12px;
   vertical-align: top;
   color: #0f172a;
@@ -148,54 +146,20 @@
   background: #fff;
 }
 
-/* Compact actions column */
-.wo-table td.actions,
-.workorders-table td.actions,
-.work-orders table td.actions {
-  white-space: nowrap;
-}
-
-/* Optional zebra stripes (uncomment if you like)
-.wo-table tbody tr:nth-child(odd) td,
-.workorders-table tbody tr:nth-child(odd) td,
-.work-orders table tbody tr:nth-child(odd) td { background: #fafafa; }
+/* Optional zebra stripes
+.styled-table tbody tr:nth-child(odd) td { background: #fafafa; }
 */
 
-/* CARD/LIST MODE (if you render divs instead of a table) */
-.wo-list,
-.workorders-list,
-.work-orders .wo-list {
-  display: grid;
-  gap: 12px;
-}
+/* Compact actions column if you add the class later
+.styled-table td.actions { white-space: nowrap; }
+*/
 
-.wo-card,
-.wo-item,
-.work-order,
-.workorders-list .item,
-.work-orders .wo-row,
-.work-orders .wo-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;   /* <-- clear borders between orders */
-  border-radius: 10px;
-  padding: 12px;
-}
+/* ===========================
+   Selects (status/assignee)
+   =========================== */
 
-/* Header row inside cards (optional) */
-.wo-card .header,
-.work-order .header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 0 -12px 8px;
-  padding: 0 12px 8px;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-/* Status <select> in table cells */
-.wo-status-select,
-.work-orders select.status,
-.workorders-table select.status {
+/* Your JSX uses class="form-select" */
+.form-select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -213,16 +177,54 @@
   background-position: right 10px center;
 }
 
-/* Keep “Edit” buttons visually consistent but scoped */
-.wo-table .btn-edit,
-.work-orders .btn-edit {
-  background: #f59e0b;
-  color: #fff;
-  border: 1px solid #d97706;
-  padding: 6px 10px;
+/* Link-looking addresses */
+.link-text {
+  color: #0ea5b7;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.link-text:hover {
+  opacity: 0.85;
+}
+
+/* ===========================
+   Buttons (general)
+   =========================== */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
   border-radius: 8px;
+  padding: 0.5rem 0.9rem;
   font-weight: 700;
   cursor: pointer;
+  text-decoration: none;
+}
+.btn-primary {
+  background: #0ea5b7;
+  color: #fff;
+  border-color: #0ea5b7;
+}
+.btn-warning {
+  background: #f59e0b;
+  color: #fff;
+  border-color: #d97706;
+}
+.btn-sm {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.9rem;
+}
+
+/* ===========================
+   Empty state
+   =========================== */
+
+.empty-state {
+  padding: 1rem;
+  text-align: center;
+  color: #64748b;
 }
 
 /* ===========================
