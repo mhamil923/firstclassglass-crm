@@ -15,7 +15,13 @@ const STATUS_OPTIONS = [
   "Completed",
 ];
 
-/* ---------- Inline PO# Editor ---------- */
+/* ---------- helpers to clean up legacy data (PO# == WO#) ---------- */
+const norm = (v) => (v ?? "").toString().trim();
+const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
+const displayWO = (wo) => norm(wo) || "—";
+const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
+
+/* ---------- Inline PO# Editor (value-only; outer label provides "PO #") ---------- */
 function PONumberEditor({ orderId, initialPo, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [po, setPo] = useState(initialPo || "");
@@ -25,17 +31,13 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
     setPo(initialPo || "");
   }, [initialPo]);
 
-  const start = () => setEditing(true);
-  const cancel = () => {
-    setPo(initialPo || "");
-    setEditing(false);
-  };
-
   const save = async () => {
     setSaving(true);
     try {
-      await api.put(`/work-orders/${orderId}`, { poNumber: po.trim() || null });
-      onSaved?.(po.trim() || null);
+      // Persist blank as NULL
+      const next = po.trim() || null;
+      await api.put(`/work-orders/${orderId}`, { poNumber: next });
+      onSaved?.(next);
       setEditing(false);
     } catch (e) {
       console.error("Failed to save PO #", e);
@@ -48,8 +50,8 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   if (!editing) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <div><strong>PO #:</strong> {initialPo || <em>None</em>}</div>
-        <button className="btn btn-primary" onClick={start}>
+        <div>{initialPo ? initialPo : <em>None</em>}</div>
+        <button className="btn btn-primary" onClick={() => setEditing(true)}>
           {initialPo ? "Update PO #" : "Add PO #"}
         </button>
       </div>
@@ -69,7 +71,9 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
       <button className="btn btn-primary" disabled={saving} onClick={save}>
         {saving ? "Saving…" : "Save"}
       </button>
-      <button className="btn btn-ghost" disabled={saving} onClick={cancel}>Cancel</button>
+      <button className="btn btn-ghost" disabled={saving} onClick={() => setEditing(false)}>
+        Cancel
+      </button>
     </div>
   );
 }
@@ -91,7 +95,6 @@ export default function ViewWorkOrder() {
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
 
-  // Fetch work order details
   const fetchWorkOrder = async () => {
     try {
       const response = await api.get(`/work-orders/${id}`);
@@ -122,11 +125,7 @@ export default function ViewWorkOrder() {
   const displayNotes = useMemo(() => {
     return originalNotes
       .map((n, idx) => ({ ...n, __origIndex: idx }))
-      .sort((a, b) => {
-        const ta = Date.parse(a.createdAt || 0);
-        const tb = Date.parse(b.createdAt || 0);
-        return tb - ta;
-      });
+      .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
   }, [originalNotes]);
 
   if (!workOrder) {
@@ -138,7 +137,7 @@ export default function ViewWorkOrder() {
   }
 
   const {
-    workOrderNumber,   // external WO# if present
+    workOrderNumber, // external WO# if present
     poNumber,
     customer,
     siteLocation,
@@ -148,30 +147,29 @@ export default function ViewWorkOrder() {
     scheduledDate,
     pdfPath,
     photoPath,
-
-    // optional contact from DB
     customerPhone,
     customerEmail,
   } = workOrder;
+
+  // Clean PO for display (blank if it was just the WO#)
+  const cleanedPo = displayPO(workOrderNumber, poNumber);
 
   // File URLs (S3/local safe)
   const pdfUrl = pdfPath
     ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}#page=1&view=FitH`
     : null;
 
-  // Existing attachments (can include images or PDFs)
   const attachments = (photoPath || "")
     .split(",")
     .map((p) => p.trim())
     .filter(Boolean);
 
   // ---------- PRINT helpers ----------
-  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put logo at /public/fcg-logo.png
+  const LOGO_URL = `${window.location.origin}/fcg-logo.png`;
 
   function parseSite(loc, fallbackName) {
     const result = { name: fallbackName || "", address: "" };
     if (!loc) return result;
-
     const s = String(loc).trim();
 
     if (s.includes(" - ")) {
@@ -203,18 +201,18 @@ export default function ViewWorkOrder() {
     const siteParsed = parseSite(siteLocation, customer);
     const siteName = siteParsed.name || customer || "";
     const siteAddr = siteParsed.address || "";
+    const agreementNo = cleanedPo || id; // don't print legacy WO in PO slot
 
     const html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Agreement ${safe(poNumber || id)}</title>
+  <title>Agreement ${safe(agreementNo)}</title>
   <style>
     @page { size: Letter; margin: 0.5in; }
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; -webkit-print-color-adjust: exact; }
     .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; page-break-inside: avoid; }
-
     .hdr { display: grid; grid-template-columns: 120px 1fr 220px; align-items: center; column-gap: 12px; }
     .logo { width: 100%; height: auto; }
     .company h1 { margin: 0; font-size: 18px; font-weight: 700; }
@@ -222,17 +220,13 @@ export default function ViewWorkOrder() {
     .agree { text-align: right; }
     .agree .title { font-size: 18px; font-weight: 700; text-transform: uppercase; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 2px; }
     .agree .no { margin-top: 6px; font-size: 12px; }
-
     .spacer-8 { height: 8px; }
-
     table { border-collapse: collapse; width: 100%; }
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
     .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
     .label { width: 18%; }
-
     .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: center; }
     .desc-box { border: 1px solid #000; height: 6.0in; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; }
-
     .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 6px; }
     .auth-note { font-size: 8.5px; text-align: center; margin-top: 4px; }
     .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 16px; margin-top: 10px; align-items: end; }
@@ -254,7 +248,7 @@ export default function ViewWorkOrder() {
       </div>
       <div class="agree">
         <div class="title">Agreement</div>
-        <div class="no">No. ${safe(poNumber || id)}</div>
+        <div class="no">No. ${safe(agreementNo)}</div>
       </div>
     </div>
 
@@ -367,7 +361,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Delete a single attachment (image or PDF)
   const handleDeleteAttachment = async (relPath) => {
     if (!window.confirm("Delete this attachment?")) return;
     try {
@@ -381,7 +374,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Replace signed PDF
   const handleReplacePdfUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -415,7 +407,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Change status on page
   const handleStatusChange = async (e) => {
     const newStatus = e.target.value;
     setLocalStatus(newStatus);
@@ -457,10 +448,9 @@ export default function ViewWorkOrder() {
         </div>
 
         <ul className="detail-list">
-          {/* Separate lines for WO# and PO#, with inline PO# editor */}
           <li className="detail-item">
             <span className="detail-label">Work Order #:</span>
-            <span className="detail-value">{workOrderNumber || "—"}</span>
+            <span className="detail-value">{displayWO(workOrderNumber)}</span>
           </li>
 
           <li className="detail-item">
@@ -468,9 +458,9 @@ export default function ViewWorkOrder() {
             <span className="detail-value">
               <PONumberEditor
                 orderId={workOrder.id}
-                initialPo={poNumber}
+                initialPo={cleanedPo} // blank if old data had WO in PO
                 onSaved={(newPo) =>
-                  setWorkOrder((prev) => ({ ...prev, poNumber: newPo }))
+                  setWorkOrder((prev) => ({ ...prev, poNumber: newPo || null }))
                 }
               />
             </span>
@@ -533,7 +523,7 @@ export default function ViewWorkOrder() {
           </li>
         </ul>
 
-        {/* Current Work Order PDF + Replace control */}
+        {/* Work Order PDF */}
         <div className="section-card">
           <h3 className="section-header">Work Order PDF</h3>
 
@@ -583,7 +573,7 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* Attachments – supports images & PDFs */}
+        {/* Attachments */}
         <div className="section-card">
           <h3 className="section-header">Attachments</h3>
 
@@ -619,7 +609,6 @@ export default function ViewWorkOrder() {
                       </a>
                     )}
 
-                    {/* little X delete button */}
                     <button
                       type="button"
                       title="Delete attachment"
