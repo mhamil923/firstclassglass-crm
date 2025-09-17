@@ -20,12 +20,11 @@ const PARTS_IN = "Parts In";
 export default function WorkOrders() {
   const navigate = useNavigate();
 
-  // auth / role (controls assignment column)
   const token = localStorage.getItem("jwt");
   let userRole = null;
   if (token) {
     try {
-      userRole = jwtDecode(token).role; // 'dispatcher', 'admin', or 'tech'
+      userRole = jwtDecode(token).role;
     } catch {
       console.warn("Invalid JWT");
     }
@@ -33,10 +32,9 @@ export default function WorkOrders() {
 
   const [workOrders, setWorkOrders] = useState([]);
   const [filteredOrders, setFilteredOrders] = useState([]);
-  const [selectedFilter, setSelectedFilter] = useState("All"); // 'All' | 'Today' | one of STATUS_LIST
+  const [selectedFilter, setSelectedFilter] = useState("All");
   const [techUsers, setTechUsers] = useState([]);
 
-  // Bulk "Parts In" modal state
   const [isPartsModalOpen, setIsPartsModalOpen] = useState(false);
   const [poSearch, setPoSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -163,7 +161,6 @@ export default function WorkOrders() {
     }
   };
 
-  // Include both WO# and PO# for filtering in the modal
   const visibleWaitingRows = useMemo(() => {
     if (selectedFilter !== PARTS_WAITING) return [];
     const q = poSearch.trim().toLowerCase();
@@ -277,7 +274,10 @@ export default function WorkOrders() {
                 onClick={() => navigate(`/view-work-order/${order.id}`)}
               >
                 <td>
-                  <div className="wo-po-cell">
+                  <div
+                    className="wo-po-cell"
+                    style={{ display: "flex", flexDirection: "column", gap: 2 }}
+                  >
                     {order.workOrderNumber && (
                       <div><strong>WO:</strong> {order.workOrderNumber}</div>
                     )}

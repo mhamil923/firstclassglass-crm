@@ -1,5 +1,4 @@
 // File: src/ViewWorkOrder.js
-
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "./api";
@@ -35,6 +34,7 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   const save = async () => {
     setSaving(true);
     try {
+      // Save ONLY the PO # to the order; WO # remains as-is.
       await api.put(`/work-orders/${orderId}`, { poNumber: po.trim() || null });
       onSaved?.(po.trim() || null);
       setEditing(false);
@@ -82,7 +82,7 @@ export default function ViewWorkOrder() {
 
   const [workOrder, setWorkOrder] = useState(null);
   const [newNote, setNewNote] = useState("");
-  const [showNoteInput, setShowNoteInput] = useState(false);
+  the [showNoteInput, setShowNoteInput] = useState(false);
 
   // Replace PDF UI state
   const [busyReplace, setBusyReplace] = useState(false);
@@ -92,7 +92,6 @@ export default function ViewWorkOrder() {
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
 
-  // Fetch work order details
   const fetchWorkOrder = async () => {
     try {
       const response = await api.get(`/work-orders/${id}`);
@@ -105,7 +104,8 @@ export default function ViewWorkOrder() {
 
   useEffect(() => {
     fetchWorkOrder();
-  }, [id]); // eslint-disable-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   // Parse existing notes safely
   const originalNotes = useMemo(() => {
@@ -118,15 +118,11 @@ export default function ViewWorkOrder() {
     }
   }, [workOrder]);
 
-  // Newest first for display
+  // Newest first
   const displayNotes = useMemo(() => {
     return originalNotes
       .map((n, idx) => ({ ...n, __origIndex: idx }))
-      .sort((a, b) => {
-        const ta = Date.parse(a.createdAt || 0);
-        const tb = Date.parse(b.createdAt || 0);
-        return tb - ta;
-      });
+      .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
   }, [originalNotes]);
 
   if (!workOrder) {
@@ -138,35 +134,34 @@ export default function ViewWorkOrder() {
   }
 
   const {
-    workOrderNumber,   // optional field if present from Clear Vision / etc
-    poNumber,
+    id: orderId,
+    workOrderNumber,   // WO # from Clear Vision / True Source / etc (optional)
+    poNumber,          // PO # (optional, edited inline)
     customer,
     siteLocation,
     billingAddress,
     problemDescription,
-    status,
     scheduledDate,
     pdfPath,
     photoPath,
-
-    // optional contact from DB
     customerPhone,
     customerEmail,
   } = workOrder;
 
-  // File URLs (S3/local safe)
+  // Prefer WO#, then PO#, then DB id for Agreement number
+  const agreementNo = workOrderNumber || poNumber || orderId;
+
   const pdfUrl = pdfPath
     ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}#page=1&view=FitH`
     : null;
 
-  // Existing attachments (can include images or PDFs)
   const attachments = (photoPath || "")
     .split(",")
     .map((p) => p.trim())
     .filter(Boolean);
 
   // ---------- PRINT helpers ----------
-  const LOGO_URL = `${window.location.origin}/fcg-logo.png`; // put logo at /public/fcg-logo.png
+  const LOGO_URL = `${window.location.origin}/fcg-logo.png`;
 
   function parseSite(loc, fallbackName) {
     const result = { name: fallbackName || "", address: "" };
@@ -208,13 +203,12 @@ export default function ViewWorkOrder() {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Agreement ${safe(poNumber || id)}</title>
+  <title>Agreement ${safe(agreementNo)}</title>
   <style>
     @page { size: Letter; margin: 0.5in; }
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; -webkit-print-color-adjust: exact; }
     .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; page-break-inside: avoid; }
-
     .hdr { display: grid; grid-template-columns: 120px 1fr 220px; align-items: center; column-gap: 12px; }
     .logo { width: 100%; height: auto; }
     .company h1 { margin: 0; font-size: 18px; font-weight: 700; }
@@ -222,17 +216,13 @@ export default function ViewWorkOrder() {
     .agree { text-align: right; }
     .agree .title { font-size: 18px; font-weight: 700; text-transform: uppercase; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 2px; }
     .agree .no { margin-top: 6px; font-size: 12px; }
-
     .spacer-8 { height: 8px; }
-
     table { border-collapse: collapse; width: 100%; }
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
     .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
     .label { width: 18%; }
-
     .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: center; }
     .desc-box { border: 1px solid #000; height: 6.0in; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; }
-
     .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 6px; }
     .auth-note { font-size: 8.5px; text-align: center; margin-top: 4px; }
     .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 16px; margin-top: 10px; align-items: end; }
@@ -254,7 +244,7 @@ export default function ViewWorkOrder() {
       </div>
       <div class="agree">
         <div class="title">Agreement</div>
-        <div class="no">No. ${safe(poNumber || id)}</div>
+        <div class="no">No. ${safe(agreementNo)}</div>
       </div>
     </div>
 
@@ -304,7 +294,7 @@ export default function ViewWorkOrder() {
       </div>
     </div>
 
-    <div className="fine">
+    <div class="fine">
       NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
     </div>
   </div>
@@ -367,13 +357,10 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Delete a single attachment (image or PDF)
   const handleDeleteAttachment = async (relPath) => {
     if (!window.confirm("Delete this attachment?")) return;
     try {
-      await api.delete(`/work-orders/${id}/attachment`, {
-        data: { photoPath: relPath },
-      });
+      await api.delete(`/work-orders/${id}/attachment`, { data: { photoPath: relPath } });
       await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error deleting attachment:", error);
@@ -381,7 +368,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Replace signed PDF
   const handleReplacePdfUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -415,7 +401,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Change status on page
   const handleStatusChange = async (e) => {
     const newStatus = e.target.value;
     setLocalStatus(newStatus);
@@ -447,17 +432,13 @@ export default function ViewWorkOrder() {
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
           <div className="view-actions">
-            <button className="btn btn-outline" onClick={handlePrint}>
-              🖨️ Print Work Order
-            </button>
-            <button className="back-btn" onClick={() => navigate("/work-orders")}>
-              ← Back to List
-            </button>
+            <button className="btn btn-outline" onClick={handlePrint}>🖨️ Print Work Order</button>
+            <button className="back-btn" onClick={() => navigate("/work-orders")}>← Back to List</button>
           </div>
         </div>
 
         <ul className="detail-list">
-          {/* Separate lines for WO# and PO#, with inline PO# editor */}
+          {/* WO # and PO # are shown separately. PO # is edited inline and does NOT overwrite WO #. */}
           <li className="detail-item">
             <span className="detail-label">Work Order #:</span>
             <span className="detail-value">{workOrderNumber || "—"}</span>
@@ -467,11 +448,9 @@ export default function ViewWorkOrder() {
             <span className="detail-label">PO #:</span>
             <span className="detail-value">
               <PONumberEditor
-                orderId={workOrder.id}
+                orderId={orderId}
                 initialPo={poNumber}
-                onSaved={(newPo) =>
-                  setWorkOrder((prev) => ({ ...prev, poNumber: newPo }))
-                }
+                onSaved={(newPo) => setWorkOrder((prev) => ({ ...prev, poNumber: newPo }))}
               />
             </span>
           </li>
@@ -485,13 +464,9 @@ export default function ViewWorkOrder() {
                 disabled={statusSaving}
                 style={{ padding: 6 }}
               >
-                <option value="" disabled>
-                  Select status…
-                </option>
+                <option value="" disabled>Select status…</option>
                 {STATUS_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
+                  <option key={opt} value={opt}>{opt}</option>
                 ))}
               </select>
               {statusSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
@@ -526,9 +501,7 @@ export default function ViewWorkOrder() {
           <li className="detail-item">
             <span className="detail-label">Scheduled Date:</span>
             <span className="detail-value">
-              {scheduledDate
-                ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
-                : "Not Scheduled"}
+              {scheduledDate ? moment(scheduledDate).format("YYYY-MM-DD HH:mm") : "Not Scheduled"}
             </span>
           </li>
         </ul>
@@ -541,27 +514,15 @@ export default function ViewWorkOrder() {
             <>
               <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
               <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
-                  Open PDF in new tab
-                </a>
+                <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">Open PDF in new tab</a>
 
                 <label className="btn">
                   {busyReplace ? "Replacing…" : "Replace Signed PDF"}
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    onChange={handleReplacePdfUpload}
-                    style={{ display: "none" }}
-                    disabled={busyReplace}
-                  />
+                  <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
                 </label>
 
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <input
-                    type="checkbox"
-                    checked={keepOldInAttachments}
-                    onChange={(e) => setKeepOldInAttachments(e.target.checked)}
-                  />
+                  <input type="checkbox" checked={keepOldInAttachments} onChange={(e) => setKeepOldInAttachments(e.target.checked)} />
                   Move existing signed PDF to attachments
                 </label>
               </div>
@@ -571,19 +532,13 @@ export default function ViewWorkOrder() {
               <p className="empty-text">No PDF attached.</p>
               <label className="btn">
                 {busyReplace ? "Uploading…" : "Upload PDF"}
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleReplacePdfUpload}
-                  style={{ display: "none" }}
-                  disabled={busyReplace}
-                />
+                <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
               </label>
             </div>
           )}
         </div>
 
-        {/* Attachments – supports images & PDFs */}
+        {/* Attachments */}
         <div className="section-card">
           <h3 className="section-header">Attachments</h3>
 
@@ -592,25 +547,10 @@ export default function ViewWorkOrder() {
               {attachments.map((relPath, i) => {
                 const url = `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
                 const pdf = isPdfKey(relPath);
-
                 return (
-                  <div
-                    key={`${relPath}-${i}`}
-                    className="attachment-item"
-                    style={{
-                      position: "relative",
-                      display: "inline-block",
-                      margin: 6,
-                    }}
-                  >
+                  <div key={`${relPath}-${i}`} className="attachment-item" style={{ position: "relative", display: "inline-block", margin: 6 }}>
                     {pdf ? (
-                      <a
-                        href={url}
-                        className="attachment-chip"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title={`Open PDF: ${relPath.split("/").pop()}`}
-                      >
+                      <a href={url} className="attachment-chip" target="_blank" rel="noopener noreferrer" title={`Open PDF: ${relPath.split("/").pop()}`}>
                         📄 {relPath.split("/").pop() || "attachment.pdf"}
                       </a>
                     ) : (
@@ -618,8 +558,6 @@ export default function ViewWorkOrder() {
                         <img src={url} alt={`attachment-${i}`} className="attachment-img" />
                       </a>
                     )}
-
-                    {/* little X delete button */}
                     <button
                       type="button"
                       title="Delete attachment"
@@ -653,12 +591,7 @@ export default function ViewWorkOrder() {
           )}
 
           <div className="attachment-upload">
-            <input
-              type="file"
-              multiple
-              accept="image/*,application/pdf"
-              onChange={handleAttachmentChange}
-            />
+            <input type="file" multiple accept="image/*,application/pdf" onChange={handleAttachmentChange} />
           </div>
         </div>
 
@@ -666,25 +599,14 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
 
-          <button
-            className="toggle-note-btn"
-            onClick={() => setShowNoteInput((v) => !v)}
-          >
+          <button className="toggle-note-btn" onClick={() => setShowNoteInput((v) => !v)}>
             {showNoteInput ? "Cancel" : "Add Note"}
           </button>
 
           {showNoteInput && (
             <div className="add-note">
-              <textarea
-                className="note-input"
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                placeholder="Write your note here..."
-                rows={3}
-              />
-              <button className="toggle-note-btn" onClick={handleAddNote}>
-                Submit Note
-              </button>
+              <textarea className="note-input" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Write your note here..." rows={3} />
+              <button className="toggle-note-btn" onClick={handleAddNote}>Submit Note</button>
             </div>
           )}
 
@@ -697,14 +619,7 @@ export default function ViewWorkOrder() {
                       {moment(n.createdAt).format("YYYY-MM-DD HH:mm")}
                       {n.by ? ` — ${n.by}` : ""}
                     </small>
-                    <button
-                      type="button"
-                      className="note-delete-btn"
-                      title="Delete note"
-                      onClick={() => handleDeleteNote(n.__origIndex)}
-                    >
-                      ✕
-                    </button>
+                    <button type="button" className="note-delete-btn" title="Delete note" onClick={() => handleDeleteNote(n.__origIndex)}>✕</button>
                   </div>
                   <p className="note-text">{n.text}</p>
                 </li>

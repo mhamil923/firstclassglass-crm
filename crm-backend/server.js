@@ -26,17 +26,17 @@ const {
   S3_BUCKET,
   AWS_REGION = 'us-east-2',
   ASSIGNEE_EXTRA_USERNAMES = 'Jeff,tech1',
-  DEFAULT_WINDOW_MINUTES = '120', // default arrival window if end not provided
+  DEFAULT_WINDOW_MINUTES = '120',
 } = process.env;
 
 const DEFAULT_WINDOW = Math.max(15, Number(DEFAULT_WINDOW_MINUTES) || 120);
 const S3_SIGNED_TTL = Number(process.env.S3_SIGNED_TTL || 900);
 
 // ⬆️ Limits (env overridable)
-const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || 75);  // per file
-const MAX_FILES        = Number(process.env.MAX_FILES || 120);        // per request (images)
-const MAX_FIELDS       = Number(process.env.MAX_FIELDS || 500);       // text fields
-const MAX_PARTS        = Number(process.env.MAX_PARTS  || 2000);      // total parts (files + fields)
+const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || 75);
+const MAX_FILES        = Number(process.env.MAX_FILES || 120);
+const MAX_FIELDS       = Number(process.env.MAX_FIELDS || 500);
+const MAX_PARTS        = Number(process.env.MAX_PARTS  || 2000);
 
 if (S3_BUCKET) AWS.config.update({ region: AWS_REGION });
 else console.warn('⚠️ S3_BUCKET not set; using local disk for uploads.');
@@ -73,7 +73,6 @@ function addMinutesToSql(sqlStr, minutes) {
   );
 }
 function roundUpDateToHour(d) {
-  // d is JS Date in local tz
   const r = new Date(d.getTime());
   if (r.getMinutes() > 0 || r.getSeconds() > 0 || r.getMilliseconds() > 0) {
     r.setHours(r.getHours() + 1);
@@ -92,23 +91,16 @@ function roundSqlUpToHour(sqlStr) {
 }
 
 function parseDateTimeFlexible(input) {
-  // Accepts:
-  //  - 'YYYY-MM-DD'
-  //  - 'YYYY-MM-DD HH:mm' or 'YYYY-MM-DD HH:mm:ss'
-  //  - 'YYYY-MM-DDTHH:mm' or 'YYYY-MM-DDTHH:mm:ss'
   if (input == null) return null;
   const s = String(input).trim();
   if (!s) return null;
 
-  // Date only
   let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (m) {
     const [ , Y, Mo, D ] = m.map(Number);
-    // default 08:00 (on the hour already)
     return toSqlDateTimeFromParts(Y, Mo, D, 8, 0, 0);
   }
 
-  // Date + time (space or T, optional seconds)
   m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2})(?::(\d{2})(?::(\d{2}))?)?$/.exec(s);
   if (m) {
     const Y  = Number(m[1]);
@@ -120,12 +112,11 @@ function parseDateTimeFlexible(input) {
     return toSqlDateTimeFromParts(Y, Mo, D, h, mi, se);
   }
 
-  return null; // unknown format
+  return null;
 }
 function parseHHmm(s) {
   if (!s) return null;
   const v = String(s).trim();
-  // allow "HH", "H", "HH:mm"
   let m = /^(\d{1,2})$/.exec(v);
   if (m) {
     const h = Number(m[1]);
@@ -141,8 +132,6 @@ function parseHHmm(s) {
   return null;
 }
 function windowSql({ dateSql, endTime, timeWindow }) {
-  // dateSql: 'YYYY-MM-DD HH:mm:ss' (start)
-  // endTime: 'HH' or 'HH:mm' OR timeWindow: 'HH[:mm]-HH[:mm]'
   if (!dateSql) return { startSql: null, endSql: null };
 
   const datePartMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateSql);
@@ -159,7 +148,6 @@ function windowSql({ dateSql, endTime, timeWindow }) {
       const startHm = parseHHmm(wm[1]);
       const endHm   = parseHHmm(wm[2]);
       if (startHm && endHm) {
-        // end from window (rounded up)
         const endD = roundUpDateToHour(new Date(Y, Mo - 1, D, endHm.h, endHm.m, 0));
         endSql = toSqlDateTimeFromParts(endD.getFullYear(), endD.getMonth()+1, endD.getDate(), endD.getHours(), 0, 0);
       }
@@ -175,7 +163,6 @@ function windowSql({ dateSql, endTime, timeWindow }) {
   }
 
   if (!endSql) {
-    // default window from (already-rounded) start
     endSql = addMinutesToSql(dateSql, DEFAULT_WINDOW);
     endSql = roundSqlUpToHour(endSql);
   }
@@ -195,16 +182,17 @@ async function getColumnType(table, col) {
 }
 async function ensureCols() {
   const colsToEnsure = [
-    { name: 'scheduledDate', type: 'DATETIME NULL' },
-    { name: 'scheduledEnd',  type: 'DATETIME NULL' }, // arrival window end
-    { name: 'pdfPath',       type: 'VARCHAR(255) NULL' },
-    { name: 'photoPath',     type: 'TEXT NULL' },
-    { name: 'notes',         type: 'TEXT NULL' },
-    { name: 'billingPhone',  type: 'VARCHAR(32) NULL' },
-    { name: 'sitePhone',     type: 'VARCHAR(32) NULL' },
-    { name: 'customerPhone', type: 'VARCHAR(32) NULL' },
-    { name: 'customerEmail', type: 'VARCHAR(255) NULL' },
-    { name: 'dayOrder',      type: 'INT NULL' },       // for drag ordering within a day
+    { name: 'scheduledDate',   type: 'DATETIME NULL' },
+    { name: 'scheduledEnd',    type: 'DATETIME NULL' },
+    { name: 'pdfPath',         type: 'VARCHAR(255) NULL' },
+    { name: 'photoPath',       type: 'TEXT NULL' },
+    { name: 'notes',           type: 'TEXT NULL' },
+    { name: 'billingPhone',    type: 'VARCHAR(32) NULL' },
+    { name: 'sitePhone',       type: 'VARCHAR(32) NULL' },
+    { name: 'customerPhone',   type: 'VARCHAR(32) NULL' },
+    { name: 'customerEmail',   type: 'VARCHAR(255) NULL' },
+    { name: 'dayOrder',        type: 'INT NULL' },
+    { name: 'workOrderNumber', type: 'VARCHAR(64) NULL' }, // <-- NEW: WO #
   ];
   for (const { name, type } of colsToEnsure) {
     try {
@@ -212,7 +200,6 @@ async function ensureCols() {
       if (!found.length) {
         await db.query(`ALTER TABLE \`work_orders\` ADD COLUMN \`${name}\` ${type}`);
       } else {
-        // if scheduledDate/End exist but are DATE, upgrade to DATETIME
         if ((name === 'scheduledDate' || name === 'scheduledEnd')) {
           try {
             const t = await getColumnType('work_orders', name);
@@ -414,11 +401,12 @@ app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
   } catch (err) { console.error('Unscheduled list error:', err); res.status(500).json({ error: 'Failed to fetch unscheduled.' }); }
 });
 
+// Optional: search also by workOrderNumber if provided
 app.get('/work-orders/search', authenticate, async (req, res) => {
-  const { customer = '', poNumber = '', siteLocation = '' } = req.query;
+  const { customer = '', poNumber = '', siteLocation = '', workOrderNumber = '' } = req.query;
   try {
-    const params = [`%${customer}%`, `%${poNumber}%`, `%${siteLocation}%`];
-    let where = ` WHERE w.customer LIKE ? AND w.poNumber LIKE ? AND w.siteLocation LIKE ?`;
+    const params = [`%${customer}%`, `%${poNumber}%`, `%${siteLocation}%`, `%${workOrderNumber}%`];
+    let where = ` WHERE w.customer LIKE ? AND w.poNumber LIKE ? AND w.siteLocation LIKE ? AND COALESCE(w.workOrderNumber,'') LIKE ?`;
     if (SCHEMA.hasAssignedTo && req.user.role === 'tech') { where += ' AND w.assignedTo = ?'; params.push(req.user.id); }
     const [rows] = await db.execute(
       `SELECT w.*, u.username AS assignedToName
@@ -438,8 +426,46 @@ app.get('/work-orders/:id', authenticate, async (req, res) => {
   } catch (err) { console.error('Work-order get error:', err); res.status(500).json({ error: 'Failed to fetch work order.' }); }
 });
 
+/**
+ * Generic light-weight update.
+ * Accepts any subset of: { status, poNumber, workOrderNumber }.
+ * (Use /assign and /edit for other fields/files.)
+ */
 app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
-  const { status } = req.body;
+  try {
+    const wid = req.params.id;
+    const { status, poNumber, workOrderNumber } = req.body || {};
+
+    if (status === undefined && poNumber === undefined && workOrderNumber === undefined) {
+      return res.status(400).json({ error: 'Provide status and/or poNumber and/or workOrderNumber.' });
+    }
+
+    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
+      const [[row]] = await db.execute('SELECT assignedTo FROM work_orders WHERE id = ?', [wid]);
+      if (!row || row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const sets = [];
+    const params = [];
+    if (status !== undefined)          { sets.push('status = ?');           params.push(status); }
+    if (poNumber !== undefined)        { sets.push('poNumber = ?');         params.push(poNumber || null); }
+    if (workOrderNumber !== undefined) { sets.push('workOrderNumber = ?');  params.push(workOrderNumber || null); }
+
+    const sql = `UPDATE work_orders SET ${sets.join(', ')} WHERE id = ?`;
+    params.push(wid);
+    await db.execute(sql, params);
+
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Work-order update error:', err);
+    res.status(500).json({ error: 'Failed to update work order.' });
+  }
+});
+
+// Dedicated status endpoint (UI tries this first)
+app.put('/work-orders/:id/status', authenticate, express.json(), async (req, res) => {
+  const { status } = req.body || {};
   if (!status) return res.status(400).json({ error: 'status is required.' });
   try {
     if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
@@ -475,7 +501,7 @@ const isTruthy = (v) => {
 };
 const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
 
-// CREATE — any field names; one PDF (optional) + images
+// CREATE — now stores workOrderNumber (WO #) and optional poNumber
 app.post(
   '/work-orders',
   authenticate,
@@ -483,8 +509,10 @@ app.post(
   async (req, res) => {
     try {
       const {
-        poNumber = '', customer, siteLocation = '', billingAddress,
-        problemDescription, status = 'Parts In', assignedTo,
+        workOrderNumber = '', // <-- WO # from Add page
+        poNumber = '',        // <-- optional; usually blank at creation
+        customer, siteLocation = '', billingAddress,
+        problemDescription, status = 'Needs to be Scheduled', assignedTo,
         billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
       } = req.body;
 
@@ -499,12 +527,12 @@ app.post(
       const firstImg  = images[0] ? fileKey(images[0]) : null;
 
       const cols = [
-        'poNumber','customer','siteLocation','billingAddress',
+        'workOrderNumber','poNumber','customer','siteLocation','billingAddress',
         'problemDescription','status','pdfPath','photoPath',
         'billingPhone','sitePhone','customerPhone','customerEmail'
       ];
       const vals = [
-        poNumber, customer, siteLocation, billingAddress,
+        workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
         problemDescription, status, pdfPath, firstImg,
         billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null
       ];
@@ -533,7 +561,7 @@ app.post(
   }
 );
 
-// EDIT — any field names; replace PDF if present; append images
+// EDIT — can change workOrderNumber/poNumber plus other fields and files
 app.put(
   '/work-orders/:id/edit',
   authenticate,
@@ -550,10 +578,8 @@ app.put(
       const { pdf, images } = splitFilesAny(req.files || []);
       if (!enforceImageCountOr413(res, images)) return;
 
-      // Current attachments list
       let attachments = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
 
-      // Flags:
       const moveOldPdf =
         isTruthy(req.body.keepOldInAttachments) ||
         isTruthy(req.body.keepOldPdfInAttachments) ||
@@ -595,11 +621,11 @@ app.put(
         }
       }
 
-      // Append images
       const newPhotos = images.map(fileKey);
       attachments = uniq([...attachments, ...newPhotos]);
 
       const {
+        workOrderNumber = existing.workOrderNumber,
         poNumber = existing.poNumber,
         customer = existing.customer,
         siteLocation = existing.siteLocation,
@@ -614,24 +640,24 @@ app.put(
       } = req.body;
 
       let sql = `UPDATE work_orders
-                 SET poNumber=?,customer=?,siteLocation=?,billingAddress=?,
+                 SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,billingAddress=?,
                      problemDescription=?,status=?,pdfPath=?,photoPath=?,
                      billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?
                  WHERE id=?`;
       const params = [
-        poNumber, customer, siteLocation, billingAddress,
+        workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
         problemDescription, status, pdfPath || null, attachments.join(','),
         billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null,
         wid
       ];
       if (SCHEMA.hasAssignedTo) {
         sql = `UPDATE work_orders
-               SET poNumber=?,customer=?,siteLocation=?,billingAddress=?,
+               SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,billingAddress=?,
                    problemDescription=?,status=?,pdfPath=?,photoPath=?,
                    billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,assignedTo=?
                WHERE id=?`;
         const assignedToVal = (assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo);
-        params.splice(12, 0, assignedToVal);
+        params.splice(13, 0, assignedToVal);
       }
 
       await db.execute(sql, params);
@@ -644,7 +670,7 @@ app.put(
   }
 );
 
-// Append a single photo (legacy)
+// Append a single photo
 app.post(
   '/work-orders/:id/append-photo',
   authenticate,
@@ -670,7 +696,7 @@ app.post(
   }
 );
 
-// Append multiple photos (preferred)
+// Append multiple photos
 app.post(
   '/work-orders/:id/append-photos',
   authenticate,
@@ -698,13 +724,6 @@ app.post(
 );
 
 // ─── CALENDAR / SCHEDULING ENDPOINTS ─────────────────────────────────────────
-
-// Update (or clear) scheduled date/time (+ optional end/window).
-// Accepts body examples:
-//   { scheduledDate: 'YYYY-MM-DD HH:mm[:ss]', scheduledEnd: 'YYYY-MM-DD HH:mm[:ss]' }
-//   { date: 'YYYY-MM-DD', time: 'HH[:mm]', endTime: 'HH[:mm]' }
-//   { scheduledDate: null }  // unschedule
-//   { date: 'YYYY-MM-DD', time: '10', timeWindow: '10-12' }
 app.put('/work-orders/:id/update-date',
   authenticate,
   authorize('dispatcher','admin'),
@@ -717,7 +736,6 @@ app.put('/work-orders/:id/update-date',
       const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
       if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-      // Determine start SQL then round up to the hour
       let startSql = parseDateTimeFlexible(scheduledDate);
       if (!startSql && date) {
         const d = String(date).trim();
@@ -730,7 +748,6 @@ app.put('/work-orders/:id/update-date',
       if (startSql) startSql = roundSqlUpToHour(startSql);
 
       if (scheduledDate === null) {
-        // Explicit unschedule
         const nextStatus = (status !== undefined && status !== null && String(status).length)
           ? status
           : 'Needs to be Scheduled';
@@ -741,7 +758,6 @@ app.put('/work-orders/:id/update-date',
       } else if (!startSql) {
         return res.status(400).json({ error: 'Invalid or missing date/time.' });
       } else {
-        // End SQL (round up as well)
         let endSql = parseDateTimeFlexible(scheduledEnd);
         if (endSql) {
           endSql = roundSqlUpToHour(endSql);
@@ -769,7 +785,6 @@ app.put('/work-orders/:id/update-date',
   }
 );
 
-// Explicit unschedule helper
 app.put('/work-orders/:id/unschedule',
   authenticate,
   authorize('dispatcher','admin'),
@@ -791,7 +806,6 @@ app.put('/work-orders/:id/unschedule',
   }
 );
 
-// Return all WOs on a given day (YYYY-MM-DD), ordered by time then dayOrder
 app.get('/calendar/day', authenticate, async (req, res) => {
   try {
     const date = String(req.query.date || '');
@@ -812,7 +826,6 @@ app.get('/calendar/day', authenticate, async (req, res) => {
   }
 });
 
-// Save drag order for a day
 app.put('/calendar/day-order',
   authenticate,
   authorize('dispatcher','admin'),
@@ -851,65 +864,7 @@ app.put('/calendar/day-order',
   }
 );
 
-// Bulk schedule/reschedule items
-app.put('/calendar/bulk-schedule',
-  authenticate,
-  authorize('dispatcher','admin'),
-  express.json(),
-  async (req, res) => {
-    try {
-      const items = Array.isArray(req.body?.items) ? req.body.items : [];
-      if (!items.length) return res.status(400).json({ error: 'items required' });
-
-      const results = [];
-      for (const it of items) {
-        const id = Number(it.id);
-        if (!Number.isFinite(id)) continue;
-
-        // Start (then round)
-        let startSql = parseDateTimeFlexible(it.scheduledDate);
-        if (!startSql && it.date) {
-          const d = String(it.date).trim();
-          const hm = parseHHmm(it.time) || { h: 8, m: 0 };
-          startSql = toSqlDateTimeFromParts(
-            Number(d.slice(0,4)), Number(d.slice(5,7)), Number(d.slice(8,10)),
-            hm.h, hm.m, 0
-          );
-        }
-        if (startSql) startSql = roundSqlUpToHour(startSql);
-
-        if (it.scheduledDate === null || !startSql) {
-          await db.execute(
-            'UPDATE work_orders SET scheduledDate = NULL, scheduledEnd = NULL, dayOrder = NULL, status = ? WHERE id = ?',
-            ['Needs to be Scheduled', id]
-          );
-        } else {
-          // End/window (round as well)
-          let endSql = parseDateTimeFlexible(it.scheduledEnd);
-          if (endSql) endSql = roundSqlUpToHour(endSql);
-          if (!endSql) {
-            const w = windowSql({ dateSql: startSql, endTime: it.endTime, timeWindow: it.timeWindow });
-            endSql = w.endSql;
-          }
-          await db.execute(
-            'UPDATE work_orders SET scheduledDate = ?, scheduledEnd = ?, status = COALESCE(NULLIF(status,""), "Scheduled"), dayOrder = NULL WHERE id = ?',
-            [startSql, endSql, id]
-          );
-        }
-
-        const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [id]);
-        results.push(fresh);
-      }
-
-      res.json({ ok: true, items: results });
-    } catch (err) {
-      console.error('Bulk-schedule error:', err);
-      res.status(500).json({ error: 'Failed to bulk schedule.' });
-    }
-  }
-);
-
-// Assign / notes / delete endpoints (unchanged)
+// Assign / notes / delete endpoints
 app.put('/work-orders/:id/assign', authenticate, authorize('dispatcher', 'admin'), express.json(), async (req, res) => {
   try {
     if (!SCHEMA.hasAssignedTo) return res.status(400).json({ error: 'assignedTo column missing' });
