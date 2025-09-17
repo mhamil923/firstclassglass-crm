@@ -45,7 +45,6 @@ export default function WorkOrders() {
   useEffect(() => {
     fetchWorkOrders();
 
-    // Dispatcher/Admin can assign; fetch assignable users (techs + extras)
     if (userRole !== "tech") {
       api
         .get("/users", { params: { assignees: 1 } })
@@ -65,7 +64,6 @@ export default function WorkOrders() {
       .catch((err) => console.error("Error fetching work orders:", err));
   };
 
-  // Recompute filtered list anytime the source or filter changes
   useEffect(() => {
     const todayStr = moment().format("YYYY-MM-DD");
     let rows = workOrders;
@@ -83,17 +81,13 @@ export default function WorkOrders() {
     setFilteredOrders(rows);
   }, [workOrders, selectedFilter]);
 
-  // Live counts for the chip bar
   const chipCounts = useMemo(() => {
     const counts = Object.fromEntries(STATUS_LIST.map((s) => [s, 0]));
     let today = 0;
     const todayStr = moment().format("YYYY-MM-DD");
     for (const o of workOrders) {
       if (o.status && counts[o.status] !== undefined) counts[o.status]++;
-      if (
-        o.scheduledDate &&
-        moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr
-      ) {
+      if (o.scheduledDate && moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr) {
         today++;
       }
     }
@@ -106,12 +100,10 @@ export default function WorkOrders() {
 
   const setFilter = (value) => setSelectedFilter(value);
 
-  // optimistic status update for a row
   const handleStatusChange = async (e, id) => {
     e.stopPropagation();
     const newStatus = e.target.value;
 
-    // optimistic update
     const prev = workOrders;
     const next = prev.map((o) => (o.id === id ? { ...o, status: newStatus } : o));
     setWorkOrders(next);
@@ -120,7 +112,6 @@ export default function WorkOrders() {
       await api.put(`/work-orders/${id}`, { status: newStatus });
     } catch (err) {
       console.error("Error updating status:", err);
-      // rollback
       setWorkOrders(prev);
       alert(err?.response?.data?.error || "Failed to update status.");
     }
@@ -145,7 +136,6 @@ export default function WorkOrders() {
 
   // -------- Bulk Parts-In modal helpers --------
   const openPartsModal = () => {
-    // preselect all visible rows under Waiting on Parts
     const preselected = new Set(filteredOrders.map((o) => o.id));
     setSelectedIds(preselected);
     setPoSearch("");
@@ -173,16 +163,18 @@ export default function WorkOrders() {
     }
   };
 
+  // Include both WO# and PO# for filtering in the modal
   const visibleWaitingRows = useMemo(() => {
     if (selectedFilter !== PARTS_WAITING) return [];
     const q = poSearch.trim().toLowerCase();
     const rows = filteredOrders;
     if (!q) return rows;
     return rows.filter((o) => {
+      const wo = String(o.workOrderNumber || "").toLowerCase();
       const po = String(o.poNumber || "").toLowerCase();
       const cust = String(o.customer || "").toLowerCase();
       const site = String(o.siteLocation || "").toLowerCase();
-      return po.includes(q) || cust.includes(q) || site.includes(q);
+      return wo.includes(q) || po.includes(q) || cust.includes(q) || site.includes(q);
     });
   }, [filteredOrders, selectedFilter, poSearch]);
 
@@ -190,7 +182,6 @@ export default function WorkOrders() {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
 
-    // optimistic update
     const ids = Array.from(selectedIds);
     const prev = workOrders;
     const next = prev.map((o) =>
@@ -199,9 +190,7 @@ export default function WorkOrders() {
     setWorkOrders(next);
 
     try {
-      // Update server (sequential for clearer error handling)
       for (const id of ids) {
-        // ignore rows that already got changed by someone else
         const row = prev.find((r) => r.id === id);
         if (row && row.status !== PARTS_IN) {
           await api.put(`/work-orders/${id}`, { status: PARTS_IN });
@@ -214,7 +203,7 @@ export default function WorkOrders() {
         err?.response?.data?.error ||
           "Failed to mark selected POs as Parts In. Restoring previous state."
       );
-      setWorkOrders(prev); // rollback
+      setWorkOrders(prev);
     } finally {
       setIsUpdatingParts(false);
     }
@@ -271,7 +260,7 @@ export default function WorkOrders() {
         <table className="styled-table">
           <thead>
             <tr>
-              <th>WO/PO #</th>
+              <th>WO / PO</th>
               <th>Customer</th>
               <th>Billing Address</th>
               <th>Site Location</th>
@@ -287,7 +276,17 @@ export default function WorkOrders() {
                 key={order.id}
                 onClick={() => navigate(`/view-work-order/${order.id}`)}
               >
-                <td>{order.poNumber || "N/A"}</td>
+                <td>
+                  <div className="wo-po-cell">
+                    {order.workOrderNumber && (
+                      <div><strong>WO:</strong> {order.workOrderNumber}</div>
+                    )}
+                    {order.poNumber && (
+                      <div><strong>PO:</strong> {order.poNumber}</div>
+                    )}
+                    {!order.workOrderNumber && !order.poNumber && "N/A"}
+                  </div>
+                </td>
                 <td>{order.customer || "N/A"}</td>
                 <td title={order.billingAddress}>{order.billingAddress}</td>
                 <td>
@@ -370,7 +369,7 @@ export default function WorkOrders() {
                 <input
                   className="modal-input"
                   type="text"
-                  placeholder="Search PO #, customer, or site…"
+                  placeholder="Search WO #, PO #, customer, or site…"
                   value={poSearch}
                   onChange={(e) => setPoSearch(e.target.value)}
                 />
@@ -400,6 +399,7 @@ export default function WorkOrders() {
                     <thead>
                       <tr>
                         <th style={{ width: 42 }}></th>
+                        <th>WO #</th>
                         <th>PO #</th>
                         <th>Customer</th>
                         <th>Site</th>
@@ -417,6 +417,7 @@ export default function WorkOrders() {
                                 onChange={() => toggleId(o.id)}
                               />
                             </td>
+                            <td>{o.workOrderNumber || "—"}</td>
                             <td>{o.poNumber || "—"}</td>
                             <td>{o.customer || "—"}</td>
                             <td title={o.siteLocation}>{o.siteLocation || "—"}</td>

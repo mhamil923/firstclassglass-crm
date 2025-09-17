@@ -16,6 +16,66 @@ const STATUS_OPTIONS = [
   "Completed",
 ];
 
+/* ---------- Inline PO# Editor ---------- */
+function PONumberEditor({ orderId, initialPo, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [po, setPo] = useState(initialPo || "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setPo(initialPo || "");
+  }, [initialPo]);
+
+  const start = () => setEditing(true);
+  const cancel = () => {
+    setPo(initialPo || "");
+    setEditing(false);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await api.put(`/work-orders/${orderId}`, { poNumber: po.trim() || null });
+      onSaved?.(po.trim() || null);
+      setEditing(false);
+    } catch (e) {
+      console.error("Failed to save PO #", e);
+      alert(e?.response?.data?.error || "Failed to save PO #");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div><strong>PO #:</strong> {initialPo || <em>None</em>}</div>
+        <button className="btn btn-primary" onClick={start}>
+          {initialPo ? "Update PO #" : "Add PO #"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <input
+        type="text"
+        value={po}
+        onChange={(e) => setPo(e.target.value)}
+        className="form-input"
+        placeholder="Enter PO # (optional)"
+        style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
+      />
+      <button className="btn btn-primary" disabled={saving} onClick={save}>
+        {saving ? "Saving…" : "Save"}
+      </button>
+      <button className="btn btn-ghost" disabled={saving} onClick={cancel}>Cancel</button>
+    </div>
+  );
+}
+/* --------------------------------------- */
+
 export default function ViewWorkOrder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -45,8 +105,7 @@ export default function ViewWorkOrder() {
 
   useEffect(() => {
     fetchWorkOrder();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id]); // eslint-disable-line
 
   // Parse existing notes safely
   const originalNotes = useMemo(() => {
@@ -79,6 +138,7 @@ export default function ViewWorkOrder() {
   }
 
   const {
+    workOrderNumber,   // optional field if present from Clear Vision / etc
     poNumber,
     customer,
     siteLocation,
@@ -293,7 +353,7 @@ export default function ViewWorkOrder() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
     const formData = new FormData();
-    files.forEach((file) => formData.append("photoFile", file)); // backend already supports 'photoFile'
+    files.forEach((file) => formData.append("photoFile", file));
     try {
       await api.put(`/work-orders/${id}/edit`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -307,7 +367,7 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // NEW: delete a single attachment (image or PDF) by its stored key
+  // Delete a single attachment (image or PDF)
   const handleDeleteAttachment = async (relPath) => {
     if (!window.confirm("Delete this attachment?")) return;
     try {
@@ -321,7 +381,7 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // ---------- replace signed PDF ----------
+  // Replace signed PDF
   const handleReplacePdfUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -334,10 +394,8 @@ export default function ViewWorkOrder() {
     try {
       const form = new FormData();
       form.append("pdfFile", file);
-      // Explicitly mark this as a replacement
       form.append("replacePdf", "1");
       if (keepOldInAttachments) {
-        // send both keys; backend accepts either
         form.append("keepOldPdfInAttachments", "1");
         form.append("keepOldInAttachments", "1");
       }
@@ -357,17 +415,15 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // ---------- change status on page ----------
+  // Change status on page
   const handleStatusChange = async (e) => {
     const newStatus = e.target.value;
     setLocalStatus(newStatus);
     setStatusSaving(true);
     try {
-      // Preferred: dedicated status endpoint
       try {
         await api.put(`/work-orders/${id}/status`, { status: newStatus });
       } catch {
-        // Fallback: edit endpoint
         const form = new FormData();
         form.append("status", newStatus);
         await api.put(`/work-orders/${id}/edit`, form, {
@@ -383,7 +439,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // ---------- helpers ----------
   const isPdfKey = (key) => /\.pdf(\?|$)/i.test(key);
 
   return (
@@ -391,7 +446,7 @@ export default function ViewWorkOrder() {
       <div className="view-card">
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
-        <div className="view-actions">
+          <div className="view-actions">
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
             </button>
@@ -402,9 +457,23 @@ export default function ViewWorkOrder() {
         </div>
 
         <ul className="detail-list">
+          {/* Separate lines for WO# and PO#, with inline PO# editor */}
           <li className="detail-item">
-            <span className="detail-label">WO/PO #:</span>
-            <span className="detail-value">{poNumber || id || "—"}</span>
+            <span className="detail-label">Work Order #:</span>
+            <span className="detail-value">{workOrderNumber || "—"}</span>
+          </li>
+
+          <li className="detail-item">
+            <span className="detail-label">PO #:</span>
+            <span className="detail-value">
+              <PONumberEditor
+                orderId={workOrder.id}
+                initialPo={poNumber}
+                onSaved={(newPo) =>
+                  setWorkOrder((prev) => ({ ...prev, poNumber: newPo }))
+                }
+              />
+            </span>
           </li>
 
           <li className="detail-item">
@@ -524,7 +593,6 @@ export default function ViewWorkOrder() {
                 const url = `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
                 const pdf = isPdfKey(relPath);
 
-                // common wrapper so we can overlay a small X button
                 return (
                   <div
                     key={`${relPath}-${i}`}
