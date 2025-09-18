@@ -68,7 +68,7 @@ export default function AddWorkOrder() {
   // ---------- Google Maps Places loader
   useEffect(() => {
     const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-    if (!key || key === "YOUR_ACTUAL_KEY_HERE") {
+    if (!key || key === "AIzaSyCVEFeBpSVhhhct5ILlOXAvEZip0B9tC4M") {
       console.warn("Google Maps API key missing; Places autocomplete disabled.");
       return;
     }
@@ -180,9 +180,7 @@ export default function AddWorkOrder() {
     if (!workOrder.customer) missing.push("Customer");
     if (!workOrder.billingAddress) missing.push("Billing Address");
     if (!workOrder.problemDescription) missing.push("Problem Description");
-    // WO # is optional at creation (some requests start with only a PO later),
-    // but you can enforce if you want by uncommenting:
-    // if (!workOrder.workOrderNumber) missing.push("Work Order #");
+    // WO # is optional at creation
     if (missing.length) {
       alert(`Please fill required fields: ${missing.join(", ")}`);
       return false;
@@ -197,8 +195,8 @@ export default function AddWorkOrder() {
 
     const form = new FormData();
     form.append("customer", workOrder.customer);
-    form.append("workOrderNumber", workOrder.workOrderNumber || "");  // <-- WO
-    // NOTE: we do NOT send poNumber here. PO will be added later from View page.
+    form.append("workOrderNumber", workOrder.workOrderNumber || "");  // <-- WO only
+    // NOTE: do NOT send poNumber here. PO will be added later from View page.
     form.append("siteLocation", workOrder.siteLocation || "");
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);

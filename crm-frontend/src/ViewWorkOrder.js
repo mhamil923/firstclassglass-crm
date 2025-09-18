@@ -527,7 +527,7 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Work Order PDF</h3>
 
-          {pdfUrl ? (
+        {pdfUrl ? (
             <>
               <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
               <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>

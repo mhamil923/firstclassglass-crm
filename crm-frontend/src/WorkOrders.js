@@ -1,3 +1,4 @@
+// File: src/WorkOrders.js
 import React, { useEffect, useMemo, useState } from "react";
 import api from "./api";
 import { Link, useNavigate } from "react-router-dom";
@@ -16,6 +17,11 @@ const STATUS_LIST = [
 
 const PARTS_WAITING = "Waiting on Parts";
 const PARTS_IN = "Parts In";
+
+// ---- Helpers to hide legacy PO values that equal the WO number
+const norm = (v) => (v ?? "").toString().trim();
+const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
+const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
 
 export default function WorkOrders() {
   const navigate = useNavigate();
@@ -167,10 +173,10 @@ export default function WorkOrders() {
     const rows = filteredOrders;
     if (!q) return rows;
     return rows.filter((o) => {
-      const wo = String(o.workOrderNumber || "").toLowerCase();
-      const po = String(o.poNumber || "").toLowerCase();
-      const cust = String(o.customer || "").toLowerCase();
-      const site = String(o.siteLocation || "").toLowerCase();
+      const wo = norm(o.workOrderNumber).toLowerCase();
+      const po = displayPO(o.workOrderNumber, o.poNumber).toLowerCase(); // cleaned PO
+      const cust = norm(o.customer).toLowerCase();
+      const site = norm(o.siteLocation).toLowerCase();
       return wo.includes(q) || po.includes(q) || cust.includes(q) || site.includes(q);
     });
   }, [filteredOrders, selectedFilter, poSearch]);
@@ -278,13 +284,15 @@ export default function WorkOrders() {
                     className="wo-po-cell"
                     style={{ display: "flex", flexDirection: "column", gap: 2 }}
                   >
-                    {order.workOrderNumber && (
+                    {order.workOrderNumber ? (
                       <div><strong>WO:</strong> {order.workOrderNumber}</div>
+                    ) : (
+                      <div><strong>WO:</strong> —</div>
                     )}
-                    {order.poNumber && (
-                      <div><strong>PO:</strong> {order.poNumber}</div>
-                    )}
-                    {!order.workOrderNumber && !order.poNumber && "N/A"}
+
+                    {displayPO(order.workOrderNumber, order.poNumber) ? (
+                      <div><strong>PO:</strong> {displayPO(order.workOrderNumber, order.poNumber)}</div>
+                    ) : null}
                   </div>
                 </td>
                 <td>{order.customer || "N/A"}</td>
@@ -418,7 +426,7 @@ export default function WorkOrders() {
                               />
                             </td>
                             <td>{o.workOrderNumber || "—"}</td>
-                            <td>{o.poNumber || "—"}</td>
+                            <td>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
                             <td>{o.customer || "—"}</td>
                             <td title={o.siteLocation}>{o.siteLocation || "—"}</td>
                           </tr>
