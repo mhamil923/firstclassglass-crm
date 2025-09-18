@@ -23,7 +23,7 @@ export default function AddWorkOrder() {
   // ---- form state
   const [workOrder, setWorkOrder] = useState({
     customer: "",
-    workOrderNumber: "",           // <-- WO # only (PO # added later on View page)
+    workOrderNumber: "", // <-- WO # only (PO # added later on View page)
     siteLocation: "",
     billingAddress: "",
     problemDescription: "",
@@ -65,20 +65,22 @@ export default function AddWorkOrder() {
       .catch((e) => console.error("Error loading assignees:", e));
   }, []);
 
-  // ---------- Google Maps Places loader
+  // ---------- Google Maps Places loader (fixed)
   useEffect(() => {
-    const key = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-    if (!key || key === "AIzaSyCVEFeBpSVhhhct5ILlOXAvEZip0B9tC4M") {
+    const key = (process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "").trim();
+    if (!key) {
       console.warn("Google Maps API key missing; Places autocomplete disabled.");
       return;
     }
 
+    // If Maps already on the page, init directly
     if (window.google?.maps?.places?.Autocomplete) {
       gmapsReadyRef.current = true;
       initAutocomplete();
       return;
     }
 
+    // Load the script once
     if (!window.__gmapsPromise) {
       window.__gmapsPromise = new Promise((resolve, reject) => {
         window.__initGMaps = () => resolve();
@@ -146,7 +148,7 @@ export default function AddWorkOrder() {
       .map((s) => s.trim())
       .filter(Boolean)[0];
     return first || "";
-    };
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -195,7 +197,7 @@ export default function AddWorkOrder() {
 
     const form = new FormData();
     form.append("customer", workOrder.customer);
-    form.append("workOrderNumber", workOrder.workOrderNumber || "");  // <-- WO only
+    form.append("workOrderNumber", workOrder.workOrderNumber || ""); // <-- WO only
     // NOTE: do NOT send poNumber here. PO will be added later from View page.
     form.append("siteLocation", workOrder.siteLocation || "");
     form.append("billingAddress", workOrder.billingAddress);
@@ -242,7 +244,7 @@ export default function AddWorkOrder() {
             placeholder="Customer name"
             autoComplete="off"
           />
-          <datalist id="customers-list">
+        <datalist id="customers-list">
             {customers.map((c) => (
               <option key={c.id} value={c.name} />
             ))}
