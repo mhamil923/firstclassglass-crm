@@ -18,7 +18,7 @@ const STATUS_LIST = [
 const PARTS_WAITING = "Waiting on Parts";
 const PARTS_IN = "Parts In";
 
-// ---- Helpers to hide legacy PO values that equal the WO number
+// Normalize helpers
 const norm = (v) => (v ?? "").toString().trim();
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
@@ -26,6 +26,7 @@ const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
 export default function WorkOrders() {
   const navigate = useNavigate();
 
+  // role
   const token = localStorage.getItem("jwt");
   let userRole = null;
   if (token) {
@@ -36,6 +37,7 @@ export default function WorkOrders() {
     }
   }
 
+  // state
   const [workOrders, setWorkOrders] = useState([]);
   const [filteredOrders, setFilteredOrders] = useState([]);
   const [selectedFilter, setSelectedFilter] = useState("All");
@@ -46,6 +48,10 @@ export default function WorkOrders() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isUpdatingParts, setIsUpdatingParts] = useState(false);
 
+  // UX: show a temporary success banner after bulk update
+  const [flashMsg, setFlashMsg] = useState("");
+
+  // data load
   useEffect(() => {
     fetchWorkOrders();
 
@@ -68,6 +74,7 @@ export default function WorkOrders() {
       .catch((err) => console.error("Error fetching work orders:", err));
   };
 
+  // filtering
   useEffect(() => {
     const todayStr = moment().format("YYYY-MM-DD");
     let rows = workOrders;
@@ -85,6 +92,7 @@ export default function WorkOrders() {
     setFilteredOrders(rows);
   }, [workOrders, selectedFilter]);
 
+  // counts
   const chipCounts = useMemo(() => {
     const counts = Object.fromEntries(STATUS_LIST.map((s) => [s, 0]));
     let today = 0;
@@ -107,6 +115,7 @@ export default function WorkOrders() {
 
   const setFilter = (value) => setSelectedFilter(value);
 
+  // single status change
   const handleStatusChange = async (e, id) => {
     e.stopPropagation();
     const newStatus = e.target.value;
@@ -117,7 +126,7 @@ export default function WorkOrders() {
 
     try {
       await api.put(`/work-orders/${id}`, { status: newStatus });
-      // optional: if you moved something out of current filter, re-fetch for freshness
+      // Refresh for authoritative state + counts
       fetchWorkOrders();
     } catch (err) {
       console.error("Error updating status:", err);
@@ -126,6 +135,7 @@ export default function WorkOrders() {
     }
   };
 
+  // assign
   const assignToTech = (orderId, techId, e) => {
     e.stopPropagation();
     api
@@ -134,6 +144,7 @@ export default function WorkOrders() {
       .catch((err) => console.error("Error assigning tech:", err));
   };
 
+  // maps
   const googleMapsApiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
   const handleLocationClick = (e, loc) => {
     e.stopPropagation();
@@ -143,9 +154,8 @@ export default function WorkOrders() {
     window.open(url, "_blank", "width=800,height=600");
   };
 
-  // -------- Bulk Parts-In modal helpers --------
+  // -------- Parts In modal helpers --------
   const openPartsModal = () => {
-    // Preselect all currently visible rows in this filter
     const preselected = new Set(filteredOrders.map((o) => o.id));
     setSelectedIds(preselected);
     setPoSearch("");
@@ -166,11 +176,7 @@ export default function WorkOrders() {
   };
 
   const setAll = (checked, visibleRows) => {
-    if (checked) {
-      setSelectedIds(new Set(visibleRows.map((o) => o.id)));
-    } else {
-      setSelectedIds(new Set());
-    }
+    setSelectedIds(checked ? new Set(visibleRows.map((o) => o.id)) : new Set());
   };
 
   const visibleWaitingRows = useMemo(() => {
@@ -180,20 +186,21 @@ export default function WorkOrders() {
     if (!q) return rows;
     return rows.filter((o) => {
       const wo = norm(o.workOrderNumber).toLowerCase();
-      const po = displayPO(o.workOrderNumber, o.poNumber).toLowerCase(); // cleaned PO
+      const po = displayPO(o.workOrderNumber, o.poNumber).toLowerCase();
       const cust = norm(o.customer).toLowerCase();
       const site = norm(o.siteLocation).toLowerCase();
       return wo.includes(q) || po.includes(q) || cust.includes(q) || site.includes(q);
     });
   }, [filteredOrders, selectedFilter, poSearch]);
 
+  // bulk update -> Parts In
   const markSelectedAsPartsIn = async () => {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
 
     const ids = Array.from(selectedIds);
 
-    // optimistic UI
+    // Optimistic UI
     const prev = workOrders;
     const next = prev.map((o) =>
       ids.includes(o.id) ? { ...o, status: PARTS_IN } : o
@@ -201,24 +208,23 @@ export default function WorkOrders() {
     setWorkOrders(next);
 
     try {
-      // update all, then refresh & switch filter so the user sees the moved items
       await Promise.all(
-        ids.map(async (id) => {
-          const row = prev.find((r) => r.id === id);
-          if (row && row.status !== PARTS_IN) {
-            await api.put(`/work-orders/${id}`, { status: PARTS_IN });
-          }
-        })
+        ids.map((id) => api.put(`/work-orders/${id}`, { status: PARTS_IN }))
       );
 
+      // Close modal, jump user to “Parts In”, and hard-refresh from server
       closePartsModal();
-      setSelectedFilter(PARTS_IN);   // <— jump user to the Parts In tab
-      fetchWorkOrders();             // <— ensure counts/rows are fresh
+      setSelectedFilter(PARTS_IN);
+      await fetchWorkOrders();
+
+      // Flash confirmation
+      setFlashMsg(`Moved ${ids.length} work order${ids.length > 1 ? "s" : ""} to “${PARTS_IN}”.`);
+      window.setTimeout(() => setFlashMsg(""), 3000);
     } catch (err) {
       console.error("Bulk update failed:", err);
       alert(
         err?.response?.data?.error ||
-          "Failed to mark selected POs as Parts In. Restoring previous state."
+          "Failed to mark selected as Parts In. Restoring previous state."
       );
       setWorkOrders(prev);
     } finally {
@@ -228,6 +234,9 @@ export default function WorkOrders() {
 
   return (
     <div className="home-container">
+      {/* Flash banner */}
+      {flashMsg ? <div className="flash-banner">{flashMsg}</div> : null}
+
       <div className="header-row">
         <h2 className="text-primary">Work Orders Dashboard</h2>
         <Link
@@ -239,7 +248,7 @@ export default function WorkOrders() {
         </Link>
       </div>
 
-      {/* Status chip bar w/ counts + conditional Parts-In button */}
+      {/* Status chip bar */}
       <div className="section-card">
         <div className="chips-toolbar">
           <div className="chips-row" role="tablist" aria-label="Work order filters">
@@ -299,20 +308,12 @@ export default function WorkOrders() {
                     style={{ display: "flex", flexDirection: "column", gap: 2 }}
                   >
                     {order.workOrderNumber ? (
-                      <div>
-                        <strong>WO:</strong> {order.workOrderNumber}
-                      </div>
+                      <div><strong>WO:</strong> {order.workOrderNumber}</div>
                     ) : (
-                      <div>
-                        <strong>WO:</strong> —
-                      </div>
+                      <div><strong>WO:</strong> —</div>
                     )}
-
                     {displayPO(order.workOrderNumber, order.poNumber) ? (
-                      <div>
-                        <strong>PO:</strong>{" "}
-                        {displayPO(order.workOrderNumber, order.poNumber)}
-                      </div>
+                      <div><strong>PO:</strong> {displayPO(order.workOrderNumber, order.poNumber)}</div>
                     ) : null}
                   </div>
                 </td>
@@ -350,9 +351,7 @@ export default function WorkOrders() {
                       className="form-select"
                       value={order.assignedTo || ""}
                       onClick={(e) => e.stopPropagation()}
-                      onChange={(e) =>
-                        assignToTech(order.id, e.target.value, e)
-                      }
+                      onChange={(e) => assignToTech(order.id, e.target.value, e)}
                     >
                       <option value="">-- assign tech --</option>
                       {techUsers.map((t) => (
@@ -378,9 +377,7 @@ export default function WorkOrders() {
             {filteredOrders.length === 0 && (
               <tr>
                 <td colSpan={userRole !== "tech" ? 8 : 7}>
-                  <div className="empty-state">
-                    No work orders for this filter.
-                  </div>
+                  <div className="empty-state">No work orders for this filter.</div>
                 </td>
               </tr>
             )}
@@ -390,22 +387,11 @@ export default function WorkOrders() {
 
       {/* ---------- Parts In Modal ---------- */}
       {isPartsModalOpen && (
-        <div
-          className="modal-overlay"
-          onClick={closePartsModal}
-          role="dialog"
-          aria-modal="true"
-        >
+        <div className="modal-overlay" onClick={closePartsModal} role="dialog" aria-modal="true">
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Mark Parts as Received</h3>
-              <button
-                className="modal-close"
-                onClick={closePartsModal}
-                aria-label="Close"
-              >
-                ×
-              </button>
+              <button className="modal-close" onClick={closePartsModal} aria-label="Close">×</button>
             </div>
 
             <div className="modal-body">
@@ -418,18 +404,10 @@ export default function WorkOrders() {
                   onChange={(e) => setPoSearch(e.target.value)}
                 />
                 <div className="modal-actions-inline">
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => setAll(true, visibleWaitingRows)}
-                  >
+                  <button type="button" className="btn btn-ghost" onClick={() => setAll(true, visibleWaitingRows)}>
                     Select All
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => setAll(false, visibleWaitingRows)}
-                  >
+                  <button type="button" className="btn btn-ghost" onClick={() => setAll(false, visibleWaitingRows)}>
                     Select None
                   </button>
                 </div>
@@ -437,9 +415,7 @@ export default function WorkOrders() {
 
               <div className="modal-list">
                 {visibleWaitingRows.length === 0 ? (
-                  <div className="empty-state">
-                    No POs in “Waiting on Parts”.
-                  </div>
+                  <div className="empty-state">No POs in “Waiting on Parts”.</div>
                 ) : (
                   <table className="mini-table">
                     <thead>
@@ -464,13 +440,9 @@ export default function WorkOrders() {
                               />
                             </td>
                             <td>{o.workOrderNumber || "—"}</td>
-                            <td>
-                              {displayPO(o.workOrderNumber, o.poNumber) || "—"}
-                            </td>
+                            <td>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
                             <td>{o.customer || "—"}</td>
-                            <td title={o.siteLocation}>
-                              {o.siteLocation || "—"}
-                            </td>
+                            <td title={o.siteLocation}>{o.siteLocation || "—"}</td>
                           </tr>
                         );
                       })}
@@ -487,15 +459,9 @@ export default function WorkOrders() {
                 disabled={isUpdatingParts || selectedIds.size === 0}
                 onClick={markSelectedAsPartsIn}
               >
-                {isUpdatingParts
-                  ? "Updating…"
-                  : `Mark Parts In (${selectedIds.size})`}
+                {isUpdatingParts ? "Updating…" : `Mark Parts In (${selectedIds.size})`}
               </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={closePartsModal}
-              >
+              <button type="button" className="btn btn-ghost" onClick={closePartsModal}>
                 Cancel
               </button>
             </div>
