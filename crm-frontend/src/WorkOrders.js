@@ -91,7 +91,10 @@ export default function WorkOrders() {
     const todayStr = moment().format("YYYY-MM-DD");
     for (const o of workOrders) {
       if (o.status && counts[o.status] !== undefined) counts[o.status]++;
-      if (o.scheduledDate && moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr) {
+      if (
+        o.scheduledDate &&
+        moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr
+      ) {
         today++;
       }
     }
@@ -114,6 +117,8 @@ export default function WorkOrders() {
 
     try {
       await api.put(`/work-orders/${id}`, { status: newStatus });
+      // optional: if you moved something out of current filter, re-fetch for freshness
+      fetchWorkOrders();
     } catch (err) {
       console.error("Error updating status:", err);
       setWorkOrders(prev);
@@ -140,6 +145,7 @@ export default function WorkOrders() {
 
   // -------- Bulk Parts-In modal helpers --------
   const openPartsModal = () => {
+    // Preselect all currently visible rows in this filter
     const preselected = new Set(filteredOrders.map((o) => o.id));
     setSelectedIds(preselected);
     setPoSearch("");
@@ -186,6 +192,8 @@ export default function WorkOrders() {
     setIsUpdatingParts(true);
 
     const ids = Array.from(selectedIds);
+
+    // optimistic UI
     const prev = workOrders;
     const next = prev.map((o) =>
       ids.includes(o.id) ? { ...o, status: PARTS_IN } : o
@@ -193,13 +201,19 @@ export default function WorkOrders() {
     setWorkOrders(next);
 
     try {
-      for (const id of ids) {
-        const row = prev.find((r) => r.id === id);
-        if (row && row.status !== PARTS_IN) {
-          await api.put(`/work-orders/${id}`, { status: PARTS_IN });
-        }
-      }
+      // update all, then refresh & switch filter so the user sees the moved items
+      await Promise.all(
+        ids.map(async (id) => {
+          const row = prev.find((r) => r.id === id);
+          if (row && row.status !== PARTS_IN) {
+            await api.put(`/work-orders/${id}`, { status: PARTS_IN });
+          }
+        })
+      );
+
       closePartsModal();
+      setSelectedFilter(PARTS_IN);   // <— jump user to the Parts In tab
+      fetchWorkOrders();             // <— ensure counts/rows are fresh
     } catch (err) {
       console.error("Bulk update failed:", err);
       alert(
@@ -285,13 +299,20 @@ export default function WorkOrders() {
                     style={{ display: "flex", flexDirection: "column", gap: 2 }}
                   >
                     {order.workOrderNumber ? (
-                      <div><strong>WO:</strong> {order.workOrderNumber}</div>
+                      <div>
+                        <strong>WO:</strong> {order.workOrderNumber}
+                      </div>
                     ) : (
-                      <div><strong>WO:</strong> —</div>
+                      <div>
+                        <strong>WO:</strong> —
+                      </div>
                     )}
 
                     {displayPO(order.workOrderNumber, order.poNumber) ? (
-                      <div><strong>PO:</strong> {displayPO(order.workOrderNumber, order.poNumber)}</div>
+                      <div>
+                        <strong>PO:</strong>{" "}
+                        {displayPO(order.workOrderNumber, order.poNumber)}
+                      </div>
                     ) : null}
                   </div>
                 </td>
@@ -329,7 +350,9 @@ export default function WorkOrders() {
                       className="form-select"
                       value={order.assignedTo || ""}
                       onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => assignToTech(order.id, e.target.value, e)}
+                      onChange={(e) =>
+                        assignToTech(order.id, e.target.value, e)
+                      }
                     >
                       <option value="">-- assign tech --</option>
                       {techUsers.map((t) => (
@@ -355,7 +378,9 @@ export default function WorkOrders() {
             {filteredOrders.length === 0 && (
               <tr>
                 <td colSpan={userRole !== "tech" ? 8 : 7}>
-                  <div className="empty-state">No work orders for this filter.</div>
+                  <div className="empty-state">
+                    No work orders for this filter.
+                  </div>
                 </td>
               </tr>
             )}
@@ -365,11 +390,22 @@ export default function WorkOrders() {
 
       {/* ---------- Parts In Modal ---------- */}
       {isPartsModalOpen && (
-        <div className="modal-overlay" onClick={closePartsModal} role="dialog" aria-modal="true">
+        <div
+          className="modal-overlay"
+          onClick={closePartsModal}
+          role="dialog"
+          aria-modal="true"
+        >
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Mark Parts as Received</h3>
-              <button className="modal-close" onClick={closePartsModal} aria-label="Close">×</button>
+              <button
+                className="modal-close"
+                onClick={closePartsModal}
+                aria-label="Close"
+              >
+                ×
+              </button>
             </div>
 
             <div className="modal-body">
@@ -401,7 +437,9 @@ export default function WorkOrders() {
 
               <div className="modal-list">
                 {visibleWaitingRows.length === 0 ? (
-                  <div className="empty-state">No POs in “Waiting on Parts”.</div>
+                  <div className="empty-state">
+                    No POs in “Waiting on Parts”.
+                  </div>
                 ) : (
                   <table className="mini-table">
                     <thead>
@@ -426,9 +464,13 @@ export default function WorkOrders() {
                               />
                             </td>
                             <td>{o.workOrderNumber || "—"}</td>
-                            <td>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
+                            <td>
+                              {displayPO(o.workOrderNumber, o.poNumber) || "—"}
+                            </td>
                             <td>{o.customer || "—"}</td>
-                            <td title={o.siteLocation}>{o.siteLocation || "—"}</td>
+                            <td title={o.siteLocation}>
+                              {o.siteLocation || "—"}
+                            </td>
                           </tr>
                         );
                       })}
@@ -445,9 +487,15 @@ export default function WorkOrders() {
                 disabled={isUpdatingParts || selectedIds.size === 0}
                 onClick={markSelectedAsPartsIn}
               >
-                {isUpdatingParts ? "Updating…" : `Mark Parts In (${selectedIds.size})`}
+                {isUpdatingParts
+                  ? "Updating…"
+                  : `Mark Parts In (${selectedIds.size})`}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={closePartsModal}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={closePartsModal}
+              >
                 Cancel
               </button>
             </div>
