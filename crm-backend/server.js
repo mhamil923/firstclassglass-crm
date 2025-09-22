@@ -170,6 +170,18 @@ function windowSql({ dateSql, endTime, timeWindow }) {
   return { startSql: dateSql, endSql };
 }
 
+// ─── STATUS CANONICALIZATION ─────────────────────────────────────────────────
+const STATUS_LIST = [
+  'Needs to be Scheduled',
+  'Scheduled',
+  'Waiting for Approval',
+  'Waiting on Parts',
+  'Parts In',
+  'Completed',
+];
+const STATUS_CANON = Object.fromEntries(STATUS_LIST.map(s => [String(s).toLowerCase(), s]));
+const canonStatus = (s) => STATUS_CANON[String(s ?? '').trim().toLowerCase()] || String(s ?? '').trim();
+
 // ─── SCHEMA HELPERS ─────────────────────────────────────────────────────────
 const SCHEMA = { hasAssignedTo: false };
 async function columnExists(table, col) {
@@ -388,6 +400,8 @@ app.get('/work-orders', authenticate, async (req, res) => {
          FROM work_orders w
          LEFT JOIN users u ON w.assignedTo = u.id${where}`, params
     );
+    // Canonicalize status on the way out (helps messy existing data)
+    rows.forEach(r => { r.status = canonStatus(r.status); });
     res.json(rows);
   } catch (err) { console.error('Work-orders list error:', err); res.status(500).json({ error: 'Failed to fetch work orders.' }); }
 });
@@ -397,6 +411,7 @@ app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
     const [rows] = await db.execute(
       'SELECT * FROM work_orders WHERE scheduledDate IS NULL ORDER BY id DESC'
     );
+    rows.forEach(r => { r.status = canonStatus(r.status); });
     res.json(rows);
   } catch (err) { console.error('Unscheduled list error:', err); res.status(500).json({ error: 'Failed to fetch unscheduled.' }); }
 });
@@ -413,6 +428,7 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
          FROM work_orders w
          LEFT JOIN users u ON w.assignedTo = u.id ${where}`, params
     );
+    rows.forEach(r => { r.status = canonStatus(r.status); });
     res.json(rows);
   } catch (err) { console.error('Work-orders search error:', err); res.status(500).json({ error: 'Search failed.' }); }
 });
@@ -422,6 +438,7 @@ app.get('/work-orders/:id', authenticate, async (req, res) => {
     const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
     if (!row) return res.status(404).json({ error: 'Not found.' });
     if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
+    row.status = canonStatus(row.status);
     res.json(row);
   } catch (err) { console.error('Work-order get error:', err); res.status(500).json({ error: 'Failed to fetch work order.' }); }
 });
@@ -447,7 +464,7 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
 
     const sets = [];
     const params = [];
-    if (status !== undefined)          { sets.push('status = ?');           params.push(status); }
+    if (status !== undefined)          { sets.push('status = ?');           params.push(canonStatus(status)); }
     if (poNumber !== undefined)        { sets.push('poNumber = ?');         params.push(poNumber || null); }
     if (workOrderNumber !== undefined) { sets.push('workOrderNumber = ?');  params.push(workOrderNumber || null); }
 
@@ -456,6 +473,7 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
     await db.execute(sql, params);
 
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    updated.status = canonStatus(updated.status);
     res.json(updated);
   } catch (err) {
     console.error('Work-order update error:', err);
@@ -465,8 +483,9 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
 
 // Dedicated status endpoint (UI tries this first)
 app.put('/work-orders/:id/status', authenticate, express.json(), async (req, res) => {
-  const { status } = req.body || {};
+  let { status } = req.body || {};
   if (!status) return res.status(400).json({ error: 'status is required.' });
+  status = canonStatus(status);
   try {
     if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
       const [[row]] = await db.execute('SELECT assignedTo FROM work_orders WHERE id = ?', [req.params.id]);
@@ -474,22 +493,21 @@ app.put('/work-orders/:id/status', authenticate, express.json(), async (req, res
     }
     await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [status, req.params.id]);
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
+    updated.status = canonStatus(updated.status);
     res.json(updated);
   } catch (err) { console.error('Work-order status update error:', err); res.status(500).json({ error: 'Failed to update status.' }); }
 });
 
-// ─── NEW: BULK status update (single authenticated call) ─────────────────────
+// NEW: Bulk status update (used by Parts In modal)
 app.put('/work-orders/bulk-status', authenticate, express.json(), async (req, res) => {
   try {
-    const { ids, status } = req.body || {};
-    if (!Array.isArray(ids) || !ids.length) {
-      return res.status(400).json({ error: 'ids array required' });
-    }
-    if (!status || typeof status !== 'string') {
-      return res.status(400).json({ error: 'status is required' });
-    }
+    let { ids, status } = req.body || {};
+    if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids array required' });
+    status = canonStatus(status);
+    if (!status) return res.status(400).json({ error: 'status is required' });
 
     if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
+      // Only allow updating rows assigned to this tech
       const [rows] = await db.query(
         `SELECT id FROM work_orders WHERE id IN (${ids.map(()=>'?').join(',')}) AND assignedTo = ?`,
         [...ids, req.user.id]
@@ -511,6 +529,7 @@ app.put('/work-orders/bulk-status', authenticate, express.json(), async (req, re
       `SELECT * FROM work_orders WHERE id IN (${ids.map(()=>'?').join(',')})`,
       ids
     );
+    updated.forEach(r => { r.status = canonStatus(r.status); });
     res.json({ ok: true, items: updated });
   } catch (err) {
     console.error('Bulk status update error:', err);
@@ -549,8 +568,8 @@ app.post(
   async (req, res) => {
     try {
       const {
-        workOrderNumber = '',
-        poNumber = '',
+        workOrderNumber = '', // <-- WO # from Add page
+        poNumber = '',        // <-- optional; usually blank at creation
         customer, siteLocation = '', billingAddress,
         problemDescription, status = 'Needs to be Scheduled', assignedTo,
         billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
@@ -573,7 +592,7 @@ app.post(
       ];
       const vals = [
         workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
-        problemDescription, status, pdfPath, firstImg,
+        canonStatus(status), pdfPath, firstImg,
         billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null
       ];
 
@@ -686,7 +705,7 @@ app.put(
                  WHERE id=?`;
       const params = [
         workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
-        problemDescription, status, pdfPath || null, attachments.join(','),
+        canonStatus(status), pdfPath || null, attachments.join(','),
         billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null,
         wid
       ];
@@ -702,6 +721,7 @@ app.put(
 
       await db.execute(sql, params);
       const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+      updated.status = canonStatus(updated.status);
       res.json(updated);
     } catch (err) {
       console.error('Work-order edit error:', err);
@@ -731,6 +751,7 @@ app.post(
 
       await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [merged.join(','), wid]);
       const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+      updated.status = canonStatus(updated.status);
       res.json(updated);
     } catch (err) { console.error('Append-photo error:', err); res.status(500).json({ error: 'Failed to append photo.' }); }
   }
@@ -758,6 +779,7 @@ app.post(
 
       await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [merged.join(','), wid]);
       const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+      updated.status = canonStatus(updated.status);
       res.json(updated);
     } catch (err) { console.error('Append-photos error:', err); res.status(500).json({ error: 'Failed to append photos.' }); }
   }
@@ -789,7 +811,7 @@ app.put('/work-orders/:id/update-date',
 
       if (scheduledDate === null) {
         const nextStatus = (status !== undefined && status !== null && String(status).length)
-          ? status
+          ? canonStatus(status)
           : 'Needs to be Scheduled';
         await db.execute(
           'UPDATE work_orders SET scheduledDate = NULL, scheduledEnd = NULL, dayOrder = NULL, status = ? WHERE id = ?',
@@ -807,8 +829,8 @@ app.put('/work-orders/:id/update-date',
         }
 
         const nextStatus = (status !== undefined && status !== null && String(status).length)
-          ? status
-          : (existing.status && existing.status !== 'Needs to be Scheduled' ? existing.status : 'Scheduled');
+          ? canonStatus(status)
+          : (existing.status && existing.status !== 'Needs to be Scheduled' ? canonStatus(existing.status) : 'Scheduled');
 
         await db.execute(
           'UPDATE work_orders SET scheduledDate = ?, scheduledEnd = ?, status = ?, dayOrder = NULL WHERE id = ?',
@@ -817,6 +839,7 @@ app.put('/work-orders/:id/update-date',
       }
 
       const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+      fresh.status = canonStatus(fresh.status);
       res.json(fresh);
     } catch (err) {
       console.error('Update-date error:', err);
@@ -832,12 +855,13 @@ app.put('/work-orders/:id/unschedule',
     try {
       const wid = req.params.id;
       const { status } = req.body || {};
-      const nextStatus = (status && String(status).length) ? status : 'Needs to be Scheduled';
+      const nextStatus = (status && String(status).length) ? canonStatus(status) : 'Needs to be Scheduled';
       await db.execute(
         'UPDATE work_orders SET scheduledDate = NULL, scheduledEnd = NULL, dayOrder = NULL, status = ? WHERE id = ?',
         [nextStatus, wid]
       );
       const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+      fresh.status = canonStatus(fresh.status);
       res.json(fresh);
     } catch (err) {
       console.error('Unschedule error:', err);
@@ -859,6 +883,7 @@ app.get('/calendar/day', authenticate, async (req, res) => {
         ORDER BY TIME(scheduledDate) ASC, COALESCE(dayOrder, 999999) ASC, id ASC`,
       [date]
     );
+    rows.forEach(r => { r.status = canonStatus(r.status); });
     res.json(rows);
   } catch (err) {
     console.error('Calendar day fetch error:', err);
@@ -896,6 +921,7 @@ app.put('/calendar/day-order',
           ORDER BY TIME(scheduledDate) ASC, COALESCE(dayOrder, 999999) ASC, id ASC`,
         [date]
       );
+      rows.forEach(r => { r.status = canonStatus(r.status); });
       res.json({ ok: true, items: rows });
     } catch (err) {
       console.error('Day-order error:', err);
@@ -917,6 +943,7 @@ app.put('/work-orders/:id/assign', authenticate, authorize('dispatcher', 'admin'
     }
     await db.execute('UPDATE work_orders SET assignedTo = ? WHERE id = ?', [val, req.params.id]);
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
+    updated.status = canonStatus(updated.status);
     res.json(updated);
   } catch (err) { console.error('Assign error:', err); res.status(500).json({ error: 'Failed to assign work order.' }); }
 });
@@ -989,6 +1016,7 @@ app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (r
     const keep = (existing.photoPath || '').split(',').filter(p => p && p !== photoPath);
     await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [keep.join(','), wid]);
     const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    fresh.status = canonStatus(fresh.status);
     res.json(fresh);
   } catch (err) { console.error('Delete attachment error:', err); res.status(500).json({ error: 'Failed to delete attachment.' }); }
 });
