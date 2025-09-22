@@ -20,6 +20,7 @@ const PARTS_IN = "Parts In";
 
 // Normalize helpers
 const norm = (v) => (v ?? "").toString().trim();
+const cleanStatus = (s) => norm(s);
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
 
@@ -48,7 +49,7 @@ export default function WorkOrders() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isUpdatingParts, setIsUpdatingParts] = useState(false);
 
-  // UX: show a temporary success banner after bulk update
+  // UX: temporary success banner
   const [flashMsg, setFlashMsg] = useState("");
 
   // data load
@@ -86,7 +87,7 @@ export default function WorkOrders() {
           moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr
       );
     } else if (selectedFilter !== "All") {
-      rows = workOrders.filter((o) => o.status === selectedFilter);
+      rows = workOrders.filter((o) => cleanStatus(o.status) === selectedFilter);
     }
 
     setFilteredOrders(rows);
@@ -98,7 +99,8 @@ export default function WorkOrders() {
     let today = 0;
     const todayStr = moment().format("YYYY-MM-DD");
     for (const o of workOrders) {
-      if (o.status && counts[o.status] !== undefined) counts[o.status]++;
+      const st = cleanStatus(o.status);
+      if (st && counts[st] !== undefined) counts[st]++;
       if (
         o.scheduledDate &&
         moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr
@@ -193,7 +195,7 @@ export default function WorkOrders() {
     });
   }, [filteredOrders, selectedFilter, poSearch]);
 
-  // bulk update -> Parts In
+  // bulk update -> Parts In (single server call)
   const markSelectedAsPartsIn = async () => {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
@@ -208,9 +210,7 @@ export default function WorkOrders() {
     setWorkOrders(next);
 
     try {
-      await Promise.all(
-        ids.map((id) => api.put(`/work-orders/${id}`, { status: PARTS_IN }))
-      );
+      await api.put(`/work-orders/bulk-status`, { ids, status: PARTS_IN });
 
       // Close modal, jump user to “Parts In”, and hard-refresh from server
       closePartsModal();
@@ -222,10 +222,10 @@ export default function WorkOrders() {
       window.setTimeout(() => setFlashMsg(""), 3000);
     } catch (err) {
       console.error("Bulk update failed:", err);
-      alert(
+      const msg =
         err?.response?.data?.error ||
-          "Failed to mark selected as Parts In. Restoring previous state."
-      );
+        (err?.response?.status === 401 ? "Invalid or expired session. Please log in again." : "Failed to mark selected as Parts In.");
+      alert(msg);
       setWorkOrders(prev);
     } finally {
       setIsUpdatingParts(false);
@@ -333,7 +333,7 @@ export default function WorkOrders() {
                 <td>
                   <select
                     className="form-select"
-                    value={order.status || ""}
+                    value={cleanStatus(order.status) || ""}
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => handleStatusChange(e, order.id)}
                   >
