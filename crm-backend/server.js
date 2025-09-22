@@ -478,6 +478,46 @@ app.put('/work-orders/:id/status', authenticate, express.json(), async (req, res
   } catch (err) { console.error('Work-order status update error:', err); res.status(500).json({ error: 'Failed to update status.' }); }
 });
 
+// ─── NEW: BULK status update (single authenticated call) ─────────────────────
+app.put('/work-orders/bulk-status', authenticate, express.json(), async (req, res) => {
+  try {
+    const { ids, status } = req.body || {};
+    if (!Array.isArray(ids) || !ids.length) {
+      return res.status(400).json({ error: 'ids array required' });
+    }
+    if (!status || typeof status !== 'string') {
+      return res.status(400).json({ error: 'status is required' });
+    }
+
+    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
+      const [rows] = await db.query(
+        `SELECT id FROM work_orders WHERE id IN (${ids.map(()=>'?').join(',')}) AND assignedTo = ?`,
+        [...ids, req.user.id]
+      );
+      const allowed = rows.map(r => r.id);
+      if (!allowed.length) return res.status(403).json({ error: 'Forbidden' });
+      await db.query(
+        `UPDATE work_orders SET status = ? WHERE id IN (${allowed.map(()=>'?').join(',')})`,
+        [status, ...allowed]
+      );
+    } else {
+      await db.query(
+        `UPDATE work_orders SET status = ? WHERE id IN (${ids.map(()=>'?').join(',')})`,
+        [status, ...ids]
+      );
+    }
+
+    const [updated] = await db.query(
+      `SELECT * FROM work_orders WHERE id IN (${ids.map(()=>'?').join(',')})`,
+      ids
+    );
+    res.json({ ok: true, items: updated });
+  } catch (err) {
+    console.error('Bulk status update error:', err);
+    res.status(500).json({ error: 'Failed to bulk update status.' });
+  }
+});
+
 // Helpers for any-field uploads
 function splitFilesAny(files = []) {
   let pdf = null; const images = [];
@@ -509,8 +549,8 @@ app.post(
   async (req, res) => {
     try {
       const {
-        workOrderNumber = '', // <-- WO # from Add page
-        poNumber = '',        // <-- optional; usually blank at creation
+        workOrderNumber = '',
+        poNumber = '',
         customer, siteLocation = '', billingAddress,
         problemDescription, status = 'Needs to be Scheduled', assignedTo,
         billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
