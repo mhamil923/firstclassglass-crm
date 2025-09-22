@@ -18,16 +18,17 @@ const STATUS_LIST = [
 const PARTS_WAITING = "Waiting on Parts";
 const PARTS_IN = "Parts In";
 
-// Normalize helpers
+// ---- Helpers
 const norm = (v) => (v ?? "").toString().trim();
-const cleanStatus = (s) => norm(s);
+const STATUS_CANON = Object.fromEntries(STATUS_LIST.map((s) => [s.toLowerCase(), s]));
+const toCanonStatus = (s) => STATUS_CANON[norm(s).toLowerCase()] || norm(s);
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
 
 export default function WorkOrders() {
   const navigate = useNavigate();
 
-  // role
+  // role from JWT (don't crash if bad)
   const token = localStorage.getItem("jwt");
   let userRole = null;
   if (token) {
@@ -48,11 +49,9 @@ export default function WorkOrders() {
   const [poSearch, setPoSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isUpdatingParts, setIsUpdatingParts] = useState(false);
-
-  // UX: temporary success banner
   const [flashMsg, setFlashMsg] = useState("");
 
-  // data load
+  // load
   useEffect(() => {
     fetchWorkOrders();
 
@@ -70,7 +69,13 @@ export default function WorkOrders() {
       .get("/work-orders")
       .then((res) => {
         const data = Array.isArray(res.data) ? res.data : [];
-        setWorkOrders(data);
+        // Normalize status as it lands (for UI only)
+        setWorkOrders(
+          data.map((o) => ({
+            ...o,
+            status: toCanonStatus(o.status),
+          }))
+        );
       })
       .catch((err) => console.error("Error fetching work orders:", err));
   };
@@ -87,7 +92,9 @@ export default function WorkOrders() {
           moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr
       );
     } else if (selectedFilter !== "All") {
-      rows = workOrders.filter((o) => cleanStatus(o.status) === selectedFilter);
+      rows = workOrders.filter(
+        (o) => toCanonStatus(o.status) === selectedFilter
+      );
     }
 
     setFilteredOrders(rows);
@@ -99,7 +106,7 @@ export default function WorkOrders() {
     let today = 0;
     const todayStr = moment().format("YYYY-MM-DD");
     for (const o of workOrders) {
-      const st = cleanStatus(o.status);
+      const st = toCanonStatus(o.status);
       if (st && counts[st] !== undefined) counts[st]++;
       if (
         o.scheduledDate &&
@@ -117,10 +124,11 @@ export default function WorkOrders() {
 
   const setFilter = (value) => setSelectedFilter(value);
 
-  // single status change
+  // single status change (always send canonical)
   const handleStatusChange = async (e, id) => {
     e.stopPropagation();
-    const newStatus = e.target.value;
+    const picked = e.target.value;
+    const newStatus = toCanonStatus(picked);
 
     const prev = workOrders;
     const next = prev.map((o) => (o.id === id ? { ...o, status: newStatus } : o));
@@ -128,7 +136,6 @@ export default function WorkOrders() {
 
     try {
       await api.put(`/work-orders/${id}`, { status: newStatus });
-      // Refresh for authoritative state + counts
       fetchWorkOrders();
     } catch (err) {
       console.error("Error updating status:", err);
@@ -191,40 +198,45 @@ export default function WorkOrders() {
       const po = displayPO(o.workOrderNumber, o.poNumber).toLowerCase();
       const cust = norm(o.customer).toLowerCase();
       const site = norm(o.siteLocation).toLowerCase();
-      return wo.includes(q) || po.includes(q) || cust.includes(q) || site.includes(q);
+      return (
+        wo.includes(q) || po.includes(q) || cust.includes(q) || site.includes(q)
+      );
     });
   }, [filteredOrders, selectedFilter, poSearch]);
 
-  // bulk update -> Parts In (single server call)
+  // bulk update -> Parts In (single server call), writing canonical label
   const markSelectedAsPartsIn = async () => {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
 
     const ids = Array.from(selectedIds);
+    const canonical = PARTS_IN;
 
     // Optimistic UI
     const prev = workOrders;
     const next = prev.map((o) =>
-      ids.includes(o.id) ? { ...o, status: PARTS_IN } : o
+      ids.includes(o.id) ? { ...o, status: canonical } : o
     );
     setWorkOrders(next);
 
     try {
-      await api.put(`/work-orders/bulk-status`, { ids, status: PARTS_IN });
+      await api.put(`/work-orders/bulk-status`, { ids, status: canonical });
 
-      // Close modal, jump user to “Parts In”, and hard-refresh from server
       closePartsModal();
       setSelectedFilter(PARTS_IN);
       await fetchWorkOrders();
 
-      // Flash confirmation
-      setFlashMsg(`Moved ${ids.length} work order${ids.length > 1 ? "s" : ""} to “${PARTS_IN}”.`);
+      setFlashMsg(
+        `Moved ${ids.length} work order${ids.length > 1 ? "s" : ""} to “${PARTS_IN}”.`
+      );
       window.setTimeout(() => setFlashMsg(""), 3000);
     } catch (err) {
       console.error("Bulk update failed:", err);
       const msg =
         err?.response?.data?.error ||
-        (err?.response?.status === 401 ? "Invalid or expired session. Please log in again." : "Failed to mark selected as Parts In.");
+        (err?.response?.status === 401
+          ? "Invalid or expired session. Please log in again."
+          : "Failed to mark selected as Parts In.");
       alert(msg);
       setWorkOrders(prev);
     } finally {
@@ -234,7 +246,6 @@ export default function WorkOrders() {
 
   return (
     <div className="home-container">
-      {/* Flash banner */}
       {flashMsg ? <div className="flash-banner">{flashMsg}</div> : null}
 
       <div className="header-row">
@@ -248,14 +259,21 @@ export default function WorkOrders() {
         </Link>
       </div>
 
-      {/* Status chip bar */}
       <div className="section-card">
         <div className="chips-toolbar">
-          <div className="chips-row" role="tablist" aria-label="Work order filters">
+          <div
+            className="chips-row"
+            role="tablist"
+            aria-label="Work order filters"
+          >
             {[
               { key: "All", label: "All", count: chipCounts.All },
               { key: "Today", label: "Today", count: chipCounts.Today },
-              ...STATUS_LIST.map((s) => ({ key: s, label: s, count: chipCounts[s] })),
+              ...STATUS_LIST.map((s) => ({
+                key: s,
+                label: s,
+                count: chipCounts[s],
+              })),
             ].map(({ key, label, count }) => {
               const active = selectedFilter === key;
               return (
@@ -273,11 +291,7 @@ export default function WorkOrders() {
           </div>
 
           {selectedFilter === PARTS_WAITING && filteredOrders.length > 0 && (
-            <button
-              type="button"
-              className="btn btn-parts"
-              onClick={openPartsModal}
-            >
+            <button type="button" className="btn btn-parts" onClick={openPartsModal}>
               Mark Parts In
             </button>
           )}
@@ -308,12 +322,19 @@ export default function WorkOrders() {
                     style={{ display: "flex", flexDirection: "column", gap: 2 }}
                   >
                     {order.workOrderNumber ? (
-                      <div><strong>WO:</strong> {order.workOrderNumber}</div>
+                      <div>
+                        <strong>WO:</strong> {order.workOrderNumber}
+                      </div>
                     ) : (
-                      <div><strong>WO:</strong> —</div>
+                      <div>
+                        <strong>WO:</strong> —
+                      </div>
                     )}
                     {displayPO(order.workOrderNumber, order.poNumber) ? (
-                      <div><strong>PO:</strong> {displayPO(order.workOrderNumber, order.poNumber)}</div>
+                      <div>
+                        <strong>PO:</strong>{" "}
+                        {displayPO(order.workOrderNumber, order.poNumber)}
+                      </div>
                     ) : null}
                   </div>
                 </td>
@@ -333,7 +354,7 @@ export default function WorkOrders() {
                 <td>
                   <select
                     className="form-select"
-                    value={cleanStatus(order.status) || ""}
+                    value={toCanonStatus(order.status) || ""}
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => handleStatusChange(e, order.id)}
                   >
@@ -377,7 +398,9 @@ export default function WorkOrders() {
             {filteredOrders.length === 0 && (
               <tr>
                 <td colSpan={userRole !== "tech" ? 8 : 7}>
-                  <div className="empty-state">No work orders for this filter.</div>
+                  <div className="empty-state">
+                    No work orders for this filter.
+                  </div>
                 </td>
               </tr>
             )}
@@ -387,11 +410,22 @@ export default function WorkOrders() {
 
       {/* ---------- Parts In Modal ---------- */}
       {isPartsModalOpen && (
-        <div className="modal-overlay" onClick={closePartsModal} role="dialog" aria-modal="true">
+        <div
+          className="modal-overlay"
+          onClick={closePartsModal}
+          role="dialog"
+          aria-modal="true"
+        >
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Mark Parts as Received</h3>
-              <button className="modal-close" onClick={closePartsModal} aria-label="Close">×</button>
+              <button
+                className="modal-close"
+                onClick={closePartsModal}
+                aria-label="Close"
+              >
+                ×
+              </button>
             </div>
 
             <div className="modal-body">
@@ -404,10 +438,18 @@ export default function WorkOrders() {
                   onChange={(e) => setPoSearch(e.target.value)}
                 />
                 <div className="modal-actions-inline">
-                  <button type="button" className="btn btn-ghost" onClick={() => setAll(true, visibleWaitingRows)}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setAll(true, visibleWaitingRows)}
+                  >
                     Select All
                   </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => setAll(false, visibleWaitingRows)}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setAll(false, visibleWaitingRows)}
+                  >
                     Select None
                   </button>
                 </div>
@@ -415,7 +457,9 @@ export default function WorkOrders() {
 
               <div className="modal-list">
                 {visibleWaitingRows.length === 0 ? (
-                  <div className="empty-state">No POs in “Waiting on Parts”.</div>
+                  <div className="empty-state">
+                    No POs in “Waiting on Parts”.
+                  </div>
                 ) : (
                   <table className="mini-table">
                     <thead>
@@ -440,9 +484,13 @@ export default function WorkOrders() {
                               />
                             </td>
                             <td>{o.workOrderNumber || "—"}</td>
-                            <td>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
+                            <td>
+                              {displayPO(o.workOrderNumber, o.poNumber) || "—"}
+                            </td>
                             <td>{o.customer || "—"}</td>
-                            <td title={o.siteLocation}>{o.siteLocation || "—"}</td>
+                            <td title={o.siteLocation}>
+                              {o.siteLocation || "—"}
+                            </td>
                           </tr>
                         );
                       })}
@@ -459,9 +507,15 @@ export default function WorkOrders() {
                 disabled={isUpdatingParts || selectedIds.size === 0}
                 onClick={markSelectedAsPartsIn}
               >
-                {isUpdatingParts ? "Updating…" : `Mark Parts In (${selectedIds.size})`}
+                {isUpdatingParts
+                  ? "Updating…"
+                  : `Mark Parts In (${selectedIds.size})`}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={closePartsModal}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={closePartsModal}
+              >
                 Cancel
               </button>
             </div>
