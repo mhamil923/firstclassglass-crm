@@ -80,16 +80,19 @@ export default function WorkOrders() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchWorkOrders = () => {
-    api
-      .get("/work-orders", { headers: authHeaders() })
-      .then((res) => {
-        const data = Array.isArray(res.data) ? res.data : [];
-        // normalize status text on the way in (for rendering)
-        const canon = data.map((o) => ({ ...o, status: toCanonicalStatus(o.status) }));
-        setWorkOrders(canon);
-      })
-      .catch((err) => console.error("Error fetching work orders:", err));
+  // NOTE: return the promise so `await fetchWorkOrders()` actually waits.
+  const fetchWorkOrders = async () => {
+    try {
+      const res = await api.get("/work-orders", { headers: authHeaders() });
+      const data = Array.isArray(res.data) ? res.data : [];
+      // normalize status text on the way in (for rendering)
+      const canon = data.map((o) => ({ ...o, status: toCanonicalStatus(o.status) }));
+      setWorkOrders(canon);
+      return canon;
+    } catch (err) {
+      console.error("Error fetching work orders:", err);
+      return [];
+    }
   };
 
   // filtering (normalize comparisons)
@@ -151,7 +154,7 @@ export default function WorkOrders() {
         { status: newStatus },
         { headers: authHeaders() }
       );
-      fetchWorkOrders();
+      await fetchWorkOrders();
     } catch (err) {
       console.error("Error updating status:", err);
       setWorkOrders(prev);
@@ -192,7 +195,6 @@ export default function WorkOrders() {
     if (normStatus(selectedFilter) !== normStatus(PARTS_WAITING)) {
       // force user onto Waiting tab before bulk action
       setSelectedFilter(PARTS_WAITING);
-      // preselect after the list recalculates on next render
     }
     const source = workOrders.filter((o) => normStatus(o.status) === normStatus(PARTS_WAITING));
     setSelectedIds(new Set(source.map((o) => o.id)));
@@ -218,6 +220,7 @@ export default function WorkOrders() {
   };
 
   const visibleWaitingRows = useMemo(() => {
+    // guard: only show rows that are still Waiting on Parts
     const base = filteredOrders.filter(
       (o) => normStatus(o.status) === normStatus(PARTS_WAITING)
     );
@@ -232,7 +235,7 @@ export default function WorkOrders() {
     });
   }, [filteredOrders, poSearch]);
 
-  // bulk -> Parts In (use existing /work-orders/:id endpoint; always send token)
+  // bulk -> Parts In
   const markSelectedAsPartsIn = async () => {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
@@ -240,13 +243,14 @@ export default function WorkOrders() {
     const ids = Array.from(selectedIds);
     const prev = workOrders;
 
-    // optimistic UI
+    // optimistic UI: move them out of "Waiting on Parts"
     const next = prev.map((o) =>
       ids.includes(o.id) ? { ...o, status: PARTS_IN } : o
     );
     setWorkOrders(next);
 
     try {
+      // update server
       await Promise.all(
         ids.map((id) =>
           api.put(
@@ -257,9 +261,11 @@ export default function WorkOrders() {
         )
       );
 
-      closePartsModal();
+      // go to Parts In, then refresh and wait for it
       setSelectedFilter(PARTS_IN);
       await fetchWorkOrders();
+
+      closePartsModal();
 
       const count = ids.length;
       setFlashMsg(`Moved ${count} work order${count === 1 ? "" : "s"} to “${PARTS_IN}”.`);
@@ -319,7 +325,7 @@ export default function WorkOrders() {
             })}
           </div>
 
-          {/* Only show this button on the Waiting on Parts tab, and only if there are rows */}
+          {/* Only show on Waiting on Parts tab, and only if there are rows */}
           {normStatus(selectedFilter) === normStatus(PARTS_WAITING) &&
             filteredOrders.some((o) => normStatus(o.status) === normStatus(PARTS_WAITING)) && (
               <button type="button" className="btn btn-parts" onClick={openPartsModal}>
