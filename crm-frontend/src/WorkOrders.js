@@ -23,6 +23,12 @@ const norm = (v) => (v ?? "").toString().trim();
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
 
+// Always build headers with fresh token (prevents "Missing token")
+const authHeaders = () => {
+  const token = localStorage.getItem("jwt");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 export default function WorkOrders() {
   const navigate = useNavigate();
 
@@ -48,7 +54,7 @@ export default function WorkOrders() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isUpdatingParts, setIsUpdatingParts] = useState(false);
 
-  // UX: show a temporary success banner after bulk update
+  // UX: flash after bulk update
   const [flashMsg, setFlashMsg] = useState("");
 
   // data load
@@ -57,7 +63,7 @@ export default function WorkOrders() {
 
     if (userRole !== "tech") {
       api
-        .get("/users", { params: { assignees: 1 } })
+        .get("/users", { params: { assignees: 1 }, headers: authHeaders() })
         .then((r) => setTechUsers(r.data || []))
         .catch((err) => console.error("Error fetching assignable users:", err));
     }
@@ -66,15 +72,12 @@ export default function WorkOrders() {
 
   const fetchWorkOrders = () => {
     api
-      .get("/work-orders")
+      .get("/work-orders", { headers: authHeaders() })
       .then((res) => {
         const data = Array.isArray(res.data) ? res.data : [];
         setWorkOrders(data);
       })
-      .catch((err) => {
-        console.error("Error fetching work orders:", err);
-        // Optional: surface a toast/badge
-      });
+      .catch((err) => console.error("Error fetching work orders:", err));
   };
 
   // filtering
@@ -118,7 +121,7 @@ export default function WorkOrders() {
 
   const setFilter = (value) => setSelectedFilter(value);
 
-  // single status change
+  // single status change (row dropdown)
   const handleStatusChange = async (e, id) => {
     e.stopPropagation();
     const newStatus = e.target.value;
@@ -128,13 +131,21 @@ export default function WorkOrders() {
     setWorkOrders(next);
 
     try {
-      await api.put(`/work-orders/${id}`, { status: newStatus });
-      // Refresh for authoritative state + counts
+      await api.put(
+        `/work-orders/${id}`,
+        { status: newStatus },
+        { headers: authHeaders() }
+      );
       fetchWorkOrders();
     } catch (err) {
       console.error("Error updating status:", err);
       setWorkOrders(prev);
-      alert(err?.response?.data?.error || "Failed to update status.");
+      const msg =
+        err?.response?.data?.error ||
+        (err?.response?.status === 401
+          ? "Missing or invalid token."
+          : "Failed to update status.");
+      alert(msg);
     }
   };
 
@@ -142,7 +153,11 @@ export default function WorkOrders() {
   const assignToTech = (orderId, techId, e) => {
     e.stopPropagation();
     api
-      .put(`/work-orders/${orderId}/assign`, { assignedTo: techId })
+      .put(
+        `/work-orders/${orderId}/assign`,
+        { assignedTo: techId },
+        { headers: authHeaders() }
+      )
       .then(fetchWorkOrders)
       .catch((err) => console.error("Error assigning tech:", err));
   };
@@ -159,7 +174,12 @@ export default function WorkOrders() {
 
   // -------- Parts In modal helpers --------
   const openPartsModal = () => {
-    const preselected = new Set(filteredOrders.map((o) => Number(o.id)));
+    // Modal only makes sense on Waiting on Parts
+    const source =
+      selectedFilter === PARTS_WAITING
+        ? filteredOrders
+        : workOrders.filter((o) => o.status === PARTS_WAITING);
+    const preselected = new Set(source.map((o) => o.id));
     setSelectedIds(preselected);
     setPoSearch("");
     setIsPartsModalOpen(true);
@@ -172,76 +192,77 @@ export default function WorkOrders() {
   };
 
   const toggleId = (id) => {
-    const intId = Number(id);
     const copy = new Set(selectedIds);
-    if (copy.has(intId)) copy.delete(intId);
-    else copy.add(intId);
+    if (copy.has(id)) copy.delete(id);
+    else copy.add(id);
     setSelectedIds(copy);
   };
 
   const setAll = (checked, visibleRows) => {
-    setSelectedIds(
-      checked ? new Set(visibleRows.map((o) => Number(o.id))) : new Set()
-    );
+    setSelectedIds(checked ? new Set(visibleRows.map((o) => o.id)) : new Set());
   };
 
   const visibleWaitingRows = useMemo(() => {
-    if (selectedFilter !== PARTS_WAITING) return [];
+    // Only rows that are actually "Waiting on Parts"
+    const base =
+      selectedFilter === PARTS_WAITING
+        ? filteredOrders
+        : workOrders.filter((o) => o.status === PARTS_WAITING);
+
     const q = poSearch.trim().toLowerCase();
-    const rows = filteredOrders;
-    if (!q) return rows;
-    return rows.filter((o) => {
+    if (!q) return base;
+
+    return base.filter((o) => {
       const wo = norm(o.workOrderNumber).toLowerCase();
       const po = displayPO(o.workOrderNumber, o.poNumber).toLowerCase();
       const cust = norm(o.customer).toLowerCase();
       const site = norm(o.siteLocation).toLowerCase();
       return wo.includes(q) || po.includes(q) || cust.includes(q) || site.includes(q);
     });
-  }, [filteredOrders, selectedFilter, poSearch]);
+  }, [filteredOrders, workOrders, selectedFilter, poSearch]);
 
-  // bulk update -> Parts In (uses new bulk endpoint)
+  // bulk update -> Parts In (one server call, always with token)
   const markSelectedAsPartsIn = async () => {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
 
-    const ids = Array.from(selectedIds).map((n) => Number(n));
+    const ids = Array.from(selectedIds);
 
-    // Optimistic UI
+    // Optimistic UI: flip to Parts In locally
     const prev = workOrders;
-    const idSet = new Set(ids);
     const next = prev.map((o) =>
-      idSet.has(Number(o.id)) ? { ...o, status: PARTS_IN } : o
+      ids.includes(o.id) ? { ...o, status: PARTS_IN } : o
     );
     setWorkOrders(next);
 
     try {
-      const { data } = await api.put(`/work-orders/bulk-status`, {
-        ids,
-        status: PARTS_IN,
-      });
-
-      // Merge updated rows returned by server (authoritative)
-      const updatedMap = new Map((data?.items || []).map((r) => [Number(r.id), r]));
-      setWorkOrders((cur) =>
-        cur.map((o) => updatedMap.get(Number(o.id)) || o)
+      const res = await api.put(
+        "/work-orders/bulk-status",
+        { ids, status: PARTS_IN },
+        { headers: authHeaders() }
       );
 
-      // Close modal, jump user to “Parts In”, and hard-refresh counts
+      // Server accepted, close modal → switch filter → reload authoritative data
       closePartsModal();
       setSelectedFilter(PARTS_IN);
-      fetchWorkOrders();
+      await fetchWorkOrders();
 
       // Flash confirmation
-      const count = data?.affected ?? ids.length;
-      setFlashMsg(`Moved ${count} work order${count !== 1 ? "s" : ""} to “${PARTS_IN}”.`);
+      const affected = res?.data?.affected ?? ids.length;
+      setFlashMsg(`Moved ${affected} work order${affected === 1 ? "" : "s"} to “${PARTS_IN}”.`);
       window.setTimeout(() => setFlashMsg(""), 3000);
     } catch (err) {
       console.error("Bulk update failed:", err);
-      alert(
-        err?.response?.data?.error ||
-          "Failed to mark selected as Parts In. Restoring previous state."
-      );
       setWorkOrders(prev);
+      const status = err?.response?.status;
+      const msg =
+        err?.response?.data?.error ||
+        (status === 401
+          ? "Missing or invalid token. Please sign in again."
+          : status === 403
+          ? "Forbidden: one or more selected items aren’t assigned to you."
+          : "Failed to mark selected as Parts In.");
+      alert(msg);
     } finally {
       setIsUpdatingParts(false);
     }
@@ -287,7 +308,8 @@ export default function WorkOrders() {
             })}
           </div>
 
-          {selectedFilter === PARTS_WAITING && filteredOrders.length > 0 && (
+          {/* Only show the Parts In bulk button when there are rows to act on */}
+          {workOrders.some((o) => o.status === PARTS_WAITING) && (
             <button
               type="button"
               className="btn btn-parts"
@@ -444,7 +466,7 @@ export default function WorkOrders() {
                     </thead>
                     <tbody>
                       {visibleWaitingRows.map((o) => {
-                        const checked = selectedIds.has(Number(o.id));
+                        const checked = selectedIds.has(o.id);
                         return (
                           <tr key={o.id}>
                             <td>
