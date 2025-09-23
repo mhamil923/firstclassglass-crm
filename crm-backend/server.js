@@ -170,6 +170,23 @@ function windowSql({ dateSql, endTime, timeWindow }) {
   return { startSql: dateSql, endSql };
 }
 
+// ─── STATUS CANONICALIZER ───────────────────────────────────────────────────
+const STATUS_CANON = [
+  'Needs to be Scheduled',
+  'Scheduled',
+  'Waiting for Approval',
+  'Waiting on Parts',
+  'Parts In',
+  'Completed',
+];
+const STATUS_LOOKUP = new Map(
+  STATUS_CANON.map(s => [s.toLowerCase().replace(/\s+/g, ' ').trim(), s])
+);
+function canonStatus(input) {
+  const key = String(input ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return STATUS_LOOKUP.get(key) || null;
+}
+
 // ─── SCHEMA HELPERS ─────────────────────────────────────────────────────────
 const SCHEMA = { hasAssignedTo: false };
 async function columnExists(table, col) {
@@ -383,11 +400,13 @@ app.get('/work-orders', authenticate, async (req, res) => {
   try {
     let where = ''; const params = [];
     if (SCHEMA.hasAssignedTo && req.user.role === 'tech') { where = ' WHERE w.assignedTo = ?'; params.push(req.user.id); }
-    const [rows] = await db.execute(
+    const [raw] = await db.execute(
       `SELECT w.*, u.username AS assignedToName
          FROM work_orders w
          LEFT JOIN users u ON w.assignedTo = u.id${where}`, params
     );
+    // Canonicalize outgoing status values for UI safety
+    const rows = raw.map(r => ({ ...r, status: canonStatus(r.status) || r.status }));
     res.json(rows);
   } catch (err) { console.error('Work-orders list error:', err); res.status(500).json({ error: 'Failed to fetch work orders.' }); }
 });
@@ -447,7 +466,11 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
 
     const sets = [];
     const params = [];
-    if (status !== undefined)          { sets.push('status = ?');           params.push(status); }
+    if (status !== undefined) {
+      const c = canonStatus(status);
+      if (!c) return res.status(400).json({ error: 'Invalid status value' });
+      sets.push('status = ?'); params.push(c);
+    }
     if (poNumber !== undefined)        { sets.push('poNumber = ?');         params.push(poNumber || null); }
     if (workOrderNumber !== undefined) { sets.push('workOrderNumber = ?');  params.push(workOrderNumber || null); }
 
@@ -472,7 +495,9 @@ app.put('/work-orders/:id/status', authenticate, express.json(), async (req, res
       const [[row]] = await db.execute('SELECT assignedTo FROM work_orders WHERE id = ?', [req.params.id]);
       if (!row || row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     }
-    await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [status, req.params.id]);
+    const c = canonStatus(status);
+    if (!c) return res.status(400).json({ error: 'Invalid status value' });
+    await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [c, req.params.id]);
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
     res.json(updated);
   } catch (err) { console.error('Work-order status update error:', err); res.status(500).json({ error: 'Failed to update status.' }); }
@@ -488,9 +513,8 @@ app.put('/work-orders/bulk-status',
       if (!Array.isArray(ids) || !ids.length) {
         return res.status(400).json({ error: 'ids[] required' });
       }
-      if (!status || typeof status !== 'string') {
-        return res.status(400).json({ error: 'status required' });
-      }
+      const c = canonStatus(status);
+      if (!c) return res.status(400).json({ error: 'Invalid status value' });
 
       // Normalize to integers; drop bad values
       const cleanIds = ids
@@ -518,11 +542,9 @@ app.put('/work-orders/bulk-status',
       }
 
       const placeholders = cleanIds.map(() => '?').join(',');
-      const params = [status, ...cleanIds];
-
-      const [result] = await db.execute(
+      await db.execute(
         `UPDATE work_orders SET status = ? WHERE id IN (${placeholders})`,
-        params
+        [c, ...cleanIds]
       );
 
       // Return the updated rows so the client can merge state
@@ -531,10 +553,13 @@ app.put('/work-orders/bulk-status',
         cleanIds
       );
 
+      // Canonicalize outgoing rows
+      const items = updatedRows.map(r => ({ ...r, status: canonStatus(r.status) || r.status }));
+
       res.json({
         ok: true,
-        affected: result.affectedRows || 0,
-        items: updatedRows,
+        affected: items.length,
+        items,
       });
     } catch (err) {
       console.error('Bulk-status error:', err);
@@ -591,6 +616,9 @@ app.post(
       const pdfPath   = pdf ? fileKey(pdf) : null;
       const firstImg  = images[0] ? fileKey(images[0]) : null;
 
+      // Canonicalize status if provided
+      const cStatus = canonStatus(status) || 'Needs to be Scheduled';
+
       const cols = [
         'workOrderNumber','poNumber','customer','siteLocation','billingAddress',
         'problemDescription','status','pdfPath','photoPath',
@@ -598,7 +626,7 @@ app.post(
       ];
       const vals = [
         workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
-        problemDescription, status, pdfPath, firstImg,
+        problemDescription, cStatus, pdfPath, firstImg,
         billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null
       ];
 
@@ -704,6 +732,8 @@ app.put(
         customerEmail = existing.customerEmail,
       } = req.body;
 
+      const cStatus = canonStatus(status) || existing.status;
+
       let sql = `UPDATE work_orders
                  SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,billingAddress=?,
                      problemDescription=?,status=?,pdfPath=?,photoPath=?,
@@ -711,7 +741,7 @@ app.put(
                  WHERE id=?`;
       const params = [
         workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
-        problemDescription, status, pdfPath || null, attachments.join(','),
+        problemDescription, cStatus, pdfPath || null, attachments.join(','),
         billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null,
         wid
       ];
@@ -814,7 +844,7 @@ app.put('/work-orders/:id/update-date',
 
       if (scheduledDate === null) {
         const nextStatus = (status !== undefined && status !== null && String(status).length)
-          ? status
+          ? (canonStatus(status) || 'Needs to be Scheduled')
           : 'Needs to be Scheduled';
         await db.execute(
           'UPDATE work_orders SET scheduledDate = NULL, scheduledEnd = NULL, dayOrder = NULL, status = ? WHERE id = ?',
@@ -832,7 +862,7 @@ app.put('/work-orders/:id/update-date',
         }
 
         const nextStatus = (status !== undefined && status !== null && String(status).length)
-          ? status
+          ? (canonStatus(status) || existing.status)
           : (existing.status && existing.status !== 'Needs to be Scheduled' ? existing.status : 'Scheduled');
 
         await db.execute(
@@ -857,7 +887,7 @@ app.put('/work-orders/:id/unschedule',
     try {
       const wid = req.params.id;
       const { status } = req.body || {};
-      const nextStatus = (status && String(status).length) ? status : 'Needs to be Scheduled';
+      const nextStatus = (status && String(status).length) ? (canonStatus(status) || 'Needs to be Scheduled') : 'Needs to be Scheduled';
       await db.execute(
         'UPDATE work_orders SET scheduledDate = NULL, scheduledEnd = NULL, dayOrder = NULL, status = ? WHERE id = ?',
         [nextStatus, wid]
