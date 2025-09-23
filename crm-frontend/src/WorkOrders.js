@@ -18,12 +18,22 @@ const STATUS_LIST = [
 const PARTS_WAITING = "Waiting on Parts";
 const PARTS_IN = "Parts In";
 
-// Normalize helpers
+// ---------- helpers ----------
 const norm = (v) => (v ?? "").toString().trim();
+const normStatus = (s) => norm(s).toLowerCase();
+
+// canonical map for status normalization -> display label
+const CANON = STATUS_LIST.reduce((acc, label) => {
+  acc[normStatus(label)] = label;
+  return acc;
+}, {});
+
+const toCanonicalStatus = (s) => CANON[normStatus(s)] ?? norm(s);
+
+// Hide legacy PO values that equal WO
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
 
-// Always build headers with fresh token (prevents "Missing token")
 const authHeaders = () => {
   const token = localStorage.getItem("jwt");
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -49,18 +59,18 @@ export default function WorkOrders() {
   const [selectedFilter, setSelectedFilter] = useState("All");
   const [techUsers, setTechUsers] = useState([]);
 
+  // parts modal
   const [isPartsModalOpen, setIsPartsModalOpen] = useState(false);
   const [poSearch, setPoSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isUpdatingParts, setIsUpdatingParts] = useState(false);
 
-  // UX: flash after bulk update
+  // UX
   const [flashMsg, setFlashMsg] = useState("");
 
-  // data load
+  // load data
   useEffect(() => {
     fetchWorkOrders();
-
     if (userRole !== "tech") {
       api
         .get("/users", { params: { assignees: 1 }, headers: authHeaders() })
@@ -75,14 +85,17 @@ export default function WorkOrders() {
       .get("/work-orders", { headers: authHeaders() })
       .then((res) => {
         const data = Array.isArray(res.data) ? res.data : [];
-        setWorkOrders(data);
+        // normalize status text on the way in (for rendering)
+        const canon = data.map((o) => ({ ...o, status: toCanonicalStatus(o.status) }));
+        setWorkOrders(canon);
       })
       .catch((err) => console.error("Error fetching work orders:", err));
   };
 
-  // filtering
+  // filtering (normalize comparisons)
   useEffect(() => {
     const todayStr = moment().format("YYYY-MM-DD");
+
     let rows = workOrders;
 
     if (selectedFilter === "Today") {
@@ -92,19 +105,21 @@ export default function WorkOrders() {
           moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr
       );
     } else if (selectedFilter !== "All") {
-      rows = workOrders.filter((o) => o.status === selectedFilter);
+      const f = normStatus(selectedFilter);
+      rows = workOrders.filter((o) => normStatus(o.status) === f);
     }
 
     setFilteredOrders(rows);
   }, [workOrders, selectedFilter]);
 
-  // counts
+  // counts (normalize into canonical buckets)
   const chipCounts = useMemo(() => {
-    const counts = Object.fromEntries(STATUS_LIST.map((s) => [s, 0]));
+    const buckets = Object.fromEntries(STATUS_LIST.map((s) => [s, 0]));
     let today = 0;
     const todayStr = moment().format("YYYY-MM-DD");
     for (const o of workOrders) {
-      if (o.status && counts[o.status] !== undefined) counts[o.status]++;
+      const label = toCanonicalStatus(o.status);
+      if (label in buckets) buckets[label] += 1;
       if (
         o.scheduledDate &&
         moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr
@@ -115,16 +130,16 @@ export default function WorkOrders() {
     return {
       All: workOrders.length,
       Today: today,
-      ...counts,
+      ...buckets,
     };
   }, [workOrders]);
 
   const setFilter = (value) => setSelectedFilter(value);
 
-  // single status change (row dropdown)
+  // single-row status change
   const handleStatusChange = async (e, id) => {
     e.stopPropagation();
-    const newStatus = e.target.value;
+    const newStatus = toCanonicalStatus(e.target.value);
 
     const prev = workOrders;
     const next = prev.map((o) => (o.id === id ? { ...o, status: newStatus } : o));
@@ -172,15 +187,15 @@ export default function WorkOrders() {
     window.open(url, "_blank", "width=800,height=600");
   };
 
-  // -------- Parts In modal helpers --------
+  // -------- Parts In modal --------
   const openPartsModal = () => {
-    // Modal only makes sense on Waiting on Parts
-    const source =
-      selectedFilter === PARTS_WAITING
-        ? filteredOrders
-        : workOrders.filter((o) => o.status === PARTS_WAITING);
-    const preselected = new Set(source.map((o) => o.id));
-    setSelectedIds(preselected);
+    if (normStatus(selectedFilter) !== normStatus(PARTS_WAITING)) {
+      // force user onto Waiting tab before bulk action
+      setSelectedFilter(PARTS_WAITING);
+      // preselect after the list recalculates on next render
+    }
+    const source = workOrders.filter((o) => normStatus(o.status) === normStatus(PARTS_WAITING));
+    setSelectedIds(new Set(source.map((o) => o.id)));
     setPoSearch("");
     setIsPartsModalOpen(true);
   };
@@ -203,15 +218,11 @@ export default function WorkOrders() {
   };
 
   const visibleWaitingRows = useMemo(() => {
-    // Only rows that are actually "Waiting on Parts"
-    const base =
-      selectedFilter === PARTS_WAITING
-        ? filteredOrders
-        : workOrders.filter((o) => o.status === PARTS_WAITING);
-
+    const base = filteredOrders.filter(
+      (o) => normStatus(o.status) === normStatus(PARTS_WAITING)
+    );
     const q = poSearch.trim().toLowerCase();
     if (!q) return base;
-
     return base.filter((o) => {
       const wo = norm(o.workOrderNumber).toLowerCase();
       const po = displayPO(o.workOrderNumber, o.poNumber).toLowerCase();
@@ -219,37 +230,39 @@ export default function WorkOrders() {
       const site = norm(o.siteLocation).toLowerCase();
       return wo.includes(q) || po.includes(q) || cust.includes(q) || site.includes(q);
     });
-  }, [filteredOrders, workOrders, selectedFilter, poSearch]);
+  }, [filteredOrders, poSearch]);
 
-  // bulk update -> Parts In (one server call, always with token)
+  // bulk -> Parts In (use existing /work-orders/:id endpoint; always send token)
   const markSelectedAsPartsIn = async () => {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
 
     const ids = Array.from(selectedIds);
-
-    // Optimistic UI: flip to Parts In locally
     const prev = workOrders;
+
+    // optimistic UI
     const next = prev.map((o) =>
       ids.includes(o.id) ? { ...o, status: PARTS_IN } : o
     );
     setWorkOrders(next);
 
     try {
-      const res = await api.put(
-        "/work-orders/bulk-status",
-        { ids, status: PARTS_IN },
-        { headers: authHeaders() }
+      await Promise.all(
+        ids.map((id) =>
+          api.put(
+            `/work-orders/${id}`,
+            { status: PARTS_IN },
+            { headers: authHeaders() }
+          )
+        )
       );
 
-      // Server accepted, close modal → switch filter → reload authoritative data
       closePartsModal();
       setSelectedFilter(PARTS_IN);
       await fetchWorkOrders();
 
-      // Flash confirmation
-      const affected = res?.data?.affected ?? ids.length;
-      setFlashMsg(`Moved ${affected} work order${affected === 1 ? "" : "s"} to “${PARTS_IN}”.`);
+      const count = ids.length;
+      setFlashMsg(`Moved ${count} work order${count === 1 ? "" : "s"} to “${PARTS_IN}”.`);
       window.setTimeout(() => setFlashMsg(""), 3000);
     } catch (err) {
       console.error("Bulk update failed:", err);
@@ -270,7 +283,6 @@ export default function WorkOrders() {
 
   return (
     <div className="home-container">
-      {/* Flash banner */}
       {flashMsg ? <div className="flash-banner">{flashMsg}</div> : null}
 
       <div className="header-row">
@@ -284,7 +296,6 @@ export default function WorkOrders() {
         </Link>
       </div>
 
-      {/* Status chip bar */}
       <div className="section-card">
         <div className="chips-toolbar">
           <div className="chips-row" role="tablist" aria-label="Work order filters">
@@ -308,16 +319,13 @@ export default function WorkOrders() {
             })}
           </div>
 
-          {/* Only show the Parts In bulk button when there are rows to act on */}
-          {workOrders.some((o) => o.status === PARTS_WAITING) && (
-            <button
-              type="button"
-              className="btn btn-parts"
-              onClick={openPartsModal}
-            >
-              Mark Parts In
-            </button>
-          )}
+          {/* Only show this button on the Waiting on Parts tab, and only if there are rows */}
+          {normStatus(selectedFilter) === normStatus(PARTS_WAITING) &&
+            filteredOrders.some((o) => normStatus(o.status) === normStatus(PARTS_WAITING)) && (
+              <button type="button" className="btn btn-parts" onClick={openPartsModal}>
+                Mark Parts In
+              </button>
+            )}
         </div>
 
         <table className="styled-table">
@@ -370,7 +378,7 @@ export default function WorkOrders() {
                 <td>
                   <select
                     className="form-select"
-                    value={order.status || ""}
+                    value={toCanonicalStatus(order.status)}
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => handleStatusChange(e, order.id)}
                   >
