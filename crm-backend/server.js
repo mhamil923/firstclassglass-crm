@@ -209,7 +209,7 @@ async function ensureCols() {
     { name: 'customerPhone',   type: 'VARCHAR(32) NULL' },
     { name: 'customerEmail',   type: 'VARCHAR(255) NULL' },
     { name: 'dayOrder',        type: 'INT NULL' },
-    { name: 'workOrderNumber', type: 'VARCHAR(64) NULL' }, // <-- NEW: WO #
+    { name: 'workOrderNumber', type: 'VARCHAR(64) NULL' },
   ];
   for (const { name, type } of colsToEnsure) {
     try {
@@ -420,7 +420,6 @@ app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
   } catch (err) { console.error('Unscheduled list error:', err); res.status(500).json({ error: 'Failed to fetch unscheduled.' }); }
 });
 
-// Optional: search also by workOrderNumber if provided
 app.get('/work-orders/search', authenticate, async (req, res) => {
   const { customer = '', poNumber = '', siteLocation = '', workOrderNumber = '' } = req.query;
   try {
@@ -486,7 +485,7 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
   }
 });
 
-// Dedicated status endpoint (UI tries this first)
+// Dedicated status endpoint
 app.put('/work-orders/:id/status', authenticate, express.json(), async (req, res) => {
   const { status } = req.body || {};
   if (!status) return res.status(400).json({ error: 'status is required.' });
@@ -536,7 +535,6 @@ app.put('/work-orders/bulk-status',
         if (!allowed.length) {
           return res.status(403).json({ error: 'Forbidden: none of the selected rows are assigned to you.' });
         }
-        // narrow to allowed IDs only
         cleanIds.length = 0;
         cleanIds.push(...allowed);
       }
@@ -553,7 +551,6 @@ app.put('/work-orders/bulk-status',
         cleanIds
       );
 
-      // Canonicalize outgoing rows
       const items = updatedRows.map(r => ({ ...r, status: canonStatus(r.status) || r.status }));
 
       res.json({
@@ -591,7 +588,7 @@ const isTruthy = (v) => {
 };
 const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
 
-// CREATE — now stores workOrderNumber (WO #) and optional poNumber
+// CREATE — stores workOrderNumber and optional poNumber
 app.post(
   '/work-orders',
   authenticate,
@@ -599,8 +596,8 @@ app.post(
   async (req, res) => {
     try {
       const {
-        workOrderNumber = '', // <-- WO # from Add page
-        poNumber = '',        // <-- optional; usually blank at creation
+        workOrderNumber = '',
+        poNumber = '',
         customer, siteLocation = '', billingAddress,
         problemDescription, status = 'Needs to be Scheduled', assignedTo,
         billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
@@ -616,7 +613,6 @@ app.post(
       const pdfPath   = pdf ? fileKey(pdf) : null;
       const firstImg  = images[0] ? fileKey(images[0]) : null;
 
-      // Canonicalize status if provided
       const cStatus = canonStatus(status) || 'Needs to be Scheduled';
 
       const cols = [
