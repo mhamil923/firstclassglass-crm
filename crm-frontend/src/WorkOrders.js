@@ -62,6 +62,7 @@ export default function WorkOrders() {
   // parts modal
   const [isPartsModalOpen, setIsPartsModalOpen] = useState(false);
   const [poSearch, setPoSearch] = useState("");
+  the
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isUpdatingParts, setIsUpdatingParts] = useState(false);
 
@@ -196,7 +197,9 @@ export default function WorkOrders() {
       // force user onto Waiting tab before bulk action
       setSelectedFilter(PARTS_WAITING);
     }
-    const source = workOrders.filter((o) => normStatus(o.status) === normStatus(PARTS_WAITING));
+    const source = workOrders.filter(
+      (o) => normStatus(o.status) === normStatus(PARTS_WAITING)
+    );
     setSelectedIds(new Set(source.map((o) => o.id)));
     setPoSearch("");
     setIsPartsModalOpen(true);
@@ -235,7 +238,7 @@ export default function WorkOrders() {
     });
   }, [filteredOrders, poSearch]);
 
-  // bulk -> Parts In
+  // bulk -> Parts In (use server bulk endpoint)
   const markSelectedAsPartsIn = async () => {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
@@ -250,18 +253,23 @@ export default function WorkOrders() {
     setWorkOrders(next);
 
     try {
-      // update server
-      await Promise.all(
-        ids.map((id) =>
-          api.put(
-            `/work-orders/${id}`,
-            { status: PARTS_IN },
-            { headers: authHeaders() }
-          )
-        )
+      // update server via bulk endpoint
+      const res = await api.put(
+        "/work-orders/bulk-status",
+        { ids, status: PARTS_IN },
+        { headers: authHeaders() }
       );
 
-      // go to Parts In, then refresh and wait for it
+      // Merge any server-returned rows (ensures we reflect canonical status text)
+      const items = Array.isArray(res?.data?.items) ? res.data.items : [];
+      if (items.length) {
+        const byId = new Map(items.map((r) => [r.id, r]));
+        setWorkOrders((cur) =>
+          cur.map((o) => (byId.has(o.id) ? { ...o, ...byId.get(o.id), status: toCanonicalStatus(byId.get(o.id).status) } : o))
+        );
+      }
+
+      // go to Parts In, then refresh
       setSelectedFilter(PARTS_IN);
       await fetchWorkOrders();
 
