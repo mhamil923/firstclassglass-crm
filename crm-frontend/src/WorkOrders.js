@@ -62,7 +62,6 @@ export default function WorkOrders() {
   // parts modal
   const [isPartsModalOpen, setIsPartsModalOpen] = useState(false);
   const [poSearch, setPoSearch] = useState("");
-  the
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isUpdatingParts, setIsUpdatingParts] = useState(false);
 
@@ -265,7 +264,11 @@ export default function WorkOrders() {
       if (items.length) {
         const byId = new Map(items.map((r) => [r.id, r]));
         setWorkOrders((cur) =>
-          cur.map((o) => (byId.has(o.id) ? { ...o, ...byId.get(o.id), status: toCanonicalStatus(byId.get(o.id).status) } : o))
+          cur.map((o) =>
+            byId.has(o.id)
+              ? { ...o, ...byId.get(o.id), status: toCanonicalStatus(byId.get(o.id).status) }
+              : o
+          )
         );
       }
 
