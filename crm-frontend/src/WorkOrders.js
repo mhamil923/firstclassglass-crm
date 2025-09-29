@@ -19,16 +19,49 @@ const PARTS_WAITING = "Waiting on Parts";
 const PARTS_IN = "Parts In";
 
 // ---------- helpers ----------
+// Basic string normalize
 const norm = (v) => (v ?? "").toString().trim();
-const normStatus = (s) => norm(s).toLowerCase();
 
-// canonical map for status normalization -> display label
-const CANON = STATUS_LIST.reduce((acc, label) => {
-  acc[normStatus(label)] = label;
-  return acc;
-}, {});
+// Build a tolerant status key (lowercase, collapse spaces, treat _ and - as spaces)
+const statusKey = (s) =>
+  norm(s)
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-const toCanonicalStatus = (s) => CANON[normStatus(s)] ?? norm(s);
+// For compatibility with existing usages in the file:
+const normStatus = statusKey;
+
+// Canonical map for status normalization -> display label
+const CANON = new Map(STATUS_LIST.map((label) => [statusKey(label), label]));
+
+// Common variants/typos -> canonical
+const STATUS_SYNONYMS = new Map([
+  // Parts In variations
+  ["part in", "Parts In"],
+  ["parts in", "Parts In"],
+  ["parts  in", "Parts In"],
+  ["parts-in", "Parts In"],
+  ["parts_in", "Parts In"],
+  ["partsin", "Parts In"],
+  ["part s in", "Parts In"],
+
+  // Waiting on Parts variations
+  ["waiting on part", "Waiting on Parts"],
+  ["waiting on parts", "Waiting on Parts"],
+  ["waiting-on-parts", "Waiting on Parts"],
+  ["waiting_on_parts", "Waiting on Parts"],
+  ["waitingonparts", "Waiting on Parts"],
+
+  // Needs to be Scheduled (defensive)
+  ["needs to be schedule", "Needs to be Scheduled"],
+  ["need to be scheduled", "Needs to be Scheduled"],
+]);
+
+// Convert any status-ish string into a canonical label for UI
+const toCanonicalStatus = (s) =>
+  CANON.get(statusKey(s)) || STATUS_SYNONYMS.get(statusKey(s)) || norm(s);
 
 // Hide legacy PO values that equal WO
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
