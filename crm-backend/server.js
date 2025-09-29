@@ -171,6 +171,7 @@ function windowSql({ dateSql, endTime, timeWindow }) {
 }
 
 // ─── STATUS CANONICALIZER ───────────────────────────────────────────────────
+// Canonical list we want stored/returned
 const STATUS_CANON = [
   'Needs to be Scheduled',
   'Scheduled',
@@ -179,12 +180,47 @@ const STATUS_CANON = [
   'Parts In',
   'Completed',
 ];
+
+// normalize any incoming status into a simple key
+function statusKey(s) {
+  return String(s ?? '')
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')     // treat -, _ like spaces
+    .replace(/\s+/g, ' ')       // collapse whitespace
+    .trim();
+}
+
+// direct lookup for canonical labels
 const STATUS_LOOKUP = new Map(
-  STATUS_CANON.map(s => [s.toLowerCase().replace(/\s+/g, ' ').trim(), s])
+  STATUS_CANON.map(s => [statusKey(s), s])
 );
+
+// common variants/typos -> canonical
+const STATUS_SYNONYMS = new Map([
+  // Parts In variations
+  ['part in',        'Parts In'],
+  ['parts in',       'Parts In'],
+  ['parts  in',      'Parts In'],
+  ['parts-in',       'Parts In'],
+  ['parts_in',       'Parts In'],
+  ['partsin',        'Parts In'],
+  ['part s in',      'Parts In'],
+
+  // Waiting on Parts variations
+  ['waiting on part',     'Waiting on Parts'],
+  ['waiting on parts',    'Waiting on Parts'],
+  ['waiting-on-parts',    'Waiting on Parts'],
+  ['waiting_on_parts',    'Waiting on Parts'],
+  ['waitingonparts',      'Waiting on Parts'],
+
+  // Needs to be Scheduled (defensive)
+  ['needs to be schedule', 'Needs to be Scheduled'],
+  ['need to be scheduled', 'Needs to be Scheduled'],
+]);
+
 function canonStatus(input) {
-  const key = String(input ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
-  return STATUS_LOOKUP.get(key) || null;
+  const k = statusKey(input);
+  return STATUS_LOOKUP.get(k) || STATUS_SYNONYMS.get(k) || null;
 }
 
 // ─── SCHEMA HELPERS ─────────────────────────────────────────────────────────
