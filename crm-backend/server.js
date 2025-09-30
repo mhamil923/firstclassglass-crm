@@ -46,8 +46,10 @@ const s3 = new AWS.S3();
 const app = express();
 app.set('trust proxy', true);
 app.use(cors({ origin: true, credentials: true }));
-app.use(bodyParser.json({ limit: '100mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '100mb' }));
+
+// Keep body limits generous but safe
+app.use(bodyParser.json({ limit: '20mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '20mb' }));
 
 // ─── MYSQL ──────────────────────────────────────────────────────────────────
 const db = mysql.createPool({
@@ -181,39 +183,24 @@ const STATUS_CANON = [
   'Completed',
 ];
 
-// normalize any incoming status into a simple key
 function statusKey(s) {
   return String(s ?? '')
     .toLowerCase()
-    .replace(/[_-]+/g, ' ')     // treat -, _ like spaces
-    .replace(/\s+/g, ' ')       // collapse whitespace
+    .replace(/[_-]+/g, ' ')  // treat -, _ as spaces
+    .replace(/\s+/g, ' ')
     .trim();
 }
-
-// direct lookup for canonical labels
-const STATUS_LOOKUP = new Map(
-  STATUS_CANON.map(s => [statusKey(s), s])
-);
-
-// common variants/typos -> canonical
+const STATUS_LOOKUP = new Map(STATUS_CANON.map(s => [statusKey(s), s]));
 const STATUS_SYNONYMS = new Map([
-  // Parts In variations
-  ['part in',        'Parts In'],
-  ['parts in',       'Parts In'],
-  ['parts  in',      'Parts In'],
-  ['parts-in',       'Parts In'],
-  ['parts_in',       'Parts In'],
-  ['partsin',        'Parts In'],
-  ['part s in',      'Parts In'],
-
-  // Waiting on Parts variations
-  ['waiting on part',     'Waiting on Parts'],
-  ['waiting on parts',    'Waiting on Parts'],
-  ['waiting-on-parts',    'Waiting on Parts'],
-  ['waiting_on_parts',    'Waiting on Parts'],
-  ['waitingonparts',      'Waiting on Parts'],
-
-  // Needs to be Scheduled (defensive)
+  // Parts In variants
+  ['part in', 'Parts In'], ['parts in', 'Parts In'], ['parts  in', 'Parts In'],
+  ['parts-in', 'Parts In'], ['parts_in', 'Parts In'], ['partsin', 'Parts In'],
+  ['part s in', 'Parts In'],
+  // Waiting on Parts variants
+  ['waiting on part', 'Waiting on Parts'], ['waiting on parts', 'Waiting on Parts'],
+  ['waiting-on-parts', 'Waiting on Parts'], ['waiting_on_parts', 'Waiting on Parts'],
+  ['waitingonparts', 'Waiting on Parts'],
+  // Needs to be Scheduled guard
   ['needs to be schedule', 'Needs to be Scheduled'],
   ['need to be scheduled', 'Needs to be Scheduled'],
 ]);
@@ -221,6 +208,11 @@ const STATUS_SYNONYMS = new Map([
 function canonStatus(input) {
   const k = statusKey(input);
   return STATUS_LOOKUP.get(k) || STATUS_SYNONYMS.get(k) || null;
+}
+
+// helpful for GETs: if blank/legacy, show something sane
+function displayStatusOrDefault(s) {
+  return canonStatus(s) || (String(s || '').trim() ? String(s) : 'Needs to be Scheduled');
 }
 
 // ─── SCHEMA HELPERS ─────────────────────────────────────────────────────────
@@ -253,7 +245,7 @@ async function ensureCols() {
       if (!found.length) {
         await db.query(`ALTER TABLE \`work_orders\` ADD COLUMN \`${name}\` ${type}`);
       } else {
-        if (name === 'scheduledDate' || name === 'scheduledEnd') {
+        if ((name === 'scheduledDate' || name === 'scheduledEnd')) {
           try {
             const t = await getColumnType('work_orders', name);
             if (t && /^date(?!time)/.test(t)) {
@@ -379,7 +371,7 @@ function authenticate(req, res, next) {
   try {
     req.user = jwt.verify(token, JWT_SECRET);
 
-    // ⬇️ Elevate "Mark" to admin for this request (per requirement)
+    // Elevate "Mark" to admin for this request
     if (req.user && req.user.username && req.user.username.toLowerCase() === 'mark') {
       req.user.role = 'admin';
     }
@@ -419,18 +411,18 @@ app.get('/users', authenticate, async (req, res) => {
 });
 
 // ─── CUSTOMERS ───────────────────────────────────────────────────────────────
+app.get('/customers', authenticate, async (req, res) => {
+  try {
+    const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers');
+    res.json(rows);
+  } catch (err) { console.error('Customers list error:', err); res.status(500).json({ error: 'Failed to fetch customers.' }); }
+});
 app.get('/customers/:id', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers WHERE id = ?', [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Customer not found.' });
     res.json(rows[0]);
   } catch (err) { console.error('Customer get error:', err); res.status(500).json({ error: 'Failed to fetch customer.' }); }
-});
-app.get('/customers', authenticate, async (req, res) => {
-  try {
-    const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers');
-    res.json(rows);
-  } catch (err) { console.error('Customers list error:', err); res.status(500).json({ error: 'Failed to fetch customers.' }); }
 });
 app.post('/customers', authenticate, async (req, res) => {
   const { name, billingAddress } = req.body;
@@ -442,7 +434,6 @@ app.post('/customers', authenticate, async (req, res) => {
 });
 
 // ─── WORK ORDERS ─────────────────────────────────────────────────────────────
-// NOTE: Removed tech-only filtering; everyone sees the full list
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
     const [raw] = await db.execute(
@@ -450,7 +441,7 @@ app.get('/work-orders', authenticate, async (req, res) => {
          FROM work_orders w
          LEFT JOIN users u ON w.assignedTo = u.id`
     );
-    const rows = raw.map(r => ({ ...r, status: canonStatus(r.status) || r.status }));
+    const rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status) }));
     res.json(rows);
   } catch (err) { console.error('Work-orders list error:', err); res.status(500).json({ error: 'Failed to fetch work orders.' }); }
 });
@@ -475,7 +466,7 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
         WHERE w.customer LIKE ? AND w.poNumber LIKE ? AND w.siteLocation LIKE ? AND COALESCE(w.workOrderNumber,'') LIKE ?`,
       params
     );
-    res.json(rows);
+    res.json(rows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) })));
   } catch (err) { console.error('Work-orders search error:', err); res.status(500).json({ error: 'Search failed.' }); }
 });
 
@@ -483,20 +474,17 @@ app.get('/work-orders/:id', authenticate, async (req, res) => {
   try {
     const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
     if (!row) return res.status(404).json({ error: 'Not found.' });
-    res.json(row);
+    res.json({ ...row, status: displayStatusOrDefault(row.status) });
   } catch (err) { console.error('Work-order get error:', err); res.status(500).json({ error: 'Failed to fetch work order.' }); }
 });
 
 /**
  * Generic light-weight update.
  * Accepts any subset of: { status, poNumber, workOrderNumber }.
- * (Use /assign and /edit for other fields/files.)
- *
- * NOTE: any authenticated user may update.
  */
 app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
   try {
-    const wid = req.params.id;
+    const wid = Number(req.params.id);
     const { status, poNumber, workOrderNumber } = req.body || {};
 
     if (status === undefined && poNumber === undefined && workOrderNumber === undefined) {
@@ -513,94 +501,95 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
     if (poNumber !== undefined)        { sets.push('poNumber = ?');         params.push(poNumber || null); }
     if (workOrderNumber !== undefined) { sets.push('workOrderNumber = ?');  params.push(workOrderNumber || null); }
 
+    if (!sets.length) return res.status(400).json({ error: 'No fields to update.' });
+
     const sql = `UPDATE work_orders SET ${sets.join(', ')} WHERE id = ?`;
     params.push(wid);
     await db.execute(sql, params);
 
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-    res.json(updated);
+    if (!updated) return res.status(404).json({ error: 'Not found.' });
+    res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
   } catch (err) {
     console.error('Work-order update error:', err);
     res.status(500).json({ error: 'Failed to update work order.' });
   }
 });
 
-// Dedicated status endpoint — hardened
+// Dedicated status endpoint
 app.put('/work-orders/:id/status', authenticate, express.json(), async (req, res) => {
+  const { status } = req.body || {};
+  if (!status) return res.status(400).json({ error: 'status is required.' });
   try {
-    const wid = Number(req.params.id);
-    if (!Number.isFinite(wid)) return res.status(400).json({ error: 'Bad id' });
+    const c = canonStatus(status);
+    if (!c) return res.status(400).json({ error: 'Invalid status value' });
+    await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [c, req.params.id]);
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
+    if (!updated) return res.status(404).json({ error: 'Not found.' });
+    res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
+  } catch (err) { console.error('Work-order status update error:', err); res.status(500).json({ error: 'Failed to update status.' }); }
+});
 
-    const { status } = req.body || {};
-    if (!status) return res.status(400).json({ error: 'status is required.' });
+// ── BULK status update — tolerant IDs, always returns JSON
+function parseIdArray(maybeIds) {
+  if (Array.isArray(maybeIds)) {
+    return maybeIds;
+  }
+  if (typeof maybeIds === 'string') {
+    // allow "41,47,49" or "41 47 49"
+    return maybeIds.split(/[,\s]+/).filter(Boolean);
+  }
+  return [];
+}
+function coerceIdsToNumbers(mixed) {
+  return mixed
+    .map(v => {
+      // Allow numeric strings, strip non-digits defensively
+      const n = Number(String(v).trim());
+      return Number.isFinite(n) ? n : NaN;
+    })
+    .filter(n => Number.isFinite(n));
+}
+
+app.put('/work-orders/bulk-status', authenticate, express.json(), async (req, res) => {
+  try {
+    const { ids, status } = req.body || {};
+
+    const rawIds = parseIdArray(ids);
+    const cleanIds = coerceIdsToNumbers(rawIds);
+
+    if (!cleanIds.length) {
+      return res.status(400).json({ error: 'ids[] required (numbers or comma-separated string)' });
+    }
 
     const c = canonStatus(status);
     if (!c) return res.status(400).json({ error: 'Invalid status value' });
 
-    const [result] = await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [c, wid]);
-    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    const placeholders = cleanIds.map(() => '?').join(',');
 
-    if (!updated) return res.status(404).json({ error: 'Not found.' });
+    const [result] = await db.execute(
+      `UPDATE work_orders SET status = ? WHERE id IN (${placeholders})`,
+      [c, ...cleanIds]
+    );
 
-    console.log('[single-status]', { id: wid, statusRequested: status, statusCanonical: c, affected: result?.affectedRows ?? 0 });
-    res.json({ ...updated, status: canonStatus(updated.status) || updated.status });
+    // Fetch the updated rows
+    const [updatedRows] = await db.execute(
+      `SELECT * FROM work_orders WHERE id IN (${placeholders})`,
+      cleanIds
+    );
+
+    const items = updatedRows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) }));
+
+    res.json({
+      ok: true,
+      affected: result?.affectedRows ?? items.length,
+      items
+    });
   } catch (err) {
-    console.error('Work-order status update error:', err);
-    res.status(500).json({ error: 'Failed to update status.' });
+    console.error('Bulk-status error:', err);
+    res.status(500).json({ error: 'Failed to bulk update status.' });
   }
 });
-
-// ── BULK status update — hardened
-app.put('/work-orders/bulk-status',
-  authenticate,
-  express.json(),
-  async (req, res) => {
-    try {
-      const { ids, status } = req.body || {};
-
-      if (!Array.isArray(ids) || !ids.length) {
-        return res.status(400).json({ error: 'ids[] required' });
-      }
-      const cleanIds = ids.map(n => Number(n)).filter(Number.isFinite);
-      if (!cleanIds.length) {
-        return res.status(400).json({ error: 'no valid ids' });
-      }
-
-      const c = canonStatus(status);
-      if (!c) return res.status(400).json({ error: 'Invalid status value' });
-
-      const placeholders = cleanIds.map(() => '?').join(',');
-
-      const [updResult] = await db.execute(
-        `UPDATE work_orders SET status = ? WHERE id IN (${placeholders})`,
-        [c, ...cleanIds]
-      );
-
-      const [updatedRows] = await db.execute(
-        `SELECT * FROM work_orders WHERE id IN (${placeholders})`,
-        cleanIds
-      );
-
-      const items = updatedRows.map(r => ({ ...r, status: canonStatus(r.status) || r.status }));
-
-      console.log('[bulk-status]', {
-        statusRequested: status,
-        statusCanonical: c,
-        idsRequested: cleanIds,
-        affected: updResult?.affectedRows ?? 0
-      });
-
-      return res.status(200).json({
-        ok: true,
-        affected: updResult?.affectedRows ?? 0,
-        items
-      });
-    } catch (err) {
-      console.error('Bulk-status error:', err);
-      res.status(500).json({ error: 'Failed to bulk update status.' });
-    }
-  }
-);
 
 // Helpers for any-field uploads
 function splitFilesAny(files = []) {
@@ -625,7 +614,7 @@ const isTruthy = (v) => {
 };
 const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
 
-// CREATE — stores workOrderNumber and optional poNumber
+// CREATE
 app.post(
   '/work-orders',
   authenticate,
@@ -687,7 +676,7 @@ app.post(
   }
 );
 
-// EDIT — any authenticated user can edit (removed assigned-tech restriction)
+// EDIT
 app.put(
   '/work-orders/:id/edit',
   authenticate,
@@ -787,7 +776,7 @@ app.put(
 
       await db.execute(sql, params);
       const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-      res.json(updated);
+      res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
     } catch (err) {
       console.error('Work-order edit error:', err);
       res.status(500).json({ error: 'Failed to update work order.' });
@@ -795,7 +784,7 @@ app.put(
   }
 );
 
-// Append a single photo — open to any authenticated user
+// Append a single photo
 app.post(
   '/work-orders/:id/append-photo',
   authenticate,
@@ -814,12 +803,12 @@ app.post(
 
       await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [merged.join(','), wid]);
       const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-      res.json(updated);
+      res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
     } catch (err) { console.error('Append-photo error:', err); res.status(500).json({ error: 'Failed to append photo.' }); }
   }
 );
 
-// Append multiple photos — open to any authenticated user
+// Append multiple photos
 app.post(
   '/work-orders/:id/append-photos',
   authenticate,
@@ -839,7 +828,7 @@ app.post(
 
       await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [merged.join(','), wid]);
       const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-      res.json(updated);
+      res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
     } catch (err) { console.error('Append-photos error:', err); res.status(500).json({ error: 'Failed to append photos.' }); }
   }
 );
@@ -898,7 +887,7 @@ app.put('/work-orders/:id/update-date',
       }
 
       const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-      res.json(fresh);
+      res.json({ ...fresh, status: displayStatusOrDefault(fresh.status) });
     } catch (err) {
       console.error('Update-date error:', err);
       res.status(500).json({ error: 'Failed to update date.' });
@@ -919,7 +908,7 @@ app.put('/work-orders/:id/unschedule',
         [nextStatus, wid]
       );
       const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-      res.json(fresh);
+      res.json({ ...fresh, status: displayStatusOrDefault(fresh.status) });
     } catch (err) {
       console.error('Unschedule error:', err);
       res.status(500).json({ error: 'Failed to unschedule.' });
@@ -940,7 +929,7 @@ app.get('/calendar/day', authenticate, async (req, res) => {
         ORDER BY TIME(scheduledDate) ASC, COALESCE(dayOrder, 999999) ASC, id ASC`,
       [date]
     );
-    res.json(rows);
+    res.json(rows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) })));
   } catch (err) {
     console.error('Calendar day fetch error:', err);
     res.status(500).json({ error: 'Failed to fetch day.' });
@@ -977,7 +966,7 @@ app.put('/calendar/day-order',
           ORDER BY TIME(scheduledDate) ASC, COALESCE(dayOrder, 999999) ASC, id ASC`,
         [date]
       );
-      res.json({ ok: true, items: rows });
+      res.json({ ok: true, items: rows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) })) });
     } catch (err) {
       console.error('Day-order error:', err);
       res.status(500).json({ error: 'Failed to save order.' });
@@ -998,7 +987,7 @@ app.put('/work-orders/:id/assign', authenticate, authorize('dispatcher', 'admin'
     }
     await db.execute('UPDATE work_orders SET assignedTo = ? WHERE id = ?', [val, req.params.id]);
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
-    res.json(updated);
+    res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
   } catch (err) { console.error('Assign error:', err); res.status(500).json({ error: 'Failed to assign work order.' }); }
 });
 
@@ -1046,7 +1035,7 @@ app.delete('/work-orders/:id/notes', authenticate, express.json(), async (req, r
   } catch (err) { console.error('Delete note (body) error:', err); res.status(500).json({ error: 'Failed to delete note.' }); }
 });
 
-// Delete a specific attachment — any authenticated user
+// Delete a specific attachment
 app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (req, res) => {
   try {
     const wid = req.params.id; const { photoPath } = req.body;
@@ -1062,7 +1051,7 @@ app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (r
     const keep = (existing?.photoPath || '').split(',').filter(p => p && p !== photoPath);
     await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [keep.join(','), wid]);
     const [[fresh]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-    res.json(fresh);
+    res.json({ ...fresh, status: displayStatusOrDefault(fresh.status) });
   } catch (err) { console.error('Delete attachment error:', err); res.status(500).json({ error: 'Failed to delete attachment.' }); }
 });
 
@@ -1159,9 +1148,18 @@ app.get('/files', async (req, res) => {
 });
 
 // ─── GLOBAL ERROR HANDLER ────────────────────────────────────────────────────
+// Map JSON parse errors to 400 instead of crashing the container
 app.use((err, req, res, next) => {
-  if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'Payload too large' });
-  if (err) { console.error('Unhandled error:', err); return res.status(500).json({ error: 'Server error' }); }
+  if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+    return res.status(413).json({ error: 'Payload too large' });
+  }
+  if (err && err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({ error: 'Invalid JSON body' });
+  }
+  if (err) {
+    console.error('Unhandled error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
   next();
 });
 
