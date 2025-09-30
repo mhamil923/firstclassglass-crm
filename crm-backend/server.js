@@ -33,7 +33,7 @@ const DEFAULT_WINDOW = Math.max(15, Number(DEFAULT_WINDOW_MINUTES) || 120);
 const S3_SIGNED_TTL = Number(process.env.S3_SIGNED_TTL || 900);
 
 // ⬆️ Limits (env overridable)
-the MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || 75);
+const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || 75);
 const MAX_FILES        = Number(process.env.MAX_FILES || 120);
 const MAX_FIELDS       = Number(process.env.MAX_FIELDS || 500);
 const MAX_PARTS        = Number(process.env.MAX_PARTS  || 2000);
@@ -253,7 +253,7 @@ async function ensureCols() {
       if (!found.length) {
         await db.query(`ALTER TABLE \`work_orders\` ADD COLUMN \`${name}\` ${type}`);
       } else {
-        if ((name === 'scheduledDate' || name === 'scheduledEnd')) {
+        if (name === 'scheduledDate' || name === 'scheduledEnd') {
           try {
             const t = await getColumnType('work_orders', name);
             if (t && /^date(?!time)/.test(t)) {
@@ -379,7 +379,7 @@ function authenticate(req, res, next) {
   try {
     req.user = jwt.verify(token, JWT_SECRET);
 
-    // ⬇️ Elevate "Mark" to admin for this request
+    // ⬇️ Elevate "Mark" to admin for this request (per requirement)
     if (req.user && req.user.username && req.user.username.toLowerCase() === 'mark') {
       req.user.role = 'admin';
     }
@@ -419,18 +419,18 @@ app.get('/users', authenticate, async (req, res) => {
 });
 
 // ─── CUSTOMERS ───────────────────────────────────────────────────────────────
+app.get('/customers/:id', authenticate, async (req, res) => {
+  try {
+    const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers WHERE id = ?', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Customer not found.' });
+    res.json(rows[0]);
+  } catch (err) { console.error('Customer get error:', err); res.status(500).json({ error: 'Failed to fetch customer.' }); }
+});
 app.get('/customers', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers');
     res.json(rows);
   } catch (err) { console.error('Customers list error:', err); res.status(500).json({ error: 'Failed to fetch customers.' }); }
-});
-app.get('/customers/:id', authenticate, async (req, res) => {
-  0 {
-    const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers WHERE id = ?', [req.params.id]);
-    if (!rows.length) return res.status(404).json({ error: 'Customer not found.' });
-    res.json(rows[0]);
-  } catch (err) { console.error('Customer get error:', err); res.status(500).json({ error: 'Failed to fetch customer.' }); }
 });
 app.post('/customers', authenticate, async (req, res) => {
   const { name, billingAddress } = req.body;
@@ -442,6 +442,7 @@ app.post('/customers', authenticate, async (req, res) => {
 });
 
 // ─── WORK ORDERS ─────────────────────────────────────────────────────────────
+// NOTE: Removed tech-only filtering; everyone sees the full list
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
     const [raw] = await db.execute(
@@ -489,6 +490,9 @@ app.get('/work-orders/:id', authenticate, async (req, res) => {
 /**
  * Generic light-weight update.
  * Accepts any subset of: { status, poNumber, workOrderNumber }.
+ * (Use /assign and /edit for other fields/files.)
+ *
+ * NOTE: any authenticated user may update.
  */
 app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
   try {
@@ -621,7 +625,7 @@ const isTruthy = (v) => {
 };
 const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
 
-// CREATE
+// CREATE — stores workOrderNumber and optional poNumber
 app.post(
   '/work-orders',
   authenticate,
@@ -683,7 +687,7 @@ app.post(
   }
 );
 
-// EDIT
+// EDIT — any authenticated user can edit (removed assigned-tech restriction)
 app.put(
   '/work-orders/:id/edit',
   authenticate,
@@ -791,7 +795,7 @@ app.put(
   }
 );
 
-// Append a single photo
+// Append a single photo — open to any authenticated user
 app.post(
   '/work-orders/:id/append-photo',
   authenticate,
@@ -815,7 +819,7 @@ app.post(
   }
 );
 
-// Append multiple photos
+// Append multiple photos — open to any authenticated user
 app.post(
   '/work-orders/:id/append-photos',
   authenticate,
@@ -840,7 +844,7 @@ app.post(
   }
 );
 
-// ─── CALENDAR / SCHEDULING ENDPOINTS ─────────────────────────────────────────
+// ─── CALENDAR / SCHEDULING ENDPOINTS (dispatcher/admin only) ─────────────────
 app.put('/work-orders/:id/update-date',
   authenticate,
   authorize('dispatcher','admin'),
@@ -1042,7 +1046,7 @@ app.delete('/work-orders/:id/notes', authenticate, express.json(), async (req, r
   } catch (err) { console.error('Delete note (body) error:', err); res.status(500).json({ error: 'Failed to delete note.' }); }
 });
 
-// Delete a specific attachment
+// Delete a specific attachment — any authenticated user
 app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (req, res) => {
   try {
     const wid = req.params.id; const { photoPath } = req.body;
