@@ -46,8 +46,6 @@ const s3 = new AWS.S3();
 const app = express();
 app.set('trust proxy', true);
 app.use(cors({ origin: true, credentials: true }));
-
-// Keep body limits generous but safe
 app.use(bodyParser.json({ limit: '20mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '20mb' }));
 
@@ -91,58 +89,36 @@ function roundSqlUpToHour(sqlStr) {
   const r = roundUpDateToHour(d);
   return toSqlDateTimeFromParts(r.getFullYear(), r.getMonth()+1, r.getDate(), r.getHours(), r.getMinutes(), r.getSeconds());
 }
-
 function parseDateTimeFlexible(input) {
   if (input == null) return null;
   const s = String(input).trim();
   if (!s) return null;
-
   let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (m) {
-    const [ , Y, Mo, D ] = m.map(Number);
-    return toSqlDateTimeFromParts(Y, Mo, D, 8, 0, 0);
-  }
-
+  if (m) { const [ , Y, Mo, D ] = m.map(Number); return toSqlDateTimeFromParts(Y, Mo, D, 8, 0, 0); }
   m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2})(?::(\d{2})(?::(\d{2}))?)?$/.exec(s);
   if (m) {
-    const Y  = Number(m[1]);
-    const Mo = Number(m[2]);
-    const D  = Number(m[3]);
-    const h  = Number(m[4]);
-    const mi = Number(m[5] || 0);
-    const se = Number(m[6] || 0);
+    const Y  = Number(m[1]), Mo = Number(m[2]), D  = Number(m[3]);
+    const h  = Number(m[4]), mi = Number(m[5] || 0), se = Number(m[6] || 0);
     return toSqlDateTimeFromParts(Y, Mo, D, h, mi, se);
   }
-
   return null;
 }
 function parseHHmm(s) {
   if (!s) return null;
   const v = String(s).trim();
   let m = /^(\d{1,2})$/.exec(v);
-  if (m) {
-    const h = Number(m[1]);
-    if (h >= 0 && h <= 23) return { h, m: 0 };
-    return null;
-  }
+  if (m) { const h = Number(m[1]); if (h >= 0 && h <= 23) return { h, m: 0 }; return null; }
   m = /^(\d{1,2}):(\d{2})$/.exec(v);
-  if (m) {
-    const h = Number(m[1]), mi = Number(m[2]);
-    if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
-    return { h, m: mi };
-  }
+  if (m) { const h = Number(m[1]), mi = Number(m[2]); if (h < 0 || h > 23 || mi < 0 || mi > 59) return null; return { h, m: mi }; }
   return null;
 }
 function windowSql({ dateSql, endTime, timeWindow }) {
   if (!dateSql) return { startSql: null, endSql: null };
-
   const datePartMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateSql);
   const Y = datePartMatch ? Number(datePartMatch[1]) : null;
   const Mo = datePartMatch ? Number(datePartMatch[2]) : null;
   const D = datePartMatch ? Number(datePartMatch[3]) : null;
-
   let endSql = null;
-
   if (timeWindow && Y) {
     const tw = String(timeWindow).trim();
     const wm = /^(\d{1,2}(?::\d{2})?)\s*-\s*(\d{1,2}(?::\d{2})?)$/.exec(tw);
@@ -155,7 +131,6 @@ function windowSql({ dateSql, endTime, timeWindow }) {
       }
     }
   }
-
   if (!endSql && endTime && Y) {
     const hm = parseHHmm(endTime);
     if (hm) {
@@ -163,17 +138,14 @@ function windowSql({ dateSql, endTime, timeWindow }) {
       endSql = toSqlDateTimeFromParts(endD.getFullYear(), endD.getMonth()+1, endD.getDate(), endD.getHours(), 0, 0);
     }
   }
-
   if (!endSql) {
     endSql = addMinutesToSql(dateSql, DEFAULT_WINDOW);
     endSql = roundSqlUpToHour(endSql);
   }
-
   return { startSql: dateSql, endSql };
 }
 
 // ─── STATUS CANONICALIZER ───────────────────────────────────────────────────
-// Canonical list we want stored/returned
 const STATUS_CANON = [
   'Needs to be Scheduled',
   'Scheduled',
@@ -182,35 +154,25 @@ const STATUS_CANON = [
   'Parts In',
   'Completed',
 ];
-
 function statusKey(s) {
   return String(s ?? '')
     .toLowerCase()
-    .replace(/[_-]+/g, ' ')  // treat -, _ as spaces
+    .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 const STATUS_LOOKUP = new Map(STATUS_CANON.map(s => [statusKey(s), s]));
 const STATUS_SYNONYMS = new Map([
-  // Parts In variants
-  ['part in', 'Parts In'], ['parts in', 'Parts In'], ['parts  in', 'Parts In'],
-  ['parts-in', 'Parts In'], ['parts_in', 'Parts In'], ['partsin', 'Parts In'],
-  ['part s in', 'Parts In'],
-  // Waiting on Parts variants
-  ['waiting on part', 'Waiting on Parts'], ['waiting on parts', 'Waiting on Parts'],
-  ['waiting-on-parts', 'Waiting on Parts'], ['waiting_on_parts', 'Waiting on Parts'],
-  ['waitingonparts', 'Waiting on Parts'],
-  // Needs to be Scheduled guard
-  ['needs to be schedule', 'Needs to be Scheduled'],
-  ['need to be scheduled', 'Needs to be Scheduled'],
+  ['part in','Parts In'],['parts in','Parts In'],['parts  in','Parts In'],
+  ['parts-in','Parts In'],['parts_in','Parts In'],['partsin','Parts In'],['part s in','Parts In'],
+  ['waiting on part','Waiting on Parts'],['waiting on parts','Waiting on Parts'],
+  ['waiting-on-parts','Waiting on Parts'],['waiting_on_parts','Waiting on Parts'],['waitingonparts','Waiting on Parts'],
+  ['needs to be schedule','Needs to be Scheduled'],['need to be scheduled','Needs to be Scheduled'],
 ]);
-
 function canonStatus(input) {
   const k = statusKey(input);
   return STATUS_LOOKUP.get(k) || STATUS_SYNONYMS.get(k) || null;
 }
-
-// helpful for GETs: if blank/legacy, show something sane
 function displayStatusOrDefault(s) {
   return canonStatus(s) || (String(s || '').trim() ? String(s) : 'Needs to be Scheduled');
 }
@@ -266,7 +228,6 @@ ensureCols().catch(e => console.warn('⚠️ ensureCols:', e.message));
 
 // ─── MULTER ─────────────────────────────────────────────────────────────────
 const allowMime = (m) => m && (/^image\//.test(m) || m === 'application/pdf');
-
 function makeUploader() {
   const limits = {
     fileSize: MAX_FILE_SIZE_MB * 1024 * 1024,
@@ -275,7 +236,6 @@ function makeUploader() {
     parts:  MAX_PARTS,
   };
   const fileFilter = (req, file, cb) => cb(null, allowMime(file.mimetype));
-
   if (S3_BUCKET) {
     return multer({
       storage: multerS3({
@@ -290,10 +250,8 @@ function makeUploader() {
       limits, fileFilter,
     });
   }
-
   const localDir = path.resolve(__dirname, 'uploads');
   if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
-
   const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, localDir),
     filename: (req, file, cb) => {
@@ -302,17 +260,13 @@ function makeUploader() {
       cb(null, `${base}${ext}`);
     }
   });
-
   return multer({ storage, limits, fileFilter });
 }
 const upload = makeUploader();
-
 if (!S3_BUCKET) {
   const localDir = path.resolve(__dirname, 'uploads');
   app.use('/uploads', express.static(localDir));
 }
-
-// Error wrapper (map Multer limits to HTTP)
 function withMulter(handler) {
   return (req, res, next) => {
     handler(req, res, (err) => {
@@ -334,8 +288,6 @@ function withMulter(handler) {
     });
   };
 }
-
-// Helpers for .any()
 const isPdf = (f) =>
   f?.mimetype === 'application/pdf' ||
   /\.pdf$/i.test(f?.originalname || '') ||
@@ -353,7 +305,6 @@ app.post('/auth/register', async (req, res) => {
     res.sendStatus(201);
   } catch (err) { console.error('Register error:', err); res.status(500).json({ error: 'Failed to register user.' }); }
 });
-
 app.post('/auth/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'username & password required' });
@@ -364,18 +315,14 @@ app.post('/auth/login', async (req, res) => {
     res.json({ token });
   } catch (err) { console.error('Login error:', err); res.status(500).json({ error: 'Login failed.' }); }
 });
-
 function authenticate(req, res, next) {
   const token = (req.headers.authorization || '').split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Missing token' });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
-
-    // Elevate "Mark" to admin for this request
     if (req.user && req.user.username && req.user.username.toLowerCase() === 'mark') {
       req.user.role = 'admin';
     }
-
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid token' });
@@ -384,7 +331,6 @@ function authenticate(req, res, next) {
 function authorize(...roles) {
   return (req, res, next) => (!req.user || !roles.includes(req.user.role)) ? res.status(403).json({ error: 'Forbidden' }) : next();
 }
-
 app.get('/auth/me', authenticate, (req, res) => res.json(req.user));
 app.get('/', (_, res) => res.send('API running'));
 app.get('/ping', (_, res) => res.send('pong'));
@@ -417,7 +363,7 @@ app.get('/customers', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) { console.error('Customers list error:', err); res.status(500).json({ error: 'Failed to fetch customers.' }); }
 });
-app.get('/customers/:id', authenticate, async (req, res) => {
+app.get('/customers/:id(\\d+)', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers WHERE id = ?', [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: 'Customer not found.' });
@@ -445,7 +391,6 @@ app.get('/work-orders', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) { console.error('Work-orders list error:', err); res.status(500).json({ error: 'Failed to fetch work orders.' }); }
 });
-
 app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -454,7 +399,6 @@ app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) { console.error('Unscheduled list error:', err); res.status(500).json({ error: 'Failed to fetch unscheduled.' }); }
 });
-
 app.get('/work-orders/search', authenticate, async (req, res) => {
   const { customer = '', poNumber = '', siteLocation = '', workOrderNumber = '' } = req.query;
   try {
@@ -470,29 +414,62 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
   } catch (err) { console.error('Work-orders search error:', err); res.status(500).json({ error: 'Search failed.' }); }
 });
 
-app.get('/work-orders/:id', authenticate, async (req, res) => {
+// ── BULK status update — put this BEFORE any "/:id" routes and keep it here
+function parseIdArray(maybeIds) {
+  if (Array.isArray(maybeIds)) return maybeIds;
+  if (typeof maybeIds === 'string') return maybeIds.split(/[,\s]+/).filter(Boolean);
+  return [];
+}
+function coerceIdsToNumbers(mixed) {
+  return mixed
+    .map(v => {
+      const n = Number(String(v).trim());
+      return Number.isFinite(n) ? n : NaN;
+    })
+    .filter(n => Number.isFinite(n));
+}
+app.put('/work-orders/bulk-status', authenticate, express.json(), async (req, res) => {
+  try {
+    const { ids, status } = req.body || {};
+    const rawIds = parseIdArray(ids);
+    const cleanIds = coerceIdsToNumbers(rawIds);
+    if (!cleanIds.length) return res.status(400).json({ error: 'ids[] required (numbers or comma-separated string)' });
+    const c = canonStatus(status);
+    if (!c) return res.status(400).json({ error: 'Invalid status value' });
+
+    const placeholders = cleanIds.map(() => '?').join(',');
+    const [result] = await db.execute(
+      `UPDATE work_orders SET status = ? WHERE id IN (${placeholders})`,
+      [c, ...cleanIds]
+    );
+    const [updatedRows] = await db.execute(
+      `SELECT * FROM work_orders WHERE id IN (${placeholders})`,
+      cleanIds
+    );
+    const items = updatedRows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) }));
+    res.json({ ok: true, affected: result?.affectedRows ?? items.length, items });
+  } catch (err) {
+    console.error('Bulk-status error:', err);
+    res.status(500).json({ error: 'Failed to bulk update status.' });
+  }
+});
+
+// ── SINGLE-ROW routes (now numeric-only) ─────────────────────────────────────
+app.get('/work-orders/:id(\\d+)', authenticate, async (req, res) => {
   try {
     const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
     if (!row) return res.status(404).json({ error: 'Not found.' });
     res.json({ ...row, status: displayStatusOrDefault(row.status) });
   } catch (err) { console.error('Work-order get error:', err); res.status(500).json({ error: 'Failed to fetch work order.' }); }
 });
-
-/**
- * Generic light-weight update.
- * Accepts any subset of: { status, poNumber, workOrderNumber }.
- */
-app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
+app.put('/work-orders/:id(\\d+)', authenticate, express.json(), async (req, res) => {
   try {
     const wid = Number(req.params.id);
     const { status, poNumber, workOrderNumber } = req.body || {};
-
     if (status === undefined && poNumber === undefined && workOrderNumber === undefined) {
       return res.status(400).json({ error: 'Provide status and/or poNumber and/or workOrderNumber.' });
     }
-
-    const sets = [];
-    const params = [];
+    const sets = []; const params = [];
     if (status !== undefined) {
       const c = canonStatus(status);
       if (!c) return res.status(400).json({ error: 'Invalid status value' });
@@ -500,13 +477,11 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
     }
     if (poNumber !== undefined)        { sets.push('poNumber = ?');         params.push(poNumber || null); }
     if (workOrderNumber !== undefined) { sets.push('workOrderNumber = ?');  params.push(workOrderNumber || null); }
-
     if (!sets.length) return res.status(400).json({ error: 'No fields to update.' });
 
     const sql = `UPDATE work_orders SET ${sets.join(', ')} WHERE id = ?`;
     params.push(wid);
     await db.execute(sql, params);
-
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!updated) return res.status(404).json({ error: 'Not found.' });
     res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
@@ -515,9 +490,7 @@ app.put('/work-orders/:id', authenticate, express.json(), async (req, res) => {
     res.status(500).json({ error: 'Failed to update work order.' });
   }
 });
-
-// Dedicated status endpoint
-app.put('/work-orders/:id/status', authenticate, express.json(), async (req, res) => {
+app.put('/work-orders/:id(\\d+)/status', authenticate, express.json(), async (req, res) => {
   const { status } = req.body || {};
   if (!status) return res.status(400).json({ error: 'status is required.' });
   try {
@@ -528,67 +501,6 @@ app.put('/work-orders/:id/status', authenticate, express.json(), async (req, res
     if (!updated) return res.status(404).json({ error: 'Not found.' });
     res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
   } catch (err) { console.error('Work-order status update error:', err); res.status(500).json({ error: 'Failed to update status.' }); }
-});
-
-// ── BULK status update — tolerant IDs, always returns JSON
-function parseIdArray(maybeIds) {
-  if (Array.isArray(maybeIds)) {
-    return maybeIds;
-  }
-  if (typeof maybeIds === 'string') {
-    // allow "41,47,49" or "41 47 49"
-    return maybeIds.split(/[,\s]+/).filter(Boolean);
-  }
-  return [];
-}
-function coerceIdsToNumbers(mixed) {
-  return mixed
-    .map(v => {
-      // Allow numeric strings, strip non-digits defensively
-      const n = Number(String(v).trim());
-      return Number.isFinite(n) ? n : NaN;
-    })
-    .filter(n => Number.isFinite(n));
-}
-
-app.put('/work-orders/bulk-status', authenticate, express.json(), async (req, res) => {
-  try {
-    const { ids, status } = req.body || {};
-
-    const rawIds = parseIdArray(ids);
-    const cleanIds = coerceIdsToNumbers(rawIds);
-
-    if (!cleanIds.length) {
-      return res.status(400).json({ error: 'ids[] required (numbers or comma-separated string)' });
-    }
-
-    const c = canonStatus(status);
-    if (!c) return res.status(400).json({ error: 'Invalid status value' });
-
-    const placeholders = cleanIds.map(() => '?').join(',');
-
-    const [result] = await db.execute(
-      `UPDATE work_orders SET status = ? WHERE id IN (${placeholders})`,
-      [c, ...cleanIds]
-    );
-
-    // Fetch the updated rows
-    const [updatedRows] = await db.execute(
-      `SELECT * FROM work_orders WHERE id IN (${placeholders})`,
-      cleanIds
-    );
-
-    const items = updatedRows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) }));
-
-    res.json({
-      ok: true,
-      affected: result?.affectedRows ?? items.length,
-      items
-    });
-  } catch (err) {
-    console.error('Bulk-status error:', err);
-    res.status(500).json({ error: 'Failed to bulk update status.' });
-  }
 });
 
 // Helpers for any-field uploads
@@ -614,227 +526,203 @@ const isTruthy = (v) => {
 };
 const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
 
-// CREATE
-app.post(
-  '/work-orders',
-  authenticate,
-  withMulter(upload.any()),
-  async (req, res) => {
-    try {
-      const {
-        workOrderNumber = '',
-        poNumber = '',
-        customer, siteLocation = '', billingAddress,
-        problemDescription, status = 'Needs to be Scheduled', assignedTo,
-        billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
-      } = req.body;
+app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res) => {
+  try {
+    const {
+      workOrderNumber = '',
+      poNumber = '',
+      customer, siteLocation = '', billingAddress,
+      problemDescription, status = 'Needs to be Scheduled', assignedTo,
+      billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
+    } = req.body;
 
-      if (!customer || !billingAddress || !problemDescription) {
-        return res.status(400).json({ error: 'Missing required fields' });
-      }
-
-      const { pdf, images } = splitFilesAny(req.files || []);
-      if (!enforceImageCountOr413(res, images)) return;
-
-      const pdfPath   = pdf ? fileKey(pdf) : null;
-      const firstImg  = images[0] ? fileKey(images[0]) : null;
-
-      const cStatus = canonStatus(status) || 'Needs to be Scheduled';
-
-      const cols = [
-        'workOrderNumber','poNumber','customer','siteLocation','billingAddress',
-        'problemDescription','status','pdfPath','photoPath',
-        'billingPhone','sitePhone','customerPhone','customerEmail'
-      ];
-      const vals = [
-        workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
-        problemDescription, cStatus, pdfPath, firstImg,
-        billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null
-      ];
-
-      if (SCHEMA.hasAssignedTo && assignedTo !== undefined && assignedTo !== '') {
-        const assignedToVal = Number.isFinite(Number(assignedTo)) ? Number(assignedTo) : null;
-        cols.push('assignedTo'); vals.push(assignedToVal);
-      }
-
-      const placeholders = cols.map(() => '?').join(',');
-      const [r] = await db.execute(`INSERT INTO work_orders (${cols.join(',')}) VALUES (${placeholders})`, vals);
-
-      if (images.length > 1) {
-        const wid = r.insertId;
-        const moreKeys = images.slice(1).map(fileKey);
-        const [[existing]] = await db.execute('SELECT photoPath FROM work_orders WHERE id = ?', [wid]);
-        const current = (existing?.photoPath || '').split(',').filter(Boolean);
-        await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [[...current, ...moreKeys].join(','), wid]);
-      }
-
-      res.status(201).json({ workOrderId: r.insertId });
-    } catch (err) {
-      console.error('Work-order create error:', err);
-      res.status(500).json({ error: 'Failed to save work order.' });
+    if (!customer || !billingAddress || !problemDescription) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
+
+    const { pdf, images } = splitFilesAny(req.files || []);
+    if (!enforceImageCountOr413(res, images)) return;
+
+    const pdfPath   = pdf ? fileKey(pdf) : null;
+    const firstImg  = images[0] ? fileKey(images[0]) : null;
+
+    const cStatus = canonStatus(status) || 'Needs to be Scheduled';
+
+    const cols = [
+      'workOrderNumber','poNumber','customer','siteLocation','billingAddress',
+      'problemDescription','status','pdfPath','photoPath',
+      'billingPhone','sitePhone','customerPhone','customerEmail'
+    ];
+    const vals = [
+      workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
+      problemDescription, cStatus, pdfPath, firstImg,
+      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null
+    ];
+
+    if (SCHEMA.hasAssignedTo && assignedTo !== undefined && assignedTo !== '') {
+      const assignedToVal = Number.isFinite(Number(assignedTo)) ? Number(assignedTo) : null;
+      cols.push('assignedTo'); vals.push(assignedToVal);
+    }
+
+    const placeholders = cols.map(() => '?').join(',');
+    const [r] = await db.execute(`INSERT INTO work_orders (${cols.join(',')}) VALUES (${placeholders})`, vals);
+
+    if (images.length > 1) {
+      const wid = r.insertId;
+      const moreKeys = images.slice(1).map(fileKey);
+      const [[existing]] = await db.execute('SELECT photoPath FROM work_orders WHERE id = ?', [wid]);
+      const current = (existing?.photoPath || '').split(',').filter(Boolean);
+      await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [[...current, ...moreKeys].join(','), wid]);
+    }
+
+    res.status(201).json({ workOrderId: r.insertId });
+  } catch (err) {
+    console.error('Work-order create error:', err);
+    res.status(500).json({ error: 'Failed to save work order.' });
   }
-);
+});
 
-// EDIT
-app.put(
-  '/work-orders/:id/edit',
-  authenticate,
-  withMulter(upload.any()),
-  async (req, res) => {
-    try {
-      const wid = req.params.id;
-      const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-      if (!existing) return res.status(404).json({ error: 'Not found.' });
+app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), async (req, res) => {
+  try {
+    const wid = req.params.id;
+    const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-      const { pdf, images } = splitFilesAny(req.files || []);
-      if (!enforceImageCountOr413(res, images)) return;
+    const { pdf, images } = splitFilesAny(req.files || []);
+    if (!enforceImageCountOr413(res, images)) return;
 
-      let attachments = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
+    let attachments = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
 
-      const moveOldPdf =
-        isTruthy(req.body.keepOldInAttachments) ||
-        isTruthy(req.body.keepOldPdfInAttachments) ||
-        isTruthy(req.body.moveOldPdfToAttachments) ||
-        isTruthy(req.body.moveOldPdf) ||
-        isTruthy(req.body.moveExistingPdfToAttachments);
+    const moveOldPdf =
+      isTruthy(req.body.keepOldInAttachments) ||
+      isTruthy(req.body.keepOldPdfInAttachments) ||
+      isTruthy(req.body.moveOldPdfToAttachments) ||
+      isTruthy(req.body.moveOldPdf) ||
+      isTruthy(req.body.moveExistingPdfToAttachments);
 
-      const wantReplacePdf =
-        isTruthy(req.body.replacePdf) ||
-        isTruthy(req.body.setAsPrimaryPdf) ||
-        isTruthy(req.body.isPdfReplacement);
+    const wantReplacePdf =
+      isTruthy(req.body.replacePdf) ||
+      isTruthy(req.body.setAsPrimaryPdf) ||
+      isTruthy(req.body.isPdfReplacement);
 
-      let pdfPath = existing.pdfPath;
+    let pdfPath = existing.pdfPath;
 
-      if (pdf) {
-        const newPdfPath = fileKey(pdf);
-        const oldPdfPath = existing.pdfPath;
+    if (pdf) {
+      const newPdfPath = fileKey(pdf);
+      const oldPdfPath = existing.pdfPath;
 
-        if (wantReplacePdf) {
-          if (oldPdfPath) {
-            if (moveOldPdf) {
-              if (!attachments.includes(oldPdfPath)) attachments.push(oldPdfPath);
-            } else {
-              try {
-                if (/^uploads\//.test(oldPdfPath)) {
-                  if (S3_BUCKET) {
-                    await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPdfPath }).promise();
-                  } else {
-                    const full = path.resolve(__dirname, 'uploads', oldPdfPath.replace(/^uploads\//, ''));
-                    if (fs.existsSync(full)) fs.unlinkSync(full);
-                  }
+      if (wantReplacePdf) {
+        if (oldPdfPath) {
+          if (moveOldPdf) {
+            if (!attachments.includes(oldPdfPath)) attachments.push(oldPdfPath);
+          } else {
+            try {
+              if (/^uploads\//.test(oldPdfPath)) {
+                if (S3_BUCKET) {
+                  await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPdfPath }).promise();
+                } else {
+                  const full = path.resolve(__dirname, 'uploads', oldPdfPath.replace(/^uploads\//, ''));
+                  if (fs.existsSync(full)) fs.unlinkSync(full);
                 }
-              } catch (e) { console.warn('⚠️ PDF delete old:', e.message); }
-            }
+              }
+            } catch (e) { console.warn('⚠️ PDF delete old:', e.message); }
           }
-          pdfPath = newPdfPath;
-        } else {
-          attachments.push(newPdfPath);
         }
+        pdfPath = newPdfPath;
+      } else {
+        attachments.push(newPdfPath);
       }
+    }
 
-      const newPhotos = images.map(fileKey);
-      attachments = uniq([...attachments, ...newPhotos]);
+    const newPhotos = images.map(fileKey);
+    attachments = uniq([...attachments, ...newPhotos]);
 
-      const {
-        workOrderNumber = existing.workOrderNumber,
-        poNumber = existing.poNumber,
-        customer = existing.customer,
-        siteLocation = existing.siteLocation,
-        billingAddress = existing.billingAddress,
-        problemDescription = existing.problemDescription,
-        status = existing.status,
-        assignedTo = existing.assignedTo,
-        billingPhone = existing.billingPhone,
-        sitePhone = existing.sitePhone,
-        customerPhone = existing.customerPhone,
-        customerEmail = existing.customerEmail,
-      } = req.body;
+    const {
+      workOrderNumber = existing.workOrderNumber,
+      poNumber = existing.poNumber,
+      customer = existing.customer,
+      siteLocation = existing.siteLocation,
+      billingAddress = existing.billingAddress,
+      problemDescription = existing.problemDescription,
+      status = existing.status,
+      assignedTo = existing.assignedTo,
+      billingPhone = existing.billingPhone,
+      sitePhone = existing.sitePhone,
+      customerPhone = existing.customerPhone,
+      customerEmail = existing.customerEmail,
+    } = req.body;
 
-      const cStatus = canonStatus(status) || existing.status;
+    const cStatus = canonStatus(status) || existing.status;
 
-      let sql = `UPDATE work_orders
-                 SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,billingAddress=?,
-                     problemDescription=?,status=?,pdfPath=?,photoPath=?,
-                     billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?
-                 WHERE id=?`;
-      const params = [
-        workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
-        problemDescription, cStatus, pdfPath || null, attachments.join(','),
-        billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null,
-        wid
-      ];
-      if (SCHEMA.hasAssignedTo) {
-        sql = `UPDATE work_orders
+    let sql = `UPDATE work_orders
                SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,billingAddress=?,
                    problemDescription=?,status=?,pdfPath=?,photoPath=?,
-                   billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,assignedTo=?
+                   billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?
                WHERE id=?`;
-        const assignedToVal = (assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo);
-        params.splice(13, 0, assignedToVal);
-      }
-
-      await db.execute(sql, params);
-      const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-      res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
-    } catch (err) {
-      console.error('Work-order edit error:', err);
-      res.status(500).json({ error: 'Failed to update work order.' });
+    const params = [
+      workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
+      problemDescription, cStatus, pdfPath || null, attachments.join(','),
+      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null,
+      wid
+    ];
+    if (SCHEMA.hasAssignedTo) {
+      sql = `UPDATE work_orders
+             SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,billingAddress=?,
+                 problemDescription=?,status=?,pdfPath=?,photoPath=?,
+                 billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,assignedTo=?
+             WHERE id=?`;
+      const assignedToVal = (assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo);
+      params.splice(13, 0, assignedToVal);
     }
+
+    await db.execute(sql, params);
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
+  } catch (err) {
+    console.error('Work-order edit error:', err);
+    res.status(500).json({ error: 'Failed to update work order.' });
   }
-);
+});
 
-// Append a single photo
-app.post(
-  '/work-orders/:id/append-photo',
-  authenticate,
-  withMulter(upload.any()),
-  async (req, res) => {
-    try {
-      const wid = req.params.id;
-      const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-      if (!existing) return res.status(404).json({ error: 'Not found.' });
+app.post('/work-orders/:id(\\d+)/append-photo', authenticate, withMulter(upload.any()), async (req, res) => {
+  try {
+    const wid = req.params.id;
+    const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-      const { images } = splitFilesAny(req.files || []);
-      if (!images.length) return res.status(400).json({ error: 'No image provided.' });
+    const { images } = splitFilesAny(req.files || []);
+    if (!images.length) return res.status(400).json({ error: 'No image provided.' });
 
-      const oldPhotos = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
-      const merged = uniq([...oldPhotos, fileKey(images[0])]);
+    const oldPhotos = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
+    const merged = uniq([...oldPhotos, fileKey(images[0])]);
 
-      await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [merged.join(','), wid]);
-      const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-      res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
-    } catch (err) { console.error('Append-photo error:', err); res.status(500).json({ error: 'Failed to append photo.' }); }
-  }
-);
+    await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [merged.join(','), wid]);
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
+  } catch (err) { console.error('Append-photo error:', err); res.status(500).json({ error: 'Failed to append photo.' }); }
+});
 
-// Append multiple photos
-app.post(
-  '/work-orders/:id/append-photos',
-  authenticate,
-  withMulter(upload.any()),
-  async (req, res) => {
-    try {
-      const wid = req.params.id;
-      const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-      if (!existing) return res.status(404).json({ error: 'Not found.' });
+app.post('/work-orders/:id(\\d+)/append-photos', authenticate, withMulter(upload.any()), async (req, res) => {
+  try {
+    const wid = req.params.id;
+    const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-      const { images } = splitFilesAny(req.files || []);
-      if (!enforceImageCountOr413(res, images)) return;
-      if (!images.length) return res.status(400).json({ error: 'No images provided.' });
+    const { images } = splitFilesAny(req.files || []);
+    if (!enforceImageCountOr413(res, images)) return;
+    if (!images.length) return res.status(400).json({ error: 'No images provided.' });
 
-      const oldPhotos = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
-      const merged = uniq([...oldPhotos, ...images.map(fileKey)]);
+    const oldPhotos = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
+    const merged = uniq([...oldPhotos, ...images.map(fileKey)]);
 
-      await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [merged.join(','), wid]);
-      const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-      res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
-    } catch (err) { console.error('Append-photos error:', err); res.status(500).json({ error: 'Failed to append photos.' }); }
-  }
-);
+    await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [merged.join(','), wid]);
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
+  } catch (err) { console.error('Append-photos error:', err); res.status(500).json({ error: 'Failed to append photos.' }); }
+});
 
-// ─── CALENDAR / SCHEDULING ENDPOINTS (dispatcher/admin only) ─────────────────
-app.put('/work-orders/:id/update-date',
+// ─── CALENDAR / SCHEDULING (dispatcher/admin) ───────────────────────────────
+app.put('/work-orders/:id(\\d+)/update-date',
   authenticate,
   authorize('dispatcher','admin'),
   express.json(),
@@ -895,7 +783,7 @@ app.put('/work-orders/:id/update-date',
   }
 );
 
-app.put('/work-orders/:id/unschedule',
+app.put('/work-orders/:id(\\d+)/unschedule',
   authenticate,
   authorize('dispatcher','admin'),
   async (req, res) => {
@@ -975,7 +863,7 @@ app.put('/calendar/day-order',
 );
 
 // Assign / notes / delete endpoints
-app.put('/work-orders/:id/assign', authenticate, authorize('dispatcher', 'admin'), express.json(), async (req, res) => {
+app.put('/work-orders/:id(\\d+)/assign', authenticate, authorize('dispatcher', 'admin'), express.json(), async (req, res) => {
   try {
     if (!SCHEMA.hasAssignedTo) return res.status(400).json({ error: 'assignedTo column missing' });
     const { assignedTo } = req.body;
@@ -990,9 +878,7 @@ app.put('/work-orders/:id/assign', authenticate, authorize('dispatcher', 'admin'
     res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
   } catch (err) { console.error('Assign error:', err); res.status(500).json({ error: 'Failed to assign work order.' }); }
 });
-
-// Notes — any authenticated user can add/delete
-app.post('/work-orders/:id/notes', authenticate, express.json(), async (req, res) => {
+app.post('/work-orders/:id(\\d+)/notes', authenticate, express.json(), async (req, res) => {
   try {
     const wid = req.params.id; const { text } = req.body;
     if (!text) return res.status(400).json({ error: 'Note text required.' });
@@ -1006,8 +892,7 @@ app.post('/work-orders/:id/notes', authenticate, express.json(), async (req, res
     res.status(500).json({ error: 'Failed to add note.' });
   }
 });
-
-app.delete('/work-orders/:id/notes/:index', authenticate, async (req, res) => {
+app.delete('/work-orders/:id(\\d+)/notes/:index', authenticate, async (req, res) => {
   try {
     const wid = req.params.id; const idx = Number(req.params.index);
     if (!Number.isInteger(idx) || idx < 0) return res.status(400).json({ error: 'Invalid note index' });
@@ -1020,8 +905,7 @@ app.delete('/work-orders/:id/notes/:index', authenticate, async (req, res) => {
     res.json({ notes: arr });
   } catch (err) { console.error('Delete note error:', err); res.status(500).json({ error: 'Failed to delete note.' }); }
 });
-
-app.delete('/work-orders/:id/notes', authenticate, express.json(), async (req, res) => {
+app.delete('/work-orders/:id(\\d+)/notes', authenticate, express.json(), async (req, res) => {
   try {
     const wid = req.params.id; const idx = Number(req.body.index);
     if (!Number.isInteger(idx) || idx < 0) return res.status(400).json({ error: 'Invalid note index' });
@@ -1034,9 +918,7 @@ app.delete('/work-orders/:id/notes', authenticate, express.json(), async (req, r
     res.json({ notes: arr });
   } catch (err) { console.error('Delete note (body) error:', err); res.status(500).json({ error: 'Failed to delete note.' }); }
 });
-
-// Delete a specific attachment
-app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (req, res) => {
+app.delete('/work-orders/:id(\\d+)/attachment', authenticate, express.json(), async (req, res) => {
   try {
     const wid = req.params.id; const { photoPath } = req.body;
     if (!photoPath) return res.status(400).json({ error: 'photoPath required.' });
@@ -1054,8 +936,7 @@ app.delete('/work-orders/:id/attachment', authenticate, express.json(), async (r
     res.json({ ...fresh, status: displayStatusOrDefault(fresh.status) });
   } catch (err) { console.error('Delete attachment error:', err); res.status(500).json({ error: 'Failed to delete attachment.' }); }
 });
-
-app.delete('/work-orders/:id', authenticate, authorize('dispatcher', 'admin'), async (req, res) => {
+app.delete('/work-orders/:id(\\d+)', authenticate, authorize('dispatcher', 'admin'), async (req, res) => {
   try { await db.execute('DELETE FROM work_orders WHERE id = ?', [req.params.id]); res.json({ message: 'Deleted.' }); }
   catch (err) { console.error('Work-order delete error:', err); res.status(500).json({ error: 'Failed to delete.' }); }
 });
@@ -1148,7 +1029,6 @@ app.get('/files', async (req, res) => {
 });
 
 // ─── GLOBAL ERROR HANDLER ────────────────────────────────────────────────────
-// Map JSON parse errors to 400 instead of crashing the container
 app.use((err, req, res, next) => {
   if (err && (err.type === 'entity.too.large' || err.status === 413)) {
     return res.status(413).json({ error: 'Payload too large' });
