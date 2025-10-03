@@ -1,4 +1,4 @@
-// File: src/CalendarPage.js
+k// File: src/CalendarPage.js
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import api from "./api";
 import { Calendar, momentLocalizer } from "react-big-calendar";
@@ -16,12 +16,6 @@ const DnDCalendar = withDragAndDrop(Calendar);
 
 // Keep this in sync with server DEFAULT_WINDOW_MINUTES
 const DEFAULT_WINDOW_MIN = 120;
-
-// ---------- tiny helpers ----------
-const norm = (v) => (v ?? "").toString().trim();
-const statusKey = (s) =>
-  norm(s).toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-const isCompleted = (s) => statusKey(s) === "completed";
 
 // ---------- date helpers ----------
 function fromDbString(dbString) {
@@ -77,7 +71,7 @@ export default function WorkOrderCalendar() {
   // Day list modal
   const [dayModalOpen, setDayModalOpen] = useState(false);
   const [dayModalTitle, setDayModalTitle] = useState("");
-  theconst [dayOrders, setDayOrders] = useState([]);
+  const [dayOrders, setDayOrders] = useState([]); // ✅ fixed
   const [dayForModal, setDayForModal] = useState(null);
 
   // Quick edit modal
@@ -103,11 +97,11 @@ export default function WorkOrderCalendar() {
       .get("/work-orders")
       .then((res) => {
         const list = Array.isArray(res.data) ? res.data : [];
-        // Scheduled go to calendar
+        // Scheduled list
         setWorkOrders(list.filter((o) => o.scheduledDate));
-        // ⬇️ Unscheduled strip: exclude Completed
+        // Unscheduled list EXCLUDING Completed
         setUnscheduledOrders(
-          list.filter((o) => !o.scheduledDate && !isCompleted(o.status))
+          list.filter((o) => !o.scheduledDate && (o.status || "").trim() !== "Completed")
         );
       })
       .catch((err) => console.error("⚠️ Error fetching work orders:", err));
@@ -341,7 +335,7 @@ export default function WorkOrderCalendar() {
       <div className="container-fluid p-0">
         <h2 className="calendar-title">Work Order Calendar</h2>
 
-        {/* Unscheduled strip you can drag from */}
+        {/* Unscheduled strip you can drag from (Completed filtered out) */}
         <div className="unscheduled-container">
           <h4>Unscheduled Work Orders</h4>
           <div className="unscheduled-list">
