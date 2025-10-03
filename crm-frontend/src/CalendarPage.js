@@ -17,6 +17,12 @@ const DnDCalendar = withDragAndDrop(Calendar);
 // Keep this in sync with server DEFAULT_WINDOW_MINUTES
 const DEFAULT_WINDOW_MIN = 120;
 
+// ---------- tiny helpers ----------
+const norm = (v) => (v ?? "").toString().trim();
+const statusKey = (s) =>
+  norm(s).toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+const isCompleted = (s) => statusKey(s) === "completed";
+
 // ---------- date helpers ----------
 function fromDbString(dbString) {
   if (!dbString) return null;
@@ -71,7 +77,7 @@ export default function WorkOrderCalendar() {
   // Day list modal
   const [dayModalOpen, setDayModalOpen] = useState(false);
   const [dayModalTitle, setDayModalTitle] = useState("");
-  const [dayOrders, setDayOrders] = useState([]);
+  theconst [dayOrders, setDayOrders] = useState([]);
   const [dayForModal, setDayForModal] = useState(null);
 
   // Quick edit modal
@@ -97,8 +103,12 @@ export default function WorkOrderCalendar() {
       .get("/work-orders")
       .then((res) => {
         const list = Array.isArray(res.data) ? res.data : [];
+        // Scheduled go to calendar
         setWorkOrders(list.filter((o) => o.scheduledDate));
-        setUnscheduledOrders(list.filter((o) => !o.scheduledDate));
+        // ⬇️ Unscheduled strip: exclude Completed
+        setUnscheduledOrders(
+          list.filter((o) => !o.scheduledDate && !isCompleted(o.status))
+        );
       })
       .catch((err) => console.error("⚠️ Error fetching work orders:", err));
   }, []);
