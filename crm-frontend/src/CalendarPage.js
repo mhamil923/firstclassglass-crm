@@ -1,4 +1,4 @@
-k// File: src/CalendarPage.js
+// File: src/CalendarPage.js
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import api from "./api";
 import { Calendar, momentLocalizer } from "react-big-calendar";
