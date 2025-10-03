@@ -1,5 +1,4 @@
 // File: src/Home.js
-
 import React, { useEffect, useState, useCallback } from "react";
 import api from "./api";
 import moment from "moment";
@@ -35,11 +34,7 @@ export default function Home() {
     navigate(`/view-work-order/${orderId}`);
   };
 
-  /**
-   * Parse scheduledDate correctly:
-   * - If it has a timezone marker (Z or +hh:mm), moment will honor it and we convert to local.
-   * - If it has no timezone (e.g. "YYYY-MM-DD" or "YYYY-MM-DD HH:mm"), treat it as already local.
-   */
+  // Parse as local unless string already has a zone
   const parseAsLocal = (dt) => {
     if (!dt) return null;
     const s = String(dt);
@@ -60,7 +55,6 @@ export default function Home() {
     if (!o.scheduledDate) return false;
     const m = parseAsLocal(o.scheduledDate);
     if (!m.isValid()) return false;
-    // strictly after today (next calendar day or later)
     return m.isAfter(moment(), "day");
   });
 
@@ -73,6 +67,8 @@ export default function Home() {
     return m && m.isValid() ? m.format("YYYY-MM-DD HH:mm") : "";
   };
 
+  const woCell = (o) => o?.workOrderNumber || "—";
+
   return (
     <div className="home-container">
       <h2 className="home-title">Welcome to the CRM Dashboard</h2>
@@ -84,7 +80,7 @@ export default function Home() {
           <Table striped bordered={false} hover responsive className="styled-table">
             <thead>
               <tr>
-                <th>PO #</th>
+                <th>Work Order #</th>
                 <th>Customer</th>
                 <th>Site Location</th>
                 <th>Problem Description</th>
@@ -98,7 +94,7 @@ export default function Home() {
                   onClick={() => handleClick(o.id)}
                   style={{ cursor: "pointer" }}
                 >
-                  <td>{o.poNumber}</td>
+                  <td>{woCell(o)}</td>
                   <td>{o.customer}</td>
                   <td>{o.siteLocation}</td>
                   <td>{o.problemDescription}</td>
@@ -119,7 +115,7 @@ export default function Home() {
           <Table striped bordered={false} hover responsive className="styled-table">
             <thead>
               <tr>
-                <th>PO #</th>
+                <th>Work Order #</th>
                 <th>Customer</th>
                 <th>Site Location</th>
                 <th>Problem Description</th>
@@ -133,7 +129,7 @@ export default function Home() {
                   onClick={() => handleClick(o.id)}
                   style={{ cursor: "pointer" }}
                 >
-                  <td>{o.poNumber}</td>
+                  <td>{woCell(o)}</td>
                   <td>{o.customer}</td>
                   <td>{o.siteLocation}</td>
                   <td>{o.problemDescription}</td>
@@ -154,7 +150,7 @@ export default function Home() {
           <Table striped bordered={false} hover responsive className="styled-table">
             <thead>
               <tr>
-                <th>PO #</th>
+                <th>Work Order #</th>
                 <th>Customer</th>
                 <th>Site Location</th>
                 <th>Problem Description</th>
@@ -168,7 +164,7 @@ export default function Home() {
                   onClick={() => handleClick(o.id)}
                   style={{ cursor: "pointer" }}
                 >
-                  <td>{o.poNumber}</td>
+                  <td>{woCell(o)}</td>
                   <td>{o.customer}</td>
                   <td>{o.siteLocation}</td>
                   <td>{o.problemDescription}</td>
