@@ -6,7 +6,13 @@ import moment from "moment";
 import { jwtDecode } from "jwt-decode";
 import "./WorkOrders.css";
 
+/**
+ * Updated status list (order = how chips render L→R):
+ * New → Needs to be Quoted → Needs to be Scheduled → Scheduled → Waiting for Approval → Waiting on Parts → Parts In → Completed
+ */
 const STATUS_LIST = [
+  "New",
+  "Needs to be Quoted",
   "Needs to be Scheduled",
   "Scheduled",
   "Waiting for Approval",
@@ -19,10 +25,8 @@ const PARTS_WAITING = "Waiting on Parts";
 const PARTS_IN = "Parts In";
 
 // ---------- helpers ----------
-// Basic string normalize
 const norm = (v) => (v ?? "").toString().trim();
 
-// Build a tolerant status key (lowercase, collapse spaces, treat _ and - as spaces)
 const statusKey = (s) =>
   norm(s)
     .toLowerCase()
@@ -30,15 +34,38 @@ const statusKey = (s) =>
     .replace(/\s+/g, " ")
     .trim();
 
-// For compatibility with existing usages in the file:
 const normStatus = statusKey;
 
 // Canonical map for status normalization -> display label
 const CANON = new Map(STATUS_LIST.map((label) => [statusKey(label), label]));
 
-// Common variants/typos -> canonical
+// Variants/typos -> canonical
 const STATUS_SYNONYMS = new Map([
-  // Parts In variations
+  // New
+  ["new", "New"],
+
+  // Needs to be Quoted
+  ["needs to be quoted", "Needs to be Quoted"],
+  ["need to be quoted", "Needs to be Quoted"],
+  ["needs quote", "Needs to be Quoted"],
+  ["needs a quote", "Needs to be Quoted"],
+  ["quote needed", "Needs to be Quoted"],
+  ["needs quoting", "Needs to be Quoted"],
+  ["needs-to-be-quoted", "Needs to be Quoted"],
+  ["needs_to_be_quoted", "Needs to be Quoted"],
+
+  // Needs to be Scheduled
+  ["needs to be schedule", "Needs to be Scheduled"],
+  ["need to be scheduled", "Needs to be Scheduled"],
+
+  // Waiting on Parts
+  ["waiting on part", "Waiting on Parts"],
+  ["waiting on parts", "Waiting on Parts"],
+  ["waiting-on-parts", "Waiting on Parts"],
+  ["waiting_on_parts", "Waiting on Parts"],
+  ["waitingonparts", "Waiting on Parts"],
+
+  // Parts In
   ["part in", "Parts In"],
   ["parts in", "Parts In"],
   ["parts  in", "Parts In"],
@@ -46,20 +73,8 @@ const STATUS_SYNONYMS = new Map([
   ["parts_in", "Parts In"],
   ["partsin", "Parts In"],
   ["part s in", "Parts In"],
-
-  // Waiting on Parts variations
-  ["waiting on part", "Waiting on Parts"],
-  ["waiting on parts", "Waiting on Parts"],
-  ["waiting-on-parts", "Waiting on Parts"],
-  ["waiting_on_parts", "Waiting on Parts"],
-  ["waitingonparts", "Waiting on Parts"],
-
-  // Needs to be Scheduled (defensive)
-  ["needs to be schedule", "Needs to be Scheduled"],
-  ["need to be scheduled", "Needs to be Scheduled"],
 ]);
 
-// Convert any status-ish string into a canonical label for UI
 const toCanonicalStatus = (s) =>
   CANON.get(statusKey(s)) || STATUS_SYNONYMS.get(statusKey(s)) || norm(s);
 
@@ -118,7 +133,7 @@ export default function WorkOrders() {
     try {
       const res = await api.get("/work-orders", { headers: authHeaders() });
       const data = Array.isArray(res.data) ? res.data : [];
-      // normalize status text on the way in (for rendering)
+      // normalize status for rendering & filtering
       const canon = data.map((o) => ({ ...o, status: toCanonicalStatus(o.status) }));
       setWorkOrders(canon);
       return canon;
@@ -128,12 +143,11 @@ export default function WorkOrders() {
     }
   };
 
-  // filtering (normalize comparisons)
+  // filtering
   useEffect(() => {
     const todayStr = moment().format("YYYY-MM-DD");
 
     let rows = workOrders;
-
     if (selectedFilter === "Today") {
       rows = workOrders.filter(
         (o) =>
@@ -148,7 +162,7 @@ export default function WorkOrders() {
     setFilteredOrders(rows);
   }, [workOrders, selectedFilter]);
 
-  // counts (normalize into canonical buckets)
+  // counts
   const chipCounts = useMemo(() => {
     const buckets = Object.fromEntries(STATUS_LIST.map((s) => [s, 0]));
     let today = 0;
@@ -226,7 +240,6 @@ export default function WorkOrders() {
   // -------- Parts In modal --------
   const openPartsModal = () => {
     if (normStatus(selectedFilter) !== normStatus(PARTS_WAITING)) {
-      // force user onto Waiting tab before bulk action
       setSelectedFilter(PARTS_WAITING);
     }
     const source = workOrders.filter(
@@ -255,7 +268,6 @@ export default function WorkOrders() {
   };
 
   const visibleWaitingRows = useMemo(() => {
-    // guard: only show rows that are still Waiting on Parts
     const base = filteredOrders.filter(
       (o) => normStatus(o.status) === normStatus(PARTS_WAITING)
     );
@@ -270,7 +282,7 @@ export default function WorkOrders() {
     });
   }, [filteredOrders, poSearch]);
 
-  // bulk -> Parts In (use server bulk endpoint)
+  // bulk -> Parts In
   const markSelectedAsPartsIn = async () => {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
@@ -278,21 +290,18 @@ export default function WorkOrders() {
     const ids = Array.from(selectedIds);
     const prev = workOrders;
 
-    // optimistic UI: move them out of "Waiting on Parts"
     const next = prev.map((o) =>
       ids.includes(o.id) ? { ...o, status: PARTS_IN } : o
     );
     setWorkOrders(next);
 
     try {
-      // update server via bulk endpoint
       const res = await api.put(
         "/work-orders/bulk-status",
         { ids, status: PARTS_IN },
         { headers: authHeaders() }
       );
 
-      // Merge any server-returned rows (ensures we reflect canonical status text)
       const items = Array.isArray(res?.data?.items) ? res.data.items : [];
       if (items.length) {
         const byId = new Map(items.map((r) => [r.id, r]));
@@ -305,10 +314,8 @@ export default function WorkOrders() {
         );
       }
 
-      // go to Parts In, then refresh
       setSelectedFilter(PARTS_IN);
       await fetchWorkOrders();
-
       closePartsModal();
 
       const count = ids.length;
@@ -369,7 +376,6 @@ export default function WorkOrders() {
             })}
           </div>
 
-          {/* Only show on Waiting on Parts tab, and only if there are rows */}
           {normStatus(selectedFilter) === normStatus(PARTS_WAITING) &&
             filteredOrders.some((o) => normStatus(o.status) === normStatus(PARTS_WAITING)) && (
               <button type="button" className="btn btn-parts" onClick={openPartsModal}>
