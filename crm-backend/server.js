@@ -1,5 +1,3 @@
-// File: server.js
-
 // ─── IMPORTS ─────────────────────────────────────────────────────────────────
 const express    = require('express');
 const cors       = require('cors');
@@ -147,6 +145,8 @@ function windowSql({ dateSql, endTime, timeWindow }) {
 
 // ─── STATUS CANONICALIZER ───────────────────────────────────────────────────
 const STATUS_CANON = [
+  'New',                    // ⬅️ NEW
+  'Needs to be Quoted',     // ⬅️ NEW
   'Needs to be Scheduled',
   'Scheduled',
   'Waiting for Approval',
@@ -163,18 +163,33 @@ function statusKey(s) {
 }
 const STATUS_LOOKUP = new Map(STATUS_CANON.map(s => [statusKey(s), s]));
 const STATUS_SYNONYMS = new Map([
+  // Parts In
   ['part in','Parts In'],['parts in','Parts In'],['parts  in','Parts In'],
   ['parts-in','Parts In'],['parts_in','Parts In'],['partsin','Parts In'],['part s in','Parts In'],
+  // Waiting on Parts
   ['waiting on part','Waiting on Parts'],['waiting on parts','Waiting on Parts'],
   ['waiting-on-parts','Waiting on Parts'],['waiting_on_parts','Waiting on Parts'],['waitingonparts','Waiting on Parts'],
+  // Needs to be Scheduled
   ['needs to be schedule','Needs to be Scheduled'],['need to be scheduled','Needs to be Scheduled'],
+  // New (permissive)
+  ['new','New'],['fresh','New'],['just created','New'],
+  // Needs to be Quoted (common variants)
+  ['needs quote','Needs to be Quoted'],
+  ['need quote','Needs to be Quoted'],
+  ['quote needed','Needs to be Quoted'],
+  ['to be quoted','Needs to be Quoted'],
+  ['needs quotation','Needs to be Quoted'],
+  ['needs-to-be-quoted','Needs to be Quoted'],
+  ['needs_to_be_quoted','Needs to be Quoted'],
+  ['needstobequoted','Needs to be Quoted'],
 ]);
 function canonStatus(input) {
   const k = statusKey(input);
   return STATUS_LOOKUP.get(k) || STATUS_SYNONYMS.get(k) || null;
 }
 function displayStatusOrDefault(s) {
-  return canonStatus(s) || (String(s || '').trim() ? String(s) : 'Needs to be Scheduled');
+  // Default unknown/empty to "New"
+  return canonStatus(s) || (String(s || '').trim() ? String(s) : 'New');
 }
 
 // ─── SCHEMA HELPERS ─────────────────────────────────────────────────────────
@@ -532,7 +547,8 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       workOrderNumber = '',
       poNumber = '',
       customer, siteLocation = '', billingAddress,
-      problemDescription, status = 'Needs to be Scheduled', assignedTo,
+      problemDescription, status = 'New', // ⬅️ default changed to New
+      assignedTo,
       billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
     } = req.body;
 
@@ -546,7 +562,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
     const pdfPath   = pdf ? fileKey(pdf) : null;
     const firstImg  = images[0] ? fileKey(images[0]) : null;
 
-    const cStatus = canonStatus(status) || 'Needs to be Scheduled';
+    const cStatus = canonStatus(status) || 'New'; // ⬅️ default New
 
     const cols = [
       'workOrderNumber','poNumber','customer','siteLocation','billingAddress',
@@ -764,9 +780,17 @@ app.put('/work-orders/:id(\\d+)/update-date',
           endSql = w.endSql;
         }
 
-        const nextStatus = (status !== undefined && status !== null && String(status).length)
-          ? (canonStatus(status) || existing.status)
-          : (existing.status && existing.status !== 'Needs to be Scheduled' ? existing.status : 'Scheduled');
+        // If caller didn't supply a status, flip pre-schedule statuses to Scheduled
+        const provided = (status !== undefined && status !== null && String(status).length);
+        let nextStatus;
+        if (provided) {
+          nextStatus = canonStatus(status) || existing.status;
+        } else {
+          const preSchedule = new Set(['New','Needs to be Quoted','Needs to be Scheduled']);
+          nextStatus = preSchedule.has(displayStatusOrDefault(existing.status))
+            ? 'Scheduled'
+            : existing.status || 'Scheduled';
+        }
 
         await db.execute(
           'UPDATE work_orders SET scheduledDate = ?, scheduledEnd = ?, status = ?, dayOrder = NULL WHERE id = ?',
