@@ -406,19 +406,68 @@ app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) { console.error('Unscheduled list error:', err); res.status(500).json({ error: 'Failed to fetch unscheduled.' }); }
 });
+
+/**
+ * UPDATED flexible search:
+ * - customer, siteLocation: AND with LIKE
+ * - status: optional AND with LIKE (normalized by caller or keep partial)
+ * - If either poNumber or workOrderNumber (or both) provided:
+ *     match value against BOTH columns with OR (so entering a WO in the PO box still works)
+ * - If both provided and different, also add individual LIKEs to honor both fields
+ * - Null-safe via COALESCE
+ */
 app.get('/work-orders/search', authenticate, async (req, res) => {
-  const { customer = '', poNumber = '', siteLocation = '', workOrderNumber = '' } = req.query;
+  const {
+    customer = '',
+    poNumber = '',
+    siteLocation = '',
+    workOrderNumber = '',
+    status = '',
+  } = req.query || {};
+
   try {
-    const params = [`%${customer}%`, `%${poNumber}%`, `%${siteLocation}%`, `%${workOrderNumber}%`];
+    const terms = [];
+    const params = [];
+
+    terms.push(`COALESCE(w.customer,'')     LIKE ?`);      params.push(`%${customer}%`);
+    terms.push(`COALESCE(w.siteLocation,'') LIKE ?`);      params.push(`%${siteLocation}%`);
+
+    if (String(status).trim()) {
+      terms.push(`COALESCE(w.status,'') LIKE ?`);
+      params.push(`%${status}%`);
+    }
+
+    const combined = String(poNumber || '').trim();
+    const woOnly   = String(workOrderNumber || '').trim();
+
+    if (combined || woOnly) {
+      const needle = combined || woOnly;
+      terms.push(`(COALESCE(w.poNumber,'') LIKE ? OR COALESCE(w.workOrderNumber,'') LIKE ?)`);
+      params.push(`%${needle}%`, `%${needle}%`);
+    }
+
+    if (combined && woOnly && combined !== woOnly) {
+      terms.push(`COALESCE(w.workOrderNumber,'') LIKE ?`);
+      params.push(`%${woOnly}%`);
+      terms.push(`COALESCE(w.poNumber,'') LIKE ?`);
+      params.push(`%${combined}%`);
+    }
+
+    const where = terms.length ? `WHERE ${terms.join(' AND ')}` : '';
     const [rows] = await db.execute(
       `SELECT w.*, u.username AS assignedToName
          FROM work_orders w
          LEFT JOIN users u ON w.assignedTo = u.id
-        WHERE w.customer LIKE ? AND w.poNumber LIKE ? AND w.siteLocation LIKE ? AND COALESCE(w.workOrderNumber,'') LIKE ?`,
+       ${where}
+       ORDER BY w.id DESC`,
       params
     );
+
     res.json(rows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) })));
-  } catch (err) { console.error('Work-orders search error:', err); res.status(500).json({ error: 'Search failed.' }); }
+  } catch (err) {
+    console.error('Work-orders search error:', err);
+    res.status(500).json({ error: 'Search failed.' });
+  }
 });
 
 /**
