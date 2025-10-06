@@ -39,6 +39,9 @@ const displayPO = (obj) => {
   return po || wo || "N/A";
 };
 
+// simple string normalizer
+const norm = (v) => (v ?? "").toString().trim().toLowerCase();
+
 // ---------- event bubble ----------
 function CustomEvent({ event }) {
   const when =
@@ -71,6 +74,9 @@ function CustomEvent({ event }) {
 export default function WorkOrderCalendar() {
   const [workOrders, setWorkOrders] = useState([]);
   const [unscheduledOrders, setUnscheduledOrders] = useState([]);
+
+  // NEW: search box state for unscheduled strip
+  const [unscheduledSearch, setUnscheduledSearch] = useState("");
 
   const [view, setView] = useState("month");
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -319,7 +325,7 @@ export default function WorkOrderCalendar() {
           title: o.customer ? `${o.customer} — ${poLabel}` : poLabel,
           poNumber: o.poNumber,
           workOrderNumber: o.workOrderNumber,
-          displayPo: poLabel, // <- use everywhere we show "PO#"
+          displayPo: poLabel,
           customer: o.customer,
           siteLocation: o.siteLocation,
           problemDescription: o.problemDescription,
@@ -333,6 +339,27 @@ export default function WorkOrderCalendar() {
     [workOrders]
   );
 
+  // ---------- Unscheduled search/filter ----------
+  const filteredUnscheduled = useMemo(() => {
+    const q = norm(unscheduledSearch);
+    if (!q) return unscheduledOrders;
+    // Allow multi-token: every token must match customer OR WO OR PO
+    const tokens = q.split(/\s+/).filter(Boolean);
+    return unscheduledOrders.filter((o) => {
+      const hayCustomer = norm(o.customer);
+      const hayPO = norm(o.poNumber);
+      const hayWO = norm(o.workOrderNumber);
+      return tokens.every(
+        (t) =>
+          hayCustomer.includes(t) ||
+          hayPO.includes(t) ||
+          hayWO.includes(t)
+      );
+    });
+  }, [unscheduledOrders, unscheduledSearch]);
+
+  const clearUnscheduledSearch = () => setUnscheduledSearch("");
+
   return (
     <div className="calendar-page" onDragEnd={endGlobalDrag}>
       <div className="container-fluid p-0">
@@ -340,9 +367,32 @@ export default function WorkOrderCalendar() {
 
         {/* Unscheduled strip you can drag from (Completed filtered out) */}
         <div className="unscheduled-container">
-          <h4>Unscheduled Work Orders</h4>
+          <div className="d-flex align-items-center justify-content-between">
+            <h4 className="mb-2">Unscheduled Work Orders</h4>
+
+            {/* Search bar */}
+            <div className="input-group" style={{ maxWidth: 420 }}>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Search customer, WO #, or PO #"
+                value={unscheduledSearch}
+                onChange={(e) => setUnscheduledSearch(e.target.value)}
+              />
+              {unscheduledSearch ? (
+                <button className="btn btn-outline-secondary" onClick={clearUnscheduledSearch}>
+                  Clear
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="text-muted mb-2" style={{ fontSize: 12 }}>
+            Showing {filteredUnscheduled.length} of {unscheduledOrders.length}
+          </div>
+
           <div className="unscheduled-list">
-            {unscheduledOrders.map((order) => {
+            {filteredUnscheduled.map((order) => {
               const poLabel = displayPO(order);
               return (
                 <div
@@ -375,6 +425,9 @@ export default function WorkOrderCalendar() {
                 </div>
               );
             })}
+            {!filteredUnscheduled.length && (
+              <div className="empty-text">No matches for that search.</div>
+            )}
           </div>
         </div>
 
