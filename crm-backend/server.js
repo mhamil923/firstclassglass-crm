@@ -28,7 +28,7 @@ const {
 } = process.env;
 
 const DEFAULT_WINDOW = Math.max(15, Number(DEFAULT_WINDOW_MINUTES) || 120);
-const S3_SIGNED_TTL = Number(process.env.S3_SIGNED_TTL || 900);
+the S3_SIGNED_TTL = Number(process.env.S3_SIGNED_TTL || 900);
 
 // ⬆️ Limits (env overridable)
 const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || 75);
@@ -145,8 +145,8 @@ function windowSql({ dateSql, endTime, timeWindow }) {
 
 // ─── STATUS CANONICALIZER ───────────────────────────────────────────────────
 const STATUS_CANON = [
-  'New',                    // ⬅️ NEW
-  'Needs to be Quoted',     // ⬅️ NEW
+  'New',
+  'Needs to be Quoted',
   'Needs to be Scheduled',
   'Scheduled',
   'Waiting for Approval',
@@ -163,21 +163,14 @@ function statusKey(s) {
 }
 const STATUS_LOOKUP = new Map(STATUS_CANON.map(s => [statusKey(s), s]));
 const STATUS_SYNONYMS = new Map([
-  // Parts In
   ['part in','Parts In'],['parts in','Parts In'],['parts  in','Parts In'],
   ['parts-in','Parts In'],['parts_in','Parts In'],['partsin','Parts In'],['part s in','Parts In'],
-  // Waiting on Parts
   ['waiting on part','Waiting on Parts'],['waiting on parts','Waiting on Parts'],
   ['waiting-on-parts','Waiting on Parts'],['waiting_on_parts','Waiting on Parts'],['waitingonparts','Waiting on Parts'],
-  // Needs to be Scheduled
   ['needs to be schedule','Needs to be Scheduled'],['need to be scheduled','Needs to be Scheduled'],
-  // New (permissive)
   ['new','New'],['fresh','New'],['just created','New'],
-  // Needs to be Quoted (common variants)
-  ['needs quote','Needs to be Quoted'],
-  ['need quote','Needs to be Quoted'],
-  ['quote needed','Needs to be Quoted'],
-  ['to be quoted','Needs to be Quoted'],
+  ['needs quote','Needs to be Quoted'],['need quote','Needs to be Quoted'],
+  ['quote needed','Needs to be Quoted'],['to be quoted','Needs to be Quoted'],
   ['needs quotation','Needs to be Quoted'],
   ['needs-to-be-quoted','Needs to be Quoted'],
   ['needs_to_be_quoted','Needs to be Quoted'],
@@ -188,7 +181,6 @@ function canonStatus(input) {
   return STATUS_LOOKUP.get(k) || STATUS_SYNONYMS.get(k) || null;
 }
 function displayStatusOrDefault(s) {
-  // Default unknown/empty to "New"
   return canonStatus(s) || (String(s || '').trim() ? String(s) : 'New');
 }
 
@@ -429,6 +421,43 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
   } catch (err) { console.error('Work-orders search error:', err); res.status(500).json({ error: 'Search failed.' }); }
 });
 
+/**
+ * NEW: Lookup by PO #
+ * Exact match by default. Pass ?like=1 for a contains/LIKE search.
+ * Example: GET /work-orders/by-po/TS-12345        (exact)
+ *          GET /work-orders/by-po/123?like=1      (LIKE '%123%')
+ */
+app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
+  try {
+    const po = decodeURIComponent(String(req.params.poNumber || '').trim());
+    const useLike = String(req.query.like || '').trim() === '1';
+    if (!po) return res.status(400).json({ error: 'poNumber is required' });
+
+    let sql =
+      `SELECT w.*, u.username AS assignedToName
+         FROM work_orders w
+         LEFT JOIN users u ON w.assignedTo = u.id
+        WHERE `;
+    const params = [];
+
+    if (useLike) {
+      sql += 'COALESCE(w.poNumber, \'\') LIKE ?';
+      params.push(`%${po}%`);
+    } else {
+      sql += 'COALESCE(w.poNumber, \'\') = ?';
+      params.push(po);
+    }
+
+    sql += ' ORDER BY w.id DESC';
+
+    const [rows] = await db.execute(sql, params);
+    res.json(rows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) })));
+  } catch (err) {
+    console.error('By-PO lookup error:', err);
+    res.status(500).json({ error: 'Failed to lookup by PO number.' });
+  }
+});
+
 // ── BULK status update — put this BEFORE any "/:id" routes and keep it here
 function parseIdArray(maybeIds) {
   if (Array.isArray(maybeIds)) return maybeIds;
@@ -547,7 +576,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       workOrderNumber = '',
       poNumber = '',
       customer, siteLocation = '', billingAddress,
-      problemDescription, status = 'New', // ⬅️ default changed to New
+      problemDescription, status = 'New',
       assignedTo,
       billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
     } = req.body;
@@ -562,7 +591,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
     const pdfPath   = pdf ? fileKey(pdf) : null;
     const firstImg  = images[0] ? fileKey(images[0]) : null;
 
-    const cStatus = canonStatus(status) || 'New'; // ⬅️ default New
+    const cStatus = canonStatus(status) || 'New';
 
     const cols = [
       'workOrderNumber','poNumber','customer','siteLocation','billingAddress',
@@ -780,7 +809,6 @@ app.put('/work-orders/:id(\\d+)/update-date',
           endSql = w.endSql;
         }
 
-        // If caller didn't supply a status, flip pre-schedule statuses to Scheduled
         const provided = (status !== undefined && status !== null && String(status).length);
         let nextStatus;
         if (provided) {
