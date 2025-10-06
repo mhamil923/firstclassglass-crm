@@ -32,6 +32,13 @@ const fmtTime = (d) => moment(d).format("HH:mm");
 // compute minutes between two JS Dates
 const diffMinutes = (a, b) => Math.max(0, Math.round((+b - +a) / 60000));
 
+// Prefer PO#, then Work Order #, else N/A
+const displayPO = (obj) => {
+  const po = (obj?.poNumber ?? "").toString().trim();
+  const wo = (obj?.workOrderNumber ?? "").toString().trim();
+  return po || wo || "N/A";
+};
+
 // ---------- event bubble ----------
 function CustomEvent({ event }) {
   const when =
@@ -44,10 +51,10 @@ function CustomEvent({ event }) {
   const popover = (
     <Popover id={`popover-${event.id}`}>
       <Popover.Header as="h3">
-        {event.customer ? `${event.customer}` : `WO ${event.id}`}
+        {event.customer ? `${event.customer}` : `Work Order`}
       </Popover.Header>
       <Popover.Body>
-        <div><strong>PO#:</strong> {event.poNumber || event.id}</div>
+        <div><strong>PO#:</strong> {event.displayPo}</div>
         {event.siteLocation ? <div><strong>Site:</strong> {event.siteLocation}</div> : null}
         {event.problemDescription ? <div><strong>Problem:</strong> {event.problemDescription}</div> : null}
         {when ? <div style={{ marginTop: 6 }}><strong>When:</strong> {when}</div> : null}
@@ -71,7 +78,7 @@ export default function WorkOrderCalendar() {
   // Day list modal
   const [dayModalOpen, setDayModalOpen] = useState(false);
   const [dayModalTitle, setDayModalTitle] = useState("");
-  const [dayOrders, setDayOrders] = useState([]); // ✅ fixed
+  const [dayOrders, setDayOrders] = useState([]);
   const [dayForModal, setDayForModal] = useState(null);
 
   // Quick edit modal
@@ -109,8 +116,6 @@ export default function WorkOrderCalendar() {
 
   // ---------- schedule helpers (server expects date/time + optional endTime) ----------
   async function setSchedulePayload(orderId, payload) {
-    // payload example: { date:'YYYY-MM-DD', time:'HH:mm', endTime:'HH:mm' }
-    // to unschedule:   { scheduledDate: null }
     await api.put(`/work-orders/${orderId}/update-date`, payload);
   }
 
@@ -139,7 +144,6 @@ export default function WorkOrderCalendar() {
   async function saveEditModal() {
     if (!editOrder) return;
 
-    // Guard: both start and end must be valid and end after start
     const start = moment(`${editDate} ${editTime}`, "YYYY-MM-DD HH:mm");
     const end   = moment(`${editDate} ${editEndTime}`, "YYYY-MM-DD HH:mm");
     if (!start.isValid() || !end.isValid()) {
@@ -234,7 +238,6 @@ export default function WorkOrderCalendar() {
 
   // ---------- rbc interactions ----------
   function handleEventDrop({ event, start, end }) {
-    // Preserve window length if RBC doesn't provide end
     let minutes = end ? diffMinutes(start, end) : minutesWindowForOrder(event);
     if (!Number.isFinite(minutes) || minutes <= 0) minutes = DEFAULT_WINDOW_MIN;
 
@@ -252,7 +255,6 @@ export default function WorkOrderCalendar() {
   }
 
   function handleEventResize({ event, start, end }) {
-    // When resizing, RBC gives us the new end — use it.
     const minutes = end ? diffMinutes(start, end) : minutesWindowForOrder(event);
     setSchedulePayload(event.id, {
       date: fmtDate(start),
@@ -290,12 +292,10 @@ export default function WorkOrderCalendar() {
   }
 
   function onSelectSlot(slotInfo) {
-    // open day modal for clicked day
     openDayModal(slotInfo.start);
   }
 
   function onShowMore(events, date) {
-    // Replace the default RBC popup with our modal
     openDayModal(date);
   }
 
@@ -311,12 +311,15 @@ export default function WorkOrderCalendar() {
         const end =
           fromDbString(o.scheduledEnd) ||
           moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
+
+        const poLabel = displayPO(o);
+
         return {
           id: o.id,
-          title: o.customer
-            ? `${o.customer} — ${o.poNumber || `WO ${o.id}`}`
-            : o.poNumber || `WO ${o.id}`,
+          title: o.customer ? `${o.customer} — ${poLabel}` : poLabel,
           poNumber: o.poNumber,
+          workOrderNumber: o.workOrderNumber,
+          displayPo: poLabel, // <- use everywhere we show "PO#"
           customer: o.customer,
           siteLocation: o.siteLocation,
           problemDescription: o.problemDescription,
@@ -339,36 +342,39 @@ export default function WorkOrderCalendar() {
         <div className="unscheduled-container">
           <h4>Unscheduled Work Orders</h4>
           <div className="unscheduled-list">
-            {unscheduledOrders.map((order) => (
-              <div
-                key={order.id}
-                className="unscheduled-item"
-                draggable
-                onDragStart={() => setDragItem(order)}
-                title={order.problemDescription || ""}
-              >
-                <strong>
-                  {order.customer ? `${order.customer}` : `WO ${order.id}`}
-                </strong>
-                {order.poNumber ? <> — {order.poNumber}</> : null}
-                <br />
-                <small className="truncate">{order.problemDescription}</small>
-                <div className="unscheduled-actions">
-                  <button
-                    className="btn btn-xs btn-outline-light me-1"
-                    onClick={() => openEditModal(order, currentDate)}
-                  >
-                    Schedule…
-                  </button>
-                  <button
-                    className="btn btn-xs btn-light"
-                    onClick={() => navigateToView(order.id)}
-                  >
-                    Open
-                  </button>
+            {unscheduledOrders.map((order) => {
+              const poLabel = displayPO(order);
+              return (
+                <div
+                  key={order.id}
+                  className="unscheduled-item"
+                  draggable
+                  onDragStart={() => setDragItem(order)}
+                  title={order.problemDescription || ""}
+                >
+                  <strong>
+                    {order.customer ? `${order.customer}` : `Work Order`}
+                  </strong>
+                  <> — {poLabel}</>
+                  <br />
+                  <small className="truncate">{order.problemDescription}</small>
+                  <div className="unscheduled-actions">
+                    <button
+                      className="btn btn-xs btn-outline-light me-1"
+                      onClick={() => openEditModal(order, currentDate)}
+                    >
+                      Schedule…
+                    </button>
+                    <button
+                      className="btn btn-xs btn-light"
+                      onClick={() => navigateToView(order.id)}
+                    >
+                      Open
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -383,7 +389,7 @@ export default function WorkOrderCalendar() {
             timeslots={4}
             min={moment().startOf("day").add(6, "hours").toDate()}   // 6 AM
             max={moment().startOf("day").add(21, "hours").toDate()}  // 9 PM
-            popup={false} // our own day modal instead of RBC popup
+            popup={false}
             resizable
             selectable
             components={{ event: CustomEvent }}
@@ -421,6 +427,7 @@ export default function WorkOrderCalendar() {
                       : s
                       ? `${moment(s).format("hh:mm A")} – ${moment(s).add(DEFAULT_WINDOW_MIN, "minutes").format("hh:mm A")}`
                       : "";
+                  const poLabel = displayPO(o);
                   return (
                     <li
                       key={o.id}
@@ -440,8 +447,7 @@ export default function WorkOrderCalendar() {
                     >
                       <div className="me-2">
                         <div className="fw-bold">
-                          {o.customer ? `${o.customer}` : `WO ${o.id}`}
-                          {o.poNumber ? ` — ${o.poNumber}` : ""}
+                          {o.customer ? `${o.customer}` : `Work Order`} — {poLabel}
                         </div>
                         <small className="text-muted">{o.problemDescription}</small>
                         <div><small>{label}</small></div>
@@ -491,8 +497,7 @@ export default function WorkOrderCalendar() {
               <>
                 <div className="mb-2">
                   <div className="fw-bold">
-                    {editOrder.customer ? `${editOrder.customer}` : `WO ${editOrder.id}`}
-                    {editOrder.poNumber ? ` — ${editOrder.poNumber}` : ""}
+                    {editOrder.customer ? `${editOrder.customer}` : `Work Order`} — {displayPO(editOrder)}
                   </div>
                   <small className="text-muted">{editOrder.problemDescription}</small>
                 </div>
