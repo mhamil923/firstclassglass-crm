@@ -28,7 +28,7 @@ const {
 } = process.env;
 
 const DEFAULT_WINDOW = Math.max(15, Number(DEFAULT_WINDOW_MINUTES) || 120);
-the S3_SIGNED_TTL = Number(process.env.S3_SIGNED_TTL || 900);
+const S3_SIGNED_TTL = Number(process.env.S3_SIGNED_TTL || 900);
 
 // ⬆️ Limits (env overridable)
 const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || 75);
