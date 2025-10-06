@@ -18,33 +18,28 @@ function decodeRoleFromJWT() {
 
 export default function AddWorkOrder() {
   const navigate = useNavigate();
-  const role = decodeRoleFromJWT(); // "dispatcher", "admin", "tech", etc.
+  const role = decodeRoleFromJWT();
 
   // ---- form state
   const [workOrder, setWorkOrder] = useState({
     customer: "",
-    workOrderNumber: "", // <-- WO # only (PO # added later on View page)
+    workOrderNumber: "",
+    poNumber: "", // ← NEW optional field
     siteLocation: "",
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
-    assignedTo: "", // user id (string)
+    assignedTo: "",
     customerPhone: "",
     customerEmail: "",
   });
 
-  // files
   const [pdfFile, setPdfFile] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
-
-  // lists
   const [customers, setCustomers] = useState([]);
   const [techs, setTechs] = useState([]);
-
-  // ui
   const [submitting, setSubmitting] = useState(false);
 
-  // google places
   const siteInputRef = useRef(null);
   const autocompleteRef = useRef(null);
   const gmapsReadyRef = useRef(false);
@@ -65,7 +60,7 @@ export default function AddWorkOrder() {
       .catch((e) => console.error("Error loading assignees:", e));
   }, []);
 
-  // ---------- Google Maps Places loader (fixed)
+  // ---------- Google Maps Autocomplete
   useEffect(() => {
     const key = (process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "").trim();
     if (!key) {
@@ -73,23 +68,20 @@ export default function AddWorkOrder() {
       return;
     }
 
-    // If Maps already on the page, init directly
     if (window.google?.maps?.places?.Autocomplete) {
       gmapsReadyRef.current = true;
       initAutocomplete();
       return;
     }
 
-    // Load the script once
     if (!window.__gmapsPromise) {
       window.__gmapsPromise = new Promise((resolve, reject) => {
         window.__initGMaps = () => resolve();
         const script = document.createElement("script");
-        script.id = "gmaps-script";
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&loading=async&callback=__initGMaps`;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&callback=__initGMaps`;
         script.async = true;
         script.defer = true;
-        script.onerror = () => reject(new Error("Failed to load Google Maps script"));
+        script.onerror = () => reject(new Error("Failed to load Google Maps"));
         document.body.appendChild(script);
       }).then(() => {
         delete window.__initGMaps;
@@ -102,7 +94,6 @@ export default function AddWorkOrder() {
         initAutocomplete();
       })
       .catch((err) => console.error(err));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function initAutocomplete() {
@@ -110,24 +101,15 @@ export default function AddWorkOrder() {
     if (!siteInputRef.current) return;
 
     try {
-      if (autocompleteRef.current && autocompleteRef.current.unbindAll) {
-        autocompleteRef.current.unbindAll();
-      }
-
       const ac = new window.google.maps.places.Autocomplete(siteInputRef.current, {
         types: ["address"],
         fields: ["formatted_address", "name", "geometry"],
       });
-
       ac.addListener("place_changed", () => {
         const place = ac.getPlace();
-        const addr =
-          (place && (place.formatted_address || place.name)) ||
-          siteInputRef.current.value ||
-          "";
+        const addr = place?.formatted_address || place?.name || siteInputRef.current.value;
         setWorkOrder((prev) => ({ ...prev, siteLocation: addr }));
       });
-
       autocompleteRef.current = ac;
     } catch (e) {
       console.error("Failed to init Places Autocomplete:", e);
@@ -140,7 +122,6 @@ export default function AddWorkOrder() {
     }
   };
 
-  // ---------- helpers
   const extractCustomerFromBilling = (addr) => {
     if (!addr) return "";
     const first = addr
@@ -154,14 +135,10 @@ export default function AddWorkOrder() {
     const { name, value } = e.target;
     setWorkOrder((prev) => {
       const upd = { ...prev, [name]: value };
-
       if (name === "customer") {
         const found = customers.find((c) => c.name === value);
-        if (found?.billingAddress) {
-          upd.billingAddress = found.billingAddress;
-        }
+        if (found?.billingAddress) upd.billingAddress = found.billingAddress;
       }
-
       if (name === "billingAddress") {
         const first = extractCustomerFromBilling(value);
         const prevAuto = extractCustomerFromBilling(prev.billingAddress || "");
@@ -169,7 +146,6 @@ export default function AddWorkOrder() {
           upd.customer = first;
         }
       }
-
       return upd;
     });
   };
@@ -182,7 +158,6 @@ export default function AddWorkOrder() {
     if (!workOrder.customer) missing.push("Customer");
     if (!workOrder.billingAddress) missing.push("Billing Address");
     if (!workOrder.problemDescription) missing.push("Problem Description");
-    // WO # is optional at creation
     if (missing.length) {
       alert(`Please fill required fields: ${missing.join(", ")}`);
       return false;
@@ -197,8 +172,8 @@ export default function AddWorkOrder() {
 
     const form = new FormData();
     form.append("customer", workOrder.customer);
-    form.append("workOrderNumber", workOrder.workOrderNumber || ""); // <-- WO only
-    // NOTE: do NOT send poNumber here. PO will be added later from View page.
+    form.append("workOrderNumber", workOrder.workOrderNumber || "");
+    form.append("poNumber", workOrder.poNumber || ""); // ← NEW
     form.append("siteLocation", workOrder.siteLocation || "");
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
@@ -244,14 +219,14 @@ export default function AddWorkOrder() {
             placeholder="Customer name"
             autoComplete="off"
           />
-        <datalist id="customers-list">
+          <datalist id="customers-list">
             {customers.map((c) => (
               <option key={c.id} value={c.name} />
             ))}
           </datalist>
         </div>
 
-        {/* Optional contact fields */}
+        {/* Optional contact info */}
         <div className="form-group">
           <label className="form-label">Customer Phone (optional)</label>
           <input
@@ -260,7 +235,6 @@ export default function AddWorkOrder() {
             onChange={handleChange}
             className="form-control-custom"
             placeholder="(###) ###-####"
-            autoComplete="tel"
           />
         </div>
 
@@ -273,11 +247,10 @@ export default function AddWorkOrder() {
             onChange={handleChange}
             className="form-control-custom"
             placeholder="name@example.com"
-            autoComplete="email"
           />
         </div>
 
-        {/* Assign to Tech (hide for tech users) */}
+        {/* Assign tech (hidden for tech role) */}
         {role !== "tech" && (
           <div className="form-group">
             <label className="form-label">Assign To</label>
@@ -297,20 +270,31 @@ export default function AddWorkOrder() {
           </div>
         )}
 
-        {/* Work Order # (WO) */}
+        {/* Work Order Number */}
         <div className="form-group">
-          <label className="form-label">Work Order # (from Clear Vision/True Source/etc)</label>
+          <label className="form-label">Work Order #</label>
           <input
             name="workOrderNumber"
             value={workOrder.workOrderNumber}
             onChange={handleChange}
             className="form-control-custom"
             placeholder="Optional at creation"
-            autoComplete="off"
           />
         </div>
 
-        {/* Site Location (Google Places) */}
+        {/* PO Number */}
+        <div className="form-group">
+          <label className="form-label">PO # (optional)</label>
+          <input
+            name="poNumber"
+            value={workOrder.poNumber}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="Enter PO number if available"
+          />
+        </div>
+
+        {/* Site Location */}
         <div className="form-group">
           <label className="form-label">Site Location</label>
           <input
@@ -321,7 +305,6 @@ export default function AddWorkOrder() {
             onFocus={handleSiteFocus}
             placeholder="Start typing address…"
             className="form-control-custom"
-            autoComplete="off"
           />
         </div>
 
@@ -369,7 +352,7 @@ export default function AddWorkOrder() {
           </select>
         </div>
 
-        {/* PDF Upload */}
+        {/* Uploads */}
         <div className="form-group">
           <label className="form-label">Upload PDF</label>
           <input
@@ -380,7 +363,6 @@ export default function AddWorkOrder() {
           />
         </div>
 
-        {/* Photo Upload (optional, single) */}
         <div className="form-group">
           <label className="form-label">Upload Photo</label>
           <input
