@@ -8,7 +8,7 @@ import "./WorkOrders.css";
 
 /**
  * Updated status list (order = how chips render L→R):
- * New → Needs to be Quoted → Needs to be Scheduled → Scheduled → Waiting for Approval → Waiting on Parts → Parts In → Completed
+ * New → Needs to be Quoted → Needs to be Scheduled → Scheduled → Waiting for Approval → Waiting on Parts → Parts In → Completed → Needs to be Invoiced
  */
 const STATUS_LIST = [
   "New",
@@ -19,6 +19,7 @@ const STATUS_LIST = [
   "Waiting on Parts",
   "Parts In",
   "Completed",
+  "Needs to be Invoiced", // ← NEW
 ];
 
 const PARTS_WAITING = "Waiting on Parts";
@@ -73,6 +74,13 @@ const STATUS_SYNONYMS = new Map([
   ["parts_in", "Parts In"],
   ["partsin", "Parts In"],
   ["part s in", "Parts In"],
+
+  // Needs to be Invoiced (common variants)
+  ["needs to be invoiced", "Needs to be Invoiced"],
+  ["need to be invoiced", "Needs to be Invoiced"],
+  ["needs invoiced", "Needs to be Invoiced"],
+  ["needs-invoiced", "Needs to be Invoiced"],
+  ["needs_invoiced", "Needs to be Invoiced"],
 ]);
 
 const toCanonicalStatus = (s) =>
