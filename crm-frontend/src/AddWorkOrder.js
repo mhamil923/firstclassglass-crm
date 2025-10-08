@@ -4,6 +4,19 @@ import { useNavigate } from "react-router-dom";
 import api from "./api";
 import "./AddWorkOrder.css";
 
+// Keep this list in sync with WorkOrders.js and server.js
+const STATUS_LIST = [
+  "New",
+  "Needs to be Quoted",
+  "Needs to be Scheduled",
+  "Scheduled",
+  "Waiting for Approval",
+  "Waiting on Parts",
+  "Parts In",
+  "Completed",
+  "Needs to be Invoiced", // ← NEW
+];
+
 function decodeRoleFromJWT() {
   try {
     const token = localStorage.getItem("jwt");
@@ -24,7 +37,7 @@ export default function AddWorkOrder() {
   const [workOrder, setWorkOrder] = useState({
     customer: "",
     workOrderNumber: "",
-    poNumber: "", // ← NEW optional field
+    poNumber: "", // optional
     siteLocation: "",
     billingAddress: "",
     problemDescription: "",
@@ -173,7 +186,7 @@ export default function AddWorkOrder() {
     const form = new FormData();
     form.append("customer", workOrder.customer);
     form.append("workOrderNumber", workOrder.workOrderNumber || "");
-    form.append("poNumber", workOrder.poNumber || ""); // ← NEW
+    form.append("poNumber", workOrder.poNumber || "");
     form.append("siteLocation", workOrder.siteLocation || "");
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
@@ -343,12 +356,11 @@ export default function AddWorkOrder() {
             onChange={handleChange}
             className="form-select-custom"
           >
-            <option>Needs to be Scheduled</option>
-            <option>Scheduled</option>
-            <option>Waiting for Approval</option>
-            <option>Waiting on Parts</option>
-            <option>Parts In</option>
-            <option>Completed</option>
+            {STATUS_LIST.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
           </select>
         </div>
 
