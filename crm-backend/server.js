@@ -153,6 +153,7 @@ const STATUS_CANON = [
   'Waiting on Parts',
   'Parts In',
   'Completed',
+  'Needs to be Invoiced', // ← NEW
 ];
 function statusKey(s) {
   return String(s ?? '')
@@ -163,18 +164,33 @@ function statusKey(s) {
 }
 const STATUS_LOOKUP = new Map(STATUS_CANON.map(s => [statusKey(s), s]));
 const STATUS_SYNONYMS = new Map([
+  // Parts In variants
   ['part in','Parts In'],['parts in','Parts In'],['parts  in','Parts In'],
   ['parts-in','Parts In'],['parts_in','Parts In'],['partsin','Parts In'],['part s in','Parts In'],
+  // Waiting on Parts
   ['waiting on part','Waiting on Parts'],['waiting on parts','Waiting on Parts'],
   ['waiting-on-parts','Waiting on Parts'],['waiting_on_parts','Waiting on Parts'],['waitingonparts','Waiting on Parts'],
+  // Needs to be Scheduled
   ['needs to be schedule','Needs to be Scheduled'],['need to be scheduled','Needs to be Scheduled'],
+  // New
   ['new','New'],['fresh','New'],['just created','New'],
+  // Needs to be Quoted
   ['needs quote','Needs to be Quoted'],['need quote','Needs to be Quoted'],
   ['quote needed','Needs to be Quoted'],['to be quoted','Needs to be Quoted'],
-  ['needs quotation','Needs to be Quoted'],
-  ['needs-to-be-quoted','Needs to be Quoted'],
-  ['needs_to_be_quoted','Needs to be Quoted'],
-  ['needstobequoted','Needs to be Quoted'],
+  ['needs quotation','Needs to be Quoted'],['needs-to-be-quoted','Needs to be Quoted'],
+  ['needs_to_be_quoted','Needs to be Quoted'],['needstobequoted','Needs to be Quoted'],
+  // Needs to be Invoiced (NEW synonyms)
+  ['needs to be invoiced','Needs to be Invoiced'],
+  ['need to be invoiced','Needs to be Invoiced'],
+  ['needs invoiced','Needs to be Invoiced'],
+  ['needs invoicing','Needs to be Invoiced'],
+  ['to be invoiced','Needs to be Invoiced'],
+  ['invoice needed','Needs to be Invoiced'],
+  ['needs-invoicing','Needs to be Invoiced'],
+  ['needs_to_be_invoiced','Needs to be Invoiced'],
+  ['needsinvoice','Needs to be Invoiced'],
+  ['needsinvoiced','Needs to be Invoiced'],
+  ['needs to invoice','Needs to be Invoiced'],
 ]);
 function canonStatus(input) {
   const k = statusKey(input);
