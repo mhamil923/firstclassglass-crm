@@ -8,7 +8,7 @@ import "./WorkOrders.css";
 
 /**
  * Updated status list (order = how chips render L→R):
- * New → Needs to be Quoted → Needs to be Scheduled → Scheduled → Waiting for Approval → Waiting on Parts → Parts In → Completed → Needs to be Invoiced
+ * New → Needs to be Quoted → Needs to be Scheduled → Scheduled → Waiting for Approval → Waiting on Parts → Parts In → Needs to be Invoiced → Completed
  */
 const STATUS_LIST = [
   "New",
@@ -18,8 +18,8 @@ const STATUS_LIST = [
   "Waiting for Approval",
   "Waiting on Parts",
   "Parts In",
+  "Needs to be Invoiced", // moved before Completed
   "Completed",
-  "Needs to be Invoiced", // ← NEW
 ];
 
 const PARTS_WAITING = "Waiting on Parts";
@@ -42,10 +42,7 @@ const CANON = new Map(STATUS_LIST.map((label) => [statusKey(label), label]));
 
 // Variants/typos -> canonical
 const STATUS_SYNONYMS = new Map([
-  // New
   ["new", "New"],
-
-  // Needs to be Quoted
   ["needs to be quoted", "Needs to be Quoted"],
   ["need to be quoted", "Needs to be Quoted"],
   ["needs quote", "Needs to be Quoted"],
@@ -54,19 +51,13 @@ const STATUS_SYNONYMS = new Map([
   ["needs quoting", "Needs to be Quoted"],
   ["needs-to-be-quoted", "Needs to be Quoted"],
   ["needs_to_be_quoted", "Needs to be Quoted"],
-
-  // Needs to be Scheduled
   ["needs to be schedule", "Needs to be Scheduled"],
   ["need to be scheduled", "Needs to be Scheduled"],
-
-  // Waiting on Parts
   ["waiting on part", "Waiting on Parts"],
   ["waiting on parts", "Waiting on Parts"],
   ["waiting-on-parts", "Waiting on Parts"],
   ["waiting_on_parts", "Waiting on Parts"],
   ["waitingonparts", "Waiting on Parts"],
-
-  // Parts In
   ["part in", "Parts In"],
   ["parts in", "Parts In"],
   ["parts  in", "Parts In"],
@@ -74,8 +65,6 @@ const STATUS_SYNONYMS = new Map([
   ["parts_in", "Parts In"],
   ["partsin", "Parts In"],
   ["part s in", "Parts In"],
-
-  // Needs to be Invoiced (common variants)
   ["needs to be invoiced", "Needs to be Invoiced"],
   ["need to be invoiced", "Needs to be Invoiced"],
   ["needs invoiced", "Needs to be Invoiced"],
@@ -86,7 +75,6 @@ const STATUS_SYNONYMS = new Map([
 const toCanonicalStatus = (s) =>
   CANON.get(statusKey(s)) || STATUS_SYNONYMS.get(statusKey(s)) || norm(s);
 
-// Hide legacy PO values that equal WO
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
 
@@ -95,10 +83,33 @@ const authHeaders = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+const clampStyle = (lines) => ({
+  display: "-webkit-box",
+  WebkitLineClamp: lines,
+  WebkitBoxOrient: "vertical",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "normal",
+});
+
+const parseNotes = (notes) => {
+  if (!notes) return [];
+  if (Array.isArray(notes)) return notes;
+  try {
+    const arr = JSON.parse(notes);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+};
+const latestNoteOf = (order) => {
+  const arr = parseNotes(order?.notes);
+  return arr.length ? arr[arr.length - 1] : null;
+};
+
 export default function WorkOrders() {
   const navigate = useNavigate();
 
-  // role
   const token = localStorage.getItem("jwt");
   let userRole = null;
   if (token) {
@@ -109,22 +120,16 @@ export default function WorkOrders() {
     }
   }
 
-  // state
   const [workOrders, setWorkOrders] = useState([]);
   const [filteredOrders, setFilteredOrders] = useState([]);
   const [selectedFilter, setSelectedFilter] = useState("All");
   const [techUsers, setTechUsers] = useState([]);
-
-  // parts modal
   const [isPartsModalOpen, setIsPartsModalOpen] = useState(false);
   const [poSearch, setPoSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isUpdatingParts, setIsUpdatingParts] = useState(false);
-
-  // UX
   const [flashMsg, setFlashMsg] = useState("");
 
-  // load data
   useEffect(() => {
     fetchWorkOrders();
     if (userRole !== "tech") {
@@ -133,16 +138,16 @@ export default function WorkOrders() {
         .then((r) => setTechUsers(r.data || []))
         .catch((err) => console.error("Error fetching assignable users:", err));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // NOTE: return the promise so `await fetchWorkOrders()` actually waits.
   const fetchWorkOrders = async () => {
     try {
       const res = await api.get("/work-orders", { headers: authHeaders() });
       const data = Array.isArray(res.data) ? res.data : [];
-      // normalize status for rendering & filtering
-      const canon = data.map((o) => ({ ...o, status: toCanonicalStatus(o.status) }));
+      const canon = data.map((o) => ({
+        ...o,
+        status: toCanonicalStatus(o.status),
+      }));
       setWorkOrders(canon);
       return canon;
     } catch (err) {
@@ -151,10 +156,8 @@ export default function WorkOrders() {
     }
   };
 
-  // filtering
   useEffect(() => {
     const todayStr = moment().format("YYYY-MM-DD");
-
     let rows = workOrders;
     if (selectedFilter === "Today") {
       rows = workOrders.filter(
@@ -166,11 +169,9 @@ export default function WorkOrders() {
       const f = normStatus(selectedFilter);
       rows = workOrders.filter((o) => normStatus(o.status) === f);
     }
-
     setFilteredOrders(rows);
   }, [workOrders, selectedFilter]);
 
-  // counts
   const chipCounts = useMemo(() => {
     const buckets = Object.fromEntries(STATUS_LIST.map((s) => [s, 0]));
     let today = 0;
@@ -185,44 +186,32 @@ export default function WorkOrders() {
         today++;
       }
     }
-    return {
-      All: workOrders.length,
-      Today: today,
-      ...buckets,
-    };
+    return { All: workOrders.length, Today: today, ...buckets };
   }, [workOrders]);
 
-  const setFilter = (value) => setSelectedFilter(value);
+  const setFilter = (v) => setSelectedFilter(v);
 
-  // single-row status change
   const handleStatusChange = async (e, id) => {
     e.stopPropagation();
     const newStatus = toCanonicalStatus(e.target.value);
-
     const prev = workOrders;
     const next = prev.map((o) => (o.id === id ? { ...o, status: newStatus } : o));
     setWorkOrders(next);
-
     try {
-      await api.put(
-        `/work-orders/${id}`,
-        { status: newStatus },
-        { headers: authHeaders() }
-      );
+      await api.put(`/work-orders/${id}`, { status: newStatus }, { headers: authHeaders() });
       await fetchWorkOrders();
     } catch (err) {
       console.error("Error updating status:", err);
       setWorkOrders(prev);
-      const msg =
+      alert(
         err?.response?.data?.error ||
-        (err?.response?.status === 401
-          ? "Missing or invalid token."
-          : "Failed to update status.");
-      alert(msg);
+          (err?.response?.status === 401
+            ? "Missing or invalid token."
+            : "Failed to update status.")
+      );
     }
   };
 
-  // assign
   const assignToTech = (orderId, techId, e) => {
     e.stopPropagation();
     api
@@ -235,7 +224,6 @@ export default function WorkOrders() {
       .catch((err) => console.error("Error assigning tech:", err));
   };
 
-  // maps
   const googleMapsApiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
   const handleLocationClick = (e, loc) => {
     e.stopPropagation();
@@ -245,15 +233,14 @@ export default function WorkOrders() {
     window.open(url, "_blank", "width=800,height=600");
   };
 
-  // -------- Parts In modal --------
   const openPartsModal = () => {
     if (normStatus(selectedFilter) !== normStatus(PARTS_WAITING)) {
       setSelectedFilter(PARTS_WAITING);
     }
-    const source = workOrders.filter(
+    const src = workOrders.filter(
       (o) => normStatus(o.status) === normStatus(PARTS_WAITING)
     );
-    setSelectedIds(new Set(source.map((o) => o.id)));
+    setSelectedIds(new Set(src.map((o) => o.id)));
     setPoSearch("");
     setIsPartsModalOpen(true);
   };
@@ -271,9 +258,8 @@ export default function WorkOrders() {
     setSelectedIds(copy);
   };
 
-  const setAll = (checked, visibleRows) => {
+  const setAll = (checked, visibleRows) =>
     setSelectedIds(checked ? new Set(visibleRows.map((o) => o.id)) : new Set());
-  };
 
   const visibleWaitingRows = useMemo(() => {
     const base = filteredOrders.filter(
@@ -290,57 +276,36 @@ export default function WorkOrders() {
     });
   }, [filteredOrders, poSearch]);
 
-  // bulk -> Parts In
   const markSelectedAsPartsIn = async () => {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
-
     const ids = Array.from(selectedIds);
     const prev = workOrders;
-
     const next = prev.map((o) =>
       ids.includes(o.id) ? { ...o, status: PARTS_IN } : o
     );
     setWorkOrders(next);
-
     try {
-      const res = await api.put(
+      await api.put(
         "/work-orders/bulk-status",
         { ids, status: PARTS_IN },
         { headers: authHeaders() }
       );
-
-      const items = Array.isArray(res?.data?.items) ? res.data.items : [];
-      if (items.length) {
-        const byId = new Map(items.map((r) => [r.id, r]));
-        setWorkOrders((cur) =>
-          cur.map((o) =>
-            byId.has(o.id)
-              ? { ...o, ...byId.get(o.id), status: toCanonicalStatus(byId.get(o.id).status) }
-              : o
-          )
-        );
-      }
-
-      setSelectedFilter(PARTS_IN);
       await fetchWorkOrders();
+      setSelectedFilter(PARTS_IN);
       closePartsModal();
-
       const count = ids.length;
       setFlashMsg(`Moved ${count} work order${count === 1 ? "" : "s"} to “${PARTS_IN}”.`);
-      window.setTimeout(() => setFlashMsg(""), 3000);
+      setTimeout(() => setFlashMsg(""), 3000);
     } catch (err) {
       console.error("Bulk update failed:", err);
       setWorkOrders(prev);
-      const status = err?.response?.status;
-      const msg =
+      alert(
         err?.response?.data?.error ||
-        (status === 401
-          ? "Missing or invalid token. Please sign in again."
-          : status === 403
-          ? "Forbidden: one or more selected items aren’t assigned to you."
-          : "Failed to mark selected as Parts In.");
-      alert(msg);
+          (err?.response?.status === 401
+            ? "Missing or invalid token."
+            : "Failed to mark selected as Parts In.")
+      );
     } finally {
       setIsUpdatingParts(false);
     }
@@ -348,7 +313,7 @@ export default function WorkOrders() {
 
   return (
     <div className="home-container">
-      {flashMsg ? <div className="flash-banner">{flashMsg}</div> : null}
+      {flashMsg && <div className="flash-banner">{flashMsg}</div>}
 
       <div className="header-row">
         <h2 className="text-primary">Work Orders Dashboard</h2>
@@ -406,83 +371,109 @@ export default function WorkOrders() {
             </tr>
           </thead>
           <tbody>
-            {filteredOrders.map((order) => (
-              <tr
-                key={order.id}
-                onClick={() => navigate(`/view-work-order/${order.id}`)}
-              >
-                <td>
-                  <div
-                    className="wo-po-cell"
-                    style={{ display: "flex", flexDirection: "column", gap: 2 }}
-                  >
-                    {order.workOrderNumber ? (
-                      <div><strong>WO:</strong> {order.workOrderNumber}</div>
-                    ) : (
-                      <div><strong>WO:</strong> —</div>
-                    )}
-                    {displayPO(order.workOrderNumber, order.poNumber) ? (
-                      <div><strong>PO:</strong> {displayPO(order.workOrderNumber, order.poNumber)}</div>
-                    ) : null}
-                  </div>
-                </td>
-                <td>{order.customer || "N/A"}</td>
-                <td title={order.billingAddress}>{order.billingAddress}</td>
-                <td>
-                  <span
-                    className="link-text"
-                    onClick={(e) => handleLocationClick(e, order.siteLocation)}
-                  >
-                    {order.siteLocation}
-                  </span>
-                </td>
-                <td title={order.problemDescription}>
-                  {order.problemDescription}
-                </td>
-                <td>
-                  <select
-                    className="form-select"
-                    value={toCanonicalStatus(order.status)}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => handleStatusChange(e, order.id)}
-                  >
-                    {STATUS_LIST.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </td>
+            {filteredOrders.map((order) => {
+              const note = latestNoteOf(order);
+              const noteTime = note?.createdAt ? moment(note.createdAt).fromNow() : null;
 
-                {userRole !== "tech" && (
+              return (
+                <tr
+                  key={order.id}
+                  onClick={() => navigate(`/view-work-order/${order.id}`)}
+                >
+                  <td>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <div>
+                        <strong>WO:</strong> {order.workOrderNumber || "—"}
+                      </div>
+                      {displayPO(order.workOrderNumber, order.poNumber) && (
+                        <div>
+                          <strong>PO:</strong> {displayPO(order.workOrderNumber, order.poNumber)}
+                        </div>
+                      )}
+                    </div>
+                  </td>
+
+                  <td>{order.customer || "N/A"}</td>
+                  <td title={order.billingAddress}>{order.billingAddress}</td>
+                  <td>
+                    <span
+                      className="link-text"
+                      onClick={(e) => handleLocationClick(e, order.siteLocation)}
+                    >
+                      {order.siteLocation}
+                    </span>
+                  </td>
+
+                  <td title={order.problemDescription}>
+                    <div style={clampStyle(4)}>{order.problemDescription}</div>
+                    {note && (
+                      <div
+                        className="latest-note"
+                        title={`${note.text}${noteTime ? ` • ${noteTime}` : ""}`}
+                        style={{
+                          marginTop: 6,
+                          fontSize: 12,
+                          color: "#6b7280",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "normal",
+                        }}
+                      >
+                        <span role="img" aria-label="note">📝</span> {note.text}
+                        {noteTime ? ` • ${noteTime}` : ""}
+                      </div>
+                    )}
+                  </td>
+
                   <td>
                     <select
                       className="form-select"
-                      value={order.assignedTo || ""}
+                      value={toCanonicalStatus(order.status)}
                       onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => assignToTech(order.id, e.target.value, e)}
+                      onChange={(e) => handleStatusChange(e, order.id)}
                     >
-                      <option value="">-- assign tech --</option>
-                      {techUsers.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.username}
+                      {STATUS_LIST.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
                         </option>
                       ))}
                     </select>
                   </td>
-                )}
 
-                <td>
-                  <Link
-                    to={`/edit-work-order/${order.id}`}
-                    className="btn btn-warning btn-sm"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    Edit
-                  </Link>
-                </td>
-              </tr>
-            ))}
+                  {userRole !== "tech" && (
+                    <td>
+                      <select
+                        className="form-select"
+                        value={order.assignedTo || ""}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => assignToTech(order.id, e.target.value, e)}
+                      >
+                        <option value="">-- assign tech --</option>
+                        {techUsers.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.username}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  )}
+
+                  <td>
+                    <Link
+                      to={`/edit-work-order/${order.id}`}
+                      className="btn btn-warning btn-sm"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Edit
+                    </Link>
+                  </td>
+                </tr>
+              );
+            })}
+
             {filteredOrders.length === 0 && (
               <tr>
                 <td colSpan={userRole !== "tech" ? 8 : 7}>
@@ -493,90 +484,6 @@ export default function WorkOrders() {
           </tbody>
         </table>
       </div>
-
-      {/* ---------- Parts In Modal ---------- */}
-      {isPartsModalOpen && (
-        <div className="modal-overlay" onClick={closePartsModal} role="dialog" aria-modal="true">
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Mark Parts as Received</h3>
-              <button className="modal-close" onClick={closePartsModal} aria-label="Close">×</button>
-            </div>
-
-            <div className="modal-body">
-              <div className="modal-controls">
-                <input
-                  className="modal-input"
-                  type="text"
-                  placeholder="Search WO #, PO #, customer, or site…"
-                  value={poSearch}
-                  onChange={(e) => setPoSearch(e.target.value)}
-                />
-                <div className="modal-actions-inline">
-                  <button type="button" className="btn btn-ghost" onClick={() => setAll(true, visibleWaitingRows)}>
-                    Select All
-                  </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => setAll(false, visibleWaitingRows)}>
-                    Select None
-                  </button>
-                </div>
-              </div>
-
-              <div className="modal-list">
-                {visibleWaitingRows.length === 0 ? (
-                  <div className="empty-state">No POs in “Waiting on Parts”.</div>
-                ) : (
-                  <table className="mini-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: 42 }}></th>
-                        <th>WO #</th>
-                        <th>PO #</th>
-                        <th>Customer</th>
-                        <th>Site</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleWaitingRows.map((o) => {
-                        const checked = selectedIds.has(o.id);
-                        return (
-                          <tr key={o.id}>
-                            <td>
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleId(o.id)}
-                              />
-                            </td>
-                            <td>{o.workOrderNumber || "—"}</td>
-                            <td>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
-                            <td>{o.customer || "—"}</td>
-                            <td title={o.siteLocation}>{o.siteLocation || "—"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="btn btn-parts"
-                disabled={isUpdatingParts || selectedIds.size === 0}
-                onClick={markSelectedAsPartsIn}
-              >
-                {isUpdatingParts ? "Updating…" : `Mark Parts In (${selectedIds.size})`}
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={closePartsModal}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
