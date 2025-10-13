@@ -9,12 +9,14 @@ import "./WorkOrders.css";
 /**
  * STATUS LIST (display & dropdown order; "Parts In" removed)
  * Chip bar renders: Today + STATUS_LIST in this exact order.
+ * Added "Approved" between "Waiting for Approval" and "Waiting on Parts".
  */
 const STATUS_LIST = [
   "New",
   "Scheduled",
   "Needs to be Quoted",
   "Waiting for Approval",
+  "Approved",              // ← NEW
   "Waiting on Parts",
   "Needs to be Scheduled",
   "Needs to be Invoiced",
@@ -37,16 +39,31 @@ const CANON = new Map(STATUS_LIST.map((label) => [statusKey(label), label]));
 // Map variants/legacy values -> canonical
 const STATUS_SYNONYMS = new Map([
   ["new", "New"],
+
   ["needs quote", "Needs to be Quoted"],
   ["needs to be quoted", "Needs to be Quoted"],
+
   ["need to be scheduled", "Needs to be Scheduled"],
   ["needs to be schedule", "Needs to be Scheduled"],
+
+  // Waiting for/ on Approval variants -> keep UI wording "Waiting for Approval"
+  ["waiting for approval", "Waiting for Approval"],
+  ["waiting-on-approval", "Waiting for Approval"],
+  ["waiting_on_approval", "Waiting for Approval"],
+  ["waiting on approval", "Waiting for Approval"],
+
+  // Approved
+  ["approved", "Approved"],
+
+  // Waiting on Parts
   ["waiting on parts", "Waiting on Parts"],
   ["waiting-on-parts", "Waiting on Parts"],
   ["waiting_on_parts", "Waiting on Parts"],
   ["waitingonparts", "Waiting on Parts"],
+
   ["needs to be invoiced", "Needs to be Invoiced"],
   ["needs invoiced", "Needs to be Invoiced"],
+
   // Legacy: map any "Parts In" variants to our new target to avoid orphans
   ["part in", PARTS_NEXT],
   ["parts in", PARTS_NEXT],
@@ -92,7 +109,6 @@ const parseNotes = (notes) => {
 const latestNoteOf = (order) => {
   const arr = parseNotes(order?.notes);
   if (!arr.length) return null;
-  // assume stored in order; if not, last is newest or adjust here
   return arr[arr.length - 1];
 };
 
