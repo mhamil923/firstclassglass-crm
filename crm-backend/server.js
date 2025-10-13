@@ -143,17 +143,18 @@ function windowSql({ dateSql, endTime, timeWindow }) {
   return { startSql: dateSql, endSql };
 }
 
-// ─── STATUS CANONICALIZER ───────────────────────────────────────────────────
+// ─── STATUS CANONICALIZER (UPDATED) ─────────────────────────────────────────
+// Canonical app statuses (no "Parts In"; now includes "Approved"; uses "Waiting for Approval")
 const STATUS_CANON = [
   'New',
   'Needs to be Quoted',
   'Needs to be Scheduled',
   'Scheduled',
   'Waiting for Approval',
+  'Approved',
   'Waiting on Parts',
-  'Parts In',
+  'Needs to be Invoiced',
   'Completed',
-  'Needs to be Invoiced', // ← NEW
 ];
 function statusKey(s) {
   return String(s ?? '')
@@ -163,23 +164,48 @@ function statusKey(s) {
     .trim();
 }
 const STATUS_LOOKUP = new Map(STATUS_CANON.map(s => [statusKey(s), s]));
+
+// Map legacy/variants → canonical
 const STATUS_SYNONYMS = new Map([
-  // Parts In variants
-  ['part in','Parts In'],['parts in','Parts In'],['parts  in','Parts In'],
-  ['parts-in','Parts In'],['parts_in','Parts In'],['partsin','Parts In'],['part s in','Parts In'],
+  // Old "Parts In" & variants → Needs to be Scheduled
+  ['part in','Needs to be Scheduled'],
+  ['parts in','Needs to be Scheduled'],
+  ['parts  in','Needs to be Scheduled'],
+  ['parts-in','Needs to be Scheduled'],
+  ['parts_in','Needs to be Scheduled'],
+  ['partsin','Needs to be Scheduled'],
+  ['part s in','Needs to be Scheduled'],
+
+  // Waiting on/for Approval harmonization → "Waiting for Approval"
+  ['waiting on approval','Waiting for Approval'],
+  ['waiting-on-approval','Waiting for Approval'],
+  ['waiting_on_approval','Waiting for Approval'],
+
   // Waiting on Parts
-  ['waiting on part','Waiting on Parts'],['waiting on parts','Waiting on Parts'],
-  ['waiting-on-parts','Waiting on Parts'],['waiting_on_parts','Waiting on Parts'],['waitingonparts','Waiting on Parts'],
-  // Needs to be Scheduled
-  ['needs to be schedule','Needs to be Scheduled'],['need to be scheduled','Needs to be Scheduled'],
+  ['waiting on part','Waiting on Parts'],
+  ['waiting on parts','Waiting on Parts'],
+  ['waiting-on-parts','Waiting on Parts'],
+  ['waiting_on_parts','Waiting on Parts'],
+  ['waitingonparts','Waiting on Parts'],
+
+  // Needs to be Scheduled variants
+  ['needs to be schedule','Needs to be Scheduled'],
+  ['need to be scheduled','Needs to be Scheduled'],
+
   // New
   ['new','New'],['fresh','New'],['just created','New'],
+
   // Needs to be Quoted
-  ['needs quote','Needs to be Quoted'],['need quote','Needs to be Quoted'],
-  ['quote needed','Needs to be Quoted'],['to be quoted','Needs to be Quoted'],
-  ['needs quotation','Needs to be Quoted'],['needs-to-be-quoted','Needs to be Quoted'],
-  ['needs_to_be_quoted','Needs to be Quoted'],['needstobequoted','Needs to be Quoted'],
-  // Needs to be Invoiced (NEW synonyms)
+  ['needs quote','Needs to be Quoted'],
+  ['need quote','Needs to be Quoted'],
+  ['quote needed','Needs to be Quoted'],
+  ['to be quoted','Needs to be Quoted'],
+  ['needs quotation','Needs to be Quoted'],
+  ['needs-to-be-quoted','Needs to be Quoted'],
+  ['needs_to_be_quoted','Needs to be Quoted'],
+  ['needstobequoted','Needs to be Quoted'],
+
+  // Needs to be Invoiced
   ['needs to be invoiced','Needs to be Invoiced'],
   ['need to be invoiced','Needs to be Invoiced'],
   ['needs invoiced','Needs to be Invoiced'],
@@ -191,12 +217,16 @@ const STATUS_SYNONYMS = new Map([
   ['needsinvoice','Needs to be Invoiced'],
   ['needsinvoiced','Needs to be Invoiced'],
   ['needs to invoice','Needs to be Invoiced'],
+
+  // Approved variants
+  ['approved','Approved'],
 ]);
 function canonStatus(input) {
   const k = statusKey(input);
   return STATUS_LOOKUP.get(k) || STATUS_SYNONYMS.get(k) || null;
 }
 function displayStatusOrDefault(s) {
+  // Normalize anything unknown; default to 'New'
   return canonStatus(s) || (String(s || '').trim() ? String(s) : 'New');
 }
 
@@ -424,13 +454,7 @@ app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
 });
 
 /**
- * UPDATED flexible search:
- * - customer, siteLocation: AND with LIKE
- * - status: optional AND with LIKE (normalized by caller or keep partial)
- * - If either poNumber or workOrderNumber (or both) provided:
- *     match value against BOTH columns with OR (so entering a WO in the PO box still works)
- * - If both provided and different, also add individual LIKEs to honor both fields
- * - Null-safe via COALESCE
+ * Flexible search (unchanged)
  */
 app.get('/work-orders/search', authenticate, async (req, res) => {
   const {
@@ -486,12 +510,7 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
   }
 });
 
-/**
- * NEW: Lookup by PO #
- * Exact match by default. Pass ?like=1 for a contains/LIKE search.
- * Example: GET /work-orders/by-po/TS-12345        (exact)
- *          GET /work-orders/by-po/123?like=1      (LIKE '%123%')
- */
+// Lookup by PO (unchanged)
 app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
   try {
     const po = decodeURIComponent(String(req.params.poNumber || '').trim());
@@ -523,7 +542,7 @@ app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
   }
 });
 
-// ── BULK status update — put this BEFORE any "/:id" routes and keep it here
+// ── BULK status update — before "/:id" routes
 function parseIdArray(maybeIds) {
   if (Array.isArray(maybeIds)) return maybeIds;
   if (typeof maybeIds === 'string') return maybeIds.split(/[,\s]+/).filter(Boolean);
@@ -563,7 +582,7 @@ app.put('/work-orders/bulk-status', authenticate, express.json(), async (req, re
   }
 });
 
-// ── SINGLE-ROW routes (now numeric-only) ─────────────────────────────────────
+// ── SINGLE-ROW routes (numeric-only) ─────────────────────────────────────────
 app.get('/work-orders/:id(\\d+)', authenticate, async (req, res) => {
   try {
     const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
