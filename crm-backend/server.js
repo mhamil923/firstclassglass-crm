@@ -236,6 +236,8 @@ async function ensureCols() {
     { name: 'customerEmail',   type: 'VARCHAR(255) NULL' },
     { name: 'dayOrder',        type: 'INT NULL' },
     { name: 'workOrderNumber', type: 'VARCHAR(64) NULL' },
+    // NEW
+    { name: 'siteAddress',     type: 'VARCHAR(255) NULL' },
   ];
   for (const { name, type } of colsToEnsure) {
     try {
@@ -437,13 +439,14 @@ app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
 });
 
 /**
- * Flexible search (unchanged)
+ * Flexible search — now includes siteAddress
  */
 app.get('/work-orders/search', authenticate, async (req, res) => {
   const {
     customer = '',
     poNumber = '',
     siteLocation = '',
+    siteAddress = '',
     workOrderNumber = '',
     status = '',
   } = req.query || {};
@@ -452,8 +455,9 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
     const terms = [];
     const params = [];
 
-    terms.push(`COALESCE(w.customer,'')     LIKE ?`);      params.push(`%${customer}%`);
-    terms.push(`COALESCE(w.siteLocation,'') LIKE ?`);      params.push(`%${siteLocation}%`);
+    terms.push(`COALESCE(w.customer,'')      LIKE ?`); params.push(`%${customer}%`);
+    terms.push(`COALESCE(w.siteLocation,'')  LIKE ?`); params.push(`%${siteLocation}%`);
+    terms.push(`COALESCE(w.siteAddress,'')   LIKE ?`); params.push(`%${siteAddress}%`);
 
     if (String(status).trim()) {
       terms.push(`COALESCE(w.status,'') LIKE ?`);
@@ -539,7 +543,7 @@ function pickPdfKeyFromRow(r) {
 app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
   try {
     const po = decodeURIComponent(String(req.params.poNumber || '').trim());
-    const useLike = String(req.query.like || '').trim() === '1';
+    theUseLike = String(req.query.like || '').trim() === '1';
     const format = String(req.query.format || '').trim().toLowerCase(); // 'json' to get link data
 
     if (!po) return res.status(400).json({ error: 'poNumber is required' });
@@ -550,7 +554,7 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
          LEFT JOIN users u ON w.assignedTo = u.id
         WHERE `;
     const params = [];
-    if (useLike) {
+    if (theUseLike) {
       sql += 'COALESCE(w.poNumber, \'\') LIKE ?';
       params.push(`%${po}%`);
     } else {
@@ -569,13 +573,14 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
     const href = `/files?key=${encodeURIComponent(key)}`;
 
     if (format === 'json') {
-      // Include siteLocation here too for convenience to ViewWorkOrder
+      // Include siteLocation and siteAddress here for convenience to ViewWorkOrder
       return res.json({
         workOrderId: row.id,
         key,
         href,
         customer: row.customer || null,
         siteLocation: row.siteLocation || null,
+        siteAddress: row.siteAddress || null,
         status: displayStatusOrDefault(row.status),
       });
     }
@@ -705,7 +710,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
     const {
       workOrderNumber = '',
       poNumber = '',
-      customer, siteLocation = '', billingAddress,
+      customer, siteLocation = '', siteAddress = '', billingAddress,
       problemDescription, status = 'New',
       assignedTo,
       billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
@@ -724,12 +729,12 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
     const cStatus = canonStatus(status) || 'New';
 
     const cols = [
-      'workOrderNumber','poNumber','customer','siteLocation','billingAddress',
+      'workOrderNumber','poNumber','customer','siteLocation','siteAddress','billingAddress',
       'problemDescription','status','pdfPath','photoPath',
       'billingPhone','sitePhone','customerPhone','customerEmail'
     ];
     const vals = [
-      workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
+      workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress, billingAddress,
       problemDescription, cStatus, pdfPath, firstImg,
       billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null
     ];
@@ -817,6 +822,7 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       poNumber = existing.poNumber,
       customer = existing.customer,
       siteLocation = existing.siteLocation,
+      siteAddress = existing.siteAddress,
       billingAddress = existing.billingAddress,
       problemDescription = existing.problemDescription,
       status = existing.status,
@@ -830,24 +836,24 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
     const cStatus = canonStatus(status) || existing.status;
 
     let sql = `UPDATE work_orders
-               SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,billingAddress=?,
+               SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
                    problemDescription=?,status=?,pdfPath=?,photoPath=?,
                    billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?
                WHERE id=?`;
     const params = [
-      workOrderNumber || null, poNumber || null, customer, siteLocation, billingAddress,
+      workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress, billingAddress,
       problemDescription, cStatus, pdfPath || null, attachments.join(','),
       billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null,
       wid
     ];
     if (SCHEMA.hasAssignedTo) {
       sql = `UPDATE work_orders
-             SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,billingAddress=?,
+             SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
                  problemDescription=?,status=?,pdfPath=?,photoPath=?,
                  billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,assignedTo=?
              WHERE id=?`;
       const assignedToVal = (assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo);
-      params.splice(13, 0, assignedToVal);
+      params.splice(14, 0, assignedToVal);
     }
 
     await db.execute(sql, params);
