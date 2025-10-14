@@ -144,7 +144,6 @@ function windowSql({ dateSql, endTime, timeWindow }) {
 }
 
 // ─── STATUS CANONICALIZER (UPDATED) ─────────────────────────────────────────
-// Canonical app statuses (no "Parts In"; now includes "Approved"; uses "Waiting for Approval")
 const STATUS_CANON = [
   'New',
   'Needs to be Quoted',
@@ -167,7 +166,6 @@ const STATUS_LOOKUP = new Map(STATUS_CANON.map(s => [statusKey(s), s]));
 
 // Map legacy/variants → canonical
 const STATUS_SYNONYMS = new Map([
-  // Old "Parts In" & variants → Needs to be Scheduled
   ['part in','Needs to be Scheduled'],
   ['parts in','Needs to be Scheduled'],
   ['parts  in','Needs to be Scheduled'],
@@ -175,27 +173,17 @@ const STATUS_SYNONYMS = new Map([
   ['parts_in','Needs to be Scheduled'],
   ['partsin','Needs to be Scheduled'],
   ['part s in','Needs to be Scheduled'],
-
-  // Waiting on/for Approval harmonization → "Waiting for Approval"
   ['waiting on approval','Waiting for Approval'],
   ['waiting-on-approval','Waiting for Approval'],
   ['waiting_on_approval','Waiting for Approval'],
-
-  // Waiting on Parts
   ['waiting on part','Waiting on Parts'],
   ['waiting on parts','Waiting on Parts'],
   ['waiting-on-parts','Waiting on Parts'],
   ['waiting_on_parts','Waiting on Parts'],
   ['waitingonparts','Waiting on Parts'],
-
-  // Needs to be Scheduled variants
   ['needs to be schedule','Needs to be Scheduled'],
   ['need to be scheduled','Needs to be Scheduled'],
-
-  // New
   ['new','New'],['fresh','New'],['just created','New'],
-
-  // Needs to be Quoted
   ['needs quote','Needs to be Quoted'],
   ['need quote','Needs to be Quoted'],
   ['quote needed','Needs to be Quoted'],
@@ -204,8 +192,6 @@ const STATUS_SYNONYMS = new Map([
   ['needs-to-be-quoted','Needs to be Quoted'],
   ['needs_to_be_quoted','Needs to be Quoted'],
   ['needstobequoted','Needs to be Quoted'],
-
-  // Needs to be Invoiced
   ['needs to be invoiced','Needs to be Invoiced'],
   ['need to be invoiced','Needs to be Invoiced'],
   ['needs invoiced','Needs to be Invoiced'],
@@ -217,8 +203,6 @@ const STATUS_SYNONYMS = new Map([
   ['needsinvoice','Needs to be Invoiced'],
   ['needsinvoiced','Needs to be Invoiced'],
   ['needs to invoice','Needs to be Invoiced'],
-
-  // Approved variants
   ['approved','Approved'],
 ]);
 function canonStatus(input) {
@@ -226,7 +210,6 @@ function canonStatus(input) {
   return STATUS_LOOKUP.get(k) || STATUS_SYNONYMS.get(k) || null;
 }
 function displayStatusOrDefault(s) {
-  // Normalize anything unknown; default to 'New'
   return canonStatus(s) || (String(s || '').trim() ? String(s) : 'New');
 }
 
@@ -539,6 +522,69 @@ app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
   } catch (err) {
     console.error('By-PO lookup error:', err);
     res.status(500).json({ error: 'Failed to lookup by PO number.' });
+  }
+});
+
+// ─── NEW: PDF-by-PO route ───────────────────────────────────────────────────
+// Picks primary pdfPath; if absent, first *.pdf in photoPath. Redirects to /files or returns JSON.
+function pickPdfKeyFromRow(r) {
+  if (r?.pdfPath && /\.pdf$/i.test(r.pdfPath)) return r.pdfPath;
+  const list = (r?.photoPath || '').split(',').map(s => s.trim()).filter(Boolean);
+  for (const k of list) {
+    if (/\.pdf$/i.test(k)) return k;
+  }
+  return null;
+}
+
+app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
+  try {
+    const po = decodeURIComponent(String(req.params.poNumber || '').trim());
+    const useLike = String(req.query.like || '').trim() === '1';
+    const format = String(req.query.format || '').trim().toLowerCase(); // 'json' to get link data
+
+    if (!po) return res.status(400).json({ error: 'poNumber is required' });
+
+    let sql =
+      `SELECT w.*, u.username AS assignedToName
+         FROM work_orders w
+         LEFT JOIN users u ON w.assignedTo = u.id
+        WHERE `;
+    const params = [];
+    if (useLike) {
+      sql += 'COALESCE(w.poNumber, \'\') LIKE ?';
+      params.push(`%${po}%`);
+    } else {
+      sql += 'COALESCE(w.poNumber, \'\') = ?';
+      params.push(po);
+    }
+    sql += ' ORDER BY w.id DESC LIMIT 1';
+
+    const [rows] = await db.execute(sql, params);
+    if (!rows.length) return res.status(404).json({ error: 'No work order found for that PO.' });
+
+    const row = rows[0];
+    const key = pickPdfKeyFromRow(row);
+    if (!key) return res.status(404).json({ error: 'No PDF found for that PO.' });
+
+    const href = `/files?key=${encodeURIComponent(key)}`;
+
+    if (format === 'json') {
+      // Include siteLocation here too for convenience to ViewWorkOrder
+      return res.json({
+        workOrderId: row.id,
+        key,
+        href,
+        customer: row.customer || null,
+        siteLocation: row.siteLocation || null,
+        status: displayStatusOrDefault(row.status),
+      });
+    }
+
+    // Default: redirect to our unified file streamer (handles S3/local + Range)
+    return res.redirect(302, href);
+  } catch (err) {
+    console.error('PDF-by-PO error:', err);
+    res.status(500).json({ error: 'Failed to resolve PDF by PO.' });
   }
 });
 
