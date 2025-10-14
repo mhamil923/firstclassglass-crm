@@ -6,12 +6,16 @@ import moment from "moment";
 import API_BASE_URL from "./config";
 import "./ViewWorkOrder.css";
 
+// Keep this in sync with AddWorkOrder.js and WorkOrders.js
 const STATUS_OPTIONS = [
-  "Needs to be Scheduled",
+  "New",
   "Scheduled",
+  "Needs to be Quoted",
   "Waiting for Approval",
+  "Approved",
   "Waiting on Parts",
-  "Parts In",
+  "Needs to be Scheduled",
+  "Needs to be Invoiced",
   "Completed",
 ];
 
@@ -34,8 +38,7 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   const save = async () => {
     setSaving(true);
     try {
-      // Persist blank as NULL
-      const next = po.trim() || null;
+      const next = po.trim() || null; // Persist blank as NULL
       await api.put(`/work-orders/${orderId}`, { poNumber: next });
       onSaved?.(next);
       setEditing(false);
@@ -87,9 +90,12 @@ export default function ViewWorkOrder() {
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
-  // Replace PDF UI state
+  // PDF UI state
   const [busyReplace, setBusyReplace] = useState(false);
   const [keepOldInAttachments, setKeepOldInAttachments] = useState(true);
+
+  // PO PDF upload state
+  const [busyPoUpload, setBusyPoUpload] = useState(false);
 
   // Status state
   const [statusSaving, setStatusSaving] = useState(false);
@@ -137,10 +143,11 @@ export default function ViewWorkOrder() {
   }
 
   const {
-    workOrderNumber, // external WO# if present
+    workOrderNumber,
     poNumber,
     customer,
-    siteLocation,
+    siteLocation,  // address (existing backend field)
+    siteName,      // optional (sent from AddWorkOrder; backend may ignore)
     billingAddress,
     problemDescription,
     status,
@@ -164,30 +171,15 @@ export default function ViewWorkOrder() {
     .map((p) => p.trim())
     .filter(Boolean);
 
+  const isPdfKey = (key) => /\.pdf(\?|$)/i.test(key);
+  const poPdfs = attachments.filter(isPdfKey);
+  const attachmentImages = attachments.filter((p) => !isPdfKey(p));
+
   // ---------- PRINT helpers ----------
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`;
 
-  function parseSite(loc, fallbackName) {
-    const result = { name: fallbackName || "", address: "" };
-    if (!loc) return result;
-    const s = String(loc).trim();
-
-    if (s.includes(" - ")) {
-      const [n, ...rest] = s.split(" - ");
-      result.name = (n || "").trim() || result.name;
-      result.address = rest.join(" - ").trim();
-      return result;
-    }
-
-    const parts = s.split(",").map((x) => x.trim());
-    if (parts.length >= 2 && !/\d/.test(parts[0]) && /\d/.test(parts[1])) {
-      result.name = parts[0] || result.name;
-      result.address = parts.slice(1).join(", ");
-      return result;
-    }
-
-    result.address = s;
-    return result;
+  function parseSiteAddressOnly(loc) {
+    return String(loc || "").trim();
   }
 
   const safe = (x) =>
@@ -198,10 +190,9 @@ export default function ViewWorkOrder() {
       .replace(/>/g, "&gt;");
 
   const handlePrint = () => {
-    const siteParsed = parseSite(siteLocation, customer);
-    const siteName = siteParsed.name || customer || "";
-    const siteAddr = siteParsed.address || "";
-    const agreementNo = cleanedPo || id; // don't print legacy WO in PO slot
+    const siteAddr = parseSiteAddressOnly(siteLocation);
+    const siteDisplayName = (siteName || customer || "").trim();
+    const agreementNo = cleanedPo || id;
 
     const html = `<!doctype html>
 <html>
@@ -263,7 +254,7 @@ export default function ViewWorkOrder() {
         <th class="label">Name</th>
         <td>${safe(customer || "")}</td>
         <th class="label">Name</th>
-        <td>${safe(siteName)}</td>
+        <td>${safe(siteDisplayName)}</td>
       </tr>
       <tr>
         <th class="label">Address</th>
@@ -343,6 +334,7 @@ export default function ViewWorkOrder() {
     }
   };
 
+  // Generic attachment uploader (images and/or PDFs go to attachments)
   const handleAttachmentChange = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -374,6 +366,7 @@ export default function ViewWorkOrder() {
     }
   };
 
+  // Replace the main "Signed Work Order" PDF (pdfPath)
   const handleReplacePdfUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -407,11 +400,39 @@ export default function ViewWorkOrder() {
     }
   };
 
+  // Upload PO Order PDF(s): these are saved to attachments (not replacing main pdfPath)
+  const handleUploadPoPdf = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    if (!files.every((f) => f.type === "application/pdf")) {
+      alert("Please choose PDF file(s).");
+      e.target.value = "";
+      return;
+    }
+    setBusyPoUpload(true);
+    try {
+      // IMPORTANT: do NOT send replacePdf; server will put PDFs into attachments
+      const form = new FormData();
+      files.forEach((f) => form.append("pdfFile", f));
+      await api.put(`/work-orders/${id}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      await fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error uploading PO PDF:", error);
+      alert(error?.response?.data?.error || "Failed to upload PO PDF.");
+    } finally {
+      setBusyPoUpload(false);
+      e.target.value = "";
+    }
+  };
+
   const handleStatusChange = async (e) => {
     const newStatus = e.target.value;
     setLocalStatus(newStatus);
     setStatusSaving(true);
     try {
+      // Prefer the dedicated status endpoint (server has both)
       try {
         await api.put(`/work-orders/${id}/status`, { status: newStatus });
       } catch {
@@ -430,7 +451,8 @@ export default function ViewWorkOrder() {
     }
   };
 
-  const isPdfKey = (key) => /\.pdf(\?|$)/i.test(key);
+  const urlFor = (relPath) =>
+    `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
 
   return (
     <div className="view-container">
@@ -458,7 +480,7 @@ export default function ViewWorkOrder() {
             <span className="detail-value">
               <PONumberEditor
                 orderId={workOrder.id}
-                initialPo={cleanedPo} // blank if old data had WO in PO
+                initialPo={cleanedPo}
                 onSaved={(newPo) =>
                   setWorkOrder((prev) => ({ ...prev, poNumber: newPo || null }))
                 }
@@ -501,10 +523,18 @@ export default function ViewWorkOrder() {
             <span className="detail-value">{customerEmail || "—"}</span>
           </li>
 
+          {/* NEW: Site Location (name) and Site Address (address) */}
           <li className="detail-item">
             <span className="detail-label">Site Location:</span>
-            <span className="detail-value">{siteLocation || "—"}</span>
+            <span className="detail-value">{siteName || "—"}</span>
           </li>
+          <li className="detail-item">
+            <span className="detail-label">Site Address:</span>
+            <span className="detail-value pre-wrap">
+              {siteLocation || "—"}
+            </span>
+          </li>
+
           <li className="detail-item">
             <span className="detail-label">Billing Address:</span>
             <span className="detail-value pre-wrap">{billingAddress || "—"}</span>
@@ -523,14 +553,17 @@ export default function ViewWorkOrder() {
           </li>
         </ul>
 
-        {/* Work Order PDF */}
+        {/* Signed Work Order PDF (main pdfPath) */}
         <div className="section-card">
-          <h3 className="section-header">Work Order PDF</h3>
+          <h3 className="section-header">Signed Work Order PDF</h3>
 
-        {pdfUrl ? (
+          {pdfUrl ? (
             <>
               <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
-              <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div
+                className="mt-2"
+                style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}
+              >
                 <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
                   Open PDF in new tab
                 </a>
@@ -560,7 +593,7 @@ export default function ViewWorkOrder() {
             <div>
               <p className="empty-text">No PDF attached.</p>
               <label className="btn">
-                {busyReplace ? "Uploading…" : "Upload PDF"}
+                {busyReplace ? "Uploading…" : "Upload Signed PDF"}
                 <input
                   type="file"
                   accept="application/pdf"
@@ -573,16 +606,15 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* Attachments */}
+        {/* PO Order PDF(s) — stored in attachments */}
         <div className="section-card">
-          <h3 className="section-header">Attachments</h3>
+          <h3 className="section-header">PO Order PDF(s)</h3>
 
-          {attachments.length ? (
+          {poPdfs.length ? (
             <div className="attachments">
-              {attachments.map((relPath, i) => {
-                const url = `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
-                const pdf = isPdfKey(relPath);
-
+              {poPdfs.map((relPath, i) => {
+                const url = urlFor(relPath);
+                const fileName = relPath.split("/").pop() || `po-${i + 1}.pdf`;
                 return (
                   <div
                     key={`${relPath}-${i}`}
@@ -593,21 +625,83 @@ export default function ViewWorkOrder() {
                       margin: 6,
                     }}
                   >
-                    {pdf ? (
-                      <a
-                        href={url}
-                        className="attachment-chip"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title={`Open PDF: ${relPath.split("/").pop()}`}
-                      >
-                        📄 {relPath.split("/").pop() || "attachment.pdf"}
-                      </a>
-                    ) : (
-                      <a href={url} target="_blank" rel="noopener noreferrer">
-                        <img src={url} alt={`attachment-${i}`} className="attachment-img" />
-                      </a>
-                    )}
+                    <a
+                      href={`${url}#page=1&view=FitH`}
+                      className="attachment-chip"
+                      target="__blank"
+                      rel="noopener noreferrer"
+                      title={`Open PO PDF: ${fileName}`}
+                    >
+                      📄 {fileName}
+                    </a>
+                    <button
+                      type="button"
+                      title="Delete PO PDF"
+                      aria-label="Delete PO PDF"
+                      onClick={() => handleDeleteAttachment(relPath)}
+                      style={{
+                        position: "absolute",
+                        top: -6,
+                        right: -6,
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        border: "none",
+                        background: "#e33",
+                        color: "#fff",
+                        fontWeight: 700,
+                        lineHeight: "18px",
+                        cursor: "pointer",
+                        zIndex: 5,
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                      }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="empty-text">No PO PDFs attached.</p>
+          )}
+
+          <div className="attachment-upload">
+            <label className="btn">
+              {busyPoUpload ? "Uploading…" : "Upload PO PDF(s)"}
+              <input
+                type="file"
+                accept="application/pdf"
+                multiple
+                onChange={handleUploadPoPdf}
+                style={{ display: "none" }}
+                disabled={busyPoUpload}
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* Image Attachments (non-PDF) */}
+        <div className="section-card">
+          <h3 className="section-header">Image Attachments</h3>
+
+          {attachmentImages.length ? (
+            <div className="attachments">
+              {attachmentImages.map((relPath, i) => {
+                const url = urlFor(relPath);
+                return (
+                  <div
+                    key={`${relPath}-${i}`}
+                    className="attachment-item"
+                    style={{
+                      position: "relative",
+                      display: "inline-block",
+                      margin: 6,
+                    }}
+                  >
+                    <a href={url} target="_blank" rel="noopener noreferrer">
+                      <img src={url} alt={`attachment-${i}`} className="attachment-img" />
+                    </a>
 
                     <button
                       type="button"
@@ -638,7 +732,7 @@ export default function ViewWorkOrder() {
               })}
             </div>
           ) : (
-            <p className="empty-text">No attachments.</p>
+            <p className="empty-text">No images attached.</p>
           )}
 
           <div className="attachment-upload">
