@@ -25,15 +25,13 @@ const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayWO = (wo) => norm(wo) || "—";
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
 
-/* ---------- Inline PO# Editor (value-only; outer label provides "PO #") ---------- */
+/* ---------- Inline PO# Editor ---------- */
 function PONumberEditor({ orderId, initialPo, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [po, setPo] = useState(initialPo || "");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    setPo(initialPo || "");
-  }, [initialPo]);
+  useEffect(() => { setPo(initialPo || ""); }, [initialPo]);
 
   const save = async () => {
     setSaving(true);
@@ -128,11 +126,13 @@ export default function ViewWorkOrder() {
   }, [workOrder]);
 
   // Newest first for display
-  const displayNotes = useMemo(() => {
-    return originalNotes
-      .map((n, idx) => ({ ...n, __origIndex: idx }))
-      .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
-  }, [originalNotes]);
+  const displayNotes = useMemo(
+    () =>
+      originalNotes
+        .map((n, idx) => ({ ...n, __origIndex: idx }))
+        .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0)),
+    [originalNotes]
+  );
 
   if (!workOrder) {
     return (
@@ -146,8 +146,8 @@ export default function ViewWorkOrder() {
     workOrderNumber,
     poNumber,
     customer,
-    siteLocation,  // address (existing backend field)
-    siteName,      // optional (sent from AddWorkOrder; backend may ignore)
+    siteLocation,   // ✅ LOCATION NAME (e.g., "Panda Express")
+    siteAddress,    // ✅ STREET ADDRESS (e.g., "1525 Rancho Conejo Blvd …")
     billingAddress,
     problemDescription,
     status,
@@ -177,11 +177,6 @@ export default function ViewWorkOrder() {
 
   // ---------- PRINT helpers ----------
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`;
-
-  function parseSiteAddressOnly(loc) {
-    return String(loc || "").trim();
-  }
-
   const safe = (x) =>
     (x ?? "")
       .toString()
@@ -190,8 +185,8 @@ export default function ViewWorkOrder() {
       .replace(/>/g, "&gt;");
 
   const handlePrint = () => {
-    const siteAddr = parseSiteAddressOnly(siteLocation);
-    const siteDisplayName = (siteName || customer || "").trim();
+    const siteDisplayName = (siteLocation || customer || "").trim();
+    const siteAddr = (siteAddress || "").trim(); // ✅ use siteAddress, not siteLocation
     const agreementNo = cleanedPo || id;
 
     const html = `<!doctype html>
@@ -300,10 +295,7 @@ export default function ViewWorkOrder() {
 </html>`;
 
     const w = window.open("", "_blank", "width=1000,height=1200");
-    if (!w) {
-      alert("Popup blocked. Please allow popups to print.");
-      return;
-    }
+    if (!w) { alert("Popup blocked. Please allow popups to print."); return; }
     w.document.open();
     w.document.write(html);
     w.document.close();
@@ -337,7 +329,7 @@ export default function ViewWorkOrder() {
   // Generic attachment uploader (images and/or PDFs go to attachments)
   const handleAttachmentChange = async (e) => {
     const files = Array.from(e.target.files || []);
-    if (!files.length) return;
+       if (!files.length) return;
     const formData = new FormData();
     files.forEach((file) => formData.append("photoFile", file));
     try {
@@ -356,9 +348,7 @@ export default function ViewWorkOrder() {
   const handleDeleteAttachment = async (relPath) => {
     if (!window.confirm("Delete this attachment?")) return;
     try {
-      await api.delete(`/work-orders/${id}/attachment`, {
-        data: { photoPath: relPath },
-      });
+      await api.delete(`/work-orders/${id}/attachment`, { data: { photoPath: relPath } });
       await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error deleting attachment:", error);
@@ -384,11 +374,9 @@ export default function ViewWorkOrder() {
         form.append("keepOldPdfInAttachments", "1");
         form.append("keepOldInAttachments", "1");
       }
-
       await api.put(`/work-orders/${id}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-
       await fetchWorkOrder();
       alert("PDF replaced successfully.");
     } catch (error) {
@@ -411,7 +399,6 @@ export default function ViewWorkOrder() {
     }
     setBusyPoUpload(true);
     try {
-      // IMPORTANT: do NOT send replacePdf; server will put PDFs into attachments
       const form = new FormData();
       files.forEach((f) => form.append("pdfFile", f));
       await api.put(`/work-orders/${id}/edit`, form, {
@@ -432,15 +419,12 @@ export default function ViewWorkOrder() {
     setLocalStatus(newStatus);
     setStatusSaving(true);
     try {
-      // Prefer the dedicated status endpoint (server has both)
       try {
         await api.put(`/work-orders/${id}/status`, { status: newStatus });
       } catch {
         const form = new FormData();
         form.append("status", newStatus);
-        await api.put(`/work-orders/${id}/edit`, form, {
-          headers: { "Content-Type": "multipart/form-data" },
-        });
+        await api.put(`/work-orders/${id}/edit`, form, { headers: { "Content-Type": "multipart/form-data" } });
       }
       await fetchWorkOrder();
     } catch (error) {
@@ -451,8 +435,7 @@ export default function ViewWorkOrder() {
     }
   };
 
-  const urlFor = (relPath) =>
-    `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
+  const urlFor = (relPath) => `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
 
   return (
     <div className="view-container">
@@ -460,12 +443,8 @@ export default function ViewWorkOrder() {
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
           <div className="view-actions">
-            <button className="btn btn-outline" onClick={handlePrint}>
-              🖨️ Print Work Order
-            </button>
-            <button className="back-btn" onClick={() => navigate("/work-orders")}>
-              ← Back to List
-            </button>
+            <button className="btn btn-outline" onClick={handlePrint}>🖨️ Print Work Order</button>
+            <button className="back-btn" onClick={() => navigate("/work-orders")}>← Back to List</button>
           </div>
         </div>
 
@@ -481,9 +460,7 @@ export default function ViewWorkOrder() {
               <PONumberEditor
                 orderId={workOrder.id}
                 initialPo={cleanedPo}
-                onSaved={(newPo) =>
-                  setWorkOrder((prev) => ({ ...prev, poNumber: newPo || null }))
-                }
+                onSaved={(newPo) => setWorkOrder((prev) => ({ ...prev, poNumber: newPo || null }))}
               />
             </span>
           </li>
@@ -491,19 +468,10 @@ export default function ViewWorkOrder() {
           <li className="detail-item">
             <span className="detail-label">Status:</span>
             <span className="detail-value">
-              <select
-                value={localStatus}
-                onChange={handleStatusChange}
-                disabled={statusSaving}
-                style={{ padding: 6 }}
-              >
-                <option value="" disabled>
-                  Select status…
-                </option>
+              <select value={localStatus} onChange={handleStatusChange} disabled={statusSaving} style={{ padding: 6 }}>
+                <option value="" disabled>Select status…</option>
                 {STATUS_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
+                  <option key={opt} value={opt}>{opt}</option>
                 ))}
               </select>
               {statusSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
@@ -523,16 +491,14 @@ export default function ViewWorkOrder() {
             <span className="detail-value">{customerEmail || "—"}</span>
           </li>
 
-          {/* NEW: Site Location (name) and Site Address (address) */}
+          {/* ✅ Correct bindings */}
           <li className="detail-item">
             <span className="detail-label">Site Location:</span>
-            <span className="detail-value">{siteName || "—"}</span>
+            <span className="detail-value">{siteLocation || "—"}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Site Address:</span>
-            <span className="detail-value pre-wrap">
-              {siteLocation || "—"}
-            </span>
+            <span className="detail-value pre-wrap">{siteAddress || "—"}</span>
           </li>
 
           <li className="detail-item">
@@ -546,9 +512,7 @@ export default function ViewWorkOrder() {
           <li className="detail-item">
             <span className="detail-label">Scheduled Date:</span>
             <span className="detail-value">
-              {scheduledDate
-                ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
-                : "Not Scheduled"}
+              {scheduledDate ? moment(scheduledDate).format("YYYY-MM-DD HH:mm") : "Not Scheduled"}
             </span>
           </li>
         </ul>
@@ -560,13 +524,8 @@ export default function ViewWorkOrder() {
           {pdfUrl ? (
             <>
               <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
-              <div
-                className="mt-2"
-                style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}
-              >
-                <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">
-                  Open PDF in new tab
-                </a>
+              <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">Open PDF in new tab</a>
 
                 <label className="btn">
                   {busyReplace ? "Replacing…" : "Replace Signed PDF"}
@@ -616,22 +575,8 @@ export default function ViewWorkOrder() {
                 const url = urlFor(relPath);
                 const fileName = relPath.split("/").pop() || `po-${i + 1}.pdf`;
                 return (
-                  <div
-                    key={`${relPath}-${i}`}
-                    className="attachment-item"
-                    style={{
-                      position: "relative",
-                      display: "inline-block",
-                      margin: 6,
-                    }}
-                  >
-                    <a
-                      href={`${url}#page=1&view=FitH`}
-                      className="attachment-chip"
-                      target="__blank"
-                      rel="noopener noreferrer"
-                      title={`Open PO PDF: ${fileName}`}
-                    >
+                  <div key={`${relPath}-${i}`} className="attachment-item" style={{ position: "relative", display: "inline-block", margin: 6 }}>
+                    <a href={`${url}#page=1&view=FitH`} className="attachment-chip" target="__blank" rel="noopener noreferrer" title={`Open PO PDF: ${fileName}`}>
                       📄 {fileName}
                     </a>
                     <button
@@ -640,19 +585,9 @@ export default function ViewWorkOrder() {
                       aria-label="Delete PO PDF"
                       onClick={() => handleDeleteAttachment(relPath)}
                       style={{
-                        position: "absolute",
-                        top: -6,
-                        right: -6,
-                        width: 20,
-                        height: 20,
-                        borderRadius: "50%",
-                        border: "none",
-                        background: "#e33",
-                        color: "#fff",
-                        fontWeight: 700,
-                        lineHeight: "18px",
-                        cursor: "pointer",
-                        zIndex: 5,
+                        position: "absolute", top: -6, right: -6, width: 20, height: 20,
+                        borderRadius: "50%", border: "none", background: "#e33", color: "#fff",
+                        fontWeight: 700, lineHeight: "18px", cursor: "pointer", zIndex: 5,
                         boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
                       }}
                     >
@@ -690,38 +625,19 @@ export default function ViewWorkOrder() {
               {attachmentImages.map((relPath, i) => {
                 const url = urlFor(relPath);
                 return (
-                  <div
-                    key={`${relPath}-${i}`}
-                    className="attachment-item"
-                    style={{
-                      position: "relative",
-                      display: "inline-block",
-                      margin: 6,
-                    }}
-                  >
+                  <div key={`${relPath}-${i}`} className="attachment-item" style={{ position: "relative", display: "inline-block", margin: 6 }}>
                     <a href={url} target="_blank" rel="noopener noreferrer">
                       <img src={url} alt={`attachment-${i}`} className="attachment-img" />
                     </a>
-
                     <button
                       type="button"
                       title="Delete attachment"
                       aria-label="Delete attachment"
                       onClick={() => handleDeleteAttachment(relPath)}
                       style={{
-                        position: "absolute",
-                        top: -6,
-                        right: -6,
-                        width: 20,
-                        height: 20,
-                        borderRadius: "50%",
-                        border: "none",
-                        background: "#e33",
-                        color: "#fff",
-                        fontWeight: 700,
-                        lineHeight: "18px",
-                        cursor: "pointer",
-                        zIndex: 5,
+                        position: "absolute", top: -6, right: -6, width: 20, height: 20,
+                        borderRadius: "50%", border: "none", background: "#e33", color: "#fff",
+                        fontWeight: 700, lineHeight: "18px", cursor: "pointer", zIndex: 5,
                         boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
                       }}
                     >
@@ -736,12 +652,7 @@ export default function ViewWorkOrder() {
           )}
 
           <div className="attachment-upload">
-            <input
-              type="file"
-              multiple
-              accept="image/*,application/pdf"
-              onChange={handleAttachmentChange}
-            />
+            <input type="file" multiple accept="image/*,application/pdf" onChange={handleAttachmentChange} />
           </div>
         </div>
 
@@ -749,10 +660,7 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
 
-          <button
-            className="toggle-note-btn"
-            onClick={() => setShowNoteInput((v) => !v)}
-          >
+          <button className="toggle-note-btn" onClick={() => setShowNoteInput((v) => !v)}>
             {showNoteInput ? "Cancel" : "Add Note"}
           </button>
 
@@ -765,9 +673,7 @@ export default function ViewWorkOrder() {
                 placeholder="Write your note here..."
                 rows={3}
               />
-              <button className="toggle-note-btn" onClick={handleAddNote}>
-                Submit Note
-              </button>
+              <button className="toggle-note-btn" onClick={handleAddNote}>Submit Note</button>
             </div>
           )}
 
