@@ -10,7 +10,7 @@ const STATUS_LIST = [
   "Scheduled",
   "Needs to be Quoted",
   "Waiting for Approval",
-  "Approved",            // ← NEW (inserted here)
+  "Approved",            // ← NEW
   "Waiting on Parts",
   "Needs to be Scheduled",
   "Needs to be Invoiced",
@@ -38,7 +38,8 @@ export default function AddWorkOrder() {
     customer: "",
     workOrderNumber: "",
     poNumber: "", // optional
-    siteLocation: "",
+    siteName: "",        // ← NEW: separate site location (name of the place)
+    siteLocation: "",    // address (kept for backend compatibility)
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
@@ -53,7 +54,7 @@ export default function AddWorkOrder() {
   const [techs, setTechs] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
-  const siteInputRef = useRef(null);
+  const siteAddressInputRef = useRef(null);   // renamed for clarity
   const autocompleteRef = useRef(null);
   const gmapsReadyRef = useRef(false);
 
@@ -73,7 +74,7 @@ export default function AddWorkOrder() {
       .catch((e) => console.error("Error loading assignees:", e));
   }, []);
 
-  // ---------- Google Maps Autocomplete
+  // ---------- Google Maps Autocomplete (for Site Address)
   useEffect(() => {
     const key = (process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "").trim();
     if (!key) {
@@ -111,16 +112,19 @@ export default function AddWorkOrder() {
 
   function initAutocomplete() {
     if (!gmapsReadyRef.current || !window.google?.maps?.places?.Autocomplete) return;
-    if (!siteInputRef.current) return;
+    if (!siteAddressInputRef.current) return;
 
     try {
-      const ac = new window.google.maps.places.Autocomplete(siteInputRef.current, {
+      const ac = new window.google.maps.places.Autocomplete(siteAddressInputRef.current, {
         types: ["address"],
         fields: ["formatted_address", "name", "geometry"],
       });
       ac.addListener("place_changed", () => {
         const place = ac.getPlace();
-        const addr = place?.formatted_address || place?.name || siteInputRef.current.value;
+        const addr =
+          place?.formatted_address ||
+          place?.name ||
+          siteAddressInputRef.current.value;
         setWorkOrder((prev) => ({ ...prev, siteLocation: addr }));
       });
       autocompleteRef.current = ac;
@@ -129,7 +133,7 @@ export default function AddWorkOrder() {
     }
   }
 
-  const handleSiteFocus = () => {
+  const handleSiteAddressFocus = () => {
     if (!autocompleteRef.current) {
       initAutocomplete();
     }
@@ -187,7 +191,10 @@ export default function AddWorkOrder() {
     form.append("customer", workOrder.customer);
     form.append("workOrderNumber", workOrder.workOrderNumber || "");
     form.append("poNumber", workOrder.poNumber || "");
+    // Keep sending siteLocation (address) for backend compatibility
     form.append("siteLocation", workOrder.siteLocation || "");
+    // Optionally include the siteName; backend will ignore if not supported yet
+    form.append("siteName", workOrder.siteName || "");
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
     form.append("status", workOrder.status || "Needs to be Scheduled");
@@ -307,15 +314,28 @@ export default function AddWorkOrder() {
           />
         </div>
 
-        {/* Site Location */}
+        {/* Site Location (Name) */}
         <div className="form-group">
           <label className="form-label">Site Location</label>
           <input
+            name="siteName"
+            value={workOrder.siteName}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="Business / Building / Suite name"
+            autoComplete="off"
+          />
+        </div>
+
+        {/* Site Address (Autocomplete) */}
+        <div className="form-group">
+          <label className="form-label">Site Address</label>
+          <input
             name="siteLocation"
-            ref={siteInputRef}
+            ref={siteAddressInputRef}
             value={workOrder.siteLocation}
             onChange={handleChange}
-            onFocus={handleSiteFocus}
+            onFocus={handleSiteAddressFocus}
             placeholder="Start typing address…"
             className="form-control-custom"
           />
