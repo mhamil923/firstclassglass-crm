@@ -7,14 +7,14 @@ import "./AddWorkOrder.css";
 // Keep this list in sync with WorkOrders.js and server.js
 const STATUS_LIST = [
   "New",
-  "Needs to be Quoted",
-  "Needs to be Scheduled",
   "Scheduled",
+  "Needs to be Quoted",
   "Waiting for Approval",
+  "Approved",            // ← NEW (inserted here)
   "Waiting on Parts",
-  "Parts In",
+  "Needs to be Scheduled",
+  "Needs to be Invoiced",
   "Completed",
-  "Needs to be Invoiced", // ← NEW
 ];
 
 function decodeRoleFromJWT() {
