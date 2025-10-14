@@ -236,8 +236,7 @@ async function ensureCols() {
     { name: 'customerEmail',   type: 'VARCHAR(255) NULL' },
     { name: 'dayOrder',        type: 'INT NULL' },
     { name: 'workOrderNumber', type: 'VARCHAR(64) NULL' },
-    // NEW
-    { name: 'siteAddress',     type: 'VARCHAR(255) NULL' },
+    { name: 'siteAddress',     type: 'VARCHAR(255) NULL' }, // <— ensure siteAddress exists
   ];
   for (const { name, type } of colsToEnsure) {
     try {
@@ -439,7 +438,7 @@ app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
 });
 
 /**
- * Flexible search — now includes siteAddress
+ * Flexible search (now supports siteAddress too)
  */
 app.get('/work-orders/search', authenticate, async (req, res) => {
   const {
@@ -497,7 +496,7 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
   }
 });
 
-// Lookup by PO (unchanged)
+// Lookup by PO (unchanged selection; returns w.* so siteAddress is included)
 app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
   try {
     const po = decodeURIComponent(String(req.params.poNumber || '').trim());
@@ -530,7 +529,6 @@ app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
 });
 
 // ─── NEW: PDF-by-PO route ───────────────────────────────────────────────────
-// Picks primary pdfPath; if absent, first *.pdf in photoPath. Redirects to /files or returns JSON.
 function pickPdfKeyFromRow(r) {
   if (r?.pdfPath && /\.pdf$/i.test(r.pdfPath)) return r.pdfPath;
   const list = (r?.photoPath || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -543,7 +541,7 @@ function pickPdfKeyFromRow(r) {
 app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
   try {
     const po = decodeURIComponent(String(req.params.poNumber || '').trim());
-    theUseLike = String(req.query.like || '').trim() === '1';
+    const useLike = String(req.query.like || '').trim() === '1';
     const format = String(req.query.format || '').trim().toLowerCase(); // 'json' to get link data
 
     if (!po) return res.status(400).json({ error: 'poNumber is required' });
@@ -554,7 +552,7 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
          LEFT JOIN users u ON w.assignedTo = u.id
         WHERE `;
     const params = [];
-    if (theUseLike) {
+    if (useLike) {
       sql += 'COALESCE(w.poNumber, \'\') LIKE ?';
       params.push(`%${po}%`);
     } else {
@@ -573,7 +571,6 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
     const href = `/files?key=${encodeURIComponent(key)}`;
 
     if (format === 'json') {
-      // Include siteLocation and siteAddress here for convenience to ViewWorkOrder
       return res.json({
         workOrderId: row.id,
         key,
@@ -585,7 +582,6 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
       });
     }
 
-    // Default: redirect to our unified file streamer (handles S3/local + Range)
     return res.redirect(302, href);
   } catch (err) {
     console.error('PDF-by-PO error:', err);
@@ -710,7 +706,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
     const {
       workOrderNumber = '',
       poNumber = '',
-      customer, siteLocation = '', siteAddress = '', billingAddress,
+      customer, siteLocation = '', siteAddress = null, billingAddress,
       problemDescription, status = 'New',
       assignedTo,
       billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
@@ -734,7 +730,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       'billingPhone','sitePhone','customerPhone','customerEmail'
     ];
     const vals = [
-      workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress, billingAddress,
+      workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
       problemDescription, cStatus, pdfPath, firstImg,
       billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null
     ];
@@ -841,7 +837,7 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
                    billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?
                WHERE id=?`;
     const params = [
-      workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress, billingAddress,
+      workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
       problemDescription, cStatus, pdfPath || null, attachments.join(','),
       billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null,
       wid
@@ -853,7 +849,7 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
                  billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,assignedTo=?
              WHERE id=?`;
       const assignedToVal = (assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo);
-      params.splice(14, 0, assignedToVal);
+      params.splice(14, 0, assignedToVal); // insert before wid
     }
 
     await db.execute(sql, params);
