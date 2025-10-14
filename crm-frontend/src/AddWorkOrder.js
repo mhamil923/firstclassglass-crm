@@ -10,7 +10,7 @@ const STATUS_LIST = [
   "Scheduled",
   "Needs to be Quoted",
   "Waiting for Approval",
-  "Approved",            // ← NEW
+  "Approved",
   "Waiting on Parts",
   "Needs to be Scheduled",
   "Needs to be Invoiced",
@@ -37,9 +37,9 @@ export default function AddWorkOrder() {
   const [workOrder, setWorkOrder] = useState({
     customer: "",
     workOrderNumber: "",
-    poNumber: "", // optional
-    siteName: "",        // ← NEW: separate site location (name of the place)
-    siteLocation: "",    // address (kept for backend compatibility)
+    poNumber: "",
+    siteLocation: "", // ✅ NAME of the place (e.g., "Panda Express")
+    siteAddress: "",  // ✅ Street address (autocomplete)
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
@@ -54,7 +54,8 @@ export default function AddWorkOrder() {
   const [techs, setTechs] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
-  const siteAddressInputRef = useRef(null);   // renamed for clarity
+  // Autocomplete for Site Address
+  const siteAddressInputRef = useRef(null);
   const autocompleteRef = useRef(null);
   const gmapsReadyRef = useRef(false);
 
@@ -74,7 +75,7 @@ export default function AddWorkOrder() {
       .catch((e) => console.error("Error loading assignees:", e));
   }, []);
 
-  // ---------- Google Maps Autocomplete (for Site Address)
+  // ---------- Google Maps Autocomplete (for Site Address only)
   useEffect(() => {
     const key = (process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "").trim();
     if (!key) {
@@ -125,7 +126,7 @@ export default function AddWorkOrder() {
           place?.formatted_address ||
           place?.name ||
           siteAddressInputRef.current.value;
-        setWorkOrder((prev) => ({ ...prev, siteLocation: addr }));
+        setWorkOrder((prev) => ({ ...prev, siteAddress: addr })); // ✅ fill address
       });
       autocompleteRef.current = ac;
     } catch (e) {
@@ -152,17 +153,21 @@ export default function AddWorkOrder() {
     const { name, value } = e.target;
     setWorkOrder((prev) => {
       const upd = { ...prev, [name]: value };
+
       if (name === "customer") {
         const found = customers.find((c) => c.name === value);
         if (found?.billingAddress) upd.billingAddress = found.billingAddress;
       }
+
       if (name === "billingAddress") {
+        // Optional auto-fill of customer from the first line of billing address
         const first = extractCustomerFromBilling(value);
         const prevAuto = extractCustomerFromBilling(prev.billingAddress || "");
         if (!prev.customer || prev.customer === prevAuto) {
           upd.customer = first;
         }
       }
+
       return upd;
     });
   };
@@ -175,6 +180,8 @@ export default function AddWorkOrder() {
     if (!workOrder.customer) missing.push("Customer");
     if (!workOrder.billingAddress) missing.push("Billing Address");
     if (!workOrder.problemDescription) missing.push("Problem Description");
+    // Site Location (name) and Site Address are optional at creation,
+    // but you can enforce either here if desired.
     if (missing.length) {
       alert(`Please fill required fields: ${missing.join(", ")}`);
       return false;
@@ -191,10 +198,8 @@ export default function AddWorkOrder() {
     form.append("customer", workOrder.customer);
     form.append("workOrderNumber", workOrder.workOrderNumber || "");
     form.append("poNumber", workOrder.poNumber || "");
-    // Keep sending siteLocation (address) for backend compatibility
-    form.append("siteLocation", workOrder.siteLocation || "");
-    // Optionally include the siteName; backend will ignore if not supported yet
-    form.append("siteName", workOrder.siteName || "");
+    form.append("siteLocation", workOrder.siteLocation || ""); // ✅ name
+    form.append("siteAddress", workOrder.siteAddress || "");   // ✅ address (server may ignore if not implemented)
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
     form.append("status", workOrder.status || "Needs to be Scheduled");
@@ -316,13 +321,13 @@ export default function AddWorkOrder() {
 
         {/* Site Location (Name) */}
         <div className="form-group">
-          <label className="form-label">Site Location</label>
+          <label className="form-label">Site Location (Name)</label>
           <input
-            name="siteName"
-            value={workOrder.siteName}
+            name="siteLocation"
+            value={workOrder.siteLocation}
             onChange={handleChange}
             className="form-control-custom"
-            placeholder="Business / Building / Suite name"
+            placeholder="Business / Building / Suite name (e.g., Panda Express)"
             autoComplete="off"
           />
         </div>
@@ -331,9 +336,9 @@ export default function AddWorkOrder() {
         <div className="form-group">
           <label className="form-label">Site Address</label>
           <input
-            name="siteLocation"
+            name="siteAddress"
             ref={siteAddressInputRef}
-            value={workOrder.siteLocation}
+            value={workOrder.siteAddress}
             onChange={handleChange}
             onFocus={handleSiteAddressFocus}
             placeholder="Start typing address…"
