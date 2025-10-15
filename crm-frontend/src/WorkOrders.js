@@ -426,24 +426,29 @@ export default function WorkOrders() {
               const note = latestNoteOf(order);
               const noteTime = note?.createdAt ? moment(note.createdAt).fromNow() : null;
 
-              // ---- Legacy-safe location/address logic ----
-              const rawSiteLocation = norm(order.siteLocation);
-              // Only use a proper "name" field for the location column.
-              // (Do NOT fall back to siteLocation here, since older orders used it for the full address.)
-              let siteLocationName = norm(order.siteName) || norm(order.siteLocationName);
+              // ---- Robust location/address logic ----
+              const rawLocField = norm(order.siteLocation);               // may be a name (new) OR an address (legacy)
+              const explicitName = norm(order.siteName) || norm(order.siteLocationName);
+              let siteLocationName = explicitName;                        // prefer explicit name fields
 
-              // Build address from explicit address fields
+              // Build address from explicit address-type fields
               let siteAddress =
                 norm(order.siteAddress) ||
                 norm(order.serviceAddress) ||
                 norm(order.address);
 
-              // If there is no explicit Site Address but siteLocation has a value,
-              // treat siteLocation as the address (older records).
-              if (!siteAddress && rawSiteLocation) {
-                siteAddress = rawSiteLocation;
-                // leave siteLocationName as-is (likely empty), so the address shows only under Site Address
+              if (!siteAddress && rawLocField) {
+                // Legacy: no explicit address, but siteLocation has something
+                // -> treat siteLocation as the address, leave name blank.
+                siteAddress = rawLocField;
+              } else if (!siteLocationName && rawLocField) {
+                // Newer: there IS an address (or not), and siteLocation is actually the "name"
+                // -> show that name in Site Location.
+                siteLocationName = rawLocField;
               }
+              // At this point:
+              // - If both name & address exist, both columns will render.
+              // - If only legacy siteLocation existed, it shows as clickable address and name stays blank.
 
               return (
                 <tr
