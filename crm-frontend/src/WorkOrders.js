@@ -16,7 +16,7 @@ const STATUS_LIST = [
   "Scheduled",
   "Needs to be Quoted",
   "Waiting for Approval",
-  "Approved",              // ← NEW
+  "Approved",
   "Waiting on Parts",
   "Needs to be Scheduled",
   "Needs to be Invoiced",
@@ -24,7 +24,6 @@ const STATUS_LIST = [
 ];
 
 const PARTS_WAITING = "Waiting on Parts";
-// "Mark Parts In" now routes these to Needs to be Scheduled
 const PARTS_NEXT = "Needs to be Scheduled";
 
 // ---------- helpers ----------
@@ -253,10 +252,12 @@ export default function WorkOrders() {
 
   // maps
   const googleMapsApiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
-  const handleLocationClick = (e, loc) => {
+  const openAddressInMaps = (e, addr, fallbackLabel) => {
     e.stopPropagation();
+    const query = addr || fallbackLabel || "";
+    if (!query) return;
     const url = `https://www.google.com/maps/embed/v1/place?key=${googleMapsApiKey}&q=${encodeURIComponent(
-      loc
+      query
     )}`;
     window.open(url, "_blank", "width=800,height=600");
   };
@@ -306,7 +307,7 @@ export default function WorkOrders() {
     });
   }, [filteredOrders, poSearch]);
 
-  // bulk -> Needs to be Scheduled (renamed logic)
+  // bulk -> Needs to be Scheduled
   const markSelectedAsPartsIn = async () => {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
@@ -402,7 +403,6 @@ export default function WorkOrders() {
           {normStatus(selectedFilter) === normStatus(PARTS_WAITING) &&
             filteredOrders.some((o) => normStatus(o.status) === normStatus(PARTS_WAITING)) && (
               <button type="button" className="btn btn-parts" onClick={openPartsModal}>
-                {/* Keep label per your request; behavior now sends to Needs to be Scheduled */}
                 Mark Parts In
               </button>
             )}
@@ -413,8 +413,8 @@ export default function WorkOrders() {
             <tr>
               <th>WO / PO</th>
               <th>Customer</th>
-              <th>Billing Address</th>
               <th>Site Location</th>
+              <th>Site Address</th>
               <th>Problem Description</th>
               <th>Status</th>
               {userRole !== "tech" && <th>Assigned To</th>}
@@ -425,6 +425,20 @@ export default function WorkOrders() {
             {filteredOrders.map((order) => {
               const note = latestNoteOf(order);
               const noteTime = note?.createdAt ? moment(note.createdAt).fromNow() : null;
+
+              // Fallbacks for legacy data
+              const siteLocationName =
+                order.siteName ||
+                order.siteLocationName ||
+                order.siteLocation ||
+                "";
+
+              const siteAddress =
+                order.siteAddress ||
+                order.serviceAddress ||
+                order.address ||
+                "";
+
               return (
                 <tr
                   key={order.id}
@@ -447,14 +461,24 @@ export default function WorkOrders() {
                   </td>
 
                   <td>{order.customer || "N/A"}</td>
-                  <td title={order.billingAddress}>{order.billingAddress}</td>
-                  <td>
-                    <span
-                      className="link-text"
-                      onClick={(e) => handleLocationClick(e, order.siteLocation)}
-                    >
-                      {order.siteLocation}
-                    </span>
+
+                  {/* Site Location (name) */}
+                  <td title={siteLocationName || "—"}>
+                    {siteLocationName || "—"}
+                  </td>
+
+                  {/* Site Address (clickable to open maps) */}
+                  <td title={siteAddress || "N/A"}>
+                    {siteAddress ? (
+                      <span
+                        className="link-text"
+                        onClick={(e) => openAddressInMaps(e, siteAddress, siteLocationName)}
+                      >
+                        {siteAddress}
+                      </span>
+                    ) : (
+                      "N/A"
+                    )}
                   </td>
 
                   <td title={order.problemDescription}>
