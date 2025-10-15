@@ -354,9 +354,9 @@ export default function WorkOrders() {
         err?.response?.data?.error ||
         (status === 401
           ? "Missing or invalid token. Please sign in again."
-          : status === 403
-          ? "Forbidden: one or more selected items aren’t assigned to you."
-          : `Failed to move selected to “${PARTS_NEXT}”.`);
+          : (status === 403
+            ? "Forbidden: one or more selected items aren’t assigned to you."
+            : `Failed to move selected to “${PARTS_NEXT}”.`));
       alert(msg);
     } finally {
       setIsUpdatingParts(false);
@@ -426,18 +426,24 @@ export default function WorkOrders() {
               const note = latestNoteOf(order);
               const noteTime = note?.createdAt ? moment(note.createdAt).fromNow() : null;
 
-              // Fallbacks for legacy data
-              const siteLocationName =
-                order.siteName ||
-                order.siteLocationName ||
-                order.siteLocation ||
-                "";
+              // ---- Legacy-safe location/address logic ----
+              const rawSiteLocation = norm(order.siteLocation);
+              // Only use a proper "name" field for the location column.
+              // (Do NOT fall back to siteLocation here, since older orders used it for the full address.)
+              let siteLocationName = norm(order.siteName) || norm(order.siteLocationName);
 
-              const siteAddress =
-                order.siteAddress ||
-                order.serviceAddress ||
-                order.address ||
-                "";
+              // Build address from explicit address fields
+              let siteAddress =
+                norm(order.siteAddress) ||
+                norm(order.serviceAddress) ||
+                norm(order.address);
+
+              // If there is no explicit Site Address but siteLocation has a value,
+              // treat siteLocation as the address (older records).
+              if (!siteAddress && rawSiteLocation) {
+                siteAddress = rawSiteLocation;
+                // leave siteLocationName as-is (likely empty), so the address shows only under Site Address
+              }
 
               return (
                 <tr
@@ -462,12 +468,12 @@ export default function WorkOrders() {
 
                   <td>{order.customer || "N/A"}</td>
 
-                  {/* Site Location (name) */}
+                  {/* Site Location (name only) */}
                   <td title={siteLocationName || "—"}>
                     {siteLocationName || "—"}
                   </td>
 
-                  {/* Site Address (clickable to open maps) */}
+                  {/* Site Address (clickable; includes legacy fallback) */}
                   <td title={siteAddress || "N/A"}>
                     {siteAddress ? (
                       <span
