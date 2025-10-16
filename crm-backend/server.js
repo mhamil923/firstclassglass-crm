@@ -32,7 +32,10 @@ const S3_SIGNED_TTL = Number(process.env.S3_SIGNED_TTL || 900);
 
 // ⬆️ Limits (env overridable)
 const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || 75);
-const MAX_FILES        = Number(process.env.MAX_FILES || 120);
+
+// Backward compatible: prefer NEW var, fall back to old MAX_FILES, default higher.
+const MAX_FILES_PER_REQUEST = Number(process.env.MAX_FILES_PER_REQUEST || process.env.MAX_FILES || 300);
+
 const MAX_FIELDS       = Number(process.env.MAX_FIELDS || 500);
 const MAX_PARTS        = Number(process.env.MAX_PARTS  || 2000);
 
@@ -223,12 +226,14 @@ async function getColumnType(table, col) {
   const [rows] = await db.query(`SHOW COLUMNS FROM \`${table}\` LIKE ?`, [col]);
   return rows.length ? String(rows[0].Type || '').toLowerCase() : null;
 }
+
+// ⬇️ UPDATED ensureCols: creates missing columns and upgrades undersized ones (incl. photoPath → MEDIUMTEXT)
 async function ensureCols() {
   const colsToEnsure = [
     { name: 'scheduledDate',   type: 'DATETIME NULL' },
     { name: 'scheduledEnd',    type: 'DATETIME NULL' },
     { name: 'pdfPath',         type: 'VARCHAR(255) NULL' },
-    { name: 'photoPath',       type: 'TEXT NULL' },
+    { name: 'photoPath',       type: 'MEDIUMTEXT NULL' }, // upgrade target
     { name: 'notes',           type: 'TEXT NULL' },
     { name: 'billingPhone',    type: 'VARCHAR(32) NULL' },
     { name: 'sitePhone',       type: 'VARCHAR(32) NULL' },
@@ -236,28 +241,49 @@ async function ensureCols() {
     { name: 'customerEmail',   type: 'VARCHAR(255) NULL' },
     { name: 'dayOrder',        type: 'INT NULL' },
     { name: 'workOrderNumber', type: 'VARCHAR(64) NULL' },
-    { name: 'siteAddress',     type: 'VARCHAR(255) NULL' }, // <— ensure siteAddress exists
+    { name: 'siteAddress',     type: 'VARCHAR(255) NULL' }, // ensure siteAddress exists
   ];
+  // Create any missing columns
   for (const { name, type } of colsToEnsure) {
     try {
       const [found] = await db.query(`SHOW COLUMNS FROM \`work_orders\` LIKE ?`, [name]);
       if (!found.length) {
         await db.query(`ALTER TABLE \`work_orders\` ADD COLUMN \`${name}\` ${type}`);
-      } else {
-        if ((name === 'scheduledDate' || name === 'scheduledEnd')) {
-          try {
-            const t = await getColumnType('work_orders', name);
-            if (t && /^date(?!time)/.test(t)) {
-              await db.query(`ALTER TABLE \`work_orders\` MODIFY COLUMN \`${name}\` DATETIME NULL`);
-              console.log(`ℹ️ Upgraded column ${name} to DATETIME`);
-            }
-          } catch (e) {
-            console.warn(`⚠️ Type check/upgrade failed for ${name}:`, e.message);
-          }
-        }
       }
     } catch (e) { console.warn(`⚠️ Schema check '${name}':`, e.message); }
   }
+
+  // Upgrades for existing wrong/undersized types
+  try {
+    const t1 = await getColumnType('work_orders', 'scheduledDate');
+    if (t1 && /^date(?!time)/.test(t1)) {
+      await db.query(`ALTER TABLE \`work_orders\` MODIFY COLUMN \`scheduledDate\` DATETIME NULL`);
+      console.log('ℹ️ Upgraded column scheduledDate to DATETIME');
+    }
+  } catch (e) { console.warn('⚠️ Type check/upgrade failed for scheduledDate:', e.message); }
+
+  try {
+    const t2 = await getColumnType('work_orders', 'scheduledEnd');
+    if (t2 && /^date(?!time)/.test(t2)) {
+      await db.query(`ALTER TABLE \`work_orders\` MODIFY COLUMN \`scheduledEnd\` DATETIME NULL`);
+      console.log('ℹ️ Upgraded column scheduledEnd to DATETIME');
+    }
+  } catch (e) { console.warn('⚠️ Type check/upgrade failed for scheduledEnd:', e.message); }
+
+  // 🔧 The big one: photoPath might be VARCHAR(255)/TEXT on old DBs; upgrade to MEDIUMTEXT
+  try {
+    const tPP = await getColumnType('work_orders', 'photoPath');
+    const small =
+      !tPP ||
+      /^varchar\(/.test(tPP) ||
+      /^tinytext$/.test(tPP) ||
+      /^text$/.test(tPP);
+    if (small) {
+      await db.query(`ALTER TABLE \`work_orders\` MODIFY COLUMN \`photoPath\` MEDIUMTEXT NULL`);
+      console.log('ℹ️ Upgraded column photoPath to MEDIUMTEXT');
+    }
+  } catch (e) { console.warn('⚠️ Type check/upgrade failed for photoPath:', e.message); }
+
   try { SCHEMA.hasAssignedTo = await columnExists('work_orders', 'assignedTo'); }
   catch (e) { console.warn('⚠️ assignedTo detect:', e.message); }
 }
@@ -268,7 +294,7 @@ const allowMime = (m) => m && (/^image\//.test(m) || m === 'application/pdf');
 function makeUploader() {
   const limits = {
     fileSize: MAX_FILE_SIZE_MB * 1024 * 1024,
-    files: MAX_FILES + 5,
+    files: MAX_FILES_PER_REQUEST + 5,  // small cushion
     fields: MAX_FIELDS,
     parts:  MAX_PARTS,
   };
@@ -314,7 +340,7 @@ function withMulter(handler) {
       ]);
       const msg =
         err.code === 'LIMIT_FILE_SIZE'   ? `File too large (>${MAX_FILE_SIZE_MB}MB)` :
-        err.code === 'LIMIT_FILE_COUNT'  ? `Too many files (max ${MAX_FILES})` :
+        err.code === 'LIMIT_FILE_COUNT'  ? `Too many files in one request (max ${MAX_FILES_PER_REQUEST})` :
         err.code === 'LIMIT_PART_COUNT'  ? `Too many parts in form-data` :
         err.code === 'LIMIT_FIELD_COUNT' ? `Too many fields (max ${MAX_FIELDS})` :
         'Request too large';
@@ -688,8 +714,8 @@ function splitFilesAny(files = []) {
   return { pdf, images };
 }
 function enforceImageCountOr413(res, images) {
-  if (images.length > MAX_FILES) {
-    res.status(413).json({ error: `Too many photos in one request (max ${MAX_FILES})` });
+  if (images.length > MAX_FILES_PER_REQUEST) {
+    res.status(413).json({ error: `Too many photos in one request (max ${MAX_FILES_PER_REQUEST})` });
     return false;
   }
   return true;
@@ -1189,9 +1215,9 @@ app.get('/files', async (req, res) => {
     if (!fs.existsSync(safePath)) return res.sendStatus(404);
     const stat = fs.statSync(safePath);
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-    const range = req.headers.range;
-    if (range) {
-      const m = /^bytes=(\d*)-(\d*)$/.exec(range);
+    const rangeLocal = req.headers.range;
+    if (rangeLocal) {
+      const m = /^bytes=(\d*)-(\d*)$/.exec(rangeLocal);
       if (!m) return res.status(416).end();
       const start = m[1] ? parseInt(m[1], 10) : 0;
       const end   = m[2] ? parseInt(m[2], 10) : stat.size - 1;
