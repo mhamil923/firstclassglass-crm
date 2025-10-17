@@ -17,7 +17,7 @@ const DnDCalendar = withDragAndDrop(Calendar);
 // Keep this in sync with server DEFAULT_WINDOW_MINUTES
 const DEFAULT_WINDOW_MIN = 120;
 
-// ---------- date helpers ----------
+// ---- helpers ----
 function fromDbString(dbString) {
   if (!dbString) return null;
   const m =
@@ -28,8 +28,6 @@ function fromDbString(dbString) {
 }
 const fmtDate = (d) => moment(d).format("YYYY-MM-DD");
 const fmtTime = (d) => moment(d).format("HH:mm");
-
-// compute minutes between two JS Dates
 const diffMinutes = (a, b) => Math.max(0, Math.round((+b - +a) / 60000));
 
 // Prefer PO#, then Work Order #, else N/A
@@ -41,6 +39,32 @@ const displayPO = (obj) => {
 
 // simple string normalizer
 const norm = (v) => (v ?? "").toString().trim().toLowerCase();
+
+// human-friendly truncation for plain text
+const truncate = (str = "", max = 120) => {
+  const s = String(str || "").replace(/\s+/g, " ").trim();
+  if (s.length <= max) return s;
+  // try to cut on a word boundary near the end
+  const slice = s.slice(0, max - 1);
+  const cut = slice.lastIndexOf(" ");
+  return (cut > 60 ? slice.slice(0, cut) : slice) + "…";
+};
+
+// multi-line clamp style for small/secondary text
+const clamp1 = {
+  display: "-webkit-box",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 1,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+const clamp2 = {
+  display: "-webkit-box",
+  WebkitBoxOrient: "vertical",
+  WebkitLineClamp: 2,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
 
 // ---------- event bubble ----------
 function CustomEvent({ event }) {
@@ -59,7 +83,11 @@ function CustomEvent({ event }) {
       <Popover.Body>
         <div><strong>PO#:</strong> {event.displayPo}</div>
         {event.siteLocation ? <div><strong>Site:</strong> {event.siteLocation}</div> : null}
-        {event.problemDescription ? <div><strong>Problem:</strong> {event.problemDescription}</div> : null}
+        {event.problemDescription ? (
+          <div style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>
+            <strong>Problem:</strong> {event.problemDescription}
+          </div>
+        ) : null}
         {when ? <div style={{ marginTop: 6 }}><strong>When:</strong> {when}</div> : null}
       </Popover.Body>
     </Popover>
@@ -74,8 +102,6 @@ function CustomEvent({ event }) {
 export default function WorkOrderCalendar() {
   const [workOrders, setWorkOrders] = useState([]);
   const [unscheduledOrders, setUnscheduledOrders] = useState([]);
-
-  // NEW: search box state for unscheduled strip
   const [unscheduledSearch, setUnscheduledSearch] = useState("");
 
   const [view, setView] = useState("month");
@@ -110,9 +136,7 @@ export default function WorkOrderCalendar() {
       .get("/work-orders")
       .then((res) => {
         const list = Array.isArray(res.data) ? res.data : [];
-        // Scheduled list
         setWorkOrders(list.filter((o) => o.scheduledDate));
-        // Unscheduled list EXCLUDING Completed
         setUnscheduledOrders(
           list.filter((o) => !o.scheduledDate && (o.status || "").trim() !== "Completed")
         );
@@ -309,7 +333,7 @@ export default function WorkOrderCalendar() {
     window.location.href = `/view-work-order/${id}`;
   }
 
-  // ---------- build rbc events (honor scheduledEnd/window) ----------
+  // ---------- build rbc events ----------
   const events = useMemo(
     () =>
       workOrders.map((o) => {
@@ -343,7 +367,6 @@ export default function WorkOrderCalendar() {
   const filteredUnscheduled = useMemo(() => {
     const q = norm(unscheduledSearch);
     if (!q) return unscheduledOrders;
-    // Allow multi-token: every token must match customer OR WO OR PO
     const tokens = q.split(/\s+/).filter(Boolean);
     return unscheduledOrders.filter((o) => {
       const hayCustomer = norm(o.customer);
@@ -365,12 +388,11 @@ export default function WorkOrderCalendar() {
       <div className="container-fluid p-0">
         <h2 className="calendar-title">Work Order Calendar</h2>
 
-        {/* Unscheduled strip you can drag from (Completed filtered out) */}
+        {/* Unscheduled strip */}
         <div className="unscheduled-container">
           <div className="d-flex align-items-center justify-content-between">
             <h4 className="mb-2">Unscheduled Work Orders</h4>
 
-            {/* Search bar */}
             <div className="input-group" style={{ maxWidth: 420 }}>
               <input
                 type="text"
@@ -394,6 +416,7 @@ export default function WorkOrderCalendar() {
           <div className="unscheduled-list">
             {filteredUnscheduled.map((order) => {
               const poLabel = displayPO(order);
+              const shortProblem = truncate(order.problemDescription, 110);
               return (
                 <div
                   key={order.id}
@@ -407,7 +430,9 @@ export default function WorkOrderCalendar() {
                   </strong>
                   <> — {poLabel}</>
                   <br />
-                  <small className="truncate">{order.problemDescription}</small>
+                  <small className="text-muted" style={clamp2}>
+                    {shortProblem}
+                  </small>
                   <div className="unscheduled-actions">
                     <button
                       className="btn btn-xs btn-outline-light me-1"
@@ -464,7 +489,7 @@ export default function WorkOrderCalendar() {
         </div>
       </div>
 
-      {/* ---------- Day list modal (draggable & reorderable) ---------- */}
+      {/* ---------- Day list modal ---------- */}
       {dayModalOpen && (
         <div className="modal-overlay" onClick={() => setDayModalOpen(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -481,6 +506,7 @@ export default function WorkOrderCalendar() {
                       ? `${moment(s).format("hh:mm A")} – ${moment(s).add(DEFAULT_WINDOW_MIN, "minutes").format("hh:mm A")}`
                       : "";
                   const poLabel = displayPO(o);
+                  const shortProblem = truncate(o.problemDescription, 140);
                   return (
                     <li
                       key={o.id}
@@ -492,17 +518,17 @@ export default function WorkOrderCalendar() {
                       style={{
                         cursor: "grab",
                         background:
-                          overIndex === idx && dragIndex !== null
-                            ? "#f1f5f9"
-                            : "white",
+                          overIndex === idx && dragIndex !== null ? "#f1f5f9" : "white",
                       }}
-                      title="Drag to reorder or drag out onto the calendar"
+                      title={o.problemDescription || "Drag to reorder or onto the calendar"}
                     >
-                      <div className="me-2">
-                        <div className="fw-bold">
+                      <div className="me-2" style={{ minWidth: 0 }}>
+                        <div className="fw-bold" style={clamp1}>
                           {o.customer ? `${o.customer}` : `Work Order`} — {poLabel}
                         </div>
-                        <small className="text-muted">{o.problemDescription}</small>
+                        <small className="text-muted" style={clamp2}>
+                          {shortProblem}
+                        </small>
                         <div><small>{label}</small></div>
                       </div>
                       <div className="d-flex align-items-center">
@@ -541,18 +567,20 @@ export default function WorkOrderCalendar() {
         </div>
       )}
 
-      {/* ---------- Quick Edit modal (start + end time) ---------- */}
+      {/* ---------- Quick Edit modal ---------- */}
       {editModalOpen && (
         <div className="modal-overlay" onClick={() => setEditModalOpen(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h4 className="mb-3">Edit Schedule</h4>
             {editOrder && (
               <>
-                <div className="mb-2">
-                  <div className="fw-bold">
+                <div className="mb-2" style={{ minWidth: 0 }}>
+                  <div className="fw-bold" style={clamp1}>
                     {editOrder.customer ? `${editOrder.customer}` : `Work Order`} — {displayPO(editOrder)}
                   </div>
-                  <small className="text-muted">{editOrder.problemDescription}</small>
+                  <small className="text-muted" style={clamp2}>
+                    {truncate(editOrder.problemDescription, 160)}
+                  </small>
                 </div>
 
                 <div className="row g-2">
