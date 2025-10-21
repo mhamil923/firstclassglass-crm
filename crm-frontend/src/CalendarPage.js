@@ -17,7 +17,9 @@ const DnDCalendar = withDragAndDrop(Calendar);
 // Keep this in sync with server DEFAULT_WINDOW_MINUTES
 const DEFAULT_WINDOW_MIN = 120;
 
-// ---- helpers ----
+/* =========================
+   Helpers
+========================= */
 function fromDbString(dbString) {
   if (!dbString) return null;
   const m =
@@ -30,35 +32,18 @@ const fmtDate = (d) => moment(d).format("YYYY-MM-DD");
 const fmtTime = (d) => moment(d).format("HH:mm");
 const diffMinutes = (a, b) => Math.max(0, Math.round((+b - +a) / 60000));
 
-// Prefer Work Order #, then PO #, else N/A (label string like "WO # 123" or "PO # 456")
-const displayWOorPO = (obj) => {
+/** Prefer Work Order #, else PO #, else N/A — and return a labeled string */
+const displayWOThenPO = (obj) => {
   const wo = (obj?.workOrderNumber ?? "").toString().trim();
   const po = (obj?.poNumber ?? "").toString().trim();
-  if (wo) return `WO # ${wo}`;
-  if (po) return `PO # ${po}`;
+  if (wo) return `WO #${wo}`;
+  if (po) return `PO #${po}`;
   return "N/A";
 };
 
-// Also expose the raw number we picked (useful for popover lines)
-const pickWOorPO = (obj) => {
-  const wo = (obj?.workOrderNumber ?? "").toString().trim();
-  const po = (obj?.poNumber ?? "").toString().trim();
-  return wo ? { label: "WO #", value: wo } : po ? { label: "PO #", value: po } : { label: "ID", value: "N/A" };
-};
-
-// simple string normalizer
 const norm = (v) => (v ?? "").toString().trim().toLowerCase();
 
-// human-friendly truncation for plain text
-const truncate = (str = "", max = 120) => {
-  const s = String(str || "").replace(/\s+/g, " ").trim();
-  if (s.length <= max) return s;
-  const slice = s.slice(0, max - 1);
-  const cut = slice.lastIndexOf(" ");
-  return (cut > 60 ? slice.slice(0, cut) : slice) + "…";
-};
-
-// multi-line clamp helpers
+/** Multi-line clamp inline styles */
 const clamp1 = {
   display: "-webkit-box",
   WebkitBoxOrient: "vertical",
@@ -79,9 +64,12 @@ const clamp4 = {
   WebkitLineClamp: 4,
   overflow: "hidden",
   textOverflow: "ellipsis",
+  whiteSpace: "pre-wrap",
 };
 
-// ---------- event bubble ----------
+/* =========================
+   Event bubble (calendar)
+========================= */
 function CustomEvent({ event }) {
   const when =
     event.start && event.end
@@ -90,27 +78,40 @@ function CustomEvent({ event }) {
       ? moment(event.start).format("YYYY-MM-DD HH:mm")
       : "";
 
-  const idPicked = pickWOorPO(event);
+  const idLabel = displayWOThenPO(event);
+  const hasProblem = !!event.problemDescription;
 
   const popover = (
     <Popover id={`popover-${event.id}`}>
       <Popover.Header as="h3">
-        {event.customer ? `${event.customer}` : `Work Order`}
+        {event.customer ? `${event.customer}` : `Work Order`} — {idLabel}
       </Popover.Header>
       <Popover.Body>
-        <div><strong>{idPicked.label}:</strong> {idPicked.value}</div>
-        {event.siteLocation ? <div><strong>Site Location:</strong> {event.siteLocation}</div> : null}
-        {event.siteAddress ? <div><strong>Site Address:</strong> {event.siteAddress}</div> : null}
-        {event.problemDescription ? (
+        {event.siteLocation ? (
+          <div>
+            <strong>Site Location:</strong> {event.siteLocation}
+          </div>
+        ) : null}
+        {event.siteAddress ? (
+          <div>
+            <strong>Site Address:</strong> {event.siteAddress}
+          </div>
+        ) : null}
+        {hasProblem ? (
           <div style={{ marginTop: 6 }}>
             <strong>Problem:</strong>
             <div style={clamp4}>{event.problemDescription}</div>
           </div>
         ) : null}
-        {when ? <div style={{ marginTop: 6 }}><strong>When:</strong> {when}</div> : null}
+        {when ? (
+          <div style={{ marginTop: 6 }}>
+            <strong>When:</strong> {when}
+          </div>
+        ) : null}
       </Popover.Body>
     </Popover>
   );
+
   return (
     <OverlayTrigger trigger={["hover", "focus"]} placement="top" overlay={popover}>
       <span className="rbc-event-title">{event.title}</span>
@@ -118,6 +119,9 @@ function CustomEvent({ event }) {
   );
 }
 
+/* =========================
+   Main component
+========================= */
 export default function WorkOrderCalendar() {
   const [workOrders, setWorkOrders] = useState([]);
   const [unscheduledOrders, setUnscheduledOrders] = useState([]);
@@ -133,11 +137,10 @@ export default function WorkOrderCalendar() {
   const [dayForModal, setDayForModal] = useState(null);
 
   // Quick edit modal
-  the:
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editOrder, setEditOrder] = useState(null);
-  const [editDate, setEditDate] = useState("");   // yyyy-mm-dd
-  const [editTime, setEditTime] = useState("");   // HH:mm
+  const [editDate, setEditDate] = useState(""); // yyyy-mm-dd
+  const [editTime, setEditTime] = useState(""); // HH:mm
   const [editEndTime, setEditEndTime] = useState(""); // HH:mm (window end)
 
   // Drag from Unscheduled OR Day modal → calendar
@@ -164,7 +167,7 @@ export default function WorkOrderCalendar() {
       .catch((err) => console.error("⚠️ Error fetching work orders:", err));
   }, []);
 
-  // ---------- schedule helpers (server expects date/time + optional endTime) ----------
+  /* ===== schedule helpers (server expects date/time + optional endTime) ===== */
   async function setSchedulePayload(orderId, payload) {
     await api.put(`/work-orders/${orderId}/update-date`, payload);
   }
@@ -177,7 +180,7 @@ export default function WorkOrderCalendar() {
     return DEFAULT_WINDOW_MIN; // fallback
   }
 
-  // ---------- edit modal wiring ----------
+  /* ===== edit modal wiring ===== */
   function openEditModal(order, fallbackDate) {
     const start = fromDbString(order?.scheduledDate) || fallbackDate || new Date();
     const end =
@@ -195,7 +198,7 @@ export default function WorkOrderCalendar() {
     if (!editOrder) return;
 
     const start = moment(`${editDate} ${editTime}`, "YYYY-MM-DD HH:mm");
-    const end   = moment(`${editDate} ${editEndTime}`, "YYYY-MM-DD HH:mm");
+    const end = moment(`${editDate} ${editEndTime}`, "YYYY-MM-DD HH:mm");
     if (!start.isValid() || !end.isValid()) {
       alert("Please enter a valid start and end time.");
       return;
@@ -234,7 +237,7 @@ export default function WorkOrderCalendar() {
     }
   }
 
-  // ---------- Day modal helpers ----------
+  /* ===== Day modal helpers ===== */
   async function openDayModal(dateLike) {
     const day = moment(dateLike).startOf("day");
     const dateStr = day.format("YYYY-MM-DD");
@@ -286,7 +289,7 @@ export default function WorkOrderCalendar() {
     setDragItem(null);
   }
 
-  // ---------- rbc interactions ----------
+  /* ===== react-big-calendar interactions ===== */
   function handleEventDrop({ event, start, end }) {
     let minutes = end ? diffMinutes(start, end) : minutesWindowForOrder(event);
     if (!Number.isFinite(minutes) || minutes <= 0) minutes = DEFAULT_WINDOW_MIN;
@@ -345,7 +348,7 @@ export default function WorkOrderCalendar() {
     openDayModal(slotInfo.start);
   }
 
-  function onShowMore(events, date) {
+  function onShowMore(eventsInCell, date) {
     openDayModal(date);
   }
 
@@ -353,39 +356,36 @@ export default function WorkOrderCalendar() {
     window.location.href = `/view-work-order/${id}`;
   }
 
-  // ---------- build rbc events ----------
-  const events = useMemo(
-    () =>
-      workOrders.map((o) => {
-        const start = fromDbString(o.scheduledDate) || new Date();
-        const end =
-          fromDbString(o.scheduledEnd) ||
-          moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
+  /* ===== build rbc events ===== */
+  const events = useMemo(() => {
+    return workOrders.map((o) => {
+      const start = fromDbString(o.scheduledDate) || new Date();
+      const end =
+        fromDbString(o.scheduledEnd) ||
+        moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
 
-        const idLabel = displayWOorPO(o);
-        const siteAddr =
-          o.siteAddress || o.serviceAddress || o.address || "";
+      const idLabel = displayWOThenPO(o);
+      const title = o.customer ? `${o.customer} — ${idLabel}` : idLabel;
 
-        return {
-          id: o.id,
-          title: o.customer ? `${o.customer} — ${idLabel}` : idLabel,
-          poNumber: o.poNumber,
-          workOrderNumber: o.workOrderNumber,
-          customer: o.customer,
-          siteLocation: o.siteLocation,
-          siteAddress: siteAddr,
-          problemDescription: o.problemDescription,
-          scheduledDate: o.scheduledDate,
-          scheduledEnd: o.scheduledEnd,
-          start,
-          end,
-          allDay: false,
-        };
-      }),
-    [workOrders]
-  );
+      return {
+        id: o.id,
+        title,
+        poNumber: o.poNumber,
+        workOrderNumber: o.workOrderNumber,
+        customer: o.customer,
+        siteLocation: o.siteLocation,
+        siteAddress: o.siteAddress || o.serviceAddress || o.address || "",
+        problemDescription: o.problemDescription,
+        scheduledDate: o.scheduledDate,
+        scheduledEnd: o.scheduledEnd,
+        start,
+        end,
+        allDay: false,
+      };
+    });
+  }, [workOrders]);
 
-  // ---------- Unscheduled search/filter ----------
+  /* ===== Unscheduled search/filter ===== */
   const filteredUnscheduled = useMemo(() => {
     const q = norm(unscheduledSearch);
     if (!q) return unscheduledOrders;
@@ -395,16 +395,16 @@ export default function WorkOrderCalendar() {
       const hayPO = norm(o.poNumber);
       const hayWO = norm(o.workOrderNumber);
       return tokens.every(
-        (t) =>
-          hayCustomer.includes(t) ||
-          hayPO.includes(t) ||
-          hayWO.includes(t)
+        (t) => hayCustomer.includes(t) || hayPO.includes(t) || hayWO.includes(t)
       );
     });
   }, [unscheduledOrders, unscheduledSearch]);
 
   const clearUnscheduledSearch = () => setUnscheduledSearch("");
 
+  /* =========================
+     Render
+  ========================= */
   return (
     <div className="calendar-page" onDragEnd={endGlobalDrag}>
       <div className="container-fluid p-0">
@@ -424,7 +424,10 @@ export default function WorkOrderCalendar() {
                 onChange={(e) => setUnscheduledSearch(e.target.value)}
               />
               {unscheduledSearch ? (
-                <button className="btn btn-outline-secondary" onClick={clearUnscheduledSearch}>
+                <button
+                  className="btn btn-outline-secondary"
+                  onClick={clearUnscheduledSearch}
+                >
                   Clear
                 </button>
               ) : null}
@@ -437,31 +440,33 @@ export default function WorkOrderCalendar() {
 
           <div className="unscheduled-list">
             {filteredUnscheduled.map((order) => {
-              const idLabel = displayWOorPO(order);
+              const idLabel = displayWOThenPO(order);
+              const customerLabel = order.customer ? order.customer : "Work Order";
+              const siteLoc = order.siteLocation || "";
               const siteAddr =
                 order.siteAddress || order.serviceAddress || order.address || "";
+
               return (
                 <div
                   key={order.id}
                   className="unscheduled-item"
                   draggable
                   onDragStart={() => setDragItem(order)}
-                  title={`${order.siteLocation || ""}${siteAddr ? ` • ${siteAddr}` : ""}`}
+                  title={`${customerLabel} — ${idLabel}`}
                 >
-                  <strong>
-                    {order.customer ? `${order.customer}` : `Work Order`}
-                  </strong>
-                  <> — {idLabel}</>
+                  <strong>{customerLabel}</strong> <> — {idLabel}</>
                   <br />
-                  {/* Site info instead of problem description */}
-                  {order.siteLocation ? (
-                    <small className="text-muted" style={clamp1}>{order.siteLocation}</small>
+                  {siteLoc ? (
+                    <small className="text-muted" style={clamp1}>
+                      Site Location: {siteLoc}
+                    </small>
                   ) : null}
                   {siteAddr ? (
-                    <>
-                      <br />
-                      <small className="text-muted" style={clamp1}>{siteAddr}</small>
-                    </>
+                    <div>
+                      <small className="text-muted" style={clamp2}>
+                        Site Address: {siteAddr}
+                      </small>
+                    </div>
                   ) : null}
                   <div className="unscheduled-actions">
                     <button
@@ -495,8 +500,8 @@ export default function WorkOrderCalendar() {
             endAccessor="end"
             step={15}
             timeslots={4}
-            min={moment().startOf("day").add(6, "hours").toDate()}   // 6 AM
-            max={moment().startOf("day").add(21, "hours").toDate()}  // 9 PM
+            min={moment().startOf("day").add(6, "hours").toDate()} // 6 AM
+            max={moment().startOf("day").add(21, "hours").toDate()} // 9 PM
             popup={false}
             resizable
             selectable
@@ -531,12 +536,19 @@ export default function WorkOrderCalendar() {
                   const e = fromDbString(o.scheduledEnd);
                   const label =
                     s && e
-                      ? `${moment(s).format("hh:mm A")} – ${moment(e).format("hh:mm A")}`
+                      ? `${moment(s).format("hh:mm A")} – ${moment(e).format(
+                          "hh:mm A"
+                        )}`
                       : s
-                      ? `${moment(s).format("hh:mm A")} – ${moment(s).add(DEFAULT_WINDOW_MIN, "minutes").format("hh:mm A")}`
+                      ? `${moment(s).format("hh:mm A")} – ${moment(s)
+                          .add(DEFAULT_WINDOW_MIN, "minutes")
+                          .format("hh:mm A")}`
                       : "";
-                  const idLabel = displayWOorPO(o);
-                  const siteAddr = o.siteAddress || o.serviceAddress || o.address || "";
+                  const idLabel = displayWOThenPO(o);
+                  const siteLoc = o.siteLocation || "";
+                  const siteAddr =
+                    o.siteAddress || o.serviceAddress || o.address || "";
+
                   return (
                     <li
                       key={o.id}
@@ -548,19 +560,31 @@ export default function WorkOrderCalendar() {
                       style={{
                         cursor: "grab",
                         background:
-                          overIndex === idx && dragIndex !== null ? "#f1f5f9" : "white",
+                          overIndex === idx && dragIndex !== null
+                            ? "#f1f5f9"
+                            : "white",
                       }}
-                      title={`${o.siteLocation || ""}${siteAddr ? ` • ${siteAddr}` : ""}`}
+                      title="Drag to reorder or onto the calendar"
                     >
                       <div className="me-2" style={{ minWidth: 0 }}>
                         <div className="fw-bold" style={clamp1}>
                           {o.customer ? `${o.customer}` : `Work Order`} — {idLabel}
                         </div>
-                        {/* Keep a compact site context under the title */}
-                        <small className="text-muted" style={clamp2}>
-                          {(o.siteLocation || "") + (siteAddr ? ` • ${siteAddr}` : "")}
-                        </small>
-                        <div><small>{label}</small></div>
+                        {siteLoc ? (
+                          <small className="text-muted" style={clamp1}>
+                            Site Location: {siteLoc}
+                          </small>
+                        ) : null}
+                        {siteAddr ? (
+                          <div>
+                            <small className="text-muted" style={clamp2}>
+                              Site Address: {siteAddr}
+                            </small>
+                          </div>
+                        ) : null}
+                        <div>
+                          <small>{label}</small>
+                        </div>
                       </div>
                       <div className="d-flex align-items-center">
                         <button
@@ -590,7 +614,10 @@ export default function WorkOrderCalendar() {
               <p className="empty-text mb-0">No work orders scheduled on this day.</p>
             )}
             <div className="text-end mt-3">
-              <button className="btn btn-secondary" onClick={() => setDayModalOpen(false)}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setDayModalOpen(false)}
+              >
                 Close
               </button>
             </div>
@@ -607,14 +634,15 @@ export default function WorkOrderCalendar() {
               <>
                 <div className="mb-2" style={{ minWidth: 0 }}>
                   <div className="fw-bold" style={clamp1}>
-                    {editOrder.customer ? `${editOrder.customer}` : `Work Order`} — {displayWOorPO(editOrder)}
+                    {editOrder.customer ? `${editOrder.customer}` : `Work Order`} —{" "}
+                    {displayWOThenPO(editOrder)}
                   </div>
-                  <small className="text-muted" style={clamp2}>
-                    {(editOrder.siteLocation || "") +
-                      ((editOrder.siteAddress || editOrder.serviceAddress || editOrder.address)
-                        ? ` • ${editOrder.siteAddress || editOrder.serviceAddress || editOrder.address}`
-                        : "")}
-                  </small>
+                  {/* Problem shown but kept compact in editor header */}
+                  {editOrder.problemDescription ? (
+                    <small className="text-muted" style={clamp2}>
+                      {editOrder.problemDescription}
+                    </small>
+                  ) : null}
                 </div>
 
                 <div className="row g-2">
@@ -648,7 +676,10 @@ export default function WorkOrderCalendar() {
                 </div>
 
                 <div className="d-flex justify-content-end mt-3">
-                  <button className="btn btn-outline-danger me-2" onClick={() => unschedule(editOrder.id)}>
+                  <button
+                    className="btn btn-outline-danger me-2"
+                    onClick={() => unschedule(editOrder.id)}
+                  >
                     Unschedule
                   </button>
                   <button className="btn btn-primary" onClick={saveEditModal}>
