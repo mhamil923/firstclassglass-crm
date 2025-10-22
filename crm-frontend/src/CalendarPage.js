@@ -68,6 +68,19 @@ const clamp4 = {
 };
 
 /* =========================
+   Status gates (new)
+========================= */
+// Only these statuses are allowed to appear in the Unscheduled strip/search
+const ALLOWED_UNSCHEDULED_STATUSES = new Set([
+  "new",
+  "scheduled",
+  "needs to be scheduled",
+]);
+
+const isAllowedForUnscheduled = (status) =>
+  ALLOWED_UNSCHEDULED_STATUSES.has(norm(status));
+
+/* =========================
    Event bubble (calendar)
 ========================= */
 function CustomEvent({ event }) {
@@ -159,10 +172,30 @@ export default function WorkOrderCalendar() {
       .get("/work-orders")
       .then((res) => {
         const list = Array.isArray(res.data) ? res.data : [];
-        setWorkOrders(list.filter((o) => o.scheduledDate));
-        setUnscheduledOrders(
-          list.filter((o) => !o.scheduledDate && (o.status || "").trim() !== "Completed")
+
+        // 1) Calendar events: only things *actually* scheduled and with status Scheduled
+        const calendarItems = list.filter(
+          (o) => o.scheduledDate && norm(o.status) === "scheduled"
         );
+
+        // 2) Unscheduled strip:
+        //    Only allow statuses New / Scheduled / Needs to be Scheduled.
+        //    - Always include items with status "Needs to be Scheduled" (even if they still have a stale scheduledDate).
+        //    - Include "New" (typically no scheduledDate).
+        //    - Include "Scheduled" only if they are not actually on the calendar (i.e., no scheduledDate).
+        const unscheduled = list.filter((o) => {
+          const statusOk = isAllowedForUnscheduled(o.status);
+          if (!statusOk) return false;
+
+          const s = norm(o.status);
+          if (s === "needs to be scheduled") return true; // force-show
+          if (!o.scheduledDate) return true; // no time set → show
+          // if status is "scheduled" but it *has* a scheduledDate, it will be on the calendar, so keep it out of the strip
+          return false;
+        });
+
+        setWorkOrders(calendarItems);
+        setUnscheduledOrders(unscheduled);
       })
       .catch((err) => console.error("⚠️ Error fetching work orders:", err));
   }, []);
@@ -227,7 +260,8 @@ export default function WorkOrderCalendar() {
   async function unschedule(orderId) {
     if (!window.confirm("Remove this work order from the calendar?")) return;
     try {
-      await setSchedulePayload(orderId, { scheduledDate: null });
+      // Only clear the scheduledDate/End here; status can be updated elsewhere to "Needs to be Scheduled"
+      await setSchedulePayload(orderId, { scheduledDate: null, scheduledEnd: null });
       setEditModalOpen(false);
       if (dayForModal) await openDayModal(dayForModal);
       fetchWorkOrders();
@@ -436,6 +470,7 @@ export default function WorkOrderCalendar() {
 
           <div className="text-muted mb-2" style={{ fontSize: 12 }}>
             Showing {filteredUnscheduled.length} of {unscheduledOrders.length}
+            {" "} (Statuses: New, Scheduled, Needs to be Scheduled)
           </div>
 
           <div className="unscheduled-list">
