@@ -17,6 +17,19 @@ const DnDCalendar = withDragAndDrop(Calendar);
 // Keep this in sync with server DEFAULT_WINDOW_MINUTES
 const DEFAULT_WINDOW_MIN = 120;
 
+// Keep this in sync with ViewWorkOrder.js and WorkOrders.js
+const STATUS_OPTIONS = [
+  "New",
+  "Scheduled",
+  "Needs to be Quoted",
+  "Waiting for Approval",
+  "Approved",
+  "Waiting on Parts",
+  "Needs to be Scheduled",
+  "Needs to be Invoiced",
+  "Completed",
+];
+
 /* =========================
    Helpers
 ========================= */
@@ -68,7 +81,7 @@ const clamp4 = {
 };
 
 /* =========================
-   Status gates (new)
+   Status gates (existing)
 ========================= */
 // Only these statuses are allowed to appear in the Unscheduled strip/search
 const ALLOWED_UNSCHEDULED_STATUSES = new Set([
@@ -76,7 +89,6 @@ const ALLOWED_UNSCHEDULED_STATUSES = new Set([
   "scheduled",
   "needs to be scheduled",
 ]);
-
 const isAllowedForUnscheduled = (status) =>
   ALLOWED_UNSCHEDULED_STATUSES.has(norm(status));
 
@@ -163,6 +175,12 @@ export default function WorkOrderCalendar() {
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
 
+  // NEW: Status picker inside Day modal
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [statusTarget, setStatusTarget] = useState(null); // the work order object
+  const [statusChoice, setStatusChoice] = useState("");
+  const [statusSaving, setStatusSaving] = useState(false);
+
   useEffect(() => {
     fetchWorkOrders();
   }, []);
@@ -178,19 +196,14 @@ export default function WorkOrderCalendar() {
           (o) => o.scheduledDate && norm(o.status) === "scheduled"
         );
 
-        // 2) Unscheduled strip:
-        //    Only allow statuses New / Scheduled / Needs to be Scheduled.
-        //    - Always include items with status "Needs to be Scheduled" (even if they still have a stale scheduledDate).
-        //    - Include "New" (typically no scheduledDate).
-        //    - Include "Scheduled" only if they are not actually on the calendar (i.e., no scheduledDate).
+        // 2) Unscheduled strip (see comments in previous version)
         const unscheduled = list.filter((o) => {
           const statusOk = isAllowedForUnscheduled(o.status);
           if (!statusOk) return false;
 
           const s = norm(o.status);
-          if (s === "needs to be scheduled") return true; // force-show
-          if (!o.scheduledDate) return true; // no time set → show
-          // if status is "scheduled" but it *has* a scheduledDate, it will be on the calendar, so keep it out of the strip
+          if (s === "needs to be scheduled") return true;
+          if (!o.scheduledDate) return true;
           return false;
         });
 
@@ -260,7 +273,6 @@ export default function WorkOrderCalendar() {
   async function unschedule(orderId) {
     if (!window.confirm("Remove this work order from the calendar?")) return;
     try {
-      // Only clear the scheduledDate/End here; status can be updated elsewhere to "Needs to be Scheduled"
       await setSchedulePayload(orderId, { scheduledDate: null, scheduledEnd: null });
       setEditModalOpen(false);
       if (dayForModal) await openDayModal(dayForModal);
@@ -436,6 +448,45 @@ export default function WorkOrderCalendar() {
 
   const clearUnscheduledSearch = () => setUnscheduledSearch("");
 
+  /* ===== Status modal actions ===== */
+  function openStatusPicker(order) {
+    setStatusTarget(order);
+    setStatusChoice(order?.status || "");
+    setStatusModalOpen(true);
+  }
+
+  async function confirmStatusChange() {
+    if (!statusTarget || !statusChoice) return;
+    setStatusSaving(true);
+    try {
+      // Try dedicated endpoint first, fallback to /edit as in ViewWorkOrder.js
+      try {
+        await api.put(`/work-orders/${statusTarget.id}/status`, { status: statusChoice });
+      } catch {
+        const form = new FormData();
+        form.append("status", statusChoice);
+        await api.put(`/work-orders/${statusTarget.id}/edit`, form, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+      }
+      setStatusModalOpen(false);
+      // Refresh lists/modal so changes are reflected immediately
+      if (dayForModal) await openDayModal(dayForModal);
+      fetchWorkOrders();
+    } catch (e) {
+      console.error("⚠️ Error updating status:", e);
+      alert("Failed to update status.");
+    } finally {
+      setStatusSaving(false);
+    }
+  }
+
+  function cancelStatusChange() {
+    setStatusModalOpen(false);
+    setStatusTarget(null);
+    setStatusChoice("");
+  }
+
   /* =========================
      Render
   ========================= */
@@ -469,8 +520,7 @@ export default function WorkOrderCalendar() {
           </div>
 
           <div className="text-muted mb-2" style={{ fontSize: 12 }}>
-            Showing {filteredUnscheduled.length} of {unscheduledOrders.length}
-            {" "} (Statuses: New, Scheduled, Needs to be Scheduled)
+            Showing {filteredUnscheduled.length} of {unscheduledOrders.length} (Statuses: New, Scheduled, Needs to be Scheduled)
           </div>
 
           <div className="unscheduled-list">
@@ -509,6 +559,12 @@ export default function WorkOrderCalendar() {
                       onClick={() => openEditModal(order, currentDate)}
                     >
                       Schedule…
+                    </button>
+                    <button
+                      className="btn btn-xs btn-light me-1"
+                      onClick={() => openStatusPicker(order)}
+                    >
+                      Status…
                     </button>
                     <button
                       className="btn btn-xs btn-light"
@@ -571,18 +627,13 @@ export default function WorkOrderCalendar() {
                   const e = fromDbString(o.scheduledEnd);
                   const label =
                     s && e
-                      ? `${moment(s).format("hh:mm A")} – ${moment(e).format(
-                          "hh:mm A"
-                        )}`
+                      ? `${moment(s).format("hh:mm A")} – ${moment(e).format("hh:mm A")}`
                       : s
-                      ? `${moment(s).format("hh:mm A")} – ${moment(s)
-                          .add(DEFAULT_WINDOW_MIN, "minutes")
-                          .format("hh:mm A")}`
+                      ? `${moment(s).format("hh:mm A")} – ${moment(s).add(DEFAULT_WINDOW_MIN, "minutes").format("hh:mm A")}`
                       : "";
                   const idLabel = displayWOThenPO(o);
                   const siteLoc = o.siteLocation || "";
-                  const siteAddr =
-                    o.siteAddress || o.serviceAddress || o.address || "";
+                  const siteAddr = o.siteAddress || o.serviceAddress || o.address || "";
 
                   return (
                     <li
@@ -594,10 +645,7 @@ export default function WorkOrderCalendar() {
                       onDrop={(ev) => handleDayDrop(ev, idx)}
                       style={{
                         cursor: "grab",
-                        background:
-                          overIndex === idx && dragIndex !== null
-                            ? "#f1f5f9"
-                            : "white",
+                        background: overIndex === idx && dragIndex !== null ? "#f1f5f9" : "white",
                       }}
                       title="Drag to reorder or onto the calendar"
                     >
@@ -621,18 +669,24 @@ export default function WorkOrderCalendar() {
                           <small>{label}</small>
                         </div>
                       </div>
-                      <div className="d-flex align-items-center">
+                      <div className="d-flex align-items-center flex-wrap" style={{ gap: 8 }}>
                         <button
-                          className="btn btn-sm btn-primary me-2"
+                          className="btn btn-sm btn-primary"
                           onClick={() => openEditModal(o, dayForModal)}
                         >
                           Edit Time…
                         </button>
                         <button
-                          className="btn btn-sm btn-outline-secondary me-2"
+                          className="btn btn-sm btn-outline-secondary"
                           onClick={() => navigateToView(o.id)}
                         >
                           Open
+                        </button>
+                        <button
+                          className="btn btn-sm btn-outline-dark"
+                          onClick={() => openStatusPicker(o)}
+                        >
+                          Status…
                         </button>
                         <button
                           className="btn btn-sm btn-outline-danger"
@@ -649,10 +703,7 @@ export default function WorkOrderCalendar() {
               <p className="empty-text mb-0">No work orders scheduled on this day.</p>
             )}
             <div className="text-end mt-3">
-              <button
-                className="btn btn-secondary"
-                onClick={() => setDayModalOpen(false)}
-              >
+              <button className="btn btn-secondary" onClick={() => setDayModalOpen(false)}>
                 Close
               </button>
             </div>
@@ -669,10 +720,8 @@ export default function WorkOrderCalendar() {
               <>
                 <div className="mb-2" style={{ minWidth: 0 }}>
                   <div className="fw-bold" style={clamp1}>
-                    {editOrder.customer ? `${editOrder.customer}` : `Work Order`} —{" "}
-                    {displayWOThenPO(editOrder)}
+                    {editOrder.customer ? `${editOrder.customer}` : `Work Order`} — {displayWOThenPO(editOrder)}
                   </div>
-                  {/* Problem shown but kept compact in editor header */}
                   {editOrder.problemDescription ? (
                     <small className="text-muted" style={clamp2}>
                       {editOrder.problemDescription}
@@ -723,6 +772,49 @@ export default function WorkOrderCalendar() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Status Picker modal (new) ---------- */}
+      {statusModalOpen && (
+        <div className="modal-overlay" onClick={cancelStatusChange}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h4 className="mb-3">Change Status</h4>
+            {statusTarget ? (
+              <>
+                <div className="mb-2" style={{ minWidth: 0 }}>
+                  <div className="fw-bold" style={clamp1}>
+                    {statusTarget.customer ? statusTarget.customer : "Work Order"} — {displayWOThenPO(statusTarget)}
+                  </div>
+                  <small className="text-muted">
+                    Current: <strong>{statusTarget.status || "—"}</strong>
+                  </small>
+                </div>
+
+                <div className="list-group mb-3" style={{ maxHeight: 260, overflowY: "auto" }}>
+                  {STATUS_OPTIONS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`list-group-item list-group-item-action ${statusChoice === s ? "active" : ""}`}
+                      onClick={() => setStatusChoice(s)}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="d-flex justify-content-end">
+                  <button className="btn btn-ghost btn-outline-secondary me-2" onClick={cancelStatusChange} disabled={statusSaving}>
+                    Cancel
+                  </button>
+                  <button className="btn btn-primary" onClick={confirmStatusChange} disabled={statusSaving || !statusChoice}>
+                    {statusSaving ? "Saving…" : "Confirm"}
+                  </button>
+                </div>
+              </>
+            ) : null}
           </div>
         </div>
       )}
