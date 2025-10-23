@@ -517,9 +517,9 @@ export default function WorkOrderCalendar() {
             </div>
           </div>
 
-        <div className="text-muted mb-2" style={{ fontSize: 12 }}>
-          Showing {filteredUnscheduled.length} of {unscheduledOrders.length} (Statuses: New, Scheduled, Needs to be Scheduled)
-        </div>
+          <div className="text-muted mb-2" style={{ fontSize: 12 }}>
+            Showing {filteredUnscheduled.length} of {unscheduledOrders.length} (Statuses: New, Scheduled, Needs to be Scheduled)
+          </div>
 
           <div className="unscheduled-list">
             {filteredUnscheduled.map((order) => {
@@ -613,15 +613,20 @@ export default function WorkOrderCalendar() {
         </div>
       </div>
 
-      {/* ---------- Day list modal (wider) ---------- */}
+      {/* ---------- Day list modal (ACTUALLY WIDER) ---------- */}
       {dayModalOpen && (
         <div className="modal-overlay" onClick={() => setDayModalOpen(false)}>
           <div
-            className="modal-content"
+            // Using a custom wide shell to avoid any width caps from .modal-content CSS
             onClick={(e) => e.stopPropagation()}
             style={{
-              width: "min(1100px, 95vw)",
-              maxHeight: "85vh",
+              background: "#fff",
+              borderRadius: 12,
+              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+              padding: 20,
+              width: "min(1400px, 98vw)",
+              maxHeight: "90vh",
+              overflow: "hidden",
               display: "flex",
               flexDirection: "column",
             }}
