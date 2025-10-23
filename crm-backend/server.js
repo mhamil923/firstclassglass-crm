@@ -99,8 +99,8 @@ function parseDateTimeFlexible(input) {
   m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2})(?::(\d{2})(?::(\d{2}))?)?$/.exec(s);
   if (m) {
     const Y  = Number(m[1]), Mo = Number(m[2]), D  = Number(m[3]);
-    const h  = Number(m[4]), mi = Number(m[5] || 0), se = Number(m[6] || 0);
-    return toSqlDateTimeFromParts(Y, Mo, D, h, mi, se);
+    thead = Number(m[4]), mi = Number(m[5] || 0), se = Number(m[6] || 0);
+    return toSqlDateTimeFromParts(Y, Mo, D, thead, mi, se);
   }
   return null;
 }
@@ -227,21 +227,23 @@ async function getColumnType(table, col) {
   return rows.length ? String(rows[0].Type || '').toLowerCase() : null;
 }
 
-// ⬇️ UPDATED ensureCols: creates missing columns and upgrades undersized ones (incl. photoPath → MEDIUMTEXT)
+// ⬇️ ensureCols: creates missing columns and upgrades undersized ones
 async function ensureCols() {
   const colsToEnsure = [
-    { name: 'scheduledDate',   type: 'DATETIME NULL' },
-    { name: 'scheduledEnd',    type: 'DATETIME NULL' },
-    { name: 'pdfPath',         type: 'VARCHAR(255) NULL' },
-    { name: 'photoPath',       type: 'MEDIUMTEXT NULL' }, // upgrade target
-    { name: 'notes',           type: 'TEXT NULL' },
-    { name: 'billingPhone',    type: 'VARCHAR(32) NULL' },
-    { name: 'sitePhone',       type: 'VARCHAR(32) NULL' },
-    { name: 'customerPhone',   type: 'VARCHAR(32) NULL' },
-    { name: 'customerEmail',   type: 'VARCHAR(255) NULL' },
-    { name: 'dayOrder',        type: 'INT NULL' },
-    { name: 'workOrderNumber', type: 'VARCHAR(64) NULL' },
-    { name: 'siteAddress',     type: 'VARCHAR(255) NULL' }, // ensure siteAddress exists
+    { name: 'scheduledDate',     type: 'DATETIME NULL' },
+    { name: 'scheduledEnd',      type: 'DATETIME NULL' },
+    { name: 'pdfPath',           type: 'VARCHAR(255) NULL' },    // primary PDF
+    { name: 'estimatePdfPath',   type: 'VARCHAR(255) NULL' },    // NEW
+    { name: 'poPdfPath',         type: 'VARCHAR(255) NULL' },    // NEW
+    { name: 'photoPath',         type: 'MEDIUMTEXT NULL' },
+    { name: 'notes',             type: 'TEXT NULL' },
+    { name: 'billingPhone',      type: 'VARCHAR(32) NULL' },
+    { name: 'sitePhone',         type: 'VARCHAR(32) NULL' },
+    { name: 'customerPhone',     type: 'VARCHAR(32) NULL' },
+    { name: 'customerEmail',     type: 'VARCHAR(255) NULL' },
+    { name: 'dayOrder',          type: 'INT NULL' },
+    { name: 'workOrderNumber',   type: 'VARCHAR(64) NULL' },
+    { name: 'siteAddress',       type: 'VARCHAR(255) NULL' },
   ];
   // Create any missing columns
   for (const { name, type } of colsToEnsure) {
@@ -270,14 +272,9 @@ async function ensureCols() {
     }
   } catch (e) { console.warn('⚠️ Type check/upgrade failed for scheduledEnd:', e.message); }
 
-  // 🔧 The big one: photoPath might be VARCHAR(255)/TEXT on old DBs; upgrade to MEDIUMTEXT
   try {
     const tPP = await getColumnType('work_orders', 'photoPath');
-    const small =
-      !tPP ||
-      /^varchar\(/.test(tPP) ||
-      /^tinytext$/.test(tPP) ||
-      /^text$/.test(tPP);
+    const small = !tPP || /^varchar\(/.test(tPP) || /^tinytext$/.test(tPP) || /^text$/.test(tPP);
     if (small) {
       await db.query(`ALTER TABLE \`work_orders\` MODIFY COLUMN \`photoPath\` MEDIUMTEXT NULL`);
       console.log('ℹ️ Upgraded column photoPath to MEDIUMTEXT');
@@ -443,6 +440,46 @@ app.post('/customers', authenticate, async (req, res) => {
 });
 
 // ─── WORK ORDERS ─────────────────────────────────────────────────────────────
+// Helper: categorize incoming files (primary/estimate/po/images + extra PDFs)
+function splitFilesTyped(files = []) {
+  const out = {
+    primaryPdf: null,
+    estimatePdf: null,
+    poPdf: null,
+    otherPdfs: [],
+    images: [],
+  };
+  for (const f of files) {
+    if (!allowMime(f.mimetype)) continue;
+    if (isImage(f)) { out.images.push(f); continue; }
+    if (!isPdf(f)) continue;
+
+    const fname = (f.fieldname || '').toLowerCase();
+    if (fname === 'estimatepdf' && !out.estimatePdf)       { out.estimatePdf = f; continue; }
+    if (fname === 'popdf' && !out.poPdf)                   { out.poPdf = f; continue; }
+    if ((fname === 'pdf' || fname === 'primarypdf') && !out.primaryPdf) { out.primaryPdf = f; continue; }
+
+    // Fallback: first pdf becomes primary if none set yet
+    if (!out.primaryPdf) { out.primaryPdf = f; continue; }
+    out.otherPdfs.push(f);
+  }
+  return out;
+}
+function enforceImageCountOr413(res, images) {
+  if (images.length > MAX_FILES_PER_REQUEST) {
+    res.status(413).json({ error: `Too many photos in one request (max ${MAX_FILES_PER_REQUEST})` });
+    return false;
+  }
+  return true;
+}
+const isTruthy = (v) => {
+  if (v === true) return true;
+  const s = String(v || '').trim().toLowerCase();
+  return ['1','true','on','yes','y','checked'].includes(s);
+};
+const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
+
+// LIST
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
     const [raw] = await db.execute(
@@ -463,9 +500,7 @@ app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
   } catch (err) { console.error('Unscheduled list error:', err); res.status(500).json({ error: 'Failed to fetch unscheduled.' }); }
 });
 
-/**
- * Flexible search (now supports siteAddress too)
- */
+// SEARCH (flex)
 app.get('/work-orders/search', authenticate, async (req, res) => {
   const {
     customer = '',
@@ -522,7 +557,7 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
   }
 });
 
-// Lookup by PO (unchanged selection; returns w.* so siteAddress is included)
+// Lookup by PO
 app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
   try {
     const po = decodeURIComponent(String(req.params.poNumber || '').trim());
@@ -554,7 +589,7 @@ app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
   }
 });
 
-// ─── NEW: PDF-by-PO route ───────────────────────────────────────────────────
+// Helper: “pick a pdf” (legacy, prefers primary then first in attachments)
 function pickPdfKeyFromRow(r) {
   if (r?.pdfPath && /\.pdf$/i.test(r.pdfPath)) return r.pdfPath;
   const list = (r?.photoPath || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -564,6 +599,7 @@ function pickPdfKeyFromRow(r) {
   return null;
 }
 
+// PDF-by-PO (legacy convenience)
 app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
   try {
     const po = decodeURIComponent(String(req.params.poNumber || '').trim());
@@ -704,29 +740,7 @@ app.put('/work-orders/:id(\\d+)/status', authenticate, express.json(), async (re
   } catch (err) { console.error('Work-order status update error:', err); res.status(500).json({ error: 'Failed to update status.' }); }
 });
 
-// Helpers for any-field uploads
-function splitFilesAny(files = []) {
-  let pdf = null; const images = [];
-  for (const f of files) {
-    if (!allowMime(f.mimetype)) continue;
-    if (isPdf(f)) { if (!pdf) pdf = f; } else if (isImage(f)) { images.push(f); }
-  }
-  return { pdf, images };
-}
-function enforceImageCountOr413(res, images) {
-  if (images.length > MAX_FILES_PER_REQUEST) {
-    res.status(413).json({ error: `Too many photos in one request (max ${MAX_FILES_PER_REQUEST})` });
-    return false;
-  }
-  return true;
-}
-const isTruthy = (v) => {
-  if (v === true) return true;
-  const s = String(v || '').trim().toLowerCase();
-  return ['1','true','on','yes','y','checked'].includes(s);
-};
-const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
-
+// ─── CREATE (multipart; supports estimate/po PDFs) ───────────────────────────
 app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     const {
@@ -742,22 +756,29 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const { pdf, images } = splitFilesAny(req.files || []);
+    const { primaryPdf, estimatePdf, poPdf, otherPdfs, images } = splitFilesTyped(req.files || []);
     if (!enforceImageCountOr413(res, images)) return;
 
-    const pdfPath   = pdf ? fileKey(pdf) : null;
-    const firstImg  = images[0] ? fileKey(images[0]) : null;
+    const pdfPath         = primaryPdf ? fileKey(primaryPdf)   : null;
+    const estimatePdfPath = estimatePdf ? fileKey(estimatePdf) : null;
+    const poPdfPath       = poPdf ? fileKey(poPdf)             : null;
+
+    const firstImg = images[0] ? fileKey(images[0]) : null;
+
+    // any *extra* PDFs become attachments by design
+    const extraPdfKeys = otherPdfs.map(fileKey);
+    const initialAttachments = [firstImg, ...extraPdfKeys].filter(Boolean).join(',');
 
     const cStatus = canonStatus(status) || 'New';
 
     const cols = [
       'workOrderNumber','poNumber','customer','siteLocation','siteAddress','billingAddress',
-      'problemDescription','status','pdfPath','photoPath',
+      'problemDescription','status','pdfPath','estimatePdfPath','poPdfPath','photoPath',
       'billingPhone','sitePhone','customerPhone','customerEmail'
     ];
     const vals = [
       workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
-      problemDescription, cStatus, pdfPath, firstImg,
+      problemDescription, cStatus, pdfPath, estimatePdfPath, poPdfPath, initialAttachments,
       billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null
     ];
 
@@ -784,17 +805,19 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
   }
 });
 
+// ─── EDIT (multipart – supports estimate/po pdf replacements) ────────────────
 app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     const wid = req.params.id;
     const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-    const { pdf, images } = splitFilesAny(req.files || []);
+    const { primaryPdf, estimatePdf, poPdf, otherPdfs, images } = splitFilesTyped(req.files || []);
     if (!enforceImageCountOr413(res, images)) return;
 
     let attachments = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
 
+    // Flags (primary)
     const moveOldPdf =
       isTruthy(req.body.keepOldInAttachments) ||
       isTruthy(req.body.keepOldPdfInAttachments) ||
@@ -807,12 +830,32 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       isTruthy(req.body.setAsPrimaryPdf) ||
       isTruthy(req.body.isPdfReplacement);
 
-    let pdfPath = existing.pdfPath;
+    // (estimate)
+    const moveOldEstimatePdf =
+      isTruthy(req.body.moveOldEstimatePdfToAttachments) ||
+      isTruthy(req.body.keepOldEstimateInAttachments);
 
-    if (pdf) {
-      const newPdfPath = fileKey(pdf);
+    const wantReplaceEstimate =
+      isTruthy(req.body.replaceEstimatePdf) ||
+      isTruthy(req.body.setAsEstimatePdf);
+
+    // (PO)
+    const moveOldPoPdf =
+      isTruthy(req.body.moveOldPoPdfToAttachments) ||
+      isTruthy(req.body.keepOldPoInAttachments);
+
+    const wantReplacePo =
+      isTruthy(req.body.replacePoPdf) ||
+      isTruthy(req.body.setAsPoPdf);
+
+    let pdfPath         = existing.pdfPath;
+    let estimatePdfPath = existing.estimatePdfPath;
+    let poPdfPath       = existing.poPdfPath;
+
+    // Handle PRIMARY pdf
+    if (primaryPdf) {
+      const newPdfPath = fileKey(primaryPdf);
       const oldPdfPath = existing.pdfPath;
-
       if (wantReplacePdf) {
         if (oldPdfPath) {
           if (moveOldPdf) {
@@ -820,14 +863,13 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
           } else {
             try {
               if (/^uploads\//.test(oldPdfPath)) {
-                if (S3_BUCKET) {
-                  await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPdfPath }).promise();
-                } else {
+                if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPdfPath }).promise();
+                else {
                   const full = path.resolve(__dirname, 'uploads', oldPdfPath.replace(/^uploads\//, ''));
                   if (fs.existsSync(full)) fs.unlinkSync(full);
                 }
               }
-            } catch (e) { console.warn('⚠️ PDF delete old:', e.message); }
+            } catch (e) { console.warn('⚠️ PDF delete old (primary):', e.message); }
           }
         }
         pdfPath = newPdfPath;
@@ -836,8 +878,62 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       }
     }
 
-    const newPhotos = images.map(fileKey);
-    attachments = uniq([...attachments, ...newPhotos]);
+    // Handle ESTIMATE pdf
+    if (estimatePdf) {
+      const newPath = fileKey(estimatePdf);
+      const oldPath = existing.estimatePdfPath;
+      if (wantReplaceEstimate || !oldPath) {
+        if (oldPath) {
+          if (moveOldEstimatePdf) {
+            if (!attachments.includes(oldPath)) attachments.push(oldPath);
+          } else {
+            try {
+              if (/^uploads\//.test(oldPath)) {
+                if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPath }).promise();
+                else {
+                  const full = path.resolve(__dirname, 'uploads', oldPath.replace(/^uploads\//, ''));
+                  if (fs.existsSync(full)) fs.unlinkSync(full);
+                }
+              }
+            } catch (e) { console.warn('⚠️ PDF delete old (estimate):', e.message); }
+          }
+        }
+        estimatePdfPath = newPath;
+      } else {
+        attachments.push(newPath);
+      }
+    }
+
+    // Handle PO pdf
+    if (poPdf) {
+      const newPath = fileKey(poPdf);
+      const oldPath = existing.poPdfPath;
+      if (wantReplacePo || !oldPath) {
+        if (oldPath) {
+          if (moveOldPoPdf) {
+            if (!attachments.includes(oldPath)) attachments.push(oldPath);
+          } else {
+            try {
+              if (/^uploads\//.test(oldPath)) {
+                if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPath }).promise();
+                else {
+                  const full = path.resolve(__dirname, 'uploads', oldPath.replace(/^uploads\//, ''));
+                  if (fs.existsSync(full)) fs.unlinkSync(full);
+                }
+              }
+            } catch (e) { console.warn('⚠️ PDF delete old (po):', e.message); }
+          }
+        }
+        poPdfPath = newPath;
+      } else {
+        attachments.push(newPath);
+      }
+    }
+
+    // New photos & any extra PDFs -> attachments
+    const newPhotos    = images.map(fileKey);
+    const extraPdfKeys = (otherPdfs || []).map(fileKey);
+    attachments = uniq([...attachments, ...newPhotos, ...extraPdfKeys]);
 
     const {
       workOrderNumber = existing.workOrderNumber,
@@ -859,23 +955,23 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
 
     let sql = `UPDATE work_orders
                SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
-                   problemDescription=?,status=?,pdfPath=?,photoPath=?,
+                   problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
                    billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?
                WHERE id=?`;
     const params = [
       workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
-      problemDescription, cStatus, pdfPath || null, attachments.join(','),
+      problemDescription, cStatus, pdfPath || null, estimatePdfPath || null, poPdfPath || null, attachments.join(','),
       billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null,
       wid
     ];
     if (SCHEMA.hasAssignedTo) {
       sql = `UPDATE work_orders
              SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
-                 problemDescription=?,status=?,pdfPath=?,photoPath=?,
+                 problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
                  billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,assignedTo=?
              WHERE id=?`;
       const assignedToVal = (assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo);
-      params.splice(14, 0, assignedToVal); // insert before wid
+      params.splice(16, 0, assignedToVal); // insert before wid
     }
 
     await db.execute(sql, params);
@@ -887,13 +983,99 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
   }
 });
 
+// ─── QUICK PDF ATTACHERS (Estimate / PO) ─────────────────────────────────────
+// POST /work-orders/:id/attach-estimate  (multipart: field "estimatePdf")
+app.post('/work-orders/:id(\\d+)/attach-estimate', authenticate, withMulter(upload.single('estimatePdf')), async (req, res) => {
+  try {
+    const wid = req.params.id;
+    const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    if (!existing) return res.status(404).json({ error: 'Not found.' });
+    const f = req.file;
+    if (!f || !isPdf(f)) return res.status(400).json({ error: 'estimatePdf must be a PDF.' });
+
+    const moveOld = isTruthy(req.body.moveOldEstimatePdfToAttachments) || isTruthy(req.body.keepOldEstimateInAttachments);
+    const newPath = fileKey(f);
+    const oldPath = existing.estimatePdfPath;
+
+    if (oldPath) {
+      if (moveOld) {
+        const attachments = (existing.photoPath || '').split(',').filter(Boolean);
+        if (!attachments.includes(oldPath)) attachments.push(oldPath);
+        await db.execute('UPDATE work_orders SET estimatePdfPath = ?, photoPath = ? WHERE id = ?', [newPath, attachments.join(','), wid]);
+      } else {
+        try {
+          if (/^uploads\//.test(oldPath)) {
+            if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPath }).promise();
+            else {
+              const full = path.resolve(__dirname, 'uploads', oldPath.replace(/^uploads\//, ''));
+              if (fs.existsSync(full)) fs.unlinkSync(full);
+            }
+          }
+        } catch(e){ console.warn('⚠️ delete old estimate:', e.message); }
+        await db.execute('UPDATE work_orders SET estimatePdfPath = ? WHERE id = ?', [newPath, wid]);
+      }
+    } else {
+      await db.execute('UPDATE work_orders SET estimatePdfPath = ? WHERE id = ?', [newPath, wid]);
+    }
+
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
+  } catch (err) {
+    console.error('Attach-estimate error:', err);
+    res.status(500).json({ error: 'Failed to attach estimate PDF.' });
+  }
+});
+
+// POST /work-orders/:id/attach-po  (multipart: field "poPdf")
+app.post('/work-orders/:id(\\d+)/attach-po', authenticate, withMulter(upload.single('poPdf')), async (req, res) => {
+  try {
+    const wid = req.params.id;
+    const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    if (!existing) return res.status(404).json({ error: 'Not found.' });
+    const f = req.file;
+    if (!f || !isPdf(f)) return res.status(400).json({ error: 'poPdf must be a PDF.' });
+
+    const moveOld = isTruthy(req.body.moveOldPoPdfToAttachments) || isTruthy(req.body.keepOldPoInAttachments);
+    const newPath = fileKey(f);
+    const oldPath = existing.poPdfPath;
+
+    if (oldPath) {
+      if (moveOld) {
+        const attachments = (existing.photoPath || '').split(',').filter(Boolean);
+        if (!attachments.includes(oldPath)) attachments.push(oldPath);
+        await db.execute('UPDATE work_orders SET poPdfPath = ?, photoPath = ? WHERE id = ?', [newPath, attachments.join(','), wid]);
+      } else {
+        try {
+          if (/^uploads\//.test(oldPath)) {
+            if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPath }).promise();
+            else {
+              const full = path.resolve(__dirname, 'uploads', oldPath.replace(/^uploads\//, ''));
+              if (fs.existsSync(full)) fs.unlinkSync(full);
+            }
+          }
+        } catch(e){ console.warn('⚠️ delete old po:', e.message); }
+        await db.execute('UPDATE work_orders SET poPdfPath = ? WHERE id = ?', [newPath, wid]);
+      }
+    } else {
+      await db.execute('UPDATE work_orders SET poPdfPath = ? WHERE id = ?', [newPath, wid]);
+    }
+
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
+  } catch (err) {
+    console.error('Attach-po error:', err);
+    res.status(500).json({ error: 'Failed to attach PO PDF.' });
+  }
+});
+
+// ─── APPEND PHOTOS (unchanged) ──────────────────────────────────────────────
 app.post('/work-orders/:id(\\d+)/append-photo', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     const wid = req.params.id;
     const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-    const { images } = splitFilesAny(req.files || []);
+    const images = (req.files || []).filter(isImage);
     if (!images.length) return res.status(400).json({ error: 'No image provided.' });
 
     const oldPhotos = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
@@ -911,7 +1093,7 @@ app.post('/work-orders/:id(\\d+)/append-photos', authenticate, withMulter(upload
     const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-    const { images } = splitFilesAny(req.files || []);
+    const images = (req.files || []).filter(isImage);
     if (!enforceImageCountOr413(res, images)) return;
     if (!images.length) return res.status(400).json({ error: 'No images provided.' });
 
@@ -1128,6 +1310,8 @@ app.delete('/work-orders/:id(\\d+)/notes', authenticate, express.json(), async (
     res.json({ notes: arr });
   } catch (err) { console.error('Delete note (body) error:', err); res.status(500).json({ error: 'Failed to delete note.' }); }
 });
+
+// Delete a single attachment (pdf or image)
 app.delete('/work-orders/:id(\\d+)/attachment', authenticate, express.json(), async (req, res) => {
   try {
     const wid = req.params.id; const { photoPath } = req.body;
@@ -1146,6 +1330,8 @@ app.delete('/work-orders/:id(\\d+)/attachment', authenticate, express.json(), as
     res.json({ ...fresh, status: displayStatusOrDefault(fresh.status) });
   } catch (err) { console.error('Delete attachment error:', err); res.status(500).json({ error: 'Failed to delete attachment.' }); }
 });
+
+// Delete a work order
 app.delete('/work-orders/:id(\\d+)', authenticate, authorize('dispatcher', 'admin'), async (req, res) => {
   try { await db.execute('DELETE FROM work_orders WHERE id = ?', [req.params.id]); res.json({ message: 'Deleted.' }); }
   catch (err) { console.error('Work-order delete error:', err); res.status(500).json({ error: 'Failed to delete.' }); }
