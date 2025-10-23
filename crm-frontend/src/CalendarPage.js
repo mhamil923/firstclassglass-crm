@@ -175,9 +175,9 @@ export default function WorkOrderCalendar() {
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
 
-  // NEW: Status picker inside Day modal
+  // Status picker inside modals/unscheduled
   const [statusModalOpen, setStatusModalOpen] = useState(false);
-  const [statusTarget, setStatusTarget] = useState(null); // the work order object
+  const [statusTarget, setStatusTarget] = useState(null);
   const [statusChoice, setStatusChoice] = useState("");
   const [statusSaving, setStatusSaving] = useState(false);
 
@@ -191,12 +191,12 @@ export default function WorkOrderCalendar() {
       .then((res) => {
         const list = Array.isArray(res.data) ? res.data : [];
 
-        // 1) Calendar events: only things *actually* scheduled and with status Scheduled
+        // 1) Calendar events: only things actually scheduled and with status Scheduled
         const calendarItems = list.filter(
           (o) => o.scheduledDate && norm(o.status) === "scheduled"
         );
 
-        // 2) Unscheduled strip (see comments in previous version)
+        // 2) Unscheduled strip
         const unscheduled = list.filter((o) => {
           const statusOk = isAllowedForUnscheduled(o.status);
           if (!statusOk) return false;
@@ -213,17 +213,16 @@ export default function WorkOrderCalendar() {
       .catch((err) => console.error("⚠️ Error fetching work orders:", err));
   }, []);
 
-  /* ===== schedule helpers (server expects date/time + optional endTime) ===== */
+  /* ===== schedule helpers ===== */
   async function setSchedulePayload(orderId, payload) {
     await api.put(`/work-orders/${orderId}/update-date`, payload);
   }
 
-  // For drag/drop: preserve current duration if available
   function minutesWindowForOrder(orderLike) {
     const start = fromDbString(orderLike.scheduledDate);
     const end = fromDbString(orderLike.scheduledEnd);
     if (start && end) return Math.max(15, diffMinutes(start, end));
-    return DEFAULT_WINDOW_MIN; // fallback
+    return DEFAULT_WINDOW_MIN;
   }
 
   /* ===== edit modal wiring ===== */
@@ -459,7 +458,7 @@ export default function WorkOrderCalendar() {
     if (!statusTarget || !statusChoice) return;
     setStatusSaving(true);
     try {
-      // Try dedicated endpoint first, fallback to /edit as in ViewWorkOrder.js
+      // Try dedicated endpoint first; fallback to /edit
       try {
         await api.put(`/work-orders/${statusTarget.id}/status`, { status: statusChoice });
       } catch {
@@ -470,7 +469,6 @@ export default function WorkOrderCalendar() {
         });
       }
       setStatusModalOpen(false);
-      // Refresh lists/modal so changes are reflected immediately
       if (dayForModal) await openDayModal(dayForModal);
       fetchWorkOrders();
     } catch (e) {
@@ -519,9 +517,9 @@ export default function WorkOrderCalendar() {
             </div>
           </div>
 
-          <div className="text-muted mb-2" style={{ fontSize: 12 }}>
-            Showing {filteredUnscheduled.length} of {unscheduledOrders.length} (Statuses: New, Scheduled, Needs to be Scheduled)
-          </div>
+        <div className="text-muted mb-2" style={{ fontSize: 12 }}>
+          Showing {filteredUnscheduled.length} of {unscheduledOrders.length} (Statuses: New, Scheduled, Needs to be Scheduled)
+        </div>
 
           <div className="unscheduled-list">
             {filteredUnscheduled.map((order) => {
@@ -615,13 +613,22 @@ export default function WorkOrderCalendar() {
         </div>
       </div>
 
-      {/* ---------- Day list modal ---------- */}
+      {/* ---------- Day list modal (wider) ---------- */}
       {dayModalOpen && (
         <div className="modal-overlay" onClick={() => setDayModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(1100px, 95vw)",
+              maxHeight: "85vh",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
             <h4 className="mb-3">{dayModalTitle}</h4>
             {dayOrders.length ? (
-              <ul className="list-group">
+              <ul className="list-group" style={{ overflowY: "auto" }}>
                 {dayOrders.map((o, idx) => {
                   const s = fromDbString(o.scheduledDate);
                   const e = fromDbString(o.scheduledEnd);
@@ -629,7 +636,9 @@ export default function WorkOrderCalendar() {
                     s && e
                       ? `${moment(s).format("hh:mm A")} – ${moment(e).format("hh:mm A")}`
                       : s
-                      ? `${moment(s).format("hh:mm A")} – ${moment(s).add(DEFAULT_WINDOW_MIN, "minutes").format("hh:mm A")}`
+                      ? `${moment(s).format("hh:mm A")} – ${moment(s)
+                          .add(DEFAULT_WINDOW_MIN, "minutes")
+                          .format("hh:mm A")}`
                       : "";
                   const idLabel = displayWOThenPO(o);
                   const siteLoc = o.siteLocation || "";
@@ -638,18 +647,24 @@ export default function WorkOrderCalendar() {
                   return (
                     <li
                       key={o.id}
-                      className="list-group-item d-flex justify-content-between align-items-start"
+                      className="list-group-item"
                       draggable
                       onDragStart={() => handleDayDragStart(idx, o)}
                       onDragOver={(ev) => handleDayDragOver(ev, idx)}
                       onDrop={(ev) => handleDayDrop(ev, idx)}
                       style={{
                         cursor: "grab",
-                        background: overIndex === idx && dragIndex !== null ? "#f1f5f9" : "white",
+                        background:
+                          overIndex === idx && dragIndex !== null ? "#f1f5f9" : "white",
+                        display: "grid",
+                        gridTemplateColumns: "1fr auto",
+                        alignItems: "center",
+                        gap: 16,
                       }}
                       title="Drag to reorder or onto the calendar"
                     >
-                      <div className="me-2" style={{ minWidth: 0 }}>
+                      {/* LEFT: details */}
+                      <div style={{ minWidth: 0 }}>
                         <div className="fw-bold" style={clamp1}>
                           {o.customer ? `${o.customer}` : `Work Order`} — {idLabel}
                         </div>
@@ -669,7 +684,12 @@ export default function WorkOrderCalendar() {
                           <small>{label}</small>
                         </div>
                       </div>
-                      <div className="d-flex align-items-center flex-wrap" style={{ gap: 8 }}>
+
+                      {/* RIGHT: actions */}
+                      <div
+                        className="d-flex align-items-center flex-wrap"
+                        style={{ gap: 8, justifySelf: "end" }}
+                      >
                         <button
                           className="btn btn-sm btn-primary"
                           onClick={() => openEditModal(o, dayForModal)}
@@ -703,7 +723,10 @@ export default function WorkOrderCalendar() {
               <p className="empty-text mb-0">No work orders scheduled on this day.</p>
             )}
             <div className="text-end mt-3">
-              <button className="btn btn-secondary" onClick={() => setDayModalOpen(false)}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setDayModalOpen(false)}
+              >
                 Close
               </button>
             </div>
@@ -720,7 +743,8 @@ export default function WorkOrderCalendar() {
               <>
                 <div className="mb-2" style={{ minWidth: 0 }}>
                   <div className="fw-bold" style={clamp1}>
-                    {editOrder.customer ? `${editOrder.customer}` : `Work Order`} — {displayWOThenPO(editOrder)}
+                    {editOrder.customer ? `${editOrder.customer}` : `Work Order`} —{" "}
+                    {displayWOThenPO(editOrder)}
                   </div>
                   {editOrder.problemDescription ? (
                     <small className="text-muted" style={clamp2}>
@@ -776,7 +800,7 @@ export default function WorkOrderCalendar() {
         </div>
       )}
 
-      {/* ---------- Status Picker modal (new) ---------- */}
+      {/* ---------- Status Picker modal ---------- */}
       {statusModalOpen && (
         <div className="modal-overlay" onClick={cancelStatusChange}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -785,19 +809,25 @@ export default function WorkOrderCalendar() {
               <>
                 <div className="mb-2" style={{ minWidth: 0 }}>
                   <div className="fw-bold" style={clamp1}>
-                    {statusTarget.customer ? statusTarget.customer : "Work Order"} — {displayWOThenPO(statusTarget)}
+                    {statusTarget.customer ? statusTarget.customer : "Work Order"} —{" "}
+                    {displayWOThenPO(statusTarget)}
                   </div>
                   <small className="text-muted">
                     Current: <strong>{statusTarget.status || "—"}</strong>
                   </small>
                 </div>
 
-                <div className="list-group mb-3" style={{ maxHeight: 260, overflowY: "auto" }}>
+                <div
+                  className="list-group mb-3"
+                  style={{ maxHeight: 260, overflowY: "auto" }}
+                >
                   {STATUS_OPTIONS.map((s) => (
                     <button
                       key={s}
                       type="button"
-                      className={`list-group-item list-group-item-action ${statusChoice === s ? "active" : ""}`}
+                      className={`list-group-item list-group-item-action ${
+                        statusChoice === s ? "active" : ""
+                      }`}
                       onClick={() => setStatusChoice(s)}
                     >
                       {s}
@@ -806,10 +836,18 @@ export default function WorkOrderCalendar() {
                 </div>
 
                 <div className="d-flex justify-content-end">
-                  <button className="btn btn-ghost btn-outline-secondary me-2" onClick={cancelStatusChange} disabled={statusSaving}>
+                  <button
+                    className="btn btn-ghost btn-outline-secondary me-2"
+                    onClick={cancelStatusChange}
+                    disabled={statusSaving}
+                  >
                     Cancel
                   </button>
-                  <button className="btn btn-primary" onClick={confirmStatusChange} disabled={statusSaving || !statusChoice}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={confirmStatusChange}
+                    disabled={statusSaving || !statusChoice}
+                  >
                     {statusSaving ? "Saving…" : "Confirm"}
                   </button>
                 </div>
