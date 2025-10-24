@@ -99,7 +99,8 @@ function parseDateTimeFlexible(input) {
   m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2})(?::(\d{2})(?::(\d{2}))?)?$/.exec(s);
   if (m) {
     const Y  = Number(m[1]), Mo = Number(m[2]), D  = Number(m[3]);
-    const hh = Number(m[4]), mi = Number(m[5] || 0), se = Number(m[6] || 0);
+    thehh = Number(m[4]); const hh = thehh; // keep style
+    const mi = Number(m[5] || 0), se = Number(m[6] || 0);
     return toSqlDateTimeFromParts(Y, Mo, D, hh, mi, se);
   }
   return null;
@@ -290,11 +291,10 @@ async function ensureCols() {
 ensureCols().catch(e => console.warn('⚠️ ensureCols:', e.message));
 
 // ─── MULTER ─────────────────────────────────────────────────────────────────
-// <<< FIX: allow PDFs by MIME OR by filename extension; accept file object
+// Accept images by MIME, PDFs by MIME or *.pdf filename (handles octet-stream)
 const allowMime = (fOrMime) => {
   const m = typeof fOrMime === 'string' ? fOrMime : (fOrMime?.mimetype || '');
   const name = typeof fOrMime === 'string' ? '' : ((fOrMime?.originalname || fOrMime?.key || '') + '');
-  // accept images by MIME, PDFs by MIME or *.pdf filename
   return (/^image\//.test(m)) || m === 'application/pdf' || /\.pdf$/i.test(name);
 };
 
@@ -305,7 +305,6 @@ function makeUploader() {
     fields: MAX_FIELDS,
     parts:  MAX_PARTS,
   };
-  // <<< FIX: pass full file object to allowMime so *.pdf with octet-stream pass
   const fileFilter = (req, file, cb) => cb(null, allowMime(file));
   if (S3_BUCKET) {
     return multer({
@@ -462,7 +461,6 @@ app.post('/customers', authenticate, async (req, res) => {
 });
 
 // ─── WORK ORDERS ─────────────────────────────────────────────────────────────
-// Helper: categorize incoming files (primary/estimate/po/images + extra PDFs)
 function splitFilesTyped(files = []) {
   const out = {
     primaryPdf: null,
@@ -472,13 +470,11 @@ function splitFilesTyped(files = []) {
     images: [],
   };
   for (const f of files) {
-    // <<< FIX: relax filter here too — allow by MIME or *.pdf filename
     if (!allowMime(f)) continue;
     if (isImage(f)) { out.images.push(f); continue; }
     if (!isPdf(f)) continue;
 
     const fname = (f.fieldname || '').toLowerCase();
-    // flexible detection by fieldname
     const isEstimateFN = looksLikeEstimate(f);
     const isPoFN       = looksLikePo(f);
 
@@ -487,12 +483,9 @@ function splitFilesTyped(files = []) {
 
     if ((fname === 'pdf' || fname === 'primarypdf') && !out.primaryPdf) { out.primaryPdf = f; continue; }
 
-    // If none labeled yet and filename hints at estimate/po, set appropriately
     if (!out.estimatePdf && nameHas(f.originalname, 'estimate')) { out.estimatePdf = f; continue; }
-    // <<< FIX: add parentheses to ensure we only test PO name when needed
     if (!out.poPdf && (nameHas(f.originalname, 'purchase order') || nameHas(f.originalname, 'po'))) { out.poPdf = f; continue; }
 
-    // Fallback: first pdf becomes primary if none set yet
     if (!out.primaryPdf) { out.primaryPdf = f; continue; }
     out.otherPdfs.push(f);
   }
@@ -967,7 +960,6 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       }
     }
 
-    // New photos & any extra PDFs -> attachments
     const newPhotos    = images.map(fileKey);
     const extraPdfKeys = (otherPdfs || []).map(fileKey);
     attachments = uniq([...attachments, ...newPhotos, ...extraPdfKeys]);
@@ -1008,7 +1000,7 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
                  billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,assignedTo=?
              WHERE id=?`;
       const assignedToVal = (assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo);
-      params.splice(16, 0, assignedToVal); // insert before wid
+      params.splice(16, 0, assignedToVal);
     }
 
     await db.execute(sql, params);
@@ -1021,7 +1013,6 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
 });
 
 // ─── QUICK PDF ATTACHERS (Estimate / PO) ─────────────────────────────────────
-// Accept ANY common field name for estimate/po instead of a single exact name
 function firstPdfFrom(req, candidates) {
   const all = (req.files ? (Array.isArray(req.files) ? req.files : []) : [])
     .concat(req.file ? [req.file] : []);
@@ -1031,12 +1022,10 @@ function firstPdfFrom(req, candidates) {
     const fn = (f.fieldname || '').toLowerCase();
     if (lc.has(fn) || (fn && candidates.some(c => fn.includes(c.toLowerCase())))) return f;
   }
-  // fallback: if only one PDF was sent, take it
   const onlyPdf = all.filter(isPdf);
   return onlyPdf.length === 1 ? onlyPdf[0] : null;
 }
 
-// POST /work-orders/:id/attach-estimate  (fields: estimatePdf | estimate | estimate_pdf | est)
 app.post('/work-orders/:id(\\d+)/attach-estimate', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath). Check DB privileges.' });
@@ -1081,7 +1070,6 @@ app.post('/work-orders/:id(\\d+)/attach-estimate', authenticate, withMulter(uplo
   }
 });
 
-// POST /work-orders/:id/attach-po  (fields: poPdf | po | po_pdf | purchaseOrder)
 app.post('/work-orders/:id(\\d+)/attach-po', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (poPdfPath). Check DB privileges.' });
@@ -1126,7 +1114,7 @@ app.post('/work-orders/:id(\\d+)/attach-po', authenticate, withMulter(upload.any
   }
 });
 
-// ─── APPEND PHOTOS (unchanged) ──────────────────────────────────────────────
+// ─── APPEND PHOTOS ──────────────────────────────────────────────────────────
 app.post('/work-orders/:id(\\d+)/append-photo', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     const wid = req.params.id;
@@ -1146,7 +1134,7 @@ app.post('/work-orders/:id(\\d+)/append-photo', authenticate, withMulter(upload.
 });
 
 app.post('/work-orders/:id(\\d+)/append-photos', authenticate, withMulter(upload.any()), async (req, res) => {
-  ￼try {
+  try {
     const wid = req.params.id;
     const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!existing) return res.status(404).json({ error: 'Not found.' });
@@ -1451,7 +1439,6 @@ app.get('/files', async (req, res) => {
                .pipe(res);
     }
 
-    // local
     const uploadsDir = path.resolve(__dirname, 'uploads');
     const safeRel  = key.replace(/^uploads\//, '');
     const safePath = path.resolve(uploadsDir, safeRel);
