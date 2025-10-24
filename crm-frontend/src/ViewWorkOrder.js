@@ -25,6 +25,14 @@ const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayWO = (wo) => norm(wo) || "—";
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
 
+/* ---------- robust PDF check ---------- */
+const isPdfFile = (file) =>
+  file &&
+  (file.type === "application/pdf" ||
+    /\.pdf$/i.test(file.name || "") ||
+    file.type === "" || // some browsers
+    file.type === "application/octet-stream");
+
 /* ---------- Inline PO# Editor ---------- */
 function PONumberEditor({ orderId, initialPo, onSaved }) {
   const [editing, setEditing] = useState(false);
@@ -95,16 +103,10 @@ export default function ViewWorkOrder() {
   // Upload/replace states for Estimate & PO
   const [busyPoUpload, setBusyPoUpload] = useState(false);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
-  const [busyPoReplace, setBusyPoReplace] = useState(false);
-  const [busyEstimateReplace, setBusyEstimateReplace] = useState(false);
 
   // Status state
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
-
-  // Internal prefixes (we set these automatically on upload; user doesn't need to name anything)
-  const EST_PREFIX = "__estimate__";
-  const PO_PREFIX = "__po__";
 
   const fetchWorkOrder = async () => {
     try {
@@ -162,15 +164,20 @@ export default function ViewWorkOrder() {
     photoPath,
     customerPhone,
     customerEmail,
+    estimatePdfPath,
+    poPdfPath,
+    id: woId,
   } = workOrder;
 
-  // Clean PO for display (blank if it was just the WO#)
   const cleanedPo = displayPO(workOrderNumber, poNumber);
 
-  // File URLs (S3/local safe)
-  const pdfUrl = pdfPath
-    ? `${API_BASE_URL}/files?key=${encodeURIComponent(pdfPath)}#page=1&view=FitH`
-    : null;
+  // Canonical file URLs (S3/local safe)
+  const urlFor = (relPath) =>
+    `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
+
+  const pdfUrl = pdfPath ? `${urlFor(pdfPath)}#page=1&view=FitH` : null;
+  const estimateUrl = estimatePdfPath ? `${urlFor(estimatePdfPath)}#page=1&view=FitH` : null;
+  const poUrl = poPdfPath ? `${urlFor(poPdfPath)}#page=1&view=FitH` : null;
 
   const attachments = (photoPath || "")
     .split(",")
@@ -178,16 +185,19 @@ export default function ViewWorkOrder() {
     .filter(Boolean);
 
   const isPdfKey = (key) => /\.pdf(\?|$)/i.test(key);
-  const pdfAttachments = attachments.filter(isPdfKey);
+  // Other PDFs are anything in attachments that isn't the canonical three
+  const otherPdfAttachments = attachments
+    .filter(isPdfKey)
+    .filter(
+      (p) =>
+        p !== pdfPath &&
+        p !== estimatePdfPath &&
+        p !== poPdfPath
+    );
+
   const attachmentImages = attachments.filter((p) => !isPdfKey(p));
 
-  // ---------- Categorize ONLY by our internal prefixes (user filename is irrelevant) ----------
-  const estimatePdfs = pdfAttachments.filter((f) => f.toLowerCase().includes(EST_PREFIX));
-  const poPdfs = pdfAttachments.filter((f) => f.toLowerCase().includes(PO_PREFIX));
-
-  const urlFor = (relPath) => `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
-
-  // ---------- PRINT helpers (restored template) ----------
+  // ---------- PRINT helpers ----------
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`;
   const safe = (x) =>
     (x ?? "")
@@ -313,13 +323,14 @@ export default function ViewWorkOrder() {
     w.document.close();
   };
 
-  /* ---------- Upload helpers ---------- */
+  /* ---------- Upload helpers (fixed) ---------- */
 
-  // Replace the main "Signed Work Order" PDF (pdfPath)
+  // Replace the main "Signed Work Order" PDF (pdfPath).
+  // IMPORTANT: field name must be "pdf" so the server treats it as the primary.
   const handleReplacePdfUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.type !== "application/pdf") {
+    if (!isPdfFile(file)) {
       alert("Please choose a PDF file.");
       e.target.value = "";
       return;
@@ -327,7 +338,7 @@ export default function ViewWorkOrder() {
     setBusyReplace(true);
     try {
       const form = new FormData();
-      form.append("pdfFile", file);
+      form.append("pdf", file); // <-- FIXED
       form.append("replacePdf", "1");
       if (keepOldInAttachments) {
         form.append("keepOldPdfInAttachments", "1");
@@ -347,37 +358,27 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Utility to create a renamed File with a prefix (so categorization never depends on user's filename)
-  const prefixedFile = (file, prefix) => {
-    try {
-      const safeName = (file.name || "file.pdf").replace(/[^a-z0-9._-]+/gi, "_");
-      const newName = `${prefix}_${Date.now()}_${safeName}`;
-      return new File([file], newName, { type: file.type || "application/pdf" });
-    } catch {
-      // Fallback for older browsers that may not support new File([...])
-      return file;
-    }
-  };
-
-  // Upload multiple Estimate PDFs (no user naming required)
-  const handleUploadEstimatePdf = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-    if (!files.every((f) => f.type === "application/pdf")) {
-      alert("Please choose PDF file(s).");
+  // Upload/replace the Estimate PDF (server keeps only one canonical estimatePdfPath).
+  const handleUploadOrReplaceEstimatePdf = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!isPdfFile(file)) {
+      alert("Please choose a PDF file.");
       e.target.value = "";
       return;
     }
     setBusyEstimateUpload(true);
     try {
       const form = new FormData();
-      files.forEach((f) => form.append("pdfFile", prefixedFile(f, EST_PREFIX)));
-      await api.put(`/work-orders/${id}/edit`, form, {
+      form.append("estimatePdf", file); // server will set estimatePdfPath, replacing old (deletes old unless move flag)
+      // To keep old as attachment instead of deletion:
+      // form.append("keepOldEstimateInAttachments","1");
+      await api.post(`/work-orders/${id}/attach-estimate`, form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       await fetchWorkOrder();
     } catch (error) {
-      console.error("⚠️ Error uploading Estimate PDF:", error);
+      console.error("⚠️ Error uploading/replacing Estimate PDF:", error);
       alert(error?.response?.data?.error || "Failed to upload Estimate PDF.");
     } finally {
       setBusyEstimateUpload(false);
@@ -385,108 +386,30 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Upload multiple PO PDFs (no user naming required)
-  const handleUploadPoPdf = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
-    if (!files.every((f) => f.type === "application/pdf")) {
-      alert("Please choose PDF file(s).");
+  // Upload/replace the PO PDF (server keeps only one canonical poPdfPath).
+  const handleUploadOrReplacePoPdf = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!isPdfFile(file)) {
+      alert("Please choose a PDF file.");
       e.target.value = "";
       return;
     }
     setBusyPoUpload(true);
     try {
       const form = new FormData();
-      files.forEach((f) => form.append("pdfFile", prefixedFile(f, PO_PREFIX)));
-      await api.put(`/work-orders/${id}/edit`, form, {
+      form.append("poPdf", file);
+      // To keep old as attachment instead of deletion:
+      // form.append("keepOldPoInAttachments","1");
+      await api.post(`/work-orders/${id}/attach-po`, form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       await fetchWorkOrder();
     } catch (error) {
-      console.error("⚠️ Error uploading PO PDF:", error);
+      console.error("⚠️ Error uploading/replacing PO PDF:", error);
       alert(error?.response?.data?.error || "Failed to upload PO PDF.");
     } finally {
       setBusyPoUpload(false);
-      e.target.value = "";
-    }
-  };
-
-  // Replace Estimate PDF(s): delete existing estimate PDFs, then upload the chosen file
-  const handleReplaceEstimatePdf = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.type !== "application/pdf") {
-      alert("Please choose a PDF file.");
-      e.target.value = "";
-      return;
-    }
-    if (!window.confirm("Replace existing Estimate PDF(s) with this one? This will delete previous Estimate PDFs.")) {
-      e.target.value = "";
-      return;
-    }
-    setBusyEstimateReplace(true);
-    try {
-      // Delete existing estimate PDFs
-      for (const relPath of estimatePdfs) {
-        try {
-          await api.delete(`/work-orders/${id}/attachment`, { data: { photoPath: relPath } });
-        } catch (err) {
-          console.warn("Failed deleting old estimate PDF:", relPath, err);
-        }
-      }
-      // Upload the new one (auto-prefixed)
-      const form = new FormData();
-      form.append("pdfFile", prefixedFile(file, EST_PREFIX));
-      await api.put(`/work-orders/${id}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      await fetchWorkOrder();
-      alert("Estimate PDF replaced.");
-    } catch (error) {
-      console.error("⚠️ Error replacing Estimate PDF:", error);
-      alert(error?.response?.data?.error || "Failed to replace Estimate PDF.");
-    } finally {
-      setBusyEstimateReplace(false);
-      e.target.value = "";
-    }
-  };
-
-  // Replace PO PDF(s): delete existing PO PDFs, then upload the chosen file
-  const handleReplacePoPdf = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.type !== "application/pdf") {
-      alert("Please choose a PDF file.");
-      e.target.value = "";
-      return;
-    }
-    if (!window.confirm("Replace existing PO PDF(s) with this one? This will delete previous PO PDFs.")) {
-      e.target.value = "";
-      return;
-    }
-    setBusyPoReplace(true);
-    try {
-      // Delete existing PO PDFs
-      for (const relPath of poPdfs) {
-        try {
-          await api.delete(`/work-orders/${id}/attachment`, { data: { photoPath: relPath } });
-        } catch (err) {
-          console.warn("Failed deleting old PO PDF:", relPath, err);
-        }
-      }
-      // Upload the new one (auto-prefixed)
-      const form = new FormData();
-      form.append("pdfFile", prefixedFile(file, PO_PREFIX));
-      await api.put(`/work-orders/${id}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      await fetchWorkOrder();
-      alert("PO PDF replaced.");
-    } catch (error) {
-      console.error("⚠️ Error replacing PO PDF:", error);
-      alert(error?.response?.data?.error || "Failed to replace PO PDF.");
-    } finally {
-      setBusyPoReplace(false);
       e.target.value = "";
     }
   };
@@ -554,13 +477,13 @@ export default function ViewWorkOrder() {
       <div className="view-card">
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
-        <div className="view-actions">
+          <div className="view-actions">
             <button className="btn btn-outline" onClick={handlePrint}>🖨️ Print Work Order</button>
             <button className="back-btn" onClick={() => navigate("/work-orders")}>← Back to List</button>
           </div>
         </div>
 
-        {/* BASIC INFO — preserved structure/classes */}
+        {/* BASIC INFO */}
         <ul className="detail-list">
           <li className="detail-item">
             <span className="detail-label">Work Order #:</span>
@@ -571,7 +494,7 @@ export default function ViewWorkOrder() {
             <span className="detail-label">PO #:</span>
             <span className="detail-value">
               <PONumberEditor
-                orderId={workOrder.id}
+                orderId={woId}
                 initialPo={cleanedPo}
                 onSaved={(newPo) => setWorkOrder((prev) => ({ ...prev, poNumber: newPo || null }))}
               />
@@ -631,7 +554,7 @@ export default function ViewWorkOrder() {
 
         {/* Signed Work Order PDF (main pdfPath) */}
         <div className="section-card">
-          <h3 className="section-header">Sign-Off Sheet PDF(s)</h3>
+          <h3 className="section-header">Sign-Off Sheet PDF</h3>
 
           {pdfUrl ? (
             <>
@@ -677,86 +600,76 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* ESTIMATE PDFs (internal prefix; user filename doesn't matter) */}
+        {/* ESTIMATE PDF */}
         <div className="section-card">
-          <h3 className="section-header">Estimate PDF(s)</h3>
+          <h3 className="section-header">Estimate PDF</h3>
 
-          {estimatePdfs.length ? (
+          {estimateUrl ? (
             <div className="attachments">
-              {estimatePdfs.map((relPath, i) => {
-                const url = urlFor(relPath);
-                const fileName = relPath.split("/").pop() || `estimate-${i + 1}.pdf`;
-                return (
-                  <div key={`${relPath}-${i}`} className="attachment-item" style={{ position: "relative", display: "inline-block", margin: 6 }}>
-                    <a href={`${url}#page=1&view=FitH`} className="attachment-chip" target="__blank" rel="noopener noreferrer" title={`Open Estimate PDF: ${fileName}`}>
-                      📄 {fileName}
-                    </a>
-                    <button
-                      type="button"
-                      title="Delete Estimate PDF"
-                      aria-label="Delete Estimate PDF"
-                      onClick={() => handleDeleteAttachment(relPath)}
-                      style={{
-                        position: "absolute", top: -6, right: -6, width: 20, height: 20,
-                        borderRadius: "50%", border: "none", background: "#e33", color: "#fff",
-                        fontWeight: 700, lineHeight: "18px", cursor: "pointer", zIndex: 5,
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                      }}
-                    >
-                      &times;
-                    </button>
-                  </div>
-                );
-              })}
+              <a href={estimateUrl} className="attachment-chip" target="__blank" rel="noopener noreferrer">📄 Open Estimate</a>
             </div>
           ) : (
-            <p className="empty-text">No estimate PDFs attached.</p>
+            <p className="empty-text">No estimate PDF attached.</p>
           )}
 
           <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label className="btn">
-              {busyEstimateUpload ? "Uploading…" : "Upload Estimate PDF(s)"}
+              {busyEstimateUpload ? "Uploading…" : estimateUrl ? "Replace Estimate PDF" : "Upload Estimate PDF"}
               <input
                 type="file"
                 accept="application/pdf"
-                multiple
-                onChange={handleUploadEstimatePdf}
+                onChange={handleUploadOrReplaceEstimatePdf}
                 style={{ display: "none" }}
                 disabled={busyEstimateUpload}
-              />
-            </label>
-
-            <label className="btn">
-              {busyEstimateReplace ? "Replacing…" : "Replace Estimate PDF"}
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={handleReplaceEstimatePdf}
-                style={{ display: "none" }}
-                disabled={busyEstimateReplace}
               />
             </label>
           </div>
         </div>
 
-        {/* PO PDFs (internal prefix; user filename doesn't matter) */}
+        {/* PO PDF */}
         <div className="section-card">
-          <h3 className="section-header">PO Order PDF(s)</h3>
+          <h3 className="section-header">PO Order PDF</h3>
 
-          {poPdfs.length ? (
+          {poUrl ? (
             <div className="attachments">
-              {poPdfs.map((relPath, i) => {
-                const url = urlFor(relPath);
-                const fileName = relPath.split("/").pop() || `po-${i + 1}.pdf`;
+              <a href={poUrl} className="attachment-chip" target="__blank" rel="noopener noreferrer">📄 Open PO</a>
+            </div>
+          ) : (
+            <p className="empty-text">No PO PDF attached.</p>
+          )}
+
+          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <label className="btn">
+              {busyPoUpload ? "Uploading…" : poUrl ? "Replace PO PDF" : "Upload PO PDF"}
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handleUploadOrReplacePoPdf}
+                style={{ display: "none" }}
+                disabled={busyPoUpload}
+              />
+            </label>
+          </div>
+        </div>
+
+        {/* Other PDF Attachments (non-canonical) */}
+        <div className="section-card">
+          <h3 className="section-header">Other PDF Attachments</h3>
+
+          {otherPdfAttachments.length ? (
+            <div className="attachments">
+              {otherPdfAttachments.map((relPath, i) => {
+                const url = `${urlFor(relPath)}#page=1&view=FitH`;
+                const fileName = relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
                 return (
                   <div key={`${relPath}-${i}`} className="attachment-item" style={{ position: "relative", display: "inline-block", margin: 6 }}>
-                    <a href={`${url}#page=1&view=FitH`} className="attachment-chip" target="__blank" rel="noopener noreferrer" title={`Open PO PDF: ${fileName}`}>
+                    <a href={url} className="attachment-chip" target="__blank" rel="noopener noreferrer" title={`Open PDF: ${fileName}`}>
                       📄 {fileName}
                     </a>
                     <button
                       type="button"
-                      title="Delete PO PDF"
-                      aria-label="Delete PO PDF"
+                      title="Delete PDF"
+                      aria-label="Delete PDF"
                       onClick={() => handleDeleteAttachment(relPath)}
                       style={{
                         position: "absolute", top: -6, right: -6, width: 20, height: 20,
@@ -772,33 +685,8 @@ export default function ViewWorkOrder() {
               })}
             </div>
           ) : (
-            <p className="empty-text">No PO PDFs attached.</p>
+            <p className="empty-text">No other PDFs attached.</p>
           )}
-
-          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <label className="btn">
-              {busyPoUpload ? "Uploading…" : "Upload PO PDF(s)"}
-              <input
-                type="file"
-                accept="application/pdf"
-                multiple
-                onChange={handleUploadPoPdf}
-                style={{ display: "none" }}
-                disabled={busyPoUpload}
-              />
-            </label>
-
-            <label className="btn">
-              {busyPoReplace ? "Replacing…" : "Replace PO PDF"}
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={handleReplacePoPdf}
-                style={{ display: "none" }}
-                disabled={busyPoReplace}
-              />
-            </label>
-          </div>
         </div>
 
         {/* Image Attachments (non-PDF) */}
