@@ -33,13 +33,20 @@ const isPdfFile = (file) =>
     file.type === "" || // some browsers
     file.type === "application/octet-stream");
 
+/* ---------- Small helpers ---------- */
+const isPdfKey = (key) => /\.pdf(\?|$)/i.test(key);
+const urlFor = (relPath) => `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
+const pdfThumbUrl = (relPath) => `${urlFor(relPath)}#page=1&view=FitH`;
+
 /* ---------- Inline PO# Editor ---------- */
 function PONumberEditor({ orderId, initialPo, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [po, setPo] = useState(initialPo || "");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { setPo(initialPo || ""); }, [initialPo]);
+  useEffect(() => {
+    setPo(initialPo || "");
+  }, [initialPo]);
 
   const save = async () => {
     setSaving(true);
@@ -86,7 +93,118 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
     </div>
   );
 }
-/* --------------------------------------- */
+
+/* ---------- Lightbox modal for enlarged previews ---------- */
+function Lightbox({ open, onClose, kind, src, title }) {
+  if (!open) return null;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#fff",
+          borderRadius: 12,
+          width: "min(100%, 980px)",
+          maxHeight: "90vh",
+          overflow: "hidden",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <strong style={{ fontSize: 14 }}>{title || "Preview"}</strong>
+          <button className="btn btn-ghost" onClick={onClose}>Close</button>
+        </div>
+        <div style={{ flex: 1, background: "#f8fafc" }}>
+          {kind === "image" ? (
+            <img src={src} alt={title || "preview"} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          ) : (
+            <iframe title={title || "preview"} src={src} style={{ width: "100%", height: "80vh", border: "none" }} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Tile component (image or pdf) ---------- */
+function FileTile({ kind, href, fileName, onDelete, onExpand }) {
+  const isPdf = kind === "pdf";
+  return (
+    <div
+      className="attachment-item"
+      style={{
+        width: 160,
+        borderRadius: 10,
+        overflow: "hidden",
+        border: "1px solid #e5e7eb",
+        background: "#fff",
+        position: "relative",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+      }}
+    >
+      <div style={{ width: "100%", height: 200, background: "#f8fafc" }}>
+        {isPdf ? (
+          <iframe
+            title={fileName}
+            src={href}
+            style={{ width: "100%", height: "100%", border: "none" }}
+          />
+        ) : (
+          <img
+            src={href}
+            alt={fileName}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        )}
+      </div>
+
+      <div style={{ padding: "6px 8px", fontSize: 12, wordBreak: "break-all" }}>
+        <a
+          href={href}
+          target="__blank"
+          rel="noopener noreferrer"
+          title={fileName}
+          className="link"
+          style={{ textDecoration: "none" }}
+        >
+          {fileName}
+        </a>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, padding: "0 8px 8px 8px" }}>
+        <button className="btn btn-light" onClick={onExpand} style={{ flex: 1 }}>
+          Expand
+        </button>
+        {onDelete && (
+          <button
+            className="btn btn-danger"
+            onClick={onDelete}
+            title="Delete"
+            style={{ flex: "0 0 auto" }}
+          >
+            ✕
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function ViewWorkOrder() {
   const { id } = useParams();
@@ -100,13 +218,18 @@ export default function ViewWorkOrder() {
   const [busyReplace, setBusyReplace] = useState(false);
   const [keepOldInAttachments, setKeepOldInAttachments] = useState(true);
 
-  // Upload/replace states for Estimate & PO
+  // Upload states for Estimate & PO
   const [busyPoUpload, setBusyPoUpload] = useState(false);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
 
   // Status state
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
+
+  // Lightbox state
+  const [lightbox, setLightbox] = useState({ open: false, kind: "pdf", src: "", title: "" });
+  const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
+  const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
   const fetchWorkOrder = async () => {
     try {
@@ -155,8 +278,8 @@ export default function ViewWorkOrder() {
     workOrderNumber,
     poNumber,
     customer,
-    siteLocation,   // LOCATION NAME
-    siteAddress,    // STREET ADDRESS
+    siteLocation,
+    siteAddress,
     billingAddress,
     problemDescription,
     scheduledDate,
@@ -171,29 +294,20 @@ export default function ViewWorkOrder() {
 
   const cleanedPo = displayPO(workOrderNumber, poNumber);
 
-  // Canonical file URLs (S3/local safe)
-  const urlFor = (relPath) =>
-    `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
-
-  const pdfUrl = pdfPath ? `${urlFor(pdfPath)}#page=1&view=FitH` : null;
-  const estimateUrl = estimatePdfPath ? `${urlFor(estimatePdfPath)}#page=1&view=FitH` : null;
-  const poUrl = poPdfPath ? `${urlFor(poPdfPath)}#page=1&view=FitH` : null;
+  // Canonical file URLs
+  const signedHref = pdfPath ? pdfThumbUrl(pdfPath) : null;
+  const estimateHref = estimatePdfPath ? pdfThumbUrl(estimatePdfPath) : null;
+  const poHref = poPdfPath ? pdfThumbUrl(poPdfPath) : null;
 
   const attachments = (photoPath || "")
     .split(",")
     .map((p) => p.trim())
     .filter(Boolean);
 
-  const isPdfKey = (key) => /\.pdf(\?|$)/i.test(key);
   // Other PDFs are anything in attachments that isn't the canonical three
   const otherPdfAttachments = attachments
     .filter(isPdfKey)
-    .filter(
-      (p) =>
-        p !== pdfPath &&
-        p !== estimatePdfPath &&
-        p !== poPdfPath
-    );
+    .filter((p) => p !== pdfPath && p !== estimatePdfPath && p !== poPdfPath);
 
   const attachmentImages = attachments.filter((p) => !isPdfKey(p));
 
@@ -317,7 +431,10 @@ export default function ViewWorkOrder() {
 </html>`;
 
     const w = window.open("", "_blank", "width=1000,height=1200");
-    if (!w) { alert("Popup blocked. Please allow popups to print."); return; }
+    if (!w) {
+      alert("Popup blocked. Please allow popups to print.");
+      return;
+    }
     w.document.open();
     w.document.write(html);
     w.document.close();
@@ -338,7 +455,7 @@ export default function ViewWorkOrder() {
     setBusyReplace(true);
     try {
       const form = new FormData();
-      form.append("pdf", file); // <-- FIXED
+      form.append("pdf", file); // <-- primary key expected by server
       form.append("replacePdf", "1");
       if (keepOldInAttachments) {
         form.append("keepOldPdfInAttachments", "1");
@@ -370,8 +487,8 @@ export default function ViewWorkOrder() {
     setBusyEstimateUpload(true);
     try {
       const form = new FormData();
-      form.append("estimatePdf", file); // server will set estimatePdfPath, replacing old (deletes old unless move flag)
-      // To keep old as attachment instead of deletion:
+      form.append("estimatePdf", file);
+      // To keep old estimate as attachment instead of deletion, include:
       // form.append("keepOldEstimateInAttachments","1");
       await api.post(`/work-orders/${id}/attach-estimate`, form, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -399,7 +516,7 @@ export default function ViewWorkOrder() {
     try {
       const form = new FormData();
       form.append("poPdf", file);
-      // To keep old as attachment instead of deletion:
+      // To keep old po as attachment instead of deletion, include:
       // form.append("keepOldPoInAttachments","1");
       await api.post(`/work-orders/${id}/attach-po`, form, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -474,6 +591,9 @@ export default function ViewWorkOrder() {
 
   return (
     <div className="view-container">
+      {/* Lightbox for expanded previews */}
+      <Lightbox open={lightbox.open} onClose={closeLightbox} kind={lightbox.kind} src={lightbox.src} title={lightbox.title} />
+
       <div className="view-card">
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
@@ -552,37 +672,19 @@ export default function ViewWorkOrder() {
           </li>
         </ul>
 
-        {/* Signed Work Order PDF (main pdfPath) */}
+        {/* Signed Work Order PDF (tile preview) */}
         <div className="section-card">
           <h3 className="section-header">Sign-Off Sheet PDF</h3>
 
-          {pdfUrl ? (
-            <>
-              <iframe src={pdfUrl} className="pdf-frame" title="Work Order PDF" />
-              <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                <a className="btn btn-light" href={pdfUrl} target="_blank" rel="noreferrer">Open PDF in new tab</a>
-
-                <label className="btn">
-                  {busyReplace ? "Replacing…" : "Replace Signed PDF"}
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    onChange={handleReplacePdfUpload}
-                    style={{ display: "none" }}
-                    disabled={busyReplace}
-                  />
-                </label>
-
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <input
-                    type="checkbox"
-                    checked={keepOldInAttachments}
-                    onChange={(e) => setKeepOldInAttachments(e.target.checked)}
-                  />
-                  Move existing signed PDF to attachments
-                </label>
-              </div>
-            </>
+          {signedHref ? (
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+              <FileTile
+                kind="pdf"
+                href={signedHref}
+                fileName={(pdfPath || "").split("/").pop() || "signed.pdf"}
+                onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")}
+              />
+            </div>
           ) : (
             <div>
               <p className="empty-text">No PDF attached.</p>
@@ -598,15 +700,44 @@ export default function ViewWorkOrder() {
               </label>
             </div>
           )}
+
+          {signedHref && (
+            <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <a className="btn btn-light" href={signedHref} target="_blank" rel="noreferrer">Open in new tab</a>
+              <label className="btn">
+                {busyReplace ? "Replacing…" : "Replace Signed PDF"}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleReplacePdfUpload}
+                  style={{ display: "none" }}
+                  disabled={busyReplace}
+                />
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={keepOldInAttachments}
+                  onChange={(e) => setKeepOldInAttachments(e.target.checked)}
+                />
+                Move existing signed PDF to attachments
+              </label>
+            </div>
+          )}
         </div>
 
-        {/* ESTIMATE PDF */}
+        {/* ESTIMATE PDF (tile preview) */}
         <div className="section-card">
           <h3 className="section-header">Estimate PDF</h3>
 
-          {estimateUrl ? (
-            <div className="attachments">
-              <a href={estimateUrl} className="attachment-chip" target="__blank" rel="noopener noreferrer">📄 Open Estimate</a>
+          {estimateHref ? (
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+              <FileTile
+                kind="pdf"
+                href={estimateHref}
+                fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
+                onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
+              />
             </div>
           ) : (
             <p className="empty-text">No estimate PDF attached.</p>
@@ -614,7 +745,7 @@ export default function ViewWorkOrder() {
 
           <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label className="btn">
-              {busyEstimateUpload ? "Uploading…" : estimateUrl ? "Replace Estimate PDF" : "Upload Estimate PDF"}
+              {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
               <input
                 type="file"
                 accept="application/pdf"
@@ -626,13 +757,18 @@ export default function ViewWorkOrder() {
           </div>
         </div>
 
-        {/* PO PDF */}
+        {/* PO PDF (tile preview) */}
         <div className="section-card">
           <h3 className="section-header">PO Order PDF</h3>
 
-          {poUrl ? (
-            <div className="attachments">
-              <a href={poUrl} className="attachment-chip" target="__blank" rel="noopener noreferrer">📄 Open PO</a>
+          {poHref ? (
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+              <FileTile
+                kind="pdf"
+                href={poHref}
+                fileName={(poPdfPath || "").split("/").pop() || "po.pdf"}
+                onExpand={() => openLightbox("pdf", poHref, "PO PDF")}
+              />
             </div>
           ) : (
             <p className="empty-text">No PO PDF attached.</p>
@@ -640,7 +776,7 @@ export default function ViewWorkOrder() {
 
           <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label className="btn">
-              {busyPoUpload ? "Uploading…" : poUrl ? "Replace PO PDF" : "Upload PO PDF"}
+              {busyPoUpload ? "Uploading…" : poHref ? "Replace PO PDF" : "Upload PO PDF"}
               <input
                 type="file"
                 accept="application/pdf"
@@ -657,30 +793,19 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">Other PDF Attachments</h3>
 
           {otherPdfAttachments.length ? (
-            <div className="attachments">
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
               {otherPdfAttachments.map((relPath, i) => {
-                const url = `${urlFor(relPath)}#page=1&view=FitH`;
+                const href = pdfThumbUrl(relPath);
                 const fileName = relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
                 return (
-                  <div key={`${relPath}-${i}`} className="attachment-item" style={{ position: "relative", display: "inline-block", margin: 6 }}>
-                    <a href={url} className="attachment-chip" target="__blank" rel="noopener noreferrer" title={`Open PDF: ${fileName}`}>
-                      📄 {fileName}
-                    </a>
-                    <button
-                      type="button"
-                      title="Delete PDF"
-                      aria-label="Delete PDF"
-                      onClick={() => handleDeleteAttachment(relPath)}
-                      style={{
-                        position: "absolute", top: -6, right: -6, width: 20, height: 20,
-                        borderRadius: "50%", border: "none", background: "#e33", color: "#fff",
-                        fontWeight: 700, lineHeight: "18px", cursor: "pointer", zIndex: 5,
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                      }}
-                    >
-                      &times;
-                    </button>
-                  </div>
+                  <FileTile
+                    key={`${relPath}-${i}`}
+                    kind="pdf"
+                    href={href}
+                    fileName={fileName}
+                    onExpand={() => openLightbox("pdf", href, fileName)}
+                    onDelete={() => handleDeleteAttachment(relPath)}
+                  />
                 );
               })}
             </div>
@@ -694,30 +819,19 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">Image Attachments</h3>
 
           {attachmentImages.length ? (
-            <div className="attachments">
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
               {attachmentImages.map((relPath, i) => {
-                const url = urlFor(relPath);
+                const href = urlFor(relPath);
                 const fileName = relPath.split("/").pop() || `image-${i + 1}.jpg`;
                 return (
-                  <div key={`${relPath}-${i}`} className="attachment-item" style={{ position: "relative", display: "inline-block", margin: 6 }}>
-                    <a href={url} target="_blank" rel="noopener noreferrer">
-                      <img src={url} alt={fileName} className="attachment-img" />
-                    </a>
-                    <button
-                      type="button"
-                      title="Delete attachment"
-                      aria-label="Delete attachment"
-                      onClick={() => handleDeleteAttachment(relPath)}
-                      style={{
-                        position: "absolute", top: -6, right: -6, width: 20, height: 20,
-                        borderRadius: "50%", border: "none", background: "#e33", color: "#fff",
-                        fontWeight: 700, lineHeight: "18px", cursor: "pointer", zIndex: 5,
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                      }}
-                    >
-                      &times;
-                    </button>
-                  </div>
+                  <FileTile
+                    key={`${relPath}-${i}`}
+                    kind="image"
+                    href={href}
+                    fileName={fileName}
+                    onExpand={() => openLightbox("image", href, fileName)}
+                    onDelete={() => handleDeleteAttachment(relPath)}
+                  />
                 );
               })}
             </div>
