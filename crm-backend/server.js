@@ -290,7 +290,14 @@ async function ensureCols() {
 ensureCols().catch(e => console.warn('⚠️ ensureCols:', e.message));
 
 // ─── MULTER ─────────────────────────────────────────────────────────────────
-const allowMime = (m) => m && (/^image\//.test(m) || m === 'application/pdf');
+// <<< FIX: allow PDFs by MIME OR by filename extension; accept file object
+const allowMime = (fOrMime) => {
+  const m = typeof fOrMime === 'string' ? fOrMime : (fOrMime?.mimetype || '');
+  const name = typeof fOrMime === 'string' ? '' : ((fOrMime?.originalname || fOrMime?.key || '') + '');
+  // accept images by MIME, PDFs by MIME or *.pdf filename
+  return (/^image\//.test(m)) || m === 'application/pdf' || /\.pdf$/i.test(name);
+};
+
 function makeUploader() {
   const limits = {
     fileSize: MAX_FILE_SIZE_MB * 1024 * 1024,
@@ -298,7 +305,8 @@ function makeUploader() {
     fields: MAX_FIELDS,
     parts:  MAX_PARTS,
   };
-  const fileFilter = (req, file, cb) => cb(null, allowMime(file.mimetype));
+  // <<< FIX: pass full file object to allowMime so *.pdf with octet-stream pass
+  const fileFilter = (req, file, cb) => cb(null, allowMime(file));
   if (S3_BUCKET) {
     return multer({
       storage: multerS3({
@@ -464,7 +472,8 @@ function splitFilesTyped(files = []) {
     images: [],
   };
   for (const f of files) {
-    if (!allowMime(f.mimetype)) continue;
+    // <<< FIX: relax filter here too — allow by MIME or *.pdf filename
+    if (!allowMime(f)) continue;
     if (isImage(f)) { out.images.push(f); continue; }
     if (!isPdf(f)) continue;
 
@@ -480,7 +489,8 @@ function splitFilesTyped(files = []) {
 
     // If none labeled yet and filename hints at estimate/po, set appropriately
     if (!out.estimatePdf && nameHas(f.originalname, 'estimate')) { out.estimatePdf = f; continue; }
-    if (!out.poPdf && nameHas(f.originalname, 'purchase order') || nameHas(f.originalname, 'po')) { out.poPdf = f; continue; }
+    // <<< FIX: add parentheses to ensure we only test PO name when needed
+    if (!out.poPdf && (nameHas(f.originalname, 'purchase order') || nameHas(f.originalname, 'po'))) { out.poPdf = f; continue; }
 
     // Fallback: first pdf becomes primary if none set yet
     if (!out.primaryPdf) { out.primaryPdf = f; continue; }
@@ -1136,7 +1146,7 @@ app.post('/work-orders/:id(\\d+)/append-photo', authenticate, withMulter(upload.
 });
 
 app.post('/work-orders/:id(\\d+)/append-photos', authenticate, withMulter(upload.any()), async (req, res) => {
-  try {
+  ￼try {
     const wid = req.params.id;
     const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!existing) return res.status(404).json({ error: 'Not found.' });
