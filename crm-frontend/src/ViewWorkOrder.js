@@ -94,7 +94,7 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   );
 }
 
-/* ---------- Lightbox modal for enlarged previews ---------- */
+/* ---------- Lightbox modal for enlarged previews (aspect-ratio safe) ---------- */
 function Lightbox({ open, onClose, kind, src, title }) {
   if (!open) return null;
   return (
@@ -118,25 +118,59 @@ function Lightbox({ open, onClose, kind, src, title }) {
         style={{
           background: "#fff",
           borderRadius: 12,
-          width: "min(100%, 980px)",
-          maxHeight: "90vh",
-          overflow: "hidden",
+          maxWidth: "95vw",
+          maxHeight: "92vh",
+          width: "auto",
+          height: "auto",
           boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
           display: "flex",
           flexDirection: "column",
+          overflow: "hidden",
         }}
       >
         <div style={{ padding: "10px 14px", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <strong style={{ fontSize: 14 }}>{title || "Preview"}</strong>
           <button className="btn btn-ghost" onClick={onClose}>Close</button>
         </div>
-        <div style={{ flex: 1, background: "#f8fafc" }}>
-          {kind === "image" ? (
-            <img src={src} alt={title || "preview"} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-          ) : (
-            <iframe title={title || "preview"} src={src} style={{ width: "100%", height: "80vh", border: "none" }} />
-          )}
-        </div>
+
+        {/* content area */}
+        {kind === "image" ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "#f8fafc",
+              padding: 8,
+            }}
+          >
+            {/* maintain original aspect ratio; never crop */}
+            <img
+              src={src}
+              alt={title || "preview"}
+              style={{
+                maxWidth: "92vw",
+                maxHeight: "82vh",
+                width: "auto",
+                height: "auto",
+                objectFit: "contain",
+                display: "block",
+              }}
+            />
+          </div>
+        ) : (
+          <iframe
+            title={title || "preview"}
+            src={src}
+            style={{
+              width: "92vw",
+              maxWidth: "1200px",
+              height: "82vh",
+              border: "none",
+              background: "#f8fafc",
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -243,8 +277,7 @@ export default function ViewWorkOrder() {
 
   useEffect(() => {
     fetchWorkOrder();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Parse existing notes safely
   const originalNotes = useMemo(() => {
