@@ -43,7 +43,6 @@ const pdfThumbUrl = (relPath) => `${urlFor(relPath)}#page=1&view=FitH`;
 function PONumberEditor({ orderId, initialPo, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [po, setPo] = useState(initialPo || "");
-  thead: null;
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -67,7 +66,14 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
 
   if (!editing) {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
         <div>{initialPo ? initialPo : <em>None</em>}</div>
         <button className="btn btn-primary" onClick={() => setEditing(true)}>
           {initialPo ? "Update PO #" : "Add PO #"}
@@ -77,19 +83,35 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+      }}
+    >
       <input
         type="text"
         value={po}
         onChange={(e) => setPo(e.target.value)}
         className="form-input"
         placeholder="Enter PO # (optional)"
-        style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
+        style={{
+          height: 36,
+          borderRadius: 8,
+          border: "1px solid #cbd5e1",
+          padding: "0 10px",
+        }}
       />
       <button className="btn btn-primary" disabled={saving} onClick={save}>
         {saving ? "Saving…" : "Save"}
       </button>
-      <button className="btn btn-ghost" disabled={saving} onClick={() => setEditing(false)}>
+      <button
+        className="btn btn-ghost"
+        disabled={saving}
+        onClick={() => setEditing(false)}
+      >
         Cancel
       </button>
     </div>
@@ -174,12 +196,24 @@ function Lightbox({ open, onClose, kind, src, title }) {
             gap: 8,
           }}
         >
-          <strong style={{ fontSize: 14, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <strong
+            style={{
+              fontSize: 14,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             {title || "Preview"}
           </strong>
           <div style={{ display: "flex", gap: 8 }}>
             {kind === "image" && (
-              <button className="btn btn-light" onClick={handleDownload} disabled={downloading}>
+              <button
+                className="btn btn-light"
+                onClick={handleDownload}
+                disabled={downloading}
+              >
                 {downloading ? "Preparing…" : "Download"}
               </button>
             )}
@@ -256,9 +290,17 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
     >
       <div style={{ width: "100%", height: 200, background: "#f8fafc" }}>
         {isPdf ? (
-          <iframe title={fileName} src={href} style={{ width: "100%", height: "100%", border: "none" }} />
+          <iframe
+            title={fileName}
+            src={href}
+            style={{ width: "100%", height: "100%", border: "none" }}
+          />
         ) : (
-          <img src={href} alt={fileName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <img
+            src={href}
+            alt={fileName}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
         )}
       </div>
 
@@ -280,7 +322,12 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
           Expand
         </button>
         {onDelete && (
-          <button className="btn btn-danger" onClick={onDelete} title="Delete" style={{ flex: "0 0 auto" }}>
+          <button
+            className="btn btn-danger"
+            onClick={onDelete}
+            title="Delete"
+            style={{ flex: "0 0 auto" }}
+          >
             ✕
           </button>
         )}
@@ -310,8 +357,14 @@ export default function ViewWorkOrder() {
   const [localStatus, setLocalStatus] = useState("");
 
   // Lightbox state
-  const [lightbox, setLightbox] = useState({ open: false, kind: "pdf", src: "", title: "" });
-  const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
+  const [lightbox, setLightbox] = useState({
+    open: false,
+    kind: "pdf",
+    src: "",
+    title: "",
+  });
+  const openLightbox = (kind, src, title) =>
+    setLightbox({ open: true, kind, src, title });
   const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
   const fetchWorkOrder = async () => {
@@ -344,7 +397,9 @@ export default function ViewWorkOrder() {
     () =>
       originalNotes
         .map((n, idx) => ({ ...n, __origIndex: idx }))
-        .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0)),
+        .sort(
+          (a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0)
+        ),
     [originalNotes]
   );
 
@@ -483,12 +538,16 @@ export default function ViewWorkOrder() {
       </tr>
     </table>
 
-    <div class="desc-title">Problem Description: ${safe(problemDescription || "")}</div>
+    <div class="desc-title">Problem Description: ${safe(
+      problemDescription || ""
+    )}</div>
     <div class="desc-box"></div>
 
-    <div className="auth-title">AUTHORIZATION TO PAY</div>
-    <div className="auth-note">
-      I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
+    <div class="auth-title">AUTHORIZATION TO PAY</div>
+    <div class="auth-note">
+      I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL
+      SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE
+      SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
     </div>
 
     <div class="sign-row">
@@ -503,7 +562,8 @@ export default function ViewWorkOrder() {
     </div>
 
     <div class="fine">
-      NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
+      NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST
+      DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
     </div>
   </div>
   <script>
@@ -612,7 +672,9 @@ export default function ViewWorkOrder() {
   const handleDeleteAttachment = async (relPath) => {
     if (!window.confirm("Delete this attachment?")) return;
     try {
-      await api.delete(`/work-orders/${id}/attachment`, { data: { photoPath: relPath } });
+      await api.delete(`/work-orders/${id}/attachment`, {
+        data: { photoPath: relPath },
+      });
       await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error deleting attachment:", error);
@@ -631,7 +693,9 @@ export default function ViewWorkOrder() {
       } catch {
         const form = new FormData();
         form.append("status", newStatus);
-        await api.put(`/work-orders/${id}/edit`, form, { headers: { "Content-Type": "multipart/form-data" } });
+        await api.put(`/work-orders/${id}/edit`, form, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
       }
       await fetchWorkOrder();
     } catch (error) {
@@ -670,14 +734,27 @@ export default function ViewWorkOrder() {
   return (
     <div className="view-container">
       {/* Lightbox for expanded previews */}
-      <Lightbox open={lightbox.open} onClose={closeLightbox} kind={lightbox.kind} src={lightbox.src} title={lightbox.title} />
+      <Lightbox
+        open={lightbox.open}
+        onClose={closeLightbox}
+        kind={lightbox.kind}
+        src={lightbox.src}
+        title={lightbox.title}
+      />
 
       <div className="view-card">
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
           <div className="view-actions">
-            <button className="btn btn-outline" onClick={handlePrint}>🖨️ Print Work Order</button>
-            <button className="back-btn" onClick={() => navigate("/work-orders")}>← Back to List</button>
+            <button className="btn btn-outline" onClick={handlePrint}>
+              🖨️ Print Work Order
+            </button>
+            <button
+              className="back-btn"
+              onClick={() => navigate("/work-orders")}
+            >
+              ← Back to List
+            </button>
           </div>
         </div>
 
@@ -694,7 +771,12 @@ export default function ViewWorkOrder() {
               <PONumberEditor
                 orderId={woId}
                 initialPo={cleanedPo}
-                onSaved={(newPo) => setWorkOrder((prev) => ({ ...prev, poNumber: newPo || null }))}
+                onSaved={(newPo) =>
+                  setWorkOrder((prev) => ({
+                    ...prev,
+                    poNumber: newPo || null,
+                  }))
+                }
               />
             </span>
           </li>
@@ -702,13 +784,24 @@ export default function ViewWorkOrder() {
           <li className="detail-item">
             <span className="detail-label">Status:</span>
             <span className="detail-value">
-              <select value={localStatus} onChange={handleStatusChange} disabled={statusSaving} style={{ padding: 6 }}>
-                <option value="" disabled>Select status…</option>
+              <select
+                value={localStatus}
+                onChange={handleStatusChange}
+                disabled={statusSaving}
+                style={{ padding: 6 }}
+              >
+                <option value="" disabled>
+                  Select status…
+                </option>
                 {STATUS_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
                 ))}
               </select>
-              {statusSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
+              {statusSaving && (
+                <small style={{ marginLeft: 8 }}>Saving…</small>
+              )}
             </span>
           </li>
 
@@ -731,21 +824,29 @@ export default function ViewWorkOrder() {
           </li>
           <li className="detail-item">
             <span className="detail-label">Site Address:</span>
-            <span className="detail-value pre-wrap">{siteAddress || "—"}</span>
+            <span className="detail-value pre-wrap">
+              {siteAddress || "—"}
+            </span>
           </li>
 
           <li className="detail-item">
             <span className="detail-label">Billing Address:</span>
-            <span className="detail-value pre-wrap">{billingAddress || "—"}</span>
+            <span className="detail-value pre-wrap">
+              {billingAddress || "—"}
+            </span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Problem Description:</span>
-            <span className="detail-value pre-wrap">{problemDescription || "—"}</span>
+            <span className="detail-value pre-wrap">
+              {problemDescription || "—"}
+            </span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Scheduled Date:</span>
             <span className="detail-value">
-              {scheduledDate ? moment(scheduledDate).format("YYYY-MM-DD HH:mm") : "Not Scheduled"}
+              {scheduledDate
+                ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
+                : "Not Scheduled"}
             </span>
           </li>
         </ul>
@@ -755,7 +856,14 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">Sign-Off Sheet PDF</h3>
 
           {signedHref ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            <div
+              className="attachments"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                gap: 12,
+              }}
+            >
               <FileTile
                 kind="pdf"
                 href={signedHref}
@@ -768,20 +876,53 @@ export default function ViewWorkOrder() {
               <p className="empty-text">No PDF attached.</p>
               <label className="btn">
                 {busyReplace ? "Uploading…" : "Upload Signed PDF"}
-                <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleReplacePdfUpload}
+                  style={{ display: "none" }}
+                  disabled={busyReplace}
+                />
               </label>
             </div>
           )}
 
           {signedHref && (
-            <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <a className="btn btn-light" href={signedHref} target="_blank" rel="noreferrer">Open in new tab</a>
+            <div
+              className="mt-2"
+              style={{
+                display: "flex",
+                gap: 12,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <a
+                className="btn btn-light"
+                href={signedHref}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open in new tab
+              </a>
               <label className="btn">
                 {busyReplace ? "Replacing…" : "Replace Signed PDF"}
-                <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleReplacePdfUpload}
+                  style={{ display: "none" }}
+                  disabled={busyReplace}
+                />
               </label>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <input type="checkbox" checked={keepOldInAttachments} onChange={(e) => setKeepOldInAttachments(e.target.checked)} />
+              <label
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={keepOldInAttachments}
+                  onChange={(e) => setKeepOldInAttachments(e.target.checked)}
+                />
                 Move existing signed PDF to attachments
               </label>
             </div>
@@ -793,22 +934,46 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">Estimate PDF</h3>
 
           {estimateHref ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            <div
+              className="attachments"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                gap: 12,
+              }}
+            >
               <FileTile
                 kind="pdf"
                 href={estimateHref}
-                fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
-                onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
+                fileName={
+                  (estimatePdfPath || "").split("/").pop() || "estimate.pdf"
+                }
+                onExpand={() =>
+                  openLightbox("pdf", estimateHref, "Estimate PDF")
+                }
               />
             </div>
           ) : (
             <p className="empty-text">No estimate PDF attached.</p>
           )}
 
-          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div
+            className="attachment-upload"
+            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+          >
             <label className="btn">
-              {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
-              <input type="file" accept="application/pdf" onChange={handleUploadOrReplaceEstimatePdf} style={{ display: "none" }} disabled={busyEstimateUpload} />
+              {busyEstimateUpload
+                ? "Uploading…"
+                : estimateHref
+                ? "Replace Estimate PDF"
+                : "Upload Estimate PDF"}
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handleUploadOrReplaceEstimatePdf}
+                style={{ display: "none" }}
+                disabled={busyEstimateUpload}
+              />
             </label>
           </div>
         </div>
@@ -818,7 +983,14 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">PO Order PDF</h3>
 
           {poHref ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            <div
+              className="attachments"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                gap: 12,
+              }}
+            >
               <FileTile
                 kind="pdf"
                 href={poHref}
@@ -830,10 +1002,23 @@ export default function ViewWorkOrder() {
             <p className="empty-text">No PO PDF attached.</p>
           )}
 
-          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div
+            className="attachment-upload"
+            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+          >
             <label className="btn">
-              {busyPoUpload ? "Uploading…" : poHref ? "Replace PO PDF" : "Upload PO PDF"}
-              <input type="file" accept="application/pdf" onChange={handleUploadOrReplacePoPdf} style={{ display: "none" }} disabled={busyPoUpload} />
+              {busyPoUpload
+                ? "Uploading…"
+                : poHref
+                ? "Replace PO PDF"
+                : "Upload PO PDF"}
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handleUploadOrReplacePoPdf}
+                style={{ display: "none" }}
+                disabled={busyPoUpload}
+              />
             </label>
           </div>
         </div>
@@ -843,10 +1028,18 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">Other PDF Attachments</h3>
 
           {otherPdfAttachments.length ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            <div
+              className="attachments"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                gap: 12,
+              }}
+            >
               {otherPdfAttachments.map((relPath, i) => {
                 const href = pdfThumbUrl(relPath);
-                const fileName = relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
+                const fileName =
+                  relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
                 return (
                   <FileTile
                     key={`${relPath}-${i}`}
@@ -869,10 +1062,18 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">Image Attachments</h3>
 
           {attachmentImages.length ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            <div
+              className="attachments"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                gap: 12,
+              }}
+            >
               {attachmentImages.map((relPath, i) => {
                 const href = urlFor(relPath);
-                const fileName = relPath.split("/").pop() || `image-${i + 1}.jpg`;
+                const fileName =
+                  relPath.split("/").pop() || `image-${i + 1}.jpg`;
                 return (
                   <FileTile
                     key={`${relPath}-${i}`}
@@ -894,7 +1095,10 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
 
-          <button className="toggle-note-btn" onClick={() => setShowNoteInput((v) => !v)}>
+          <button
+            className="toggle-note-btn"
+            onClick={() => setShowNoteInput((v) => !v)}
+          >
             {showNoteInput ? "Cancel" : "Add Note"}
           </button>
 
@@ -907,7 +1111,9 @@ export default function ViewWorkOrder() {
                 placeholder="Write your note here..."
                 rows={3}
               />
-              <button className="toggle-note-btn" onClick={handleAddNote}>Submit Note</button>
+              <button className="toggle-note-btn" onClick={handleAddNote}>
+                Submit Note
+              </button>
             </div>
           )}
 
