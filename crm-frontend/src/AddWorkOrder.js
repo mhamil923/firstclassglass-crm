@@ -48,8 +48,10 @@ export default function AddWorkOrder() {
     customerEmail: "",
   });
 
-  const [pdfFile, setPdfFile] = useState(null);
+  const [pdfFile, setPdfFile] = useState(null);                // Work Order PDF
+  const [estimatePdfFile, setEstimatePdfFile] = useState(null); // NEW: Estimate PDF
   const [photoFile, setPhotoFile] = useState(null);
+
   const [customers, setCustomers] = useState([]);
   const [techs, setTechs] = useState([]);
   const [submitting, setSubmitting] = useState(false);
@@ -173,6 +175,7 @@ export default function AddWorkOrder() {
   };
 
   const handlePdfChange = (e) => setPdfFile(e.target.files?.[0] || null);
+  const handleEstimateChange = (e) => setEstimatePdfFile(e.target.files?.[0] || null); // NEW
   const handlePhotoChange = (e) => setPhotoFile(e.target.files?.[0] || null);
 
   const validate = () => {
@@ -206,7 +209,10 @@ export default function AddWorkOrder() {
     form.append("customerPhone", workOrder.customerPhone || "");
     form.append("customerEmail", workOrder.customerEmail || "");
     if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
-    if (pdfFile) form.append("pdfFile", pdfFile);
+
+    // Files
+    if (pdfFile) form.append("pdfFile", pdfFile);                        // existing Work Order PDF
+    if (estimatePdfFile) form.append("estimatePdfFile", estimatePdfFile); // NEW: Estimate PDF
     if (photoFile) form.append("photoFile", photoFile);
 
     try {
@@ -391,13 +397,27 @@ export default function AddWorkOrder() {
 
         {/* Uploads */}
         <div className="form-group">
-          <label className="form-label">Upload PDF</label>
+          <label className="form-label">Upload Work Order PDF</label>
           <input
             type="file"
             accept="application/pdf"
             onChange={handlePdfChange}
             className="form-file-custom"
           />
+        </div>
+
+        {/* NEW: Upload Estimate PDF */}
+        <div className="form-group">
+          <label className="form-label">Upload Estimate PDF</label>
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={handleEstimateChange}
+            className="form-file-custom"
+          />
+          <small className="help-text">
+            This will appear under <strong>Estimates</strong> on the Work Order.
+          </small>
         </div>
 
         <div className="form-group">
