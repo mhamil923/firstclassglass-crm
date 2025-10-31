@@ -99,7 +99,7 @@ function parseDateTimeFlexible(input) {
   m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2})(?::(\d{2})(?::(\d{2}))?)?$/.exec(s);
   if (m) {
     const Y  = Number(m[1]), Mo = Number(m[2]), D  = Number(m[3]);
-    thehh = Number(m[4]); const hh = thehh; // keep style
+    const hh = Number(m[4]);
     const mi = Number(m[5] || 0), se = Number(m[6] || 0);
     return toSqlDateTimeFromParts(Y, Mo, D, hh, mi, se);
   }
@@ -233,9 +233,9 @@ async function ensureCols() {
   const colsToEnsure = [
     { name: 'scheduledDate',     type: 'DATETIME NULL' },
     { name: 'scheduledEnd',      type: 'DATETIME NULL' },
-    { name: 'pdfPath',           type: 'VARCHAR(255) NULL' },    // primary PDF
-    { name: 'estimatePdfPath',   type: 'VARCHAR(255) NULL' },    // NEW
-    { name: 'poPdfPath',         type: 'VARCHAR(255) NULL' },    // NEW
+    { name: 'pdfPath',           type: 'VARCHAR(255) NULL' },    // primary PDF (work order)
+    { name: 'estimatePdfPath',   type: 'VARCHAR(255) NULL' },    // estimate
+    { name: 'poPdfPath',         type: 'VARCHAR(255) NULL' },    // PO
     { name: 'photoPath',         type: 'MEDIUMTEXT NULL' },
     { name: 'notes',             type: 'TEXT NULL' },
     { name: 'billingPhone',      type: 'VARCHAR(32) NULL' },
@@ -337,6 +337,25 @@ if (!S3_BUCKET) {
   const localDir = path.resolve(__dirname, 'uploads');
   app.use('/uploads', express.static(localDir));
 }
+
+// ─── FIELDNAME NORMALIZATION (STRICT) ────────────────────────────────────────
+const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const FIELD_SETS = {
+  work: new Set(['workorderpdf','primarypdf','pdf']), // primary work-order PDF
+  est:  new Set(['estimatepdf']),                      // estimate PDF
+  po:   new Set(['popdf']),                            // purchase order PDF
+};
+
+// STRICT selector: pick pdf by normalized fieldname only (no filename guessing)
+function pickPdfByFields(files, allowedSet) {
+  for (const f of (files || [])) {
+    if (!isPdf(f)) continue;
+    const nf = norm(f.fieldname);
+    if (allowedSet.has(nf)) return f;
+  }
+  return null;
+}
+
 function withMulter(handler) {
   return (req, res, next) => {
     handler(req, res, (err) => {
@@ -364,17 +383,6 @@ const isPdf = (f) =>
   /\.pdf$/i.test(f?.key || '');
 const isImage = (f) => /^image\//.test(f?.mimetype || '');
 const fileKey = (f) => (S3_BUCKET ? f.key : f.filename);
-
-// Helpers to normalize fieldnames and filenames
-const nameHas = (s, needle) => (s || '').toLowerCase().includes(String(needle).toLowerCase());
-const looksLikeEstimate = (f) =>
-  nameHas(f.fieldname, 'estimate') || nameHas(f.fieldname, 'estimate_pdf') ||
-  nameHas(f.fieldname, 'estimatepdf') || nameHas(f.fieldname, 'est') ||
-  nameHas(f.originalname, 'estimate');
-const looksLikePo = (f) =>
-  nameHas(f.fieldname, 'popdf') || nameHas(f.fieldname, 'po_pdf') ||
-  nameHas(f.fieldname, 'po') || nameHas(f.fieldname, 'purchaseorder') ||
-  nameHas(f.originalname, 'po') || nameHas(f.originalname, 'purchase order');
 
 // ─── AUTH ────────────────────────────────────────────────────────────────────
 app.post('/auth/register', async (req, res) => {
@@ -461,32 +469,32 @@ app.post('/customers', authenticate, async (req, res) => {
 });
 
 // ─── WORK ORDERS ─────────────────────────────────────────────────────────────
+// STRICT splitter: map only by exact (normalized) field names.
 function splitFilesTyped(files = []) {
   const out = {
-    primaryPdf: null,
-    estimatePdf: null,
-    poPdf: null,
+    primaryPdf: null,   // WorkorderPdf / Primary
+    estimatePdf: null,  // EstimatePdf
+    poPdf: null,        // poPdf
     otherPdfs: [],
     images: [],
   };
   for (const f of files) {
     if (!allowMime(f)) continue;
-    if (isImage(f)) { out.images.push(f); continue; }
+
+    if (isImage(f)) {
+      out.images.push(f);
+      continue;
+    }
+
     if (!isPdf(f)) continue;
 
-    const fname = (f.fieldname || '').toLowerCase();
-    const isEstimateFN = looksLikeEstimate(f);
-    const isPoFN       = looksLikePo(f);
+    const nf = norm(f.fieldname);
 
-    if (isEstimateFN && !out.estimatePdf) { out.estimatePdf = f; continue; }
-    if (isPoFN && !out.poPdf)             { out.poPdf = f; continue; }
+    if (!out.primaryPdf && FIELD_SETS.work.has(nf)) { out.primaryPdf = f; continue; }
+    if (!out.estimatePdf && FIELD_SETS.est.has(nf)) { out.estimatePdf = f; continue; }
+    if (!out.poPdf && FIELD_SETS.po.has(nf))       { out.poPdf = f; continue; }
 
-    if ((fname === 'pdf' || fname === 'primarypdf') && !out.primaryPdf) { out.primaryPdf = f; continue; }
-
-    if (!out.estimatePdf && nameHas(f.originalname, 'estimate')) { out.estimatePdf = f; continue; }
-    if (!out.poPdf && (nameHas(f.originalname, 'purchase order') || nameHas(f.originalname, 'po'))) { out.poPdf = f; continue; }
-
-    if (!out.primaryPdf) { out.primaryPdf = f; continue; }
+    // Any other pdf ends up as "other" (attachments)
     out.otherPdfs.push(f);
   }
   return out;
@@ -766,7 +774,7 @@ app.put('/work-orders/:id(\\d+)/status', authenticate, express.json(), async (re
   } catch (err) { console.error('Work-order status update error:', err); res.status(500).json({ error: 'Failed to update status.' }); }
 });
 
-// ─── CREATE (multipart; supports estimate/po PDFs) ───────────────────────────
+// ─── CREATE (multipart; STRICT 3 PDF fields) ────────────────────────────────
 app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -784,7 +792,13 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const { primaryPdf, estimatePdf, poPdf, otherPdfs, images } = splitFilesTyped(req.files || []);
+    const files = req.files || [];
+    const primaryPdf   = pickPdfByFields(files, FIELD_SETS.work);
+    const estimatePdf  = pickPdfByFields(files, FIELD_SETS.est);
+    const poPdf        = pickPdfByFields(files, FIELD_SETS.po);
+    const otherPdfs    = files.filter(f => isPdf(f) && ![primaryPdf, estimatePdf, poPdf].includes(f));
+    const images       = files.filter(isImage);
+
     if (!enforceImageCountOr413(res, images)) return;
 
     const pdfPath         = primaryPdf ? fileKey(primaryPdf)   : null;
@@ -833,7 +847,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
   }
 });
 
-// ─── EDIT (multipart – supports estimate/po pdf replacements) ────────────────
+// ─── EDIT (multipart – STRICT replacements) ─────────────────────────────────
 app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -842,79 +856,64 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
     const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-    const { primaryPdf, estimatePdf, poPdf, otherPdfs, images } = splitFilesTyped(req.files || []);
+    const files = req.files || [];
+    const primaryPdf   = pickPdfByFields(files, FIELD_SETS.work);
+    const estimatePdf  = pickPdfByFields(files, FIELD_SETS.est);
+    const poPdf        = pickPdfByFields(files, FIELD_SETS.po);
+    const otherPdfs    = files.filter(f => isPdf(f) && ![primaryPdf, estimatePdf, poPdf].includes(f));
+    const images       = files.filter(isImage);
+
     if (!enforceImageCountOr413(res, images)) return;
 
     let attachments = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
 
-    // Flags (primary)
-    const moveOldPdf =
-      isTruthy(req.body.keepOldInAttachments) ||
-      isTruthy(req.body.keepOldPdfInAttachments) ||
-      isTruthy(req.body.moveOldPdfToAttachments) ||
-      isTruthy(req.body.moveOldPdf) ||
-      isTruthy(req.body.moveExistingPdfToAttachments);
+    // Flags (for whether to move old into attachments when replacing)
+    const moveOldPdf        = isTruthy(req.body.keepOldInAttachments) || isTruthy(req.body.keepOldPdfInAttachments) || isTruthy(req.body.moveOldPdfToAttachments) || isTruthy(req.body.moveOldPdf) || isTruthy(req.body.moveExistingPdfToAttachments);
+    const wantReplacePdf    = isTruthy(req.body.replacePdf) || isTruthy(req.body.setAsPrimaryPdf) || isTruthy(req.body.isPdfReplacement);
 
-    const wantReplacePdf =
-      isTruthy(req.body.replacePdf) ||
-      isTruthy(req.body.setAsPrimaryPdf) ||
-      isTruthy(req.body.isPdfReplacement);
+    const moveOldEstimate   = isTruthy(req.body.moveOldEstimatePdfToAttachments) || isTruthy(req.body.keepOldEstimateInAttachments);
+    const wantReplaceEst    = isTruthy(req.body.replaceEstimatePdf) || isTruthy(req.body.setAsEstimatePdf);
 
-    // (estimate)
-    const moveOldEstimatePdf =
-      isTruthy(req.body.moveOldEstimatePdfToAttachments) ||
-      isTruthy(req.body.keepOldEstimateInAttachments);
-
-    const wantReplaceEstimate =
-      isTruthy(req.body.replaceEstimatePdf) ||
-      isTruthy(req.body.setAsEstimatePdf);
-
-    // (PO)
-    const moveOldPoPdf =
-      isTruthy(req.body.moveOldPoPdfToAttachments) ||
-      isTruthy(req.body.keepOldPoInAttachments);
-
-    const wantReplacePo =
-      isTruthy(req.body.replacePoPdf) ||
-      isTruthy(req.body.setAsPoPdf);
+    const moveOldPo         = isTruthy(req.body.moveOldPoPdfToAttachments) || isTruthy(req.body.keepOldPoInAttachments);
+    const wantReplacePo     = isTruthy(req.body.replacePoPdf) || isTruthy(req.body.setAsPoPdf);
 
     let pdfPath         = existing.pdfPath;
     let estimatePdfPath = existing.estimatePdfPath;
     let poPdfPath       = existing.poPdfPath;
 
-    // Handle PRIMARY pdf
+    // PRIMARY work-order PDF
     if (primaryPdf) {
-      const newPdfPath = fileKey(primaryPdf);
-      const oldPdfPath = existing.pdfPath;
-      if (wantReplacePdf) {
-        if (oldPdfPath) {
+      const newPath = fileKey(primaryPdf);
+      const oldPath = existing.pdfPath;
+      if (wantReplacePdf || !oldPath) {
+        if (oldPath) {
           if (moveOldPdf) {
-            if (!attachments.includes(oldPdfPath)) attachments.push(oldPdfPath);
+            if (!attachments.includes(oldPath)) attachments.push(oldPath);
           } else {
             try {
-              if (/^uploads\//.test(oldPdfPath)) {
-                if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPdfPath }).promise();
+              if (/^uploads\//.test(oldPath)) {
+                if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPath }).promise();
                 else {
-                  const full = path.resolve(__dirname, 'uploads', oldPdfPath.replace(/^uploads\//, ''));
+                  const full = path.resolve(__dirname, 'uploads', oldPath.replace(/^uploads\//, ''));
                   if (fs.existsSync(full)) fs.unlinkSync(full);
                 }
               }
             } catch (e) { console.warn('⚠️ PDF delete old (primary):', e.message); }
           }
         }
-        pdfPath = newPdfPath;
+        pdfPath = newPath;
       } else {
-        attachments.push(newPdfPath);
+        attachments.push(newPath);
       }
     }
 
-    // Handle ESTIMATE pdf
+    // ESTIMATE PDF
     if (estimatePdf) {
       const newPath = fileKey(estimatePdf);
       const oldPath = existing.estimatePdfPath;
-      if (wantReplaceEstimate || !oldPath) {
+      if (wantReplaceEst || !oldPath) {
         if (oldPath) {
-          if (moveOldEstimatePdf) {
+          if (moveOldEstimate) {
             if (!attachments.includes(oldPath)) attachments.push(oldPath);
           } else {
             try {
@@ -934,13 +933,13 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       }
     }
 
-    // Handle PO pdf
+    // PO PDF
     if (poPdf) {
       const newPath = fileKey(poPdf);
       const oldPath = existing.poPdfPath;
       if (wantReplacePo || !oldPath) {
         if (oldPath) {
-          if (moveOldPoPdf) {
+          if (moveOldPo) {
             if (!attachments.includes(oldPath)) attachments.push(oldPath);
           } else {
             try {
@@ -1012,18 +1011,16 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
   }
 });
 
-// ─── QUICK PDF ATTACHERS (Estimate / PO) ─────────────────────────────────────
-function firstPdfFrom(req, candidates) {
-  const all = (req.files ? (Array.isArray(req.files) ? req.files : []) : [])
-    .concat(req.file ? [req.file] : []);
-  const lc = new Set(candidates.map(s => s.toLowerCase()));
-  for (const f of all) {
+// ─── QUICK PDF ATTACHERS (STRICT) ───────────────────────────────────────────
+// Only accept the *exact* field names; no one-PDF fallback and no filename guessing.
+function firstPdfFrom(req, allowedNormNames) {
+  const files = (req.files ? (Array.isArray(req.files) ? req.files : []) : []).concat(req.file ? [req.file] : []);
+  const allowed = new Set(allowedNormNames.map(norm));
+  for (const f of files) {
     if (!isPdf(f)) continue;
-    const fn = (f.fieldname || '').toLowerCase();
-    if (lc.has(fn) || (fn && candidates.some(c => fn.includes(c.toLowerCase())))) return f;
+    if (allowed.has(norm(f.fieldname))) return f;
   }
-  const onlyPdf = all.filter(isPdf);
-  return onlyPdf.length === 1 ? onlyPdf[0] : null;
+  return null;
 }
 
 app.post('/work-orders/:id(\\d+)/attach-estimate', authenticate, withMulter(upload.any()), async (req, res) => {
@@ -1034,8 +1031,9 @@ app.post('/work-orders/:id(\\d+)/attach-estimate', authenticate, withMulter(uplo
     const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-    const f = firstPdfFrom(req, ['estimatePdf', 'estimate', 'estimate_pdf', 'est']);
-    if (!f || !isPdf(f)) return res.status(400).json({ error: 'Provide an estimate PDF.' });
+    // Accept only 'EstimatePdf'
+    const f = firstPdfFrom(req, ['EstimatePdf']);
+    if (!f || !isPdf(f)) return res.status(400).json({ error: 'Provide an EstimatePdf file field.' });
 
     const moveOld = isTruthy(req.body.moveOldEstimatePdfToAttachments) || isTruthy(req.body.keepOldEstimateInAttachments);
     const newPath = fileKey(f);
@@ -1078,8 +1076,9 @@ app.post('/work-orders/:id(\\d+)/attach-po', authenticate, withMulter(upload.any
     const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!existing) return res.status(404).json({ error: 'Not found.' });
 
-    const f = firstPdfFrom(req, ['poPdf', 'po', 'po_pdf', 'purchaseOrder', 'purchase_order']);
-    if (!f || !isPdf(f)) return res.status(400).json({ error: 'Provide a PO PDF.' });
+    // Accept only 'poPdf'
+    const f = firstPdfFrom(req, ['poPdf']);
+    if (!f || !isPdf(f)) return res.status(400).json({ error: 'Provide a poPdf file field.' });
 
     const moveOld = isTruthy(req.body.moveOldPoPdfToAttachments) || isTruthy(req.body.keepOldPoInAttachments);
     const newPath = fileKey(f);
