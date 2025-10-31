@@ -48,8 +48,8 @@ export default function AddWorkOrder() {
     customerEmail: "",
   });
 
-  const [pdfFile, setPdfFile] = useState(null);                // Work Order PDF
-  const [estimatePdfFile, setEstimatePdfFile] = useState(null); // NEW: Estimate PDF
+  const [pdfFile, setPdfFile] = useState(null);                 // Work Order sign-off PDF
+  const [estimatePdfFile, setEstimatePdfFile] = useState(null); // Estimate PDF
   const [photoFile, setPhotoFile] = useState(null);
 
   const [customers, setCustomers] = useState([]);
@@ -175,7 +175,7 @@ export default function AddWorkOrder() {
   };
 
   const handlePdfChange = (e) => setPdfFile(e.target.files?.[0] || null);
-  const handleEstimateChange = (e) => setEstimatePdfFile(e.target.files?.[0] || null); // NEW
+  const handleEstimateChange = (e) => setEstimatePdfFile(e.target.files?.[0] || null);
   const handlePhotoChange = (e) => setPhotoFile(e.target.files?.[0] || null);
 
   const validate = () => {
@@ -183,8 +183,6 @@ export default function AddWorkOrder() {
     if (!workOrder.customer) missing.push("Customer");
     if (!workOrder.billingAddress) missing.push("Billing Address");
     if (!workOrder.problemDescription) missing.push("Problem Description");
-    // Site Location (name) and Site Address are optional at creation,
-    // but you can enforce either here if desired.
     if (missing.length) {
       alert(`Please fill required fields: ${missing.join(", ")}`);
       return false;
@@ -210,9 +208,9 @@ export default function AddWorkOrder() {
     form.append("customerEmail", workOrder.customerEmail || "");
     if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
 
-    // Files
-    if (pdfFile) form.append("pdfFile", pdfFile);                        // existing Work Order PDF
-    if (estimatePdfFile) form.append("estimatePdfFile", estimatePdfFile); // NEW: Estimate PDF
+    // Files — use distinct field names the server can route correctly
+    if (pdfFile) form.append("workOrderPdf", pdfFile);          // ⬅️ was "pdfFile"
+    if (estimatePdfFile) form.append("estimatePdf", estimatePdfFile); // ⬅️ was "estimatePdfFile"
     if (photoFile) form.append("photoFile", photoFile);
 
     try {
@@ -406,7 +404,7 @@ export default function AddWorkOrder() {
           />
         </div>
 
-        {/* NEW: Upload Estimate PDF */}
+        {/* Upload Estimate PDF */}
         <div className="form-group">
           <label className="form-label">Upload Estimate PDF</label>
           <input
