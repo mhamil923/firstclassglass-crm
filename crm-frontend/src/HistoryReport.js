@@ -2,17 +2,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "./api";
-import "./HistoryReport.css"; // styles
+import "./HistoryReport.css"; // keep existing styles
 
-// helpers (match WorkOrders.js behavior)
+// ----------------- helpers -----------------
 const norm = (v) => (v ?? "").toString().trim();
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
 
-// ---- Search history (today-only) -------------------------------------------
+// ---- Search history (today-only) ----------
 const MAX_HISTORY = 8;
 const todayKey = () => {
-  // store per local day (yyyy-mm-dd)
   const d = new Date();
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -28,9 +27,7 @@ function summarizeFilters(f) {
   if (norm(f.siteLocation)) bits.push(`Site: ${norm(f.siteLocation)}`);
   return bits.join(" · ") || "—";
 }
-
 function canonicalKey(f) {
-  // used to de-dupe identical searches
   return JSON.stringify({
     c: norm(f.customer).toLowerCase(),
     wo: norm(f.workOrderNumber).toLowerCase(),
@@ -38,7 +35,6 @@ function canonicalKey(f) {
     s: norm(f.siteLocation).toLowerCase(),
   });
 }
-
 function loadHistory() {
   try {
     const raw = localStorage.getItem(todayKey());
@@ -48,37 +44,25 @@ function loadHistory() {
     return [];
   }
 }
-
 function saveHistory(items) {
   try {
     localStorage.setItem(todayKey(), JSON.stringify(items.slice(0, MAX_HISTORY)));
-  } catch {
-    // ignore storage errors
-  }
+  } catch {}
 }
-
 function addToHistory(f) {
-  // Don't save completely empty searches
-  if (
-    !norm(f.customer) &&
-    !norm(f.workOrderNumber) &&
-    !norm(f.poNumber) &&
-    !norm(f.siteLocation)
-  ) {
+  if (!norm(f.customer) && !norm(f.workOrderNumber) && !norm(f.poNumber) && !norm(f.siteLocation)) {
     return loadHistory();
   }
   const now = Date.now();
   const key = canonicalKey(f);
   const curr = loadHistory();
-  // remove any existing identical entry
   const filtered = curr.filter((it) => it.key !== key);
   const next = [{ key, when: now, filters: f }, ...filtered].slice(0, MAX_HISTORY);
   saveHistory(next);
   return next;
 }
 
-// ---------------------------------------------------------------------------
-
+// ----------------- component -----------------
 export default function HistoryReport() {
   const navigate = useNavigate();
 
@@ -88,7 +72,6 @@ export default function HistoryReport() {
     workOrderNumber: "",
     siteLocation: "",
   });
-
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -116,7 +99,6 @@ export default function HistoryReport() {
         },
       });
       setResults(Array.isArray(data) ? data : []);
-      // add to history (today-only)
       setHistory(addToHistory(filters));
     } catch (err) {
       console.error("Search failed:", err);
@@ -128,7 +110,6 @@ export default function HistoryReport() {
 
   const runFromHistory = async (h) => {
     setFilters(h.filters);
-    // trigger a search using those filters
     setLoading(true);
     try {
       const { data } = await api.get("/work-orders/search", {
@@ -140,7 +121,6 @@ export default function HistoryReport() {
         },
       });
       setResults(Array.isArray(data) ? data : []);
-      // bump this item to the front
       const bumped = addToHistory(h.filters);
       setHistory(bumped);
     } catch (err) {
@@ -169,87 +149,177 @@ export default function HistoryReport() {
     return `${n} match${n === 1 ? "" : "es"}`;
   }, [results.length]);
 
+  // small inline styles so this looks great without touching CSS files
+  const chipStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    maxWidth: 420,
+    padding: "6px 12px",
+    borderRadius: 999,
+    background: "#f1f5f9", // slate-100 vibe
+    border: "1px solid #e2e8f0",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    fontSize: 13,
+    lineHeight: 1.25,
+  };
+  const chipTextStyle = {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  };
+  const chipXStyle = {
+    border: "none",
+    background: "transparent",
+    padding: 0,
+    marginLeft: 4,
+    fontSize: 14,
+    lineHeight: 1,
+    opacity: 0.6,
+  };
+
   return (
     <div className="history-report">
       <h2 className="history-title">Work Order History</h2>
 
-      <form onSubmit={handleSearch} className="filter-form">
-        <input
-          name="customer"
-          className="form-control"
-          placeholder="Customer"
-          value={filters.customer}
-          onChange={handleChange}
-        />
-        <input
-          name="workOrderNumber"
-          className="form-control"
-          placeholder="Work Order Number"
-          value={filters.workOrderNumber}
-          onChange={handleChange}
-        />
-        <input
-          name="poNumber"
-          className="form-control"
-          placeholder="PO Number"
-          value={filters.poNumber}
-          onChange={handleChange}
-        />
-        <input
-          name="siteLocation"
-          className="form-control"
-          placeholder="Site Location"
-          value={filters.siteLocation}
-          onChange={handleChange}
-        />
-        <button type="submit" className="search-btn" disabled={loading}>
-          {loading ? "Searching…" : "Search"}
-        </button>
+      {/* Search bar card */}
+      <form onSubmit={handleSearch} className="filter-form"
+        style={{
+          background: "#fff",
+          borderRadius: 12,
+          padding: 16,
+          boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
+          border: "1px solid #eef2f7",
+        }}
+      >
+        <div className="row g-2">
+          <div className="col-12 col-md-3">
+            <input
+              name="customer"
+              className="form-control"
+              placeholder="Customer"
+              value={filters.customer}
+              onChange={handleChange}
+            />
+          </div>
+          <div className="col-12 col-md-3">
+            <input
+              name="workOrderNumber"
+              className="form-control"
+              placeholder="Work Order Number"
+              value={filters.workOrderNumber}
+              onChange={handleChange}
+            />
+          </div>
+          <div className="col-12 col-md-3">
+            <input
+              name="poNumber"
+              className="form-control"
+              placeholder="PO Number"
+              value={filters.poNumber}
+              onChange={handleChange}
+            />
+          </div>
+          <div className="col-12 col-md-3">
+            <input
+              name="siteLocation"
+              className="form-control"
+              placeholder="Site Location"
+              value={filters.siteLocation}
+              onChange={handleChange}
+            />
+          </div>
+        </div>
+
+        <div className="d-flex justify-content-start mt-3">
+          <button type="submit" className="btn btn-primary" disabled={loading} style={{ minWidth: 140 }}>
+            {loading ? "Searching…" : "Search"}
+          </button>
+        </div>
       </form>
 
       {/* Recent search history (today) */}
       {hasAnyHistory && (
-        <div className="recent-searches">
-          <div className="recent-header">
-            <span className="recent-title">Recent Searches (today)</span>
+        <div
+          className="recent-searches mt-3"
+          style={{
+            background: "#fff",
+            borderRadius: 12,
+            padding: 12,
+            border: "1px solid #eef2f7",
+          }}
+        >
+          <div className="d-flex align-items-center justify-content-between mb-2">
+            <div className="text-muted" style={{ fontSize: 13, fontWeight: 600 }}>
+              Recent Searches (today)
+            </div>
             <button
-              className="recent-clear-btn"
+              className="btn btn-link p-0"
               onClick={clearHistory}
               title="Clear all"
+              style={{ fontSize: 13, textDecoration: "none" }}
             >
               Clear all
             </button>
           </div>
 
-          <div className="recent-strip">
-            {history.map((h) => (
-              <div key={h.key} className="recent-chip" title={summarizeFilters(h.filters)}>
-                <button
-                  className="recent-chip-main"
-                  onClick={() => runFromHistory(h)}
+          <div
+            className="d-flex flex-wrap"
+            style={{ gap: 8 }}
+          >
+            {history.map((h) => {
+              const label = summarizeFilters(h.filters);
+              return (
+                <div
+                  key={h.key}
+                  className="recent-chip"
+                  title={label}
+                  style={{ ...chipStyle }}
                 >
-                  {summarizeFilters(h.filters)}
-                </button>
-                <button
-                  className="recent-chip-x"
-                  aria-label="Remove"
-                  title="Remove"
-                  onClick={() => removeHistoryItem(h.key)}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
+                  <button
+                    className="btn btn-sm btn-link p-0 text-reset"
+                    style={{ ...chipTextStyle, textDecoration: "none" }}
+                    onClick={() => runFromHistory(h)}
+                  >
+                    {label}
+                  </button>
+                  <button
+                    className="btn-close"
+                    aria-label="Remove"
+                    title="Remove"
+                    onClick={() => removeHistoryItem(h.key)}
+                    style={{
+                      ...chipXStyle,
+                      filter: "grayscale(1)",
+                    }}
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
+      {/* Results */}
       {results.length > 0 ? (
         <>
-          <div className="results-meta">{prettyResultsCount}</div>
-          <div className="results-table">
-            <table>
-              <thead>
+          <div className="results-meta mt-3 text-muted" style={{ fontSize: 13 }}>
+            {prettyResultsCount}
+          </div>
+          <div
+            className="results-table"
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              border: "1px solid #eef2f7",
+              boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
+            }}
+          >
+            <table className="table mb-0">
+              <thead className="table-light">
                 <tr>
                   <th>WO #</th>
                   <th>PO #</th>
@@ -282,7 +352,7 @@ export default function HistoryReport() {
           </div>
         </>
       ) : (
-        <p className="empty-text">
+        <p className="empty-text text-muted mt-4" style={{ fontStyle: "italic" }}>
           {loading ? "Searching…" : "No matching work orders."}
         </p>
       )}
