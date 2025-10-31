@@ -149,7 +149,7 @@ export default function HistoryReport() {
     return `${n} match${n === 1 ? "" : "es"}`;
   }, [results.length]);
 
-  // small inline styles so this looks great without touching CSS files
+  // chip styles (minimal inline)
   const chipStyle = {
     display: "inline-flex",
     alignItems: "center",
@@ -157,28 +157,14 @@ export default function HistoryReport() {
     maxWidth: 420,
     padding: "6px 12px",
     borderRadius: 999,
-    background: "#f1f5f9", // slate-100 vibe
+    background: "#f1f5f9",
     border: "1px solid #e2e8f0",
     boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-    cursor: "pointer",
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
     fontSize: 13,
     lineHeight: 1.25,
-  };
-  const chipTextStyle = {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  };
-  const chipXStyle = {
-    border: "none",
-    background: "transparent",
-    padding: 0,
-    marginLeft: 4,
-    fontSize: 14,
-    lineHeight: 1,
-    opacity: 0.6,
   };
 
   return (
@@ -186,7 +172,9 @@ export default function HistoryReport() {
       <h2 className="history-title">Work Order History</h2>
 
       {/* Search bar card */}
-      <form onSubmit={handleSearch} className="filter-form"
+      <form
+        onSubmit={handleSearch}
+        className="filter-form"
         style={{
           background: "#fff",
           borderRadius: 12,
@@ -195,47 +183,50 @@ export default function HistoryReport() {
           border: "1px solid #eef2f7",
         }}
       >
-        <div className="row g-2">
-          <div className="col-12 col-md-3">
-            <input
-              name="customer"
-              className="form-control"
-              placeholder="Customer"
-              value={filters.customer}
-              onChange={handleChange}
-            />
-          </div>
-          <div className="col-12 col-md-3">
-            <input
-              name="workOrderNumber"
-              className="form-control"
-              placeholder="Work Order Number"
-              value={filters.workOrderNumber}
-              onChange={handleChange}
-            />
-          </div>
-          <div className="col-12 col-md-3">
-            <input
-              name="poNumber"
-              className="form-control"
-              placeholder="PO Number"
-              value={filters.poNumber}
-              onChange={handleChange}
-            />
-          </div>
-          <div className="col-12 col-md-3">
-            <input
-              name="siteLocation"
-              className="form-control"
-              placeholder="Site Location"
-              value={filters.siteLocation}
-              onChange={handleChange}
-            />
-          </div>
-        </div>
+        {/* Full-width, evenly spaced inputs with aligned Search button */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, minmax(180px, 1fr)) 140px",
+            gap: 12,
+            alignItems: "center",
+          }}
+        >
+          <input
+            name="customer"
+            className="form-control"
+            placeholder="Customer"
+            value={filters.customer}
+            onChange={handleChange}
+          />
+          <input
+            name="workOrderNumber"
+            className="form-control"
+            placeholder="Work Order Number"
+            value={filters.workOrderNumber}
+            onChange={handleChange}
+          />
+          <input
+            name="poNumber"
+            className="form-control"
+            placeholder="PO Number"
+            value={filters.poNumber}
+            onChange={handleChange}
+          />
+          <input
+            name="siteLocation"
+            className="form-control"
+            placeholder="Site Location"
+            value={filters.siteLocation}
+            onChange={handleChange}
+          />
 
-        <div className="d-flex justify-content-start mt-3">
-          <button type="submit" className="btn btn-primary" disabled={loading} style={{ minWidth: 140 }}>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={loading}
+            style={{ width: "100%" }}
+          >
             {loading ? "Searching…" : "Search"}
           </button>
         </div>
@@ -266,22 +257,14 @@ export default function HistoryReport() {
             </button>
           </div>
 
-          <div
-            className="d-flex flex-wrap"
-            style={{ gap: 8 }}
-          >
+          <div className="d-flex flex-wrap" style={{ gap: 8 }}>
             {history.map((h) => {
               const label = summarizeFilters(h.filters);
               return (
-                <div
-                  key={h.key}
-                  className="recent-chip"
-                  title={label}
-                  style={{ ...chipStyle }}
-                >
+                <div key={h.key} className="recent-chip" title={label} style={chipStyle}>
                   <button
                     className="btn btn-sm btn-link p-0 text-reset"
-                    style={{ ...chipTextStyle, textDecoration: "none" }}
+                    style={{ textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis" }}
                     onClick={() => runFromHistory(h)}
                   >
                     {label}
@@ -291,10 +274,7 @@ export default function HistoryReport() {
                     aria-label="Remove"
                     title="Remove"
                     onClick={() => removeHistoryItem(h.key)}
-                    style={{
-                      ...chipXStyle,
-                      filter: "grayscale(1)",
-                    }}
+                    style={{ filter: "grayscale(1)" }}
                   />
                 </div>
               );
