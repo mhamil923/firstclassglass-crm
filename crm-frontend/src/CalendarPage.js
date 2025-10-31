@@ -83,7 +83,7 @@ const clamp4 = {
 /* =========================
    Status gates (existing)
 ========================= */
-// Only these statuses are allowed to appear in the Unscheduled strip/search
+// Only these statuses are allowed to appear in the Unscheduled strip when there is no search
 const ALLOWED_UNSCHEDULED_STATUSES = new Set([
   "new",
   "scheduled",
@@ -148,7 +148,8 @@ function CustomEvent({ event }) {
    Main component
 ========================= */
 export default function WorkOrderCalendar() {
-  const [workOrders, setWorkOrders] = useState([]);
+  const [allOrders, setAllOrders] = useState([]);            // ⬅️ NEW: keep full list
+  const [workOrders, setWorkOrders] = useState([]);          // scheduled & status=Scheduled → calendar
   const [unscheduledOrders, setUnscheduledOrders] = useState([]);
   const [unscheduledSearch, setUnscheduledSearch] = useState("");
 
@@ -191,16 +192,18 @@ export default function WorkOrderCalendar() {
       .then((res) => {
         const list = Array.isArray(res.data) ? res.data : [];
 
+        // Keep the full list in state so search can include scheduled items
+        setAllOrders(list);
+
         // 1) Calendar events: only things actually scheduled and with status Scheduled
         const calendarItems = list.filter(
           (o) => o.scheduledDate && norm(o.status) === "scheduled"
         );
 
-        // 2) Unscheduled strip
+        // 2) Unscheduled strip (default view, when search is empty)
         const unscheduled = list.filter((o) => {
           const statusOk = isAllowedForUnscheduled(o.status);
           if (!statusOk) return false;
-
           const s = norm(o.status);
           if (s === "needs to be scheduled") return true;
           if (!o.scheduledDate) return true;
@@ -385,7 +388,7 @@ export default function WorkOrderCalendar() {
   }
 
   function onSelectEvent(event) {
-    const full = workOrders.find((o) => o.id === event.id) || event;
+    const full = allOrders.find((o) => o.id === event.id) || event;
     openEditModal(full);
   }
 
@@ -430,12 +433,18 @@ export default function WorkOrderCalendar() {
     });
   }, [workOrders]);
 
-  /* ===== Unscheduled search/filter ===== */
-  const filteredUnscheduled = useMemo(() => {
+  /* ===== Search logic (enhanced) =====
+     - If the search box is empty, show the classic "Unscheduled" list.
+     - If there's a search query, search ACROSS ALL WORK ORDERS (scheduled & unscheduled).
+       This lets you pull up scheduled work orders and drag them to reschedule. */
+  const listForStrip = useMemo(() => {
     const q = norm(unscheduledSearch);
     if (!q) return unscheduledOrders;
+
     const tokens = q.split(/\s+/).filter(Boolean);
-    return unscheduledOrders.filter((o) => {
+    const pool = allOrders; // search everything when there's a query
+
+    return pool.filter((o) => {
       const hayCustomer = norm(o.customer);
       const hayPO = norm(o.poNumber);
       const hayWO = norm(o.workOrderNumber);
@@ -443,7 +452,7 @@ export default function WorkOrderCalendar() {
         (t) => hayCustomer.includes(t) || hayPO.includes(t) || hayWO.includes(t)
       );
     });
-  }, [unscheduledOrders, unscheduledSearch]);
+  }, [unscheduledOrders, allOrders, unscheduledSearch]);
 
   const clearUnscheduledSearch = () => setUnscheduledSearch("");
 
@@ -493,16 +502,18 @@ export default function WorkOrderCalendar() {
       <div className="container-fluid p-0">
         <h2 className="calendar-title">Work Order Calendar</h2>
 
-        {/* Unscheduled strip */}
+        {/* Search & Unscheduled strip */}
         <div className="unscheduled-container">
           <div className="d-flex align-items-center justify-content-between">
-            <h4 className="mb-2">Unscheduled Work Orders</h4>
+            <h4 className="mb-2">
+              {unscheduledSearch ? "Search Results (All Work Orders)" : "Unscheduled Work Orders"}
+            </h4>
 
-            <div className="input-group" style={{ maxWidth: 420 }}>
+            <div className="input-group" style={{ maxWidth: 520 }}>
               <input
                 type="text"
                 className="form-control"
-                placeholder="Search customer, WO #, or PO #"
+                placeholder="Search customer, WO #, or PO # (includes scheduled)"
                 value={unscheduledSearch}
                 onChange={(e) => setUnscheduledSearch(e.target.value)}
               />
@@ -518,16 +529,40 @@ export default function WorkOrderCalendar() {
           </div>
 
           <div className="text-muted mb-2" style={{ fontSize: 12 }}>
-            Showing {filteredUnscheduled.length} of {unscheduledOrders.length} (Statuses: New, Scheduled, Needs to be Scheduled)
+            {unscheduledSearch ? (
+              <>
+                Showing {listForStrip.length} match{listForStrip.length === 1 ? "" : "es"} across{" "}
+                {allOrders.length} total work order{allOrders.length === 1 ? "" : "s"} (drag any item to reschedule).
+              </>
+            ) : (
+              <>
+                Showing {listForStrip.length} of {unscheduledOrders.length} (Statuses: New, Scheduled, Needs to be Scheduled)
+              </>
+            )}
           </div>
 
           <div className="unscheduled-list">
-            {filteredUnscheduled.map((order) => {
+            {listForStrip.map((order) => {
               const idLabel = displayWOThenPO(order);
               const customerLabel = order.customer ? order.customer : "Work Order";
               const siteLoc = order.siteLocation || "";
               const siteAddr =
                 order.siteAddress || order.serviceAddress || order.address || "";
+              const isScheduled = !!order.scheduledDate;
+
+              // Build a friendly current-time label if scheduled
+              let currentWhen = "";
+              if (isScheduled) {
+                const s = fromDbString(order.scheduledDate);
+                const e =
+                  fromDbString(order.scheduledEnd) ||
+                  (s ? moment(s).add(DEFAULT_WINDOW_MIN, "minutes").toDate() : null);
+                if (s) {
+                  currentWhen = `${moment(s).format("MMM D, YYYY h:mm A")}${
+                    e ? ` – ${moment(e).format("h:mm A")}` : ""
+                  }`;
+                }
+              }
 
               return (
                 <div
@@ -537,8 +572,15 @@ export default function WorkOrderCalendar() {
                   onDragStart={() => setDragItem(order)}
                   title={`${customerLabel} — ${idLabel}`}
                 >
-                  <strong>{customerLabel}</strong> <> — {idLabel}</>
-                  <br />
+                  <div className="d-flex align-items-center justify-content-between" style={{ gap: 8 }}>
+                    <div className="fw-bold" style={clamp1}>
+                      {customerLabel} — {idLabel}
+                    </div>
+                    {isScheduled && (
+                      <span className="badge text-bg-secondary">Scheduled</span>
+                    )}
+                  </div>
+
                   {siteLoc ? (
                     <small className="text-muted" style={clamp1}>
                       Site Location: {siteLoc}
@@ -551,12 +593,24 @@ export default function WorkOrderCalendar() {
                       </small>
                     </div>
                   ) : null}
+
+                  {isScheduled && currentWhen && (
+                    <div className="mt-1">
+                      <small className="text-muted">Current: {currentWhen}</small>
+                    </div>
+                  )}
+
                   <div className="unscheduled-actions">
                     <button
                       className="btn btn-xs btn-outline-light me-1"
-                      onClick={() => openEditModal(order, currentDate)}
+                      onClick={() =>
+                        openEditModal(
+                          order,
+                          currentDate // fallback date
+                        )
+                      }
                     >
-                      Schedule…
+                      {isScheduled ? "Edit/Reschedule…" : "Schedule…"}
                     </button>
                     <button
                       className="btn btn-xs btn-light me-1"
@@ -574,7 +628,7 @@ export default function WorkOrderCalendar() {
                 </div>
               );
             })}
-            {!filteredUnscheduled.length && (
+            {!listForStrip.length && (
               <div className="empty-text">No matches for that search.</div>
             )}
           </div>
