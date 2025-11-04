@@ -22,22 +22,20 @@ const {
   DB_PORT     = '3306',
   JWT_SECRET  = 'supersecretjwtkey',
   S3_BUCKET,
-  AWS_REGION = 'us-east-2',
+  AWS_REGION  = 'us-east-2',
   ASSIGNEE_EXTRA_USERNAMES = 'Jeff,tech1',
   DEFAULT_WINDOW_MINUTES = '120',
-  // Debug toggle for file resolver logs
   FILES_VERBOSE = process.env.FILES_VERBOSE || '0',
 } = process.env;
 
 const DEFAULT_WINDOW = Math.max(15, Number(DEFAULT_WINDOW_MINUTES) || 120);
 const S3_SIGNED_TTL = Number(process.env.S3_SIGNED_TTL || 900);
 
-// ⬆️ Limits (env overridable)
+// Limits (env overridable)
 const MAX_FILE_SIZE_MB = Number(process.env.MAX_FILE_SIZE_MB || 75);
-// Backward compatible: prefer NEW var, fall back to old MAX_FILES, default higher.
 const MAX_FILES_PER_REQUEST = Number(process.env.MAX_FILES_PER_REQUEST || process.env.MAX_FILES || 300);
-const MAX_FIELDS       = Number(process.env.MAX_FIELDS || 500);
-const MAX_PARTS        = Number(process.env.MAX_PARTS  || 2000);
+const MAX_FIELDS = Number(process.env.MAX_FIELDS || 500);
+const MAX_PARTS  = Number(process.env.MAX_PARTS  || 2000);
 
 if (S3_BUCKET) AWS.config.update({ region: AWS_REGION });
 else console.warn('⚠️ S3_BUCKET not set; using local disk for uploads.');
@@ -52,8 +50,14 @@ app.use(bodyParser.urlencoded({ extended: true, limit: '20mb' }));
 
 // ─── MYSQL ──────────────────────────────────────────────────────────────────
 const db = mysql.createPool({
-  host: DB_HOST, user: DB_USER, password: DB_PASS, database: DB_NAME,
-  port: Number(DB_PORT), waitForConnections: true, connectionLimit: 10, dateStrings: true,
+  host: DB_HOST,
+  user: DB_USER,
+  password: DB_PASS,
+  database: DB_NAME,
+  port: Number(DB_PORT),
+  waitForConnections: true,
+  connectionLimit: 10,
+  dateStrings: true,
 });
 
 // ─── SMALL UTILITIES ─────────────────────────────────────────────────────────
@@ -290,7 +294,7 @@ const allowMime = (fOrMime) => {
 function makeUploader() {
   const limits = {
     fileSize: MAX_FILE_SIZE_MB * 1024 * 1024,
-    files: MAX_FILES_PER_REQUEST + 5,  // cushion
+    files: MAX_FILES_PER_REQUEST + 5,
     fields: MAX_FIELDS,
     parts:  MAX_PARTS,
   };
@@ -330,9 +334,9 @@ if (!S3_BUCKET) {
 // ─── FIELDNAME NORMALIZATION (STRICT) ────────────────────────────────────────
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const FIELD_SETS = {
-  work: new Set(['workorderpdf','primarypdf','pdf']), // primary work-order PDF
-  est:  new Set(['estimatepdf']),                      // estimate PDF
-  po:   new Set(['popdf']),                            // purchase order PDF
+  work: new Set(['workorderpdf','primarypdf','pdf']),
+  est:  new Set(['estimatepdf']),
+  po:   new Set(['popdf']),
 };
 function pickPdfByFields(files, allowedSet) {
   for (const f of (files || [])) {
@@ -370,7 +374,7 @@ const isPdf = (f) =>
 const isImage = (f) => /^image\//.test(f?.mimetype || '');
 const fileKey = (f) => (S3_BUCKET ? f.key : f.filename);
 
-// ─── MISSING: enforceImageCountOr413 (FIXED) ────────────────────────────────
+// Guard for huge photo dumps
 function enforceImageCountOr413(res, images) {
   if ((images || []).length > MAX_FILES_PER_REQUEST) {
     res.status(413).json({ error: `Too many photos in one request (max ${MAX_FILES_PER_REQUEST})` });
@@ -480,7 +484,25 @@ const isTruthy = (v) => {
 const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
 
 // ─── SEARCH/LIST/CRUD ───────────────────────────────────────────────────────
-// GET single work order by ID
+
+// LIST ALL — (frontend dashboard calls this)
+app.get('/work-orders', authenticate, async (req, res) => {
+  try {
+    const [raw] = await db.execute(
+      `SELECT w.*, u.username AS assignedToName
+         FROM work_orders w
+         LEFT JOIN users u ON w.assignedTo = u.id
+       ORDER BY w.id DESC`
+    );
+    const rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status) }));
+    res.json(rows);
+  } catch (err) {
+    console.error('Work-orders list error:', err);
+    res.status(500).json({ error: 'Failed to fetch work orders.' });
+  }
+});
+
+// GET single by ID — (frontend "View Work Order" page)
 app.get('/work-orders/:id(\\d+)', authenticate, async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -501,6 +523,7 @@ app.get('/work-orders/:id(\\d+)', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch work order.' });
   }
 });
+
 app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -509,6 +532,7 @@ app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
     res.json(rows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) })));
   } catch (err) { console.error('Unscheduled list error:', err); res.status(500).json({ error: 'Failed to fetch unscheduled.' }); }
 });
+
 app.get('/work-orders/search', authenticate, async (req, res) => {
   const {
     customer = '',
@@ -551,6 +575,7 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Search failed.' });
   }
 });
+
 app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
   try {
     const po = decodeURIComponent(String(req.params.poNumber || '').trim());
@@ -572,6 +597,7 @@ app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to lookup by PO number.' });
   }
 });
+
 app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
   try {
     const po = decodeURIComponent(String(req.params.poNumber || '').trim());
@@ -611,7 +637,7 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
   }
 });
 
-// ─── CREATE / EDIT ──────────────────────────────────────────────────────────
+// CREATE
 app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -633,13 +659,17 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
     const otherPdfs    = files.filter(f => isPdf(f) && ![primaryPdf, estimatePdf, poPdf].includes(f));
     const images       = files.filter(isImage);
     if (!enforceImageCountOr413(res, images)) return;
+
     const pdfPath         = primaryPdf ? fileKey(primaryPdf)   : null;
     const estimatePdfPath = estimatePdf ? fileKey(estimatePdf) : null;
     const poPdfPath       = poPdf ? fileKey(poPdf)             : null;
+
     const firstImg = images[0] ? fileKey(images[0]) : null;
     const extraPdfKeys = otherPdfs.map(fileKey);
     const initialAttachments = [firstImg, ...extraPdfKeys].filter(Boolean).join(',');
+
     const cStatus = canonStatus(status) || 'New';
+
     const cols = [
       'workOrderNumber','poNumber','customer','siteLocation','siteAddress','billingAddress',
       'problemDescription','status','pdfPath','estimatePdfPath','poPdfPath','photoPath',
@@ -656,6 +686,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
     }
     const placeholders = cols.map(() => '?').join(',');
     const [r] = await db.execute(`INSERT INTO work_orders (${cols.join(',')}) VALUES (${placeholders})`, vals);
+
     if (images.length > 1) {
       const wid = r.insertId;
       const moreKeys = images.slice(1).map(fileKey);
@@ -669,6 +700,8 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
     res.status(500).json({ error: 'Failed to save work order.' });
   }
 });
+
+// EDIT
 app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -697,15 +730,14 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
     let estimatePdfPath = existing.estimatePdfPath;
     let poPdfPath       = existing.poPdfPath;
 
-    // PRIMARY work-order PDF
+    // PRIMARY PDF
     if (primaryPdf) {
       const newPath = fileKey(primaryPdf);
       const oldPath = existing.pdfPath;
       if (wantReplacePdf || !oldPath) {
         if (oldPath) {
-          if (moveOldPdf) {
-            if (!attachments.includes(oldPath)) attachments.push(oldPath);
-          } else {
+          if (moveOldPdf) { if (!attachments.includes(oldPath)) attachments.push(oldPath); }
+          else {
             try {
               if (/^uploads\//.test(oldPath)) {
                 if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPath }).promise();
@@ -729,9 +761,8 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       const oldPath = existing.estimatePdfPath;
       if (wantReplaceEst || !oldPath) {
         if (oldPath) {
-          if (moveOldEstimate) {
-            if (!attachments.includes(oldPath)) attachments.push(oldPath);
-          } else {
+          if (moveOldEstimate) { if (!attachments.includes(oldPath)) attachments.push(oldPath); }
+          else {
             try {
               if (/^uploads\//.test(oldPath)) {
                 if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPath }).promise();
@@ -755,9 +786,8 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       const oldPath = existing.poPdfPath;
       if (wantReplacePo || !oldPath) {
         if (oldPath) {
-          if (moveOldPo) {
-            if (!attachments.includes(oldPath)) attachments.push(oldPath);
-          } else {
+          if (moveOldPo) { if (!attachments.includes(oldPath)) attachments.push(oldPath); }
+          else {
             try {
               if (/^uploads\//.test(oldPath)) {
                 if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPath }).promise();
@@ -827,7 +857,7 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
   }
 });
 
-// ─── NOTES / STATUS ─────────────────────────────────────────────────────────
+// NOTES / STATUS only
 app.put('/work-orders/:id(\\d+)/status', authenticate, express.json(), async (req, res) => {
   const { status } = req.body || {};
   if (!status) return res.status(400).json({ error: 'status is required.' });
@@ -844,14 +874,7 @@ app.put('/work-orders/:id(\\d+)/status', authenticate, express.json(), async (re
 // ─── KEY NORMALIZATION / REPAIR HELPERS ─────────────────────────────────────
 function logFiles(...args){ if (FILES_VERBOSE === '1') console.log('[files]', ...args); }
 
-/**
- * Accepts anything we might have stored historically:
- *  - "uploads/123.pdf"
- *  - "/uploads/123.pdf"
- *  - "123.pdf"
- *  - "https://.../uploads/123.pdf"
- * Returns a normalized key like "uploads/123.pdf"
- */
+/** Normalize stored/legacy keys to "uploads/xyz.pdf" */
 function normalizeStoredKey(raw) {
   if (!raw) return null;
   let v = String(raw).trim();
@@ -861,12 +884,9 @@ function normalizeStoredKey(raw) {
       const u = new URL(v);
       const p = u.pathname || '';
       const idx = p.toLowerCase().lastIndexOf('/uploads/');
-      if (idx >= 0) v = p.slice(idx + 1); // drop leading slash
-      else {
-        const base = path.posix.basename(p);
-        v = `uploads/${base}`;
-      }
-    } catch { /* ignore */ }
+      if (idx >= 0) v = p.slice(idx + 1);
+      else v = `uploads/${path.posix.basename(p)}`;
+    } catch {}
   }
   v = v.replace(/^\/+/, '');
   if (!v.toLowerCase().startsWith('uploads/')) v = `uploads/${path.posix.basename(v)}`;
@@ -874,21 +894,19 @@ function normalizeStoredKey(raw) {
   return v;
 }
 function localCandidatesFromKey(key) {
-  const norm = normalizeStoredKey(key);
-  const base = path.posix.basename(norm);
-  const rel1 = norm.replace(/^uploads\//i, '');
+  const n = normalizeStoredKey(key);
+  const base = path.posix.basename(n);
+  const rel1 = n.replace(/^uploads\//i, '');
   return [rel1, base];
 }
 async function s3HeadKey(Key) {
   try {
     const meta = await s3.headObject({ Bucket: S3_BUCKET, Key }).promise();
     return { ok: true, meta };
-  } catch (e) {
-    return { ok: false, err: e };
-  }
+  } catch (e) { return { ok: false, err: e }; }
 }
 
-// ─── OPTIONAL: DB MIGRATION HELPERS TO FIX EXISTING ROWS ────────────────────
+// Bulk repair endpoints (optional ops)
 async function fixRowKeys(row) {
   const upd = {};
   const fields = ['pdfPath','estimatePdfPath','poPdfPath'];
@@ -939,26 +957,22 @@ app.get('/files', async (req, res) => {
     const raw = req.query.key;
     if (!raw) return res.status(400).json({ error: 'Missing ?key=' });
 
-    // Normalize incoming key (repairs old/bad formats)
     let key = normalizeStoredKey(raw);
     const ext = path.extname(key).toLowerCase();
     const mimeMap = {
-      '.pdf':  'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-      '.png':  'image/png',       '.gif': 'image/gif',  '.webp': 'image/webp', '.heic': 'image/heic'
+      '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+      '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic'
     };
     const fallbackCT = mimeMap[ext] || 'application/octet-stream';
-    const filename   = path.basename(key);
+    const filename = path.basename(key);
 
-    // ── S3 MODE ──────────────────────────────────────────────────────────────
     if (S3_BUCKET) {
       const range = req.headers.range;
 
-      // Try primary key
       const primaryKey = key;
       let head = await s3HeadKey(primaryKey);
       logFiles('S3 head primary', primaryKey, head.ok ? 'OK' : 'MISS');
 
-      // Try fallback "uploads/<basename>"
       if (!head.ok) {
         const base = path.posix.basename(primaryKey);
         const alt1 = `uploads/${base}`;
@@ -968,8 +982,6 @@ app.get('/files', async (req, res) => {
           if (h2.ok) { key = alt1; head = h2; }
         }
       }
-
-      // Try raw basename (legacy)
       if (!head.ok) {
         const base = path.posix.basename(primaryKey);
         const alt2 = base;
@@ -979,13 +991,10 @@ app.get('/files', async (req, res) => {
           if (h3.ok) { key = alt2; head = h3; }
         }
       }
-
-      if (!head.ok) {
-        return res.status(404).json({ error: 'File not found' });
-      }
+      if (!head.ok) return res.status(404).json({ error: 'File not found' });
 
       const size = head.meta.ContentLength;
-      const ct = head.meta.ContentType || fallbackCT;
+      const ct   = head.meta.ContentType || fallbackCT;
 
       if (range) {
         const m = /^bytes=(\d*)-(\d*)$/.exec(range);
@@ -1003,7 +1012,7 @@ app.get('/files', async (req, res) => {
         });
         return s3.getObject({ Bucket: S3_BUCKET, Key: key, Range: `bytes=${start}-${end}` })
                  .createReadStream()
-                 .on('error', e => { if (!res.headersSent) res.status(500).end(); })
+                 .on('error', () => { if (!res.headersSent) res.status(500).end(); })
                  .pipe(res);
       }
 
@@ -1016,13 +1025,13 @@ app.get('/files', async (req, res) => {
       });
       return s3.getObject({ Bucket: S3_BUCKET, Key: key })
                .createReadStream()
-               .on('error', e => { if (!res.headersSent) res.status(500).end(); })
+               .on('error', () => { if (!res.headersSent) res.status(500).end(); })
                .pipe(res);
     }
 
-    // ── LOCAL DISK MODE ──────────────────────────────────────────────────────
+    // Local mode
     const uploadsDir = path.resolve(__dirname, 'uploads');
-    const candidateRels = localCandidatesFromKey(key); // relative to /uploads
+    const candidateRels = localCandidatesFromKey(key);
     let chosenPath = null;
     for (const rel of candidateRels) {
       const p = path.resolve(uploadsDir, rel);
@@ -1033,9 +1042,7 @@ app.get('/files', async (req, res) => {
       const p = path.resolve(uploadsDir, base);
       if (p.startsWith(uploadsDir) && fs.existsSync(p)) chosenPath = p;
     }
-    if (!chosenPath) {
-      return res.sendStatus(404);
-    }
+    if (!chosenPath) return res.sendStatus(404);
 
     const stat = fs.statSync(chosenPath);
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
