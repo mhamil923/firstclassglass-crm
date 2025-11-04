@@ -480,16 +480,26 @@ const isTruthy = (v) => {
 const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
 
 // ─── SEARCH/LIST/CRUD ───────────────────────────────────────────────────────
-app.get('/work-orders', authenticate, async (req, res) => {
+// GET single work order by ID
+app.get('/work-orders/:id(\\d+)', authenticate, async (req, res) => {
   try {
-    const [raw] = await db.execute(
+    const id = Number(req.params.id);
+    const [[row]] = await db.execute(
       `SELECT w.*, u.username AS assignedToName
          FROM work_orders w
-         LEFT JOIN users u ON w.assignedTo = u.id`
+         LEFT JOIN users u ON w.assignedTo = u.id
+        WHERE w.id = ?`,
+      [id]
     );
-    const rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status) }));
-    res.json(rows);
-  } catch (err) { console.error('Work-orders list error:', err); res.status(500).json({ error: 'Failed to fetch work orders.' }); }
+    if (!row) return res.status(404).json({ error: 'Not found.' });
+    row.status = (row.status && canonStatus(row.status))
+      ? canonStatus(row.status)
+      : displayStatusOrDefault(row.status);
+    res.json(row);
+  } catch (err) {
+    console.error('Work-order get-by-id error:', err);
+    res.status(500).json({ error: 'Failed to fetch work order.' });
+  }
 });
 app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
   try {
