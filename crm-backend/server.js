@@ -211,9 +211,23 @@ const STATUS_SYNONYMS = new Map([
   ['needs to invoice','Needs to be Invoiced'],
   ['approved','Approved'],
 ]);
+
+// Additional tolerant short-codes (what the UI sometimes sends, e.g. "Ne")
+const STATUS_SHORT = new Map([
+  ['ne', 'New'],
+  ['sc', 'Scheduled'],
+  ['ap', 'Approved'],
+  ['wf', 'Waiting for Approval'],
+  ['wa', 'Waiting on Parts'],
+  ['nq', 'Needs to be Quoted'],
+  ['ns', 'Needs to be Scheduled'],
+  ['ni', 'Needs to be Invoiced'],
+  ['co', 'Completed'],
+]);
+
 function canonStatus(input) {
   const k = statusKey(input);
-  return STATUS_LOOKUP.get(k) || STATUS_SYNONYMS.get(k) || null;
+  return STATUS_LOOKUP.get(k) || STATUS_SYNONYMS.get(k) || STATUS_SHORT.get(k) || null;
 }
 function displayStatusOrDefault(s) {
   return canonStatus(s) || (String(s || '').trim() ? String(s) : 'New');
@@ -648,6 +662,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       problemDescription, status = 'New',
       assignedTo,
       billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
+      notes = null,
     } = req.body;
     if (!customer || !billingAddress || !problemDescription) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -673,12 +688,12 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
     const cols = [
       'workOrderNumber','poNumber','customer','siteLocation','siteAddress','billingAddress',
       'problemDescription','status','pdfPath','estimatePdfPath','poPdfPath','photoPath',
-      'billingPhone','sitePhone','customerPhone','customerEmail'
+      'billingPhone','sitePhone','customerPhone','customerEmail','notes'
     ];
     const vals = [
       workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
       problemDescription, cStatus, pdfPath, estimatePdfPath, poPdfPath, initialAttachments,
-      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null
+      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes
     ];
     if (SCHEMA.hasAssignedTo && assignedTo !== undefined && assignedTo !== '') {
       const assignedToVal = Number.isFinite(Number(assignedTo)) ? Number(assignedTo) : null;
@@ -823,6 +838,7 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       sitePhone = existing.sitePhone,
       customerPhone = existing.customerPhone,
       customerEmail = existing.customerEmail,
+      notes = existing.notes,
     } = req.body;
 
     const cStatus = canonStatus(status) || existing.status;
@@ -830,22 +846,26 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
     let sql = `UPDATE work_orders
                SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
                    problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
-                   billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?
+                   billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?
                WHERE id=?`;
     const params = [
       workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
       problemDescription, cStatus, pdfPath || null, estimatePdfPath || null, poPdfPath || null, attachments.join(','),
-      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null,
+      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes,
       wid
     ];
     if (SCHEMA.hasAssignedTo) {
       sql = `UPDATE work_orders
              SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
                  problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
-                 billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,assignedTo=?
+                 billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?,assignedTo=?
              WHERE id=?`;
       const assignedToVal = (assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo);
-      params.splice(16, 0, assignedToVal);
+      params.splice(16, 0, notes); // keep notes at index 16 in the version without assignedTo
+      // After splice above, append assignedTo and wid in the right order:
+      params.splice(17, 0, assignedToVal);
+      // Ensure final wid at end:
+      if (params[params.length - 1] !== wid) params.push(wid);
     }
 
     await db.execute(sql, params);
@@ -857,10 +877,38 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
   }
 });
 
-// NOTES / STATUS only
-app.put('/work-orders/:id(\\d+)/status', authenticate, express.json(), async (req, res) => {
+// NOTES — simple setter or append
+app.put('/work-orders/:id(\\d+)/notes', authenticate, async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const { notes, append } = req.body || {};
+    if (notes == null) return res.status(400).json({ error: 'notes is required.' });
+
+    if (isTruthy(append)) {
+      const [[row]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [wid]);
+      if (!row) return res.status(404).json({ error: 'Not found.' });
+      const who = req.user?.username || 'system';
+      const stamp = new Date().toISOString().replace('T',' ').replace('Z','');
+      const sep = row.notes ? '\n\n' : '';
+      const newNotes = (row.notes || '') + `${sep}[${stamp}] ${who}: ${notes}`;
+      await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [newNotes, wid]);
+    } else {
+      await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [String(notes), wid]);
+    }
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Work-order notes update error:', err);
+    res.status(500).json({ error: 'Failed to update notes.' });
+  }
+});
+
+// STATUS only (tolerant)
+app.put('/work-orders/:id(\\d+)/status', authenticate, async (req, res) => {
   const { status } = req.body || {};
-  if (!status) return res.status(400).json({ error: 'status is required.' });
+  if (status == null || String(status).trim() === '') {
+    return res.status(400).json({ error: 'status is required.' });
+  }
   try {
     const c = canonStatus(status);
     if (!c) return res.status(400).json({ error: 'Invalid status value' });
@@ -868,7 +916,10 @@ app.put('/work-orders/:id(\\d+)/status', authenticate, express.json(), async (re
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
     if (!updated) return res.status(404).json({ error: 'Not found.' });
     res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
-  } catch (err) { console.error('Work-order status update error:', err); res.status(500).json({ error: 'Failed to update status.' }); }
+  } catch (err) {
+    console.error('Work-order status update error:', err);
+    res.status(500).json({ error: 'Failed to update status.' });
+  }
 });
 
 // ─── KEY NORMALIZATION / REPAIR HELPERS ─────────────────────────────────────
