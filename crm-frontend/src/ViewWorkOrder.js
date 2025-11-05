@@ -53,7 +53,13 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
     setSaving(true);
     try {
       const next = po.trim() || null; // Persist blank as NULL
-      await api.put(`/work-orders/${orderId}`, { poNumber: next });
+      // Prefer edit route (present in backend)
+      const form = new FormData();
+      if (next === null) form.append("poNumber", "");
+      else form.append("poNumber", next);
+      await api.put(`/work-orders/${orderId}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
       onSaved?.(next);
       setEditing(false);
     } catch (e) {
@@ -118,18 +124,16 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   );
 }
 
-/* ---------- Lightbox modal for enlarged previews (aspect-ratio safe) ---------- */
+/* ---------- Lightbox modal for enlarged previews ---------- */
 function Lightbox({ open, onClose, kind, src, title }) {
   const [downloading, setDownloading] = useState(false);
   if (!open) return null;
 
-  // Best-effort filename for downloads
   const inferredName =
     (title && /\.[a-z0-9]{2,5}$/i.test(title) && title) ||
     (src?.split("/").pop() || "").split("?")[0] ||
     "download.jpg";
 
-  // Force a real download (no navigation) even for cross-origin urls
   const handleDownload = async (e) => {
     e.stopPropagation();
     if (downloading) return;
@@ -148,7 +152,6 @@ function Lightbox({ open, onClose, kind, src, title }) {
       URL.revokeObjectURL(objectUrl);
     } catch (err) {
       console.error("Download failed; opening in new tab as fallback", err);
-      // Fallback: open in new tab if we can't fetch (e.g., CORS blocked)
       window.open(src, "_blank", "noopener,noreferrer");
     } finally {
       setDownloading(false);
@@ -229,7 +232,6 @@ function Lightbox({ open, onClose, kind, src, title }) {
           </div>
         </div>
 
-        {/* content area */}
         {kind === "image" ? (
           <div
             style={{
@@ -240,7 +242,6 @@ function Lightbox({ open, onClose, kind, src, title }) {
               padding: 8,
             }}
           >
-            {/* maintain original aspect ratio; never crop */}
             <img
               src={src}
               alt={title || "preview"}
@@ -336,6 +337,104 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* Notes parsing/formatting (supports JSON-array or server TEXT log format)    */
+/* -------------------------------------------------------------------------- */
+function parseNotesArrayOrText(raw) {
+  if (!raw) return { entries: [], originalOrder: [] };
+
+  // JSON array?
+  if (Array.isArray(raw)) {
+    const entries = raw.map((n, i) => ({
+      text: String(n?.text ?? "").trim(),
+      createdAt: n?.createdAt || n?.time || null,
+      by: n?.by || n?.author || n?.user || null,
+      __order: i,
+    }));
+    return { entries, originalOrder: entries.map((e) => e.__order) };
+  }
+
+  // JSON string of array?
+  if (typeof raw === "string") {
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        const entries = arr.map((n, i) => ({
+          text: String(n?.text ?? "").trim(),
+          createdAt: n?.createdAt || n?.time || null,
+          by: n?.by || n?.author || n?.user || null,
+          __order: i,
+        }));
+        return { entries, originalOrder: entries.map((e) => e.__order) };
+      }
+    } catch {
+      // fall through to TEXT parsing
+    }
+  }
+
+  // Plain TEXT: blocks like
+  // [2025-11-05 19:06:12.555] Mark: test note
+  // (blank line between entries)
+  const s = String(raw);
+  const lines = s.split(/\r?\n/);
+
+  const entries = [];
+  let current = null;
+
+  const startRe = /^\[([^\]]+)\]\s*([^:]+):\s*(.*)$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    const m = line.match(startRe);
+    if (m) {
+      // push previous block if any
+      if (current) entries.push({ ...current });
+      current = {
+        createdAt: m[1],
+        by: m[2].trim(),
+        text: m[3] ? m[3] : "",
+        __order: entries.length, // original append order
+      };
+      continue;
+    }
+
+    // blank line => finalize current
+    if (/^\s*$/.test(line)) {
+      if (current) {
+        entries.push({ ...current });
+        current = null;
+      }
+      continue;
+    }
+
+    // continuation line for text
+    if (current) {
+      current.text = (current.text ? current.text + "\n" : "") + line;
+    }
+  }
+  if (current) entries.push({ ...current });
+
+  return { entries, originalOrder: entries.map((e) => e.__order) };
+}
+
+function formatNotesText(entriesInOrder) {
+  // Render back to server's plain-text format
+  return entriesInOrder
+    .map((n) => {
+      const ts = n.createdAt || moment().format("YYYY-MM-DD HH:mm:ss.SSS");
+      const by = n.by || "system";
+      const txt = (n.text || "").toString();
+      const firstLine = `[${ts}] ${by}: `;
+      // Keep multi-line body under it
+      const body = txt.includes("\n") ? txt : txt; // already string
+      return firstLine + body;
+    })
+    .join("\n\n");
+}
+
+/* -------------------------------------------------------------------------- */
+
 export default function ViewWorkOrder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -381,27 +480,21 @@ export default function ViewWorkOrder() {
     fetchWorkOrder();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Parse existing notes safely
-  const originalNotes = useMemo(() => {
-    try {
-      const raw = workOrder?.notes;
-      const arr = typeof raw === "string" ? JSON.parse(raw) : raw;
-      return Array.isArray(arr) ? arr : [];
-    } catch {
-      return [];
-    }
+  /* ---------- Parse notes from server ---------- */
+  const { entries: parsedNotes, originalOrder } = useMemo(() => {
+    const raw = workOrder?.notes ?? null;
+    return parseNotesArrayOrText(raw);
   }, [workOrder]);
 
-  // Newest first for display
-  const displayNotes = useMemo(
-    () =>
-      originalNotes
-        .map((n, idx) => ({ ...n, __origIndex: idx }))
-        .sort(
-          (a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0)
-        ),
-    [originalNotes]
-  );
+  // Show newest first (createdAt desc; unknown timestamps go to bottom)
+  const displayNotes = useMemo(() => {
+    const withSortKey = parsedNotes.map((n, i) => ({
+      ...n,
+      __idx: i,
+      __t: n.createdAt ? Date.parse(n.createdAt) || 0 : 0,
+    }));
+    return withSortKey.sort((a, b) => b.__t - a.__t);
+  }, [parsedNotes]);
 
   if (!workOrder) {
     return (
@@ -441,7 +534,6 @@ export default function ViewWorkOrder() {
     .map((p) => p.trim())
     .filter(Boolean);
 
-  // Other PDFs are anything in attachments that isn't the canonical three
   const otherPdfAttachments = attachments
     .filter(isPdfKey)
     .filter((p) => p !== pdfPath && p !== estimatePdfPath && p !== poPdfPath);
@@ -582,10 +674,8 @@ export default function ViewWorkOrder() {
     w.document.close();
   };
 
-  /* ---------- Upload helpers (fixed) ---------- */
+  /* ---------- Upload helpers ---------- */
 
-  // Replace the main "Signed Work Order" PDF (pdfPath).
-  // IMPORTANT: field name must be "pdf" so the server treats it as the primary.
   const handleReplacePdfUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -597,7 +687,7 @@ export default function ViewWorkOrder() {
     setBusyReplace(true);
     try {
       const form = new FormData();
-      form.append("pdf", file); // <-- primary key expected by server
+      form.append("pdf", file); // primary work-order PDF field
       form.append("replacePdf", "1");
       if (keepOldInAttachments) {
         form.append("keepOldPdfInAttachments", "1");
@@ -617,7 +707,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Upload/replace the Estimate PDF (server keeps only one canonical estimatePdfPath).
   const handleUploadOrReplaceEstimatePdf = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -630,7 +719,8 @@ export default function ViewWorkOrder() {
     try {
       const form = new FormData();
       form.append("estimatePdf", file);
-      await api.post(`/work-orders/${id}/attach-estimate`, form, {
+      // Reuse /edit (backend handles estimatePdfPath when field is "estimatePdf")
+      await api.put(`/work-orders/${id}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       await fetchWorkOrder();
@@ -643,7 +733,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Upload/replace the PO PDF (server keeps only one canonical poPdfPath).
   const handleUploadOrReplacePoPdf = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -656,7 +745,8 @@ export default function ViewWorkOrder() {
     try {
       const form = new FormData();
       form.append("poPdf", file);
-      await api.post(`/work-orders/${id}/attach-po`, form, {
+      // Reuse /edit (backend handles poPdfPath when field is "poPdf")
+      await api.put(`/work-orders/${id}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       await fetchWorkOrder();
@@ -672,10 +762,9 @@ export default function ViewWorkOrder() {
   const handleDeleteAttachment = async (relPath) => {
     if (!window.confirm("Delete this attachment?")) return;
     try {
-      await api.delete(`/work-orders/${id}/attachment`, {
-        data: { photoPath: relPath },
-      });
-      await fetchWorkOrder();
+      // Using /edit with a JSON body is not supported; your backend doesn't expose a delete-attachment route yet.
+      // Optionally implement a dedicated DELETE route in backend. For now, just warn.
+      alert("Deleting attachments requires a backend route. Not implemented.");
     } catch (error) {
       console.error("⚠️ Error deleting attachment:", error);
       alert(error?.response?.data?.error || "Failed to delete attachment.");
@@ -706,28 +795,53 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /* ---------- Notes ---------- */
+  /* ---------- Notes (FIXED to match backend) ---------- */
   const handleAddNote = async () => {
-    if (!newNote.trim()) return;
+    const text = newNote.trim();
+    if (!text) return;
+
     try {
-      await api.post(`/work-orders/${id}/notes`, { text: newNote });
+      // Backend expects: PUT /work-orders/:id/notes  with { notes: <string>, append: true }
+      await api.put(`/work-orders/${id}/notes`, {
+        notes: text,
+        append: true,
+      });
       setNewNote("");
       setShowNoteInput(false);
-      fetchWorkOrder();
+      await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error adding note:", error);
-      alert("Failed to add note.");
+      alert(error?.response?.data?.error || "Failed to add note.");
     }
   };
 
-  const handleDeleteNote = async (origIndex) => {
+  const handleDeleteNote = async (displayIdx) => {
+    // There is no DELETE endpoint; rebuild notes without this entry and PUT the full text.
     if (!window.confirm("Delete this note?")) return;
+
     try {
-      await api.delete(`/work-orders/${id}/notes/${origIndex}`);
-      fetchWorkOrder();
+      // Convert parsed list back to original append order (oldest -> newest)
+      const byOriginal = [...parsedNotes].sort((a, b) => (a.__order ?? 0) - (b.__order ?? 0));
+
+      // Map displayIdx (newest-first list) back to the actual entry
+      const target = displayNotes[displayIdx];
+      if (!target) return;
+
+      // Remove the target from the ordered list
+      const kept = byOriginal.filter((e) => !(e.createdAt === target.createdAt && e.text === target.text && (e.by || "") === (target.by || "")));
+
+      // Format back to server TEXT
+      const newBody = formatNotesText(kept);
+
+      await api.put(`/work-orders/${id}/notes`, {
+        notes: newBody,
+        append: false, // overwrite with rebuilt body
+      });
+
+      await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error deleting note:", error);
-      alert("Failed to delete note.");
+      alert(error?.response?.data?.error || "Failed to delete note.");
     }
   };
 
@@ -1123,14 +1237,16 @@ export default function ViewWorkOrder() {
                 <li key={`${n.createdAt || "na"}-${idx}`} className="note-item">
                   <div className="note-header">
                     <small className="note-timestamp">
-                      {moment(n.createdAt).format("YYYY-MM-DD HH:mm")}
+                      {n.createdAt
+                        ? moment(n.createdAt).format("YYYY-MM-DD HH:mm")
+                        : "—"}
                       {n.by ? ` — ${n.by}` : ""}
                     </small>
                     <button
                       type="button"
                       className="note-delete-btn"
                       title="Delete note"
-                      onClick={() => handleDeleteNote(n.__origIndex)}
+                      onClick={() => handleDeleteNote(idx)}
                     >
                       ✕
                     </button>
