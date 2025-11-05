@@ -45,8 +45,23 @@ const s3 = new AWS.S3();
 const app = express();
 app.set('trust proxy', true);
 app.use(cors({ origin: true, credentials: true }));
+
+// Parse JSON + URL-encoded as usual
 app.use(bodyParser.json({ limit: '20mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '20mb' }));
+
+// CRITICAL: also accept text/plain bodies (many front-ends send this by mistake)
+app.use(bodyParser.text({ type: 'text/plain', limit: '1mb' }));
+
+// Coerce text bodies to objects the endpoints can use
+function coerceBody(req) {
+  if (req.body == null) return {};
+  if (typeof req.body === 'object') return req.body;
+  // req.body is a string (text/plain)
+  const str = String(req.body).trim();
+  if (!str) return {};
+  try { return JSON.parse(str); } catch (_) { return { text: str, value: str, notes: str }; }
+}
 
 // ─── MYSQL ──────────────────────────────────────────────────────────────────
 const db = mysql.createPool({
@@ -399,7 +414,7 @@ function enforceImageCountOr413(res, images) {
 
 // ─── AUTH ────────────────────────────────────────────────────────────────────
 app.post('/auth/register', async (req, res) => {
-  const { username, password, role } = req.body;
+  const { username, password, role } = coerceBody(req);
   if (!username || !password || !role) return res.status(400).json({ error: 'username, password & role required' });
   try {
     const hash = await bcrypt.hash(password, 10);
@@ -408,7 +423,7 @@ app.post('/auth/register', async (req, res) => {
   } catch (err) { console.error('Register error:', err); res.status(500).json({ error: 'Failed to register user.' }); }
 });
 app.post('/auth/login', async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password } = coerceBody(req);
   if (!username || !password) return res.status(400).json({ error: 'username & password required' });
   try {
     const [[user]] = await db.execute('SELECT * FROM users WHERE username = ?', [username]);
@@ -473,7 +488,7 @@ app.get('/customers/:id(\\d+)', authenticate, async (req, res) => {
   } catch (err) { console.error('Customer get error:', err); res.status(500).json({ error: 'Failed to fetch customer.' }); }
 });
 app.post('/customers', authenticate, async (req, res) => {
-  const { name, billingAddress } = req.body;
+  const { name, billingAddress } = coerceBody(req);
   if (!name || !billingAddress) return res.status(400).json({ error: 'name & billingAddress required' });
   try {
     const [r] = await db.execute('INSERT INTO customers (name,billingAddress) VALUES (?,?)', [name, billingAddress]);
@@ -824,6 +839,7 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
     const extraPdfKeys = (otherPdfs || []).map(fileKey);
     attachments = uniq([...attachments, ...newPhotos, ...extraPdfKeys]);
 
+    const body = { ...existing, ...req.body };
     const {
       workOrderNumber = existing.workOrderNumber,
       poNumber = existing.poNumber,
@@ -839,34 +855,22 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       customerPhone = existing.customerPhone,
       customerEmail = existing.customerEmail,
       notes = existing.notes,
-    } = req.body;
+    } = body;
 
     const cStatus = canonStatus(status) || existing.status;
 
+    // Clean, explicit param build (no splicing surprises)
     let sql = `UPDATE work_orders
-               SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
-                   problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
-                   billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?
-               WHERE id=?`;
+                 SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
+                     problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
+                     billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?`;
     const params = [
       workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
       problemDescription, cStatus, pdfPath || null, estimatePdfPath || null, poPdfPath || null, attachments.join(','),
-      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes,
-      wid
+      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes
     ];
-    if (SCHEMA.hasAssignedTo) {
-      sql = `UPDATE work_orders
-             SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
-                 problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
-                 billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?,assignedTo=?
-             WHERE id=?`;
-      const assignedToVal = (assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo);
-      params.splice(16, 0, notes); // keep notes at index 16 in the version without assignedTo
-      // After splice above, append assignedTo and wid in the right order:
-      params.splice(17, 0, assignedToVal);
-      // Ensure final wid at end:
-      if (params[params.length - 1] !== wid) params.push(wid);
-    }
+    if (SCHEMA.hasAssignedTo) { sql += `,assignedTo=?`; params.push((assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo)); }
+    sql += ` WHERE id=?`; params.push(wid);
 
     await db.execute(sql, params);
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
@@ -877,14 +881,16 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
   }
 });
 
-// NOTES — simple setter or append
+// NOTES — simple setter or append (now tolerant to text/plain & alt field names)
 app.put('/work-orders/:id(\\d+)/notes', authenticate, async (req, res) => {
   try {
     const wid = Number(req.params.id);
-    const { notes, append } = req.body || {};
-    if (notes == null) return res.status(400).json({ error: 'notes is required.' });
+    const b = coerceBody(req);
+    const notes = b.notes ?? b.note ?? b.text ?? b.message;
+    const append = isTruthy(b.append) || isTruthy(b.appendNotes) || isTruthy(b.a);
+    if (notes == null || String(notes).trim() === '') return res.status(400).json({ error: 'notes is required.' });
 
-    if (isTruthy(append)) {
+    if (append) {
       const [[row]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [wid]);
       if (!row) return res.status(404).json({ error: 'Not found.' });
       const who = req.user?.username || 'system';
@@ -903,14 +909,15 @@ app.put('/work-orders/:id(\\d+)/notes', authenticate, async (req, res) => {
   }
 });
 
-// STATUS only (tolerant)
+// STATUS only (tolerant; also accepts text/plain & alias fields)
 app.put('/work-orders/:id(\\d+)/status', authenticate, async (req, res) => {
-  const { status } = req.body || {};
-  if (status == null || String(status).trim() === '') {
+  const b = coerceBody(req);
+  const incoming = b.status ?? b.value ?? b.newStatus ?? b.s ?? b.text;
+  if (incoming == null || String(incoming).trim() === '') {
     return res.status(400).json({ error: 'status is required.' });
   }
   try {
-    const c = canonStatus(status);
+    const c = canonStatus(incoming);
     if (!c) return res.status(400).json({ error: 'Invalid status value' });
     await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [c, req.params.id]);
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
