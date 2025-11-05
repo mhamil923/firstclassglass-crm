@@ -94,22 +94,54 @@ const clampStyle = (lines) => ({
   whiteSpace: "normal",
 });
 
-// notes helpers
-const parseNotes = (notes) => {
-  if (!notes) return [];
-  if (Array.isArray(notes)) return notes;
-  try {
-    const arr = JSON.parse(notes);
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
+/* -------------------------------------------------------------------------- */
+/* Notes helpers — tolerant of server TEXT format like:
+   "[2025-11-05 19:06:12.555] Mark: test note from curl"
+   and also supports JSON-array notes if present.                             */
+/* -------------------------------------------------------------------------- */
+function parseLatestNote(notes) {
+  if (!notes) return null;
+
+  // If array (newer UIs), get last
+  if (Array.isArray(notes) && notes.length) {
+    const last = notes[notes.length - 1];
+    return {
+      text: String(last?.text ?? "").trim(),
+      createdAt: last?.createdAt || last?.time || null,
+      author: last?.author || last?.user || null,
+    };
   }
-};
-const latestNoteOf = (order) => {
-  const arr = parseNotes(order?.notes);
-  if (!arr.length) return null;
-  return arr[arr.length - 1];
-};
+
+  // If JSON stringified array
+  const s = String(notes);
+  try {
+    const arr = JSON.parse(s);
+    if (Array.isArray(arr) && arr.length) {
+      const last = arr[arr.length - 1];
+      return {
+        text: String(last?.text ?? "").trim(),
+        createdAt: last?.createdAt || last?.time || null,
+        author: last?.author || last?.user || null,
+      };
+    }
+  } catch {
+    // Plain text fallback
+  }
+
+  // Plain text (server appends new lines). Find the last bracketed entry.
+  const lines = s.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return null;
+
+  const lastBracket = [...lines].reverse().find((l) => /^\[[^\]]+\]\s*/.test(l)) || lines[lines.length - 1];
+
+  // Try to parse "[timestamp] author: text"
+  const m = lastBracket.match(/^\[([^\]]+)\]\s*([^:]+):\s*(.*)$/);
+  if (m) {
+    return { createdAt: m[1], author: m[2], text: m[3] };
+  }
+  // Otherwise just show the tail line as text
+  return { text: lastBracket, createdAt: null, author: null };
+}
 
 export default function WorkOrders() {
   const navigate = useNavigate();
@@ -209,7 +241,9 @@ export default function WorkOrders() {
 
   const setFilter = (value) => setSelectedFilter(value);
 
-  // single-row status change
+  /* ------------------------------------------------------------------------ */
+  /* SINGLE-ROW STATUS CHANGE  (FIXED ROUTE -> PUT /work-orders/:id/status)    */
+  /* ------------------------------------------------------------------------ */
   const handleStatusChange = async (e, id) => {
     e.stopPropagation();
     const newStatus = toCanonicalStatus(e.target.value);
@@ -220,7 +254,7 @@ export default function WorkOrders() {
 
     try {
       await api.put(
-        `/work-orders/${id}`,
+        `/work-orders/${id}/status`,
         { status: newStatus },
         { headers: authHeaders() }
       );
@@ -237,17 +271,33 @@ export default function WorkOrders() {
     }
   };
 
-  // assign
-  const assignToTech = (orderId, techId, e) => {
+  // assign — try `/assign`, fallback to `/edit` if backend lacks /assign endpoint
+  const assignToTech = async (orderId, techId, e) => {
     e.stopPropagation();
-    api
-      .put(
+    try {
+      await api.put(
         `/work-orders/${orderId}/assign`,
         { assignedTo: techId },
         { headers: authHeaders() }
-      )
-      .then(fetchWorkOrders)
-      .catch((err) => console.error("Error assigning tech:", err));
+      );
+      await fetchWorkOrders();
+    } catch (err) {
+      // fallback path using existing /edit route
+      try {
+        await api.put(
+          `/work-orders/${orderId}/edit`,
+          { assignedTo: techId },
+          { headers: authHeaders() }
+        );
+        await fetchWorkOrders();
+      } catch (err2) {
+        console.error("Error assigning tech:", err2);
+        alert(
+          err2?.response?.data?.error ||
+            "Failed to assign technician."
+        );
+      }
+    }
   };
 
   // maps
@@ -307,7 +357,9 @@ export default function WorkOrders() {
     });
   }, [filteredOrders, poSearch]);
 
-  // bulk -> Needs to be Scheduled
+  /* ------------------------------------------------------------------------ */
+  /* BULK -> Needs to be Scheduled  (no /bulk-status: fan out to per-row)     */
+  /* ------------------------------------------------------------------------ */
   const markSelectedAsPartsIn = async () => {
     if (!selectedIds.size) return;
     setIsUpdatingParts(true);
@@ -315,29 +367,23 @@ export default function WorkOrders() {
     const ids = Array.from(selectedIds);
     const prev = workOrders;
 
+    // Local optimistic update
     const next = prev.map((o) =>
       ids.includes(o.id) ? { ...o, status: PARTS_NEXT } : o
     );
     setWorkOrders(next);
 
     try {
-      const res = await api.put(
-        "/work-orders/bulk-status",
-        { ids, status: PARTS_NEXT },
-        { headers: authHeaders() }
-      );
-
-      const items = Array.isArray(res?.data?.items) ? res.data.items : [];
-      if (items.length) {
-        const byId = new Map(items.map((r) => [r.id, r]));
-        setWorkOrders((cur) =>
-          cur.map((o) =>
-            byId.has(o.id)
-              ? { ...o, ...byId.get(o.id), status: toCanonicalStatus(byId.get(o.id).status) }
-              : o
+      // Fan-out to the correct endpoint for each id
+      await Promise.all(
+        ids.map((id) =>
+          api.put(
+            `/work-orders/${id}/status`,
+            { status: PARTS_NEXT },
+            { headers: authHeaders() }
           )
-        );
-      }
+        )
+      );
 
       setSelectedFilter(PARTS_NEXT);
       await fetchWorkOrders();
@@ -423,8 +469,10 @@ export default function WorkOrders() {
           </thead>
           <tbody>
             {filteredOrders.map((order) => {
-              const note = latestNoteOf(order);
-              const noteTime = note?.createdAt ? moment(note.createdAt).fromNow() : null;
+              const latest = parseLatestNote(order?.notes);
+              const noteTime = latest?.createdAt
+                ? moment(latest.createdAt).fromNow()
+                : null;
 
               // ---- Robust location/address logic ----
               const rawLocField = norm(order.siteLocation);               // may be a name (new) OR an address (legacy)
@@ -446,9 +494,6 @@ export default function WorkOrders() {
                 // -> show that name in Site Location.
                 siteLocationName = rawLocField;
               }
-              // At this point:
-              // - If both name & address exist, both columns will render.
-              // - If only legacy siteLocation existed, it shows as clickable address and name stays blank.
 
               return (
                 <tr
@@ -496,10 +541,10 @@ export default function WorkOrders() {
                     {/* Clamp to 4 lines */}
                     <div style={clampStyle(4)}>{order.problemDescription}</div>
                     {/* Latest note preview (2 lines) */}
-                    {note && (
+                    {latest?.text && (
                       <div
                         className="latest-note"
-                        title={`${note.text}${noteTime ? ` • ${noteTime}` : ""}`}
+                        title={`${latest.text}${noteTime ? ` • ${noteTime}` : ""}`}
                         style={{
                           marginTop: 6,
                           fontSize: 12,
@@ -512,7 +557,7 @@ export default function WorkOrders() {
                           whiteSpace: "normal",
                         }}
                       >
-                        <span role="img" aria-label="note">📝</span> {note.text}
+                        <span role="img" aria-label="note">📝</span> {latest.text}
                         {noteTime ? ` • ${noteTime}` : ""}
                       </div>
                     )}
@@ -593,10 +638,18 @@ export default function WorkOrders() {
                   onChange={(e) => setPoSearch(e.target.value)}
                 />
                 <div className="modal-actions-inline">
-                  <button type="button" className="btn btn-ghost" onClick={() => setAll(true, visibleWaitingRows)}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setAll(true, visibleWaitingRows)}
+                  >
                     Select All
                   </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => setAll(false, visibleWaitingRows)}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setAll(false, visibleWaitingRows)}
+                  >
                     Select None
                   </button>
                 </div>
