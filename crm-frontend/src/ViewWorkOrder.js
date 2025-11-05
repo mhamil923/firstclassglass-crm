@@ -19,6 +19,12 @@ const STATUS_OPTIONS = [
   "Completed",
 ];
 
+/* ---------- auth header (match WorkOrders.js) ---------- */
+const authHeaders = () => {
+  const token = localStorage.getItem("jwt");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 /* ---------- helpers to clean up legacy data (PO# == WO#) ---------- */
 const norm = (v) => (v ?? "").toString().trim();
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
@@ -30,7 +36,7 @@ const isPdfFile = (file) =>
   file &&
   (file.type === "application/pdf" ||
     /\.pdf$/i.test(file.name || "") ||
-    file.type === "" || // some browsers
+    file.type === "" ||
     file.type === "application/octet-stream");
 
 /* ---------- Small helpers ---------- */
@@ -52,13 +58,12 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   const save = async () => {
     setSaving(true);
     try {
-      const next = po.trim() || null; // Persist blank as NULL
-      // Prefer edit route (present in backend)
+      const next = po.trim() || null;
       const form = new FormData();
       if (next === null) form.append("poNumber", "");
       else form.append("poNumber", next);
       await api.put(`/work-orders/${orderId}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
       onSaved?.(next);
       setEditing(false);
@@ -72,14 +77,7 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
 
   if (!editing) {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          flexWrap: "wrap",
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div>{initialPo ? initialPo : <em>None</em>}</div>
         <button className="btn btn-primary" onClick={() => setEditing(true)}>
           {initialPo ? "Update PO #" : "Add PO #"}
@@ -89,42 +87,26 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        flexWrap: "wrap",
-      }}
-    >
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <input
         type="text"
         value={po}
         onChange={(e) => setPo(e.target.value)}
         className="form-input"
         placeholder="Enter PO # (optional)"
-        style={{
-          height: 36,
-          borderRadius: 8,
-          border: "1px solid #cbd5e1",
-          padding: "0 10px",
-        }}
+        style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
       />
       <button className="btn btn-primary" disabled={saving} onClick={save}>
         {saving ? "Saving…" : "Save"}
       </button>
-      <button
-        className="btn btn-ghost"
-        disabled={saving}
-        onClick={() => setEditing(false)}
-      >
+      <button className="btn btn-ghost" disabled={saving} onClick={() => setEditing(false)}>
         Cancel
       </button>
     </div>
   );
 }
 
-/* ---------- Lightbox modal for enlarged previews ---------- */
+/* ---------- Lightbox modal ---------- */
 function Lightbox({ open, onClose, kind, src, title }) {
   const [downloading, setDownloading] = useState(false);
   if (!open) return null;
@@ -199,73 +181,34 @@ function Lightbox({ open, onClose, kind, src, title }) {
             gap: 8,
           }}
         >
-          <strong
-            style={{
-              fontSize: 14,
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <strong style={{ fontSize: 14, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {title || "Preview"}
           </strong>
           <div style={{ display: "flex", gap: 8 }}>
             {kind === "image" && (
-              <button
-                className="btn btn-light"
-                onClick={handleDownload}
-                disabled={downloading}
-              >
+              <button className="btn btn-light" onClick={handleDownload} disabled={downloading}>
                 {downloading ? "Preparing…" : "Download"}
               </button>
             )}
-            <button
-              className="btn btn-ghost"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose();
-              }}
-            >
+            <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); onClose(); }}>
               Close
             </button>
           </div>
         </div>
 
         {kind === "image" ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "#f8fafc",
-              padding: 8,
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", padding: 8 }}>
             <img
               src={src}
               alt={title || "preview"}
-              style={{
-                maxWidth: "92vw",
-                maxHeight: "82vh",
-                width: "auto",
-                height: "auto",
-                objectFit: "contain",
-                display: "block",
-              }}
+              style={{ maxWidth: "92vw", maxHeight: "82vh", width: "auto", height: "auto", objectFit: "contain", display: "block" }}
             />
           </div>
         ) : (
           <iframe
             title={title || "preview"}
             src={src}
-            style={{
-              width: "92vw",
-              maxWidth: "1200px",
-              height: "82vh",
-              border: "none",
-              background: "#f8fafc",
-            }}
+            style={{ width: "92vw", maxWidth: "1200px", height: "82vh", border: "none", background: "#f8fafc" }}
           />
         )}
       </div>
@@ -291,29 +234,14 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
     >
       <div style={{ width: "100%", height: 200, background: "#f8fafc" }}>
         {isPdf ? (
-          <iframe
-            title={fileName}
-            src={href}
-            style={{ width: "100%", height: "100%", border: "none" }}
-          />
+          <iframe title={fileName} src={href} style={{ width: "100%", height: "100%", border: "none" }} />
         ) : (
-          <img
-            src={href}
-            alt={fileName}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
+          <img src={href} alt={fileName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         )}
       </div>
 
       <div style={{ padding: "6px 8px", fontSize: 12, wordBreak: "break-all" }}>
-        <a
-          href={href}
-          target="__blank"
-          rel="noopener noreferrer"
-          title={fileName}
-          className="link"
-          style={{ textDecoration: "none" }}
-        >
+        <a href={href} target="__blank" rel="noopener noreferrer" title={fileName} className="link" style={{ textDecoration: "none" }}>
           {fileName}
         </a>
       </div>
@@ -323,12 +251,7 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
           Expand
         </button>
         {onDelete && (
-          <button
-            className="btn btn-danger"
-            onClick={onDelete}
-            title="Delete"
-            style={{ flex: "0 0 auto" }}
-          >
+          <button className="btn btn-danger" onClick={onDelete} title="Delete" style={{ flex: "0 0 auto" }}>
             ✕
           </button>
         )}
@@ -342,8 +265,6 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
 /* -------------------------------------------------------------------------- */
 function parseNotesArrayOrText(raw) {
   if (!raw) return { entries: [], originalOrder: [] };
-
-  // JSON array?
   if (Array.isArray(raw)) {
     const entries = raw.map((n, i) => ({
       text: String(n?.text ?? "").trim(),
@@ -353,8 +274,6 @@ function parseNotesArrayOrText(raw) {
     }));
     return { entries, originalOrder: entries.map((e) => e.__order) };
   }
-
-  // JSON string of array?
   if (typeof raw === "string") {
     try {
       const arr = JSON.parse(raw);
@@ -368,38 +287,29 @@ function parseNotesArrayOrText(raw) {
         return { entries, originalOrder: entries.map((e) => e.__order) };
       }
     } catch {
-      // fall through to TEXT parsing
+      /* fall through */
     }
   }
 
-  // Plain TEXT: blocks like
-  // [2025-11-05 19:06:12.555] Mark: test note
-  // (blank line between entries)
   const s = String(raw);
   const lines = s.split(/\r?\n/);
-
   const entries = [];
   let current = null;
-
   const startRe = /^\[([^\]]+)\]\s*([^:]+):\s*(.*)$/;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-
     const m = line.match(startRe);
     if (m) {
-      // push previous block if any
       if (current) entries.push({ ...current });
       current = {
         createdAt: m[1],
         by: m[2].trim(),
         text: m[3] ? m[3] : "",
-        __order: entries.length, // original append order
+        __order: entries.length,
       };
       continue;
     }
-
-    // blank line => finalize current
     if (/^\s*$/.test(line)) {
       if (current) {
         entries.push({ ...current });
@@ -407,11 +317,7 @@ function parseNotesArrayOrText(raw) {
       }
       continue;
     }
-
-    // continuation line for text
-    if (current) {
-      current.text = (current.text ? current.text + "\n" : "") + line;
-    }
+    if (current) current.text = (current.text ? current.text + "\n" : "") + line;
   }
   if (current) entries.push({ ...current });
 
@@ -419,20 +325,15 @@ function parseNotesArrayOrText(raw) {
 }
 
 function formatNotesText(entriesInOrder) {
-  // Render back to server's plain-text format
   return entriesInOrder
     .map((n) => {
       const ts = n.createdAt || moment().format("YYYY-MM-DD HH:mm:ss.SSS");
       const by = n.by || "system";
       const txt = (n.text || "").toString();
-      const firstLine = `[${ts}] ${by}: `;
-      // Keep multi-line body under it
-      const body = txt.includes("\n") ? txt : txt; // already string
-      return firstLine + body;
+      return `[${ts}] ${by}: ${txt}`;
     })
     .join("\n\n");
 }
-
 /* -------------------------------------------------------------------------- */
 
 export default function ViewWorkOrder() {
@@ -443,32 +344,26 @@ export default function ViewWorkOrder() {
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
-  // Main Signed PDF UI state
   const [busyReplace, setBusyReplace] = useState(false);
   const [keepOldInAttachments, setKeepOldInAttachments] = useState(true);
-
-  // Upload states for Estimate & PO
   const [busyPoUpload, setBusyPoUpload] = useState(false);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
 
-  // Status state
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
 
-  // Lightbox state
   const [lightbox, setLightbox] = useState({
     open: false,
     kind: "pdf",
     src: "",
     title: "",
   });
-  const openLightbox = (kind, src, title) =>
-    setLightbox({ open: true, kind, src, title });
+  const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
   const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
   const fetchWorkOrder = async () => {
     try {
-      const response = await api.get(`/work-orders/${id}`);
+      const response = await api.get(`/work-orders/${id}`, { headers: authHeaders() });
       setWorkOrder(response.data || null);
       setLocalStatus(response.data?.status || "");
     } catch (error) {
@@ -480,13 +375,11 @@ export default function ViewWorkOrder() {
     fetchWorkOrder();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ---------- Parse notes from server ---------- */
-  const { entries: parsedNotes, originalOrder } = useMemo(() => {
+  const { entries: parsedNotes } = useMemo(() => {
     const raw = workOrder?.notes ?? null;
     return parseNotesArrayOrText(raw);
   }, [workOrder]);
 
-  // Show newest first (createdAt desc; unknown timestamps go to bottom)
   const displayNotes = useMemo(() => {
     const withSortKey = parsedNotes.map((n, i) => ({
       ...n,
@@ -523,8 +416,6 @@ export default function ViewWorkOrder() {
   } = workOrder;
 
   const cleanedPo = displayPO(workOrderNumber, poNumber);
-
-  // Canonical file URLs
   const signedHref = pdfPath ? pdfThumbUrl(pdfPath) : null;
   const estimateHref = estimatePdfPath ? pdfThumbUrl(estimatePdfPath) : null;
   const poHref = poPdfPath ? pdfThumbUrl(poPdfPath) : null;
@@ -540,7 +431,6 @@ export default function ViewWorkOrder() {
 
   const attachmentImages = attachments.filter((p) => !isPdfKey(p));
 
-  // ---------- PRINT helpers ----------
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`;
   const safe = (x) =>
     (x ?? "")
@@ -630,30 +520,28 @@ export default function ViewWorkOrder() {
       </tr>
     </table>
 
-    <div class="desc-title">Problem Description: ${safe(
-      problemDescription || ""
-    )}</div>
-    <div class="desc-box"></div>
+    <div className="desc-title">Problem Description: ${safe(problemDescription || "")}</div>
+    <div className="desc-box"></div>
 
-    <div class="auth-title">AUTHORIZATION TO PAY</div>
-    <div class="auth-note">
+    <div className="auth-title">AUTHORIZATION TO PAY</div>
+    <div className="auth-note">
       I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL
       SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE
       SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
     </div>
 
-    <div class="sign-row">
+    <div className="sign-row">
       <div>
-        <div class="sign-line"></div>
-        <div class="sign-label">Customer Signature:</div>
+        <div className="sign-line"></div>
+        <div className="sign-label">Customer Signature:</div>
       </div>
       <div>
-        <div class="sign-line"></div>
-        <div class="sign-label">Date:</div>
+        <div className="sign-line"></div>
+        <div className="sign-label">Date:</div>
       </div>
     </div>
 
-    <div class="fine">
+    <div className="fine">
       NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST
       DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
     </div>
@@ -675,7 +563,6 @@ export default function ViewWorkOrder() {
   };
 
   /* ---------- Upload helpers ---------- */
-
   const handleReplacePdfUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -687,14 +574,14 @@ export default function ViewWorkOrder() {
     setBusyReplace(true);
     try {
       const form = new FormData();
-      form.append("pdf", file); // primary work-order PDF field
+      form.append("pdf", file);
       form.append("replacePdf", "1");
       if (keepOldInAttachments) {
         form.append("keepOldPdfInAttachments", "1");
         form.append("keepOldInAttachments", "1");
       }
       await api.put(`/work-orders/${id}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
       await fetchWorkOrder();
       alert("PDF replaced successfully.");
@@ -719,9 +606,8 @@ export default function ViewWorkOrder() {
     try {
       const form = new FormData();
       form.append("estimatePdf", file);
-      // Reuse /edit (backend handles estimatePdfPath when field is "estimatePdf")
       await api.put(`/work-orders/${id}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
       await fetchWorkOrder();
     } catch (error) {
@@ -745,9 +631,8 @@ export default function ViewWorkOrder() {
     try {
       const form = new FormData();
       form.append("poPdf", file);
-      // Reuse /edit (backend handles poPdfPath when field is "poPdf")
       await api.put(`/work-orders/${id}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
       await fetchWorkOrder();
     } catch (error) {
@@ -759,16 +644,8 @@ export default function ViewWorkOrder() {
     }
   };
 
-  const handleDeleteAttachment = async (relPath) => {
-    if (!window.confirm("Delete this attachment?")) return;
-    try {
-      // Using /edit with a JSON body is not supported; your backend doesn't expose a delete-attachment route yet.
-      // Optionally implement a dedicated DELETE route in backend. For now, just warn.
-      alert("Deleting attachments requires a backend route. Not implemented.");
-    } catch (error) {
-      console.error("⚠️ Error deleting attachment:", error);
-      alert(error?.response?.data?.error || "Failed to delete attachment.");
-    }
+  const handleDeleteAttachment = async () => {
+    alert("Deleting attachments requires a backend route. Not implemented.");
   };
 
   /* ---------- Status ---------- */
@@ -778,65 +655,81 @@ export default function ViewWorkOrder() {
     setStatusSaving(true);
     try {
       try {
-        await api.put(`/work-orders/${id}/status`, { status: newStatus });
+        await api.put(`/work-orders/${id}/status`, { status: newStatus }, { headers: authHeaders() });
       } catch {
         const form = new FormData();
         form.append("status", newStatus);
         await api.put(`/work-orders/${id}/edit`, form, {
-          headers: { "Content-Type": "multipart/form-data" },
+          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
         });
       }
       await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error updating status:", error);
-      alert("Failed to update status.");
+      alert(error?.response?.data?.error || "Failed to update status.");
     } finally {
       setStatusSaving(false);
     }
   };
 
-  /* ---------- Notes (FIXED to match backend) ---------- */
+  /* ---------- Notes (FIXED) ---------- */
   const handleAddNote = async () => {
     const text = newNote.trim();
     if (!text) return;
 
     try {
-      // Backend expects: PUT /work-orders/:id/notes  with { notes: <string>, append: true }
-      await api.put(`/work-orders/${id}/notes`, {
-        notes: text,
-        append: true,
-      });
-      setNewNote("");
-      setShowNoteInput(false);
-      await fetchWorkOrder();
-    } catch (error) {
-      console.error("⚠️ Error adding note:", error);
-      alert(error?.response?.data?.error || "Failed to add note.");
+      // 1) Primary: EXACTLY like your successful curl
+      await api.put(
+        `/work-orders/${id}/notes`,
+        { notes: text, append: true },
+        { headers: { "Content-Type": "application/json", ...authHeaders() } }
+      );
+    } catch (err1) {
+      // 2) Fallback: some deployments accept `text` instead of `notes`
+      try {
+        await api.put(
+          `/work-orders/${id}/notes`,
+          { text, append: true },
+          { headers: { "Content-Type": "application/json", ...authHeaders() } }
+        );
+      } catch (err2) {
+        console.error("Add note failed:", err1, err2);
+        const msg =
+          err2?.response?.data?.error ||
+          err1?.response?.data?.error ||
+          err2?.message ||
+          err1?.message ||
+          "Failed to add note.";
+        alert(msg);
+        return;
+      }
     }
+
+    setNewNote("");
+    setShowNoteInput(false);
+    await fetchWorkOrder();
   };
 
   const handleDeleteNote = async (displayIdx) => {
-    // There is no DELETE endpoint; rebuild notes without this entry and PUT the full text.
     if (!window.confirm("Delete this note?")) return;
-
     try {
-      // Convert parsed list back to original append order (oldest -> newest)
-      const byOriginal = [...parsedNotes].sort((a, b) => (a.__order ?? 0) - (b.__order ?? 0));
-
-      // Map displayIdx (newest-first list) back to the actual entry
+      // Rebuild notes by removing selected one (no delete endpoint available)
+      const byOldest = [...parsedNotes].sort(
+        (a, b) => (a.createdAt ? Date.parse(a.createdAt) : 0) - (b.createdAt ? Date.parse(b.createdAt) : 0)
+      );
       const target = displayNotes[displayIdx];
       if (!target) return;
 
-      // Remove the target from the ordered list
-      const kept = byOriginal.filter((e) => !(e.createdAt === target.createdAt && e.text === target.text && (e.by || "") === (target.by || "")));
-
-      // Format back to server TEXT
+      const kept = byOldest.filter(
+        (e) => !(e.createdAt === target.createdAt && e.text === target.text && (e.by || "") === (target.by || ""))
+      );
       const newBody = formatNotesText(kept);
 
-      await api.put(`/work-orders/${id}/notes`, {
-        notes: newBody,
-        append: false, // overwrite with rebuilt body
-      });
+      await api.put(
+        `/work-orders/${id}/notes`,
+        { notes: newBody, append: false },
+        { headers: { "Content-Type": "application/json", ...authHeaders() } }
+      );
 
       await fetchWorkOrder();
     } catch (error) {
@@ -847,7 +740,7 @@ export default function ViewWorkOrder() {
 
   return (
     <div className="view-container">
-      {/* Lightbox for expanded previews */}
+      {/* Lightbox */}
       <Lightbox
         open={lightbox.open}
         onClose={closeLightbox}
@@ -860,15 +753,8 @@ export default function ViewWorkOrder() {
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
           <div className="view-actions">
-            <button className="btn btn-outline" onClick={handlePrint}>
-              🖨️ Print Work Order
-            </button>
-            <button
-              className="back-btn"
-              onClick={() => navigate("/work-orders")}
-            >
-              ← Back to List
-            </button>
+            <button className="btn btn-outline" onClick={handlePrint}>🖨️ Print Work Order</button>
+            <button className="back-btn" onClick={() => navigate("/work-orders")}>← Back to List</button>
           </div>
         </div>
 
@@ -885,12 +771,7 @@ export default function ViewWorkOrder() {
               <PONumberEditor
                 orderId={woId}
                 initialPo={cleanedPo}
-                onSaved={(newPo) =>
-                  setWorkOrder((prev) => ({
-                    ...prev,
-                    poNumber: newPo || null,
-                  }))
-                }
+                onSaved={(newPo) => setWorkOrder((prev) => ({ ...prev, poNumber: newPo || null }))}
               />
             </span>
           </li>
@@ -898,262 +779,109 @@ export default function ViewWorkOrder() {
           <li className="detail-item">
             <span className="detail-label">Status:</span>
             <span className="detail-value">
-              <select
-                value={localStatus}
-                onChange={handleStatusChange}
-                disabled={statusSaving}
-                style={{ padding: 6 }}
-              >
-                <option value="" disabled>
-                  Select status…
-                </option>
+              <select value={localStatus} onChange={handleStatusChange} disabled={statusSaving} style={{ padding: 6 }}>
+                <option value="" disabled>Select status…</option>
                 {STATUS_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
+                  <option key={opt} value={opt}>{opt}</option>
                 ))}
               </select>
-              {statusSaving && (
-                <small style={{ marginLeft: 8 }}>Saving…</small>
-              )}
+              {statusSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
             </span>
           </li>
 
-          <li className="detail-item">
-            <span className="detail-label">Customer:</span>
-            <span className="detail-value">{customer || "—"}</span>
-          </li>
-          <li className="detail-item">
-            <span className="detail-label">Customer Phone:</span>
-            <span className="detail-value">{customerPhone || "—"}</span>
-          </li>
-          <li className="detail-item">
-            <span className="detail-label">Customer Email:</span>
-            <span className="detail-value">{customerEmail || "—"}</span>
-          </li>
-
-          <li className="detail-item">
-            <span className="detail-label">Site Location:</span>
-            <span className="detail-value">{siteLocation || "—"}</span>
-          </li>
-          <li className="detail-item">
-            <span className="detail-label">Site Address:</span>
-            <span className="detail-value pre-wrap">
-              {siteAddress || "—"}
-            </span>
-          </li>
-
-          <li className="detail-item">
-            <span className="detail-label">Billing Address:</span>
-            <span className="detail-value pre-wrap">
-              {billingAddress || "—"}
-            </span>
-          </li>
-          <li className="detail-item">
-            <span className="detail-label">Problem Description:</span>
-            <span className="detail-value pre-wrap">
-              {problemDescription || "—"}
-            </span>
-          </li>
+          <li className="detail-item"><span className="detail-label">Customer:</span><span className="detail-value">{customer || "—"}</span></li>
+          <li className="detail-item"><span className="detail-label">Customer Phone:</span><span className="detail-value">{customerPhone || "—"}</span></li>
+          <li className="detail-item"><span className="detail-label">Customer Email:</span><span className="detail-value">{customerEmail || "—"}</span></li>
+          <li className="detail-item"><span className="detail-label">Site Location:</span><span className="detail-value">{siteLocation || "—"}</span></li>
+          <li className="detail-item"><span className="detail-label">Site Address:</span><span className="detail-value pre-wrap">{siteAddress || "—"}</span></li>
+          <li className="detail-item"><span className="detail-label">Billing Address:</span><span className="detail-value pre-wrap">{billingAddress || "—"}</span></li>
+          <li className="detail-item"><span className="detail-label">Problem Description:</span><span className="detail-value pre-wrap">{problemDescription || "—"}</span></li>
           <li className="detail-item">
             <span className="detail-label">Scheduled Date:</span>
             <span className="detail-value">
-              {scheduledDate
-                ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
-                : "Not Scheduled"}
+              {scheduledDate ? moment(scheduledDate).format("YYYY-MM-DD HH:mm") : "Not Scheduled"}
             </span>
           </li>
         </ul>
 
-        {/* Signed Work Order PDF (tile preview) */}
+        {/* Signed Work Order PDF */}
         <div className="section-card">
           <h3 className="section-header">Sign-Off Sheet PDF</h3>
-
           {signedHref ? (
-            <div
-              className="attachments"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                gap: 12,
-              }}
-            >
-              <FileTile
-                kind="pdf"
-                href={signedHref}
-                fileName={(pdfPath || "").split("/").pop() || "signed.pdf"}
-                onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")}
-              />
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+              <FileTile kind="pdf" href={signedHref} fileName={(pdfPath || "").split("/").pop() || "signed.pdf"} onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")} />
             </div>
           ) : (
             <div>
               <p className="empty-text">No PDF attached.</p>
               <label className="btn">
                 {busyReplace ? "Uploading…" : "Upload Signed PDF"}
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleReplacePdfUpload}
-                  style={{ display: "none" }}
-                  disabled={busyReplace}
-                />
+                <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
               </label>
             </div>
           )}
 
           {signedHref && (
-            <div
-              className="mt-2"
-              style={{
-                display: "flex",
-                gap: 12,
-                alignItems: "center",
-                flexWrap: "wrap",
-              }}
-            >
-              <a
-                className="btn btn-light"
-                href={signedHref}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Open in new tab
-              </a>
+            <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <a className="btn btn-light" href={signedHref} target="_blank" rel="noreferrer">Open in new tab</a>
               <label className="btn">
                 {busyReplace ? "Replacing…" : "Replace Signed PDF"}
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleReplacePdfUpload}
-                  style={{ display: "none" }}
-                  disabled={busyReplace}
-                />
+                <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
               </label>
-              <label
-                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-              >
-                <input
-                  type="checkbox"
-                  checked={keepOldInAttachments}
-                  onChange={(e) => setKeepOldInAttachments(e.target.checked)}
-                />
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <input type="checkbox" checked={keepOldInAttachments} onChange={(e) => setKeepOldInAttachments(e.target.checked)} />
                 Move existing signed PDF to attachments
               </label>
             </div>
           )}
         </div>
 
-        {/* ESTIMATE PDF (tile preview) */}
+        {/* ESTIMATE PDF */}
         <div className="section-card">
           <h3 className="section-header">Estimate PDF</h3>
-
           {estimateHref ? (
-            <div
-              className="attachments"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                gap: 12,
-              }}
-            >
-              <FileTile
-                kind="pdf"
-                href={estimateHref}
-                fileName={
-                  (estimatePdfPath || "").split("/").pop() || "estimate.pdf"
-                }
-                onExpand={() =>
-                  openLightbox("pdf", estimateHref, "Estimate PDF")
-                }
-              />
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+              <FileTile kind="pdf" href={estimateHref} fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"} onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")} />
             </div>
           ) : (
             <p className="empty-text">No estimate PDF attached.</p>
           )}
 
-          <div
-            className="attachment-upload"
-            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-          >
+          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label className="btn">
-              {busyEstimateUpload
-                ? "Uploading…"
-                : estimateHref
-                ? "Replace Estimate PDF"
-                : "Upload Estimate PDF"}
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={handleUploadOrReplaceEstimatePdf}
-                style={{ display: "none" }}
-                disabled={busyEstimateUpload}
-              />
+              {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
+              <input type="file" accept="application/pdf" onChange={handleUploadOrReplaceEstimatePdf} style={{ display: "none" }} disabled={busyEstimateUpload} />
             </label>
           </div>
         </div>
 
-        {/* PO PDF (tile preview) */}
+        {/* PO PDF */}
         <div className="section-card">
           <h3 className="section-header">PO Order PDF</h3>
-
           {poHref ? (
-            <div
-              className="attachments"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                gap: 12,
-              }}
-            >
-              <FileTile
-                kind="pdf"
-                href={poHref}
-                fileName={(poPdfPath || "").split("/").pop() || "po.pdf"}
-                onExpand={() => openLightbox("pdf", poHref, "PO PDF")}
-              />
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+              <FileTile kind="pdf" href={poHref} fileName={(poPdfPath || "").split("/").pop() || "po.pdf"} onExpand={() => openLightbox("pdf", poHref, "PO PDF")} />
             </div>
           ) : (
             <p className="empty-text">No PO PDF attached.</p>
           )}
 
-          <div
-            className="attachment-upload"
-            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-          >
+          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label className="btn">
-              {busyPoUpload
-                ? "Uploading…"
-                : poHref
-                ? "Replace PO PDF"
-                : "Upload PO PDF"}
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={handleUploadOrReplacePoPdf}
-                style={{ display: "none" }}
-                disabled={busyPoUpload}
-              />
+              {busyPoUpload ? "Uploading…" : poHref ? "Replace PO PDF" : "Upload PO PDF"}
+              <input type="file" accept="application/pdf" onChange={handleUploadOrReplacePoPdf} style={{ display: "none" }} disabled={busyPoUpload} />
             </label>
           </div>
         </div>
 
-        {/* Other PDF Attachments (non-canonical) */}
+        {/* Other PDFs */}
         <div className="section-card">
           <h3 className="section-header">Other PDF Attachments</h3>
-
           {otherPdfAttachments.length ? (
-            <div
-              className="attachments"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                gap: 12,
-              }}
-            >
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
               {otherPdfAttachments.map((relPath, i) => {
                 const href = pdfThumbUrl(relPath);
-                const fileName =
-                  relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
+                const fileName = relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
                 return (
                   <FileTile
                     key={`${relPath}-${i}`}
@@ -1161,7 +889,7 @@ export default function ViewWorkOrder() {
                     href={href}
                     fileName={fileName}
                     onExpand={() => openLightbox("pdf", href, fileName)}
-                    onDelete={() => handleDeleteAttachment(relPath)}
+                    onDelete={handleDeleteAttachment}
                   />
                 );
               })}
@@ -1171,23 +899,14 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* Image Attachments (non-PDF) */}
+        {/* Images */}
         <div className="section-card">
           <h3 className="section-header">Image Attachments</h3>
-
           {attachmentImages.length ? (
-            <div
-              className="attachments"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                gap: 12,
-              }}
-            >
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
               {attachmentImages.map((relPath, i) => {
                 const href = urlFor(relPath);
-                const fileName =
-                  relPath.split("/").pop() || `image-${i + 1}.jpg`;
+                const fileName = relPath.split("/").pop() || `image-${i + 1}.jpg`;
                 return (
                   <FileTile
                     key={`${relPath}-${i}`}
@@ -1195,7 +914,7 @@ export default function ViewWorkOrder() {
                     href={href}
                     fileName={fileName}
                     onExpand={() => openLightbox("image", href, fileName)}
-                    onDelete={() => handleDeleteAttachment(relPath)}
+                    onDelete={handleDeleteAttachment}
                   />
                 );
               })}
@@ -1209,10 +928,7 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
 
-          <button
-            className="toggle-note-btn"
-            onClick={() => setShowNoteInput((v) => !v)}
-          >
+          <button className="toggle-note-btn" onClick={() => setShowNoteInput((v) => !v)}>
             {showNoteInput ? "Cancel" : "Add Note"}
           </button>
 
@@ -1237,9 +953,7 @@ export default function ViewWorkOrder() {
                 <li key={`${n.createdAt || "na"}-${idx}`} className="note-item">
                   <div className="note-header">
                     <small className="note-timestamp">
-                      {n.createdAt
-                        ? moment(n.createdAt).format("YYYY-MM-DD HH:mm")
-                        : "—"}
+                      {n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "—"}
                       {n.by ? ` — ${n.by}` : ""}
                     </small>
                     <button
