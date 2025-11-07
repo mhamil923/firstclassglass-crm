@@ -1085,7 +1085,7 @@ app.get('/files', async (req, res) => {
                .createReadStream()
                .on('error', () => { if (!res.headersSent) res.status(500).end(); })
                .pipe(res);
-    }
+    } // <— close S3 branch
 
     // Local mode
     const uploadsDir = path.resolve(__dirname, 'uploads');
@@ -1125,6 +1125,101 @@ app.get('/files', async (req, res) => {
   } catch (err) {
     console.error('File resolver error:', err);
     res.status(500).json({ error: 'Failed to resolve file' });
+  }
+});
+
+// ─── DELETE HELPERS & ENDPOINTS ──────────────────────────────────────────────
+async function deleteKeyIfExists(key) {
+  if (!key) return;
+  const k = normalizeStoredKey(key);
+  try {
+    if (S3_BUCKET) {
+      await s3.deleteObject({ Bucket: S3_BUCKET, Key: k }).promise();
+    } else {
+      const uploadsDir = path.resolve(__dirname, 'uploads');
+      const rels = localCandidatesFromKey(k);
+      for (const rel of rels) {
+        const p = path.resolve(uploadsDir, rel);
+        if (p.startsWith(uploadsDir) && fs.existsSync(p)) {
+          try { fs.unlinkSync(p); } catch {}
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ deleteKeyIfExists:', k, e.message);
+  }
+}
+
+async function deleteWorkOrderById(wid, { purgeFiles = true } = {}) {
+  const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+  if (!row) return { ok: false, code: 404, error: 'Not found' };
+
+  // delete files (best effort)
+  if (purgeFiles) {
+    const keys = []
+      .concat(row.pdfPath || [])
+      .concat(row.estimatePdfPath || [])
+      .concat(row.poPdfPath || [])
+      .concat(String(row.photoPath || '').split(',').filter(Boolean));
+    for (const k of keys) await deleteKeyIfExists(k);
+  }
+
+  await db.execute('DELETE FROM work_orders WHERE id = ?', [wid]);
+  return { ok: true };
+}
+
+// Canonical REST delete
+app.delete('/work-orders/:id(\\d+)', authenticate, async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const result = await deleteWorkOrderById(wid, { purgeFiles: true });
+    if (!result.ok) return res.status(result.code || 500).json({ error: result.error || 'Delete failed' });
+    res.json({ ok: true, id: wid });
+  } catch (e) {
+    console.error('Delete /work-orders/:id error:', e);
+    res.status(500).json({ error: 'Failed to delete work order.' });
+  }
+});
+
+// Method-override style: POST ?_method=DELETE
+app.post('/work-orders/:id(\\d+)', authenticate, async (req, res, next) => {
+  if (String(req.query._method || '').toUpperCase() !== 'DELETE') return next();
+  try {
+    const wid = Number(req.params.id);
+    const result = await deleteWorkOrderById(wid, { purgeFiles: true });
+    if (!result.ok) return res.status(result.code || 500).json({ error: result.error || 'Delete failed' });
+    res.json({ ok: true, id: wid });
+  } catch (e) {
+    console.error('POST ?_method=DELETE error:', e);
+    res.status(500).json({ error: 'Failed to delete work order.' });
+  }
+});
+
+// Explicit action route
+app.post('/work-orders/:id(\\d+)/delete', authenticate, async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const result = await deleteWorkOrderById(wid, { purgeFiles: true });
+    if (!result.ok) return res.status(result.code || 500).json({ error: result.error || 'Delete failed' });
+    res.json({ ok: true, id: wid });
+  } catch (e) {
+    console.error('POST /work-orders/:id/delete error:', e);
+    res.status(500).json({ error: 'Failed to delete work order.' });
+  }
+});
+
+// Bulk/body style: DELETE /work-orders  { id }
+app.delete('/work-orders', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const wid = Number(b.id);
+    if (!wid) return res.status(400).json({ error: 'id is required' });
+    const result = await deleteWorkOrderById(wid, { purgeFiles: isTruthy(b.purgeFiles) || true });
+    if (!result.ok) return res.status(result.code || 500).json({ error: result.error || 'Delete failed' });
+    res.json({ ok: true, id: wid });
+  } catch (e) {
+    console.error('DELETE /work-orders {id} error:', e);
+    res.status(500).json({ error: 'Failed to delete work order.' });
   }
 });
 
