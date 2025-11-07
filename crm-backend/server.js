@@ -666,7 +666,7 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
   }
 });
 
-// CREATE
+// CREATE — now persists scheduledDate & scheduledEnd
 app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -678,10 +678,28 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       assignedTo,
       billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
       notes = null,
+
+      // NEW fields accepted from AddWorkOrder
+      scheduledDate: scheduledDateRaw = null,   // e.g. "2025-10-27 08:00" or "2025-10-27T08:00"
+      endTime = null,                            // optional "HH" or "HH:mm"
+      timeWindow = null                          // optional "08-12"
     } = req.body;
+
     if (!customer || !billingAddress || !problemDescription) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
+
+    // Normalize schedule inputs
+    let startSqlMaybe = (scheduledDateRaw === '') ? null : parseDateTimeFlexible(scheduledDateRaw);
+    const { startSql, endSql } = windowSql({
+      dateSql: startSqlMaybe,
+      endTime,
+      timeWindow
+    });
+    const scheduledDate = startSql || null;
+    const scheduledEnd  = endSql   || null;
+
+    // Files
     const files = req.files || [];
     const primaryPdf   = pickPdfByFields(files, FIELD_SETS.work);
     const estimatePdf  = pickPdfByFields(files, FIELD_SETS.est);
@@ -700,15 +718,18 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
 
     const cStatus = canonStatus(status) || 'New';
 
+    // ⬇️ scheduledDate & scheduledEnd included
     const cols = [
       'workOrderNumber','poNumber','customer','siteLocation','siteAddress','billingAddress',
       'problemDescription','status','pdfPath','estimatePdfPath','poPdfPath','photoPath',
-      'billingPhone','sitePhone','customerPhone','customerEmail','notes'
+      'billingPhone','sitePhone','customerPhone','customerEmail','notes',
+      'scheduledDate','scheduledEnd'
     ];
     const vals = [
       workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
       problemDescription, cStatus, pdfPath, estimatePdfPath, poPdfPath, initialAttachments,
-      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes
+      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes,
+      scheduledDate, scheduledEnd
     ];
     if (SCHEMA.hasAssignedTo && assignedTo !== undefined && assignedTo !== '') {
       const assignedToVal = Number.isFinite(Number(assignedTo)) ? Number(assignedTo) : null;
@@ -731,7 +752,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
   }
 });
 
-// EDIT
+// EDIT — now updates/clears scheduledDate & scheduledEnd
 app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -855,19 +876,43 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       customerPhone = existing.customerPhone,
       customerEmail = existing.customerEmail,
       notes = existing.notes,
+
+      // NEW schedule fields
+      scheduledDate: scheduledDateRaw = undefined, // undefined = not sent; '' = clear; otherwise set
+      endTime = null,
+      timeWindow = null
     } = body;
 
     const cStatus = canonStatus(status) || existing.status;
 
-    // Clean, explicit param build (no splicing surprises)
+    // Compute schedule updates
+    let scheduledDate = existing.scheduledDate || null;
+    let scheduledEnd  = existing.scheduledEnd  || null;
+
+    if (scheduledDateRaw !== undefined) {
+      if (scheduledDateRaw === '') {
+        // explicit clear
+        scheduledDate = null;
+        scheduledEnd  = null;
+      } else {
+        const startSqlMaybe = parseDateTimeFlexible(scheduledDateRaw);
+        const win = windowSql({ dateSql: startSqlMaybe, endTime, timeWindow });
+        scheduledDate = win.startSql || startSqlMaybe || null;
+        scheduledEnd  = win.endSql || null;
+      }
+    }
+
+    // Clean, explicit param build
     let sql = `UPDATE work_orders
                  SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
                      problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
-                     billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?`;
+                     billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?,
+                     scheduledDate=?,scheduledEnd=?`;
     const params = [
       workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
       problemDescription, cStatus, pdfPath || null, estimatePdfPath || null, poPdfPath || null, attachments.join(','),
-      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes
+      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes,
+      scheduledDate, scheduledEnd
     ];
     if (SCHEMA.hasAssignedTo) { sql += `,assignedTo=?`; params.push((assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo)); }
     sql += ` WHERE id=?`; params.push(wid);
