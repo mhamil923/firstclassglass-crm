@@ -46,6 +46,7 @@ export default function AddWorkOrder() {
     assignedTo: "",
     customerPhone: "",
     customerEmail: "",
+    scheduledDate: "", // ✅ NEW — "YYYY-MM-DDTHH:mm" (local time) for <input type="datetime-local">
   });
 
   const [pdfFile, setPdfFile] = useState(null);                 // Work Order sign-off PDF
@@ -200,7 +201,7 @@ export default function AddWorkOrder() {
     form.append("workOrderNumber", workOrder.workOrderNumber || "");
     form.append("poNumber", workOrder.poNumber || "");
     form.append("siteLocation", workOrder.siteLocation || ""); // ✅ name
-    form.append("siteAddress", workOrder.siteAddress || "");   // ✅ address (server may ignore if not implemented)
+    form.append("siteAddress", workOrder.siteAddress || "");   // ✅ address
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
     form.append("status", workOrder.status || "Needs to be Scheduled");
@@ -208,9 +209,14 @@ export default function AddWorkOrder() {
     form.append("customerEmail", workOrder.customerEmail || "");
     if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
 
+    // ✅ NEW — send scheduledDate exactly as the datetime-local value (server normalizes/uses it)
+    if (workOrder.scheduledDate) {
+      form.append("scheduledDate", workOrder.scheduledDate);
+    }
+
     // Files — use distinct field names the server can route correctly
-    if (pdfFile) form.append("workOrderPdf", pdfFile);          // ⬅️ was "pdfFile"
-    if (estimatePdfFile) form.append("estimatePdf", estimatePdfFile); // ⬅️ was "estimatePdfFile"
+    if (pdfFile) form.append("workOrderPdf", pdfFile);
+    if (estimatePdfFile) form.append("estimatePdf", estimatePdfFile);
     if (photoFile) form.append("photoFile", photoFile);
 
     try {
@@ -391,6 +397,19 @@ export default function AddWorkOrder() {
               </option>
             ))}
           </select>
+        </div>
+
+        {/* ✅ NEW — Scheduled Date & Time */}
+        <div className="form-group">
+          <label className="form-label">Scheduled Date & Time</label>
+          <input
+            type="datetime-local"
+            name="scheduledDate"
+            value={workOrder.scheduledDate}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="mm/dd/yyyy, --:-- --"
+          />
         </div>
 
         {/* Uploads */}
