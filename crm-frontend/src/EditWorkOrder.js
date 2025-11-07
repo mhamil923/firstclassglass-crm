@@ -24,6 +24,7 @@ export default function EditWorkOrder() {
   const [workOrder, setWorkOrder] = useState(null);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
 
   // Files
   const [pdfFile, setPdfFile] = useState(null); // WO PDF replacement
@@ -37,9 +38,7 @@ export default function EditWorkOrder() {
   const scheduledDateInput = useMemo(() => {
     if (!workOrder?.scheduledDate) return "";
     try {
-      // Expecting an ISO or Date-compatible string
       const dt = new Date(workOrder.scheduledDate);
-      // Format to "YYYY-MM-DDTHH:MM" for input[type=datetime-local]
       const pad = (n) => String(n).padStart(2, "0");
       const yyyy = dt.getFullYear();
       const mm = pad(dt.getMonth() + 1);
@@ -55,7 +54,7 @@ export default function EditWorkOrder() {
   useEffect(() => {
     // fetch the work order
     api
-      .get(`/work-orders/${id}`)
+      .get(`/work-orders/${id}`, { withCredentials: true })
       .then((res) => {
         setWorkOrder(res.data);
         setLoading(false);
@@ -67,7 +66,7 @@ export default function EditWorkOrder() {
 
     // fetch assignees list (hide Mark)
     api
-      .get("/users", { params: { assignees: 1 } })
+      .get("/users", { params: { assignees: 1 }, withCredentials: true })
       .then((res) =>
         setUsers((res.data || []).filter((u) => u.username !== "Mark"))
       )
@@ -80,12 +79,10 @@ export default function EditWorkOrder() {
   const handleWOFileChange = (e) => {
     setPdfFile(e.target.files?.[0] ?? null);
   };
-
   const handleEstimateFiles = (e) => {
     const files = Array.from(e.target.files || []);
     setEstimateFiles(files);
   };
-
   const handlePOFiles = (e) => {
     const files = Array.from(e.target.files || []);
     setPoFiles(files);
@@ -95,18 +92,20 @@ export default function EditWorkOrder() {
     const text = (quickNote || "").trim();
     if (!text) return;
     try {
-      // Primary shape: { notes, append: true }
-      await api.put(`/work-orders/${id}/notes`, {
-        notes: text,
-        append: true,
-      });
+      // Primary shape
+      await api.put(
+        `/work-orders/${id}/notes`,
+        { notes: text, append: true },
+        { withCredentials: true }
+      );
     } catch (e1) {
       try {
-        // Fallback shape: { text, append: true }
-        await api.put(`/work-orders/${id}/notes`, {
-          text,
-          append: true,
-        });
+        // Fallback shape
+        await api.put(
+          `/work-orders/${id}/notes`,
+          { text, append: true },
+          { withCredentials: true }
+        );
       } catch (e2) {
         console.error(
           "⚠️ Failed to append note:",
@@ -139,48 +138,33 @@ export default function EditWorkOrder() {
       formData.append("billingAddress", workOrder.billingAddress || "");
 
       // Problem
-      formData.append(
-        "problemDescription",
-        workOrder.problemDescription || ""
-      );
+      formData.append("problemDescription", workOrder.problemDescription || "");
 
       // Status / Assign / Schedule
       formData.append("status", workOrder.status || "Needs to be Scheduled");
       formData.append("assignedTo", workOrder.assignedTo || "");
-      formData.append(
-        "scheduledDate",
-        // The input supplies "YYYY-MM-DDTHH:mm" (local). Send as-is; server can interpret/normalize.
-        workOrder.scheduledDate || ""
-      );
+      formData.append("scheduledDate", workOrder.scheduledDate || "");
 
       // Replace WO PDF (optional)
-      if (pdfFile) {
-        formData.append("pdfFile", pdfFile);
-      }
+      if (pdfFile) formData.append("pdfFile", pdfFile);
 
       // Append Estimate PDFs (optional, multiple)
       if (estimateFiles?.length) {
-        for (const f of estimateFiles) {
-          formData.append("estimatePdfFiles", f);
-        }
+        for (const f of estimateFiles) formData.append("estimatePdfFiles", f);
       }
 
       // Append PO PDFs (optional, multiple)
       if (poFiles?.length) {
-        for (const f of poFiles) {
-          formData.append("poPdfFiles", f);
-        }
+        for (const f of poFiles) formData.append("poPdfFiles", f);
       }
 
-      // Save changes
       await api.put(`/work-orders/${id}/edit`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        withCredentials: true,
       });
 
-      // Append note if provided
       await appendQuickNoteIfAny();
 
-      // Done
       navigate("/work-orders");
     } catch (err) {
       console.error("⚠️ Error updating work order:", err?.response || err);
@@ -188,33 +172,78 @@ export default function EditWorkOrder() {
     }
   };
 
+  /**
+   * Robust multi-strategy delete:
+   *  - DELETE /work-orders/:id
+   *  - POST   /work-orders/:id?_method=DELETE   (method-override)
+   *  - POST   /work-orders/:id/delete
+   *  - DELETE /work-orders { id }
+   * Includes withCredentials on each attempt and surfaces precise server errors.
+   */
   const handleDelete = async () => {
+    if (deleting) return;
     if (!window.confirm("Delete this work order? This cannot be undone.")) return;
 
-    // Try several server styles so delete works regardless of backend route shape
+    setDeleting(true);
+
+    const showErr = (err, label) => {
+      const status = err?.response?.status;
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.message ||
+        err?.message ||
+        "Unknown error";
+      console.error(`❌ ${label} failed`, { status, msg, err });
+      return { status, msg };
+    };
+
     try {
-      await api.delete(`/work-orders/${id}`);
+      // Try 1: canonical REST
+      await api.delete(`/work-orders/${id}`, { withCredentials: true });
       navigate("/work-orders");
       return;
     } catch (e1) {
-      // fall through
+      const { status, msg } = showErr(e1, "DELETE /work-orders/:id");
+      // If 401/403, no point trying others without creds; but we already pass withCredentials.
+      // Keep going.
     }
 
     try {
-      await api.post(`/work-orders/${id}/delete`);
+      // Try 2: method-override style
+      await api.post(`/work-orders/${id}?_method=DELETE`, null, {
+        withCredentials: true,
+      });
       navigate("/work-orders");
       return;
     } catch (e2) {
-      // fall through
+      showErr(e2, "POST /work-orders/:id?_method=DELETE");
     }
 
     try {
-      await api.delete(`/work-orders`, { data: { id } });
+      // Try 3: explicit /delete endpoint
+      await api.post(`/work-orders/${id}/delete`, null, {
+        withCredentials: true,
+      });
       navigate("/work-orders");
       return;
     } catch (e3) {
-      console.error("Error deleting work order:", e3);
-      alert(e3?.response?.data?.error || "Failed to delete. See console.");
+      showErr(e3, "POST /work-orders/:id/delete");
+    }
+
+    try {
+      // Try 4: bulk-style body
+      await api.delete(`/work-orders`, {
+        data: { id, purgeFiles: true },
+        withCredentials: true,
+        headers: { "Content-Type": "application/json" },
+      });
+      navigate("/work-orders");
+      return;
+    } catch (e4) {
+      const { status, msg } = showErr(e4, "DELETE /work-orders { id }");
+      alert(`Failed to delete (status ${status ?? "?"}). ${msg}. See console for details.`);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -234,9 +263,7 @@ export default function EditWorkOrder() {
               type="text"
               className="form-control-custom"
               value={workOrder.workOrderNumber || ""}
-              onChange={(e) =>
-                onChange({ workOrderNumber: e.target.value })
-              }
+              onChange={(e) => onChange({ workOrderNumber: e.target.value })}
               placeholder="e.g., 24-00123"
             />
           </div>
@@ -345,9 +372,7 @@ export default function EditWorkOrder() {
             rows="4"
             required
             value={workOrder.problemDescription || ""}
-            onChange={(e) =>
-              onChange({ problemDescription: e.target.value })
-            }
+            onChange={(e) => onChange({ problemDescription: e.target.value })}
           />
         </div>
 
@@ -389,15 +414,8 @@ export default function EditWorkOrder() {
             <input
               type="datetime-local"
               className="form-control-custom"
-              value={
-                workOrder.scheduledDate
-                  ? // use the memoized formatted value
-                    (scheduledDateInput || "")
-                  : ""
-              }
-              onChange={(e) =>
-                onChange({ scheduledDate: e.target.value })
-              }
+              value={workOrder.scheduledDate ? scheduledDateInput || "" : ""}
+              onChange={(e) => onChange({ scheduledDate: e.target.value })}
             />
           </div>
         </div>
@@ -437,7 +455,6 @@ export default function EditWorkOrder() {
               multiple
               onChange={handleEstimateFiles}
             />
-            {/* Existing estimates list (read-only) */}
             {!!workOrder?.estimatePdfPaths && (
               <small className="text-muted d-block">
                 Existing: {String(workOrder.estimatePdfPaths)}
@@ -445,22 +462,21 @@ export default function EditWorkOrder() {
             )}
           </div>
 
-            <div className="form-group">
-              <label>Upload PO PDF(s) (Optional)</label>
-              <input
-                type="file"
-                className="form-file-custom"
-                accept="application/pdf"
-                multiple
-                onChange={handlePOFiles}
-              />
-              {/* Existing POs list (read-only) */}
-              {!!workOrder?.poPdfPaths && (
-                <small className="text-muted d-block">
-                  Existing: {String(workOrder.poPdfPaths)}
-                </small>
-              )}
-            </div>
+          <div className="form-group">
+            <label>Upload PO PDF(s) (Optional)</label>
+            <input
+              type="file"
+              className="form-file-custom"
+              accept="application/pdf"
+              multiple
+              onChange={handlePOFiles}
+            />
+            {!!workOrder?.poPdfPaths && (
+              <small className="text-muted d-block">
+                Existing: {String(workOrder.poPdfPaths)}
+              </small>
+            )}
+          </div>
         </div>
 
         {/* Quick Note (appends to notes history) */}
@@ -476,20 +492,23 @@ export default function EditWorkOrder() {
         </div>
 
         <div className="button-row">
-          <button type="submit" className="btn-custom btn-save">
+          <button type="submit" className="btn-custom btn-save" disabled={deleting}>
             Save Changes
           </button>
           <button
             type="button"
             className="btn-custom btn-delete"
             onClick={handleDelete}
+            disabled={deleting}
+            title={deleting ? "Deleting…" : "Delete work order"}
           >
-            Delete
+            {deleting ? "Deleting…" : "Delete"}
           </button>
           <button
             type="button"
             className="btn-custom btn-back"
             onClick={() => navigate("/work-orders")}
+            disabled={deleting}
           >
             Back
           </button>
