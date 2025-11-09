@@ -81,18 +81,6 @@ const clamp4 = {
 };
 
 /* =========================
-   Status gates (existing)
-========================= */
-// Only these statuses are allowed to appear in the Unscheduled strip when there is no search
-const ALLOWED_UNSCHEDULED_STATUSES = new Set([
-  "new",
-  "scheduled",
-  "needs to be scheduled",
-]);
-const isAllowedForUnscheduled = (status) =>
-  ALLOWED_UNSCHEDULED_STATUSES.has(norm(status));
-
-/* =========================
    Event bubble (calendar)
 ========================= */
 function CustomEvent({ event }) {
@@ -104,7 +92,15 @@ function CustomEvent({ event }) {
       : "";
 
   const idLabel = displayWOThenPO(event);
-  const hasProblem = !!event.problemDescription;
+  const problem = event.problemDescription || event.meta?.problemDescription;
+
+  const siteLocation = event.siteLocation ?? event.meta?.siteLocation;
+  const siteAddress =
+    event.siteAddress ??
+    event.meta?.siteAddress ??
+    event.serviceAddress ??
+    event.address ??
+    "";
 
   const popover = (
     <Popover id={`popover-${event.id}`}>
@@ -112,20 +108,20 @@ function CustomEvent({ event }) {
         {event.customer ? `${event.customer}` : `Work Order`} — {idLabel}
       </Popover.Header>
       <Popover.Body>
-        {event.siteLocation ? (
+        {siteLocation ? (
           <div>
-            <strong>Site Location:</strong> {event.siteLocation}
+            <strong>Site Location:</strong> {siteLocation}
           </div>
         ) : null}
-        {event.siteAddress ? (
+        {siteAddress ? (
           <div>
-            <strong>Site Address:</strong> {event.siteAddress}
+            <strong>Site Address:</strong> {siteAddress}
           </div>
         ) : null}
-        {hasProblem ? (
+        {problem ? (
           <div style={{ marginTop: 6 }}>
             <strong>Problem:</strong>
-            <div style={clamp4}>{event.problemDescription}</div>
+            <div style={clamp4}>{problem}</div>
           </div>
         ) : null}
         {when ? (
@@ -148,11 +144,15 @@ function CustomEvent({ event }) {
    Main component
 ========================= */
 export default function WorkOrderCalendar() {
-  const [allOrders, setAllOrders] = useState([]);            // ⬅️ NEW: keep full list
-  const [workOrders, setWorkOrders] = useState([]);          // scheduled & status=Scheduled → calendar
+  // Full work order list (for search in the Unscheduled bar)
+  const [allOrders, setAllOrders] = useState([]);
+  // Scheduled events for the visible range
+  const [events, setEvents] = useState([]);
+  // Unscheduled strip data
   const [unscheduledOrders, setUnscheduledOrders] = useState([]);
   const [unscheduledSearch, setUnscheduledSearch] = useState("");
 
+  // Calendar view/range
   const [view, setView] = useState("month");
   const [currentDate, setCurrentDate] = useState(new Date());
 
@@ -172,67 +172,114 @@ export default function WorkOrderCalendar() {
   // Drag from Unscheduled OR Day modal → calendar
   const [dragItem, setDragItem] = useState(null);
 
-  // Reorder within day modal
-  const [dragIndex, setDragIndex] = useState(null);
-  const [overIndex, setOverIndex] = useState(null);
-
-  // Status picker inside modals/unscheduled
+  // Status modal
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [statusTarget, setStatusTarget] = useState(null);
   const [statusChoice, setStatusChoice] = useState("");
   const [statusSaving, setStatusSaving] = useState(false);
 
+  /* ========= initial fetches ========= */
   useEffect(() => {
-    fetchWorkOrders();
+    // all work orders (for search) and unscheduled bar feed
+    refreshLists();
   }, []);
 
-  const fetchWorkOrders = useCallback(() => {
-    api
-      .get("/work-orders")
-      .then((res) => {
-        const list = Array.isArray(res.data) ? res.data : [];
+  // refresh calendar events whenever the visible range changes
+  useEffect(() => {
+    fetchCalendarForVisibleRange();
+  }, [view, currentDate]);
 
-        // Keep the full list in state so search can include scheduled items
-        setAllOrders(list);
-
-        // 1) Calendar events: only things actually scheduled and with status Scheduled
-        const calendarItems = list.filter(
-          (o) => o.scheduledDate && norm(o.status) === "scheduled"
-        );
-
-        // 2) Unscheduled strip (default view, when search is empty)
-        const unscheduled = list.filter((o) => {
-          const statusOk = isAllowedForUnscheduled(o.status);
-          if (!statusOk) return false;
-          const s = norm(o.status);
-          if (s === "needs to be scheduled") return true;
-          if (!o.scheduledDate) return true;
-          return false;
-        });
-
-        setWorkOrders(calendarItems);
-        setUnscheduledOrders(unscheduled);
-      })
-      .catch((err) => console.error("⚠️ Error fetching work orders:", err));
+  const refreshLists = useCallback(async () => {
+    try {
+      const [allRes, unRes] = await Promise.all([
+        api.get("/work-orders"),
+        api.get("/work-orders/unscheduled"),
+      ]);
+      setAllOrders(Array.isArray(allRes.data) ? allRes.data : []);
+      setUnscheduledOrders(Array.isArray(unRes.data) ? unRes.data : []);
+    } catch (e) {
+      console.error("⚠️ Error loading lists:", e);
+    }
   }, []);
 
-  /* ===== schedule helpers ===== */
-  async function setSchedulePayload(orderId, payload) {
-    await api.put(`/work-orders/${orderId}/update-date`, payload);
+  /* ========= /calendar/events ========= */
+  function visibleRangeFor(viewName, anchorDate) {
+    const m = moment(anchorDate);
+    switch (viewName) {
+      case "day": {
+        const start = m.clone().startOf("day");
+        const end = m.clone().endOf("day");
+        return { start: start.format("YYYY-MM-DD"), end: end.format("YYYY-MM-DD") };
+      }
+      case "week": {
+        const start = m.clone().startOf("week");
+        const end = m.clone().endOf("week");
+        return { start: start.format("YYYY-MM-DD"), end: end.format("YYYY-MM-DD") };
+      }
+      case "agenda":
+      case "month":
+      default: {
+        const start = m.clone().startOf("month").startOf("week");
+        const end = m.clone().endOf("month").endOf("week");
+        return { start: start.format("YYYY-MM-DD"), end: end.format("YYYY-MM-DD") };
+      }
+    }
+  }
+
+  const fetchCalendarForVisibleRange = useCallback(async () => {
+    try {
+      const { start, end } = visibleRangeFor(view, currentDate);
+      const { data } = await api.get("/calendar/events", { params: { start, end } });
+      const list = Array.isArray(data) ? data : [];
+      // map server events to rbc events (preserve meta)
+      const mapped = list.map((ev) => {
+        const startD = fromDbString(ev.start) || new Date();
+        const endD =
+          fromDbString(ev.end) ||
+          moment(startD).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
+
+        // Provide extra fields for UI convenience
+        return {
+          ...ev,
+          start: startD,
+          end: endD,
+          customer: ev.meta?.customer ?? ev.customer,
+          siteLocation: ev.meta?.siteLocation ?? ev.siteLocation,
+          siteAddress: ev.meta?.siteAddress ?? ev.siteAddress,
+          problemDescription: ev.meta?.problemDescription ?? ev.problemDescription,
+        };
+      });
+      setEvents(mapped);
+    } catch (e) {
+      console.error("⚠️ Error fetching calendar:", e);
+    }
+  }, [view, currentDate]);
+
+  /* ===== schedule helpers (use PUT /work-orders/:id/edit) ===== */
+  async function setSchedulePayload(orderId, { date, time, endTime, status }) {
+    // server expects scheduledDate as "YYYY-MM-DD HH:mm" and optional endTime "HH:mm"
+    const scheduledDate = `${date} ${time}`;
+    const payload = { scheduledDate, endTime };
+    if (status) payload.status = status;
+
+    await api.put(`/work-orders/${orderId}/edit`, payload);
   }
 
   function minutesWindowForOrder(orderLike) {
-    const start = fromDbString(orderLike.scheduledDate);
-    const end = fromDbString(orderLike.scheduledEnd);
+    const start = fromDbString(orderLike.scheduledDate || orderLike.start);
+    const end = fromDbString(orderLike.scheduledEnd || orderLike.end);
     if (start && end) return Math.max(15, diffMinutes(start, end));
     return DEFAULT_WINDOW_MIN;
   }
 
   /* ===== edit modal wiring ===== */
   function openEditModal(order, fallbackDate) {
-    const start = fromDbString(order?.scheduledDate) || fallbackDate || new Date();
+    const start =
+      fromDbString(order?.scheduledDate || order?.start) ||
+      fallbackDate ||
+      new Date();
     const end =
-      fromDbString(order?.scheduledEnd) ||
+      fromDbString(order?.scheduledEnd || order?.end) ||
       moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
 
     setEditOrder(order);
@@ -265,7 +312,7 @@ export default function WorkOrderCalendar() {
       });
       setEditModalOpen(false);
       if (dayForModal) await openDayModal(dayForModal);
-      fetchWorkOrders();
+      await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
     } catch (e) {
       console.error("⚠️ Error saving schedule:", e);
       alert("Failed to save schedule.");
@@ -275,23 +322,47 @@ export default function WorkOrderCalendar() {
   async function unschedule(orderId) {
     if (!window.confirm("Remove this work order from the calendar?")) return;
     try {
-      await setSchedulePayload(orderId, { scheduledDate: null, scheduledEnd: null });
+      // Clearing: send empty string for scheduledDate so server nulls both start/end
+      await api.put(`/work-orders/${orderId}/edit`, { scheduledDate: "" });
       setEditModalOpen(false);
       if (dayForModal) await openDayModal(dayForModal);
-      fetchWorkOrders();
+      await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
     } catch (e) {
       console.error("⚠️ Error unscheduling:", e);
       alert("Failed to unschedule.");
     }
   }
 
-  /* ===== Day modal helpers ===== */
+  /* ===== Day modal helpers (no special backend route required) ===== */
   async function openDayModal(dateLike) {
     const day = moment(dateLike).startOf("day");
-    const dateStr = day.format("YYYY-MM-DD");
+    const startStr = day.format("YYYY-MM-DD");
+    const endStr = day.format("YYYY-MM-DD");
+
     try {
-      const { data } = await api.get("/calendar/day", { params: { date: dateStr } });
-      const list = Array.isArray(data) ? data : [];
+      // Pull that day’s events directly from calendar feed
+      const { data } = await api.get("/calendar/events", {
+        params: { start: startStr, end: endStr },
+      });
+      const list = (Array.isArray(data) ? data : []).map((ev) => ({
+        id: ev.id,
+        customer: ev.meta?.customer ?? ev.customer,
+        siteLocation: ev.meta?.siteLocation ?? ev.siteLocation,
+        siteAddress: ev.meta?.siteAddress ?? ev.siteAddress,
+        workOrderNumber: ev.workOrderNumber,
+        poNumber: ev.poNumber,
+        problemDescription: ev.meta?.problemDescription ?? ev.problemDescription,
+        scheduledDate: ev.start,
+        scheduledEnd: ev.end,
+      }));
+
+      // Sort by start time for readability
+      list.sort((a, b) => {
+        const sa = new Date(a.scheduledDate).getTime();
+        const sb = new Date(b.scheduledDate).getTime();
+        return sa - sb;
+      });
+
       setDayOrders(list);
       setDayForModal(day.toDate());
       setDayModalTitle(`Work Orders for ${day.format("LL")}`);
@@ -302,37 +373,6 @@ export default function WorkOrderCalendar() {
     }
   }
 
-  async function saveDayOrder() {
-    if (!dayForModal || !dayOrders.length) return;
-    const dateStr = moment(dayForModal).format("YYYY-MM-DD");
-    const orderedIds = dayOrders.map((o) => o.id);
-    try {
-      await api.put("/calendar/day-order", { date: dateStr, orderedIds });
-    } catch (e) {
-      console.error("⚠️ Error saving order:", e);
-    }
-  }
-
-  // HTML5 drag reorder inside day modal
-  function handleDayDragStart(index, item) {
-    setDragIndex(index);
-    setDragItem(item); // also allow dragging out to calendar
-  }
-  function handleDayDragOver(e, index) {
-    e.preventDefault();
-    setOverIndex(index);
-  }
-  async function handleDayDrop(e, dropIndex) {
-    e.preventDefault();
-    if (dragIndex === null || dragIndex === dropIndex) return;
-    const next = [...dayOrders];
-    const [moved] = next.splice(dragIndex, 1);
-    next.splice(dropIndex, 0, moved);
-    setDayOrders(next);
-    setDragIndex(null);
-    setOverIndex(null);
-    await saveDayOrder();
-  }
   function endGlobalDrag() {
     setDragItem(null);
   }
@@ -348,9 +388,9 @@ export default function WorkOrderCalendar() {
       endTime: fmtTime(moment(start).add(minutes, "minutes").toDate()),
       status: "Scheduled",
     })
-      .then(() => {
-        fetchWorkOrders();
-        if (dayForModal) openDayModal(dayForModal);
+      .then(async () => {
+        if (dayForModal) await openDayModal(dayForModal);
+        await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
       })
       .catch((e) => console.error("⚠️ Error updating work order date:", e));
   }
@@ -363,9 +403,9 @@ export default function WorkOrderCalendar() {
       endTime: fmtTime(moment(start).add(minutes, "minutes").toDate()),
       status: "Scheduled",
     })
-      .then(() => {
-        fetchWorkOrders();
-        if (dayForModal) openDayModal(dayForModal);
+      .then(async () => {
+        if (dayForModal) await openDayModal(dayForModal);
+        await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
       })
       .catch((e) => console.error("⚠️ Error resizing event:", e));
   }
@@ -379,16 +419,18 @@ export default function WorkOrderCalendar() {
       endTime: fmtTime(moment(start).add(minutes, "minutes").toDate()),
       status: "Scheduled",
     })
-      .then(() => {
+      .then(async () => {
         endGlobalDrag();
-        fetchWorkOrders();
-        if (dayForModal) openDayModal(dayForModal);
+        if (dayForModal) await openDayModal(dayForModal);
+        await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
       })
       .catch((e) => console.error("⚠️ Error scheduling work order:", e));
   }
 
   function onSelectEvent(event) {
-    const full = allOrders.find((o) => o.id === event.id) || event;
+    // We might have richer info in allOrders
+    const full =
+      allOrders.find((o) => Number(o.id) === Number(event.id)) || event;
     openEditModal(full);
   }
 
@@ -396,7 +438,7 @@ export default function WorkOrderCalendar() {
     openDayModal(slotInfo.start);
   }
 
-  function onShowMore(eventsInCell, date) {
+  function onShowMore(_eventsInCell, date) {
     openDayModal(date);
   }
 
@@ -404,45 +446,37 @@ export default function WorkOrderCalendar() {
     window.location.href = `/view-work-order/${id}`;
   }
 
-  /* ===== build rbc events ===== */
-  const events = useMemo(() => {
-    return workOrders.map((o) => {
-      const start = fromDbString(o.scheduledDate) || new Date();
+  /* ===== Build RBC events from server events ===== */
+  const rbcEvents = useMemo(() => {
+    return events.map((o) => {
+      const start = fromDbString(o.start) || new Date();
       const end =
-        fromDbString(o.scheduledEnd) ||
+        fromDbString(o.end) ||
         moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
 
+      // Keep idLabel & title consistent with server meta
       const idLabel = displayWOThenPO(o);
       const title = o.customer ? `${o.customer} — ${idLabel}` : idLabel;
 
       return {
-        id: o.id,
+        ...o,
         title,
-        poNumber: o.poNumber,
-        workOrderNumber: o.workOrderNumber,
-        customer: o.customer,
-        siteLocation: o.siteLocation,
-        siteAddress: o.siteAddress || o.serviceAddress || o.address || "",
-        problemDescription: o.problemDescription,
-        scheduledDate: o.scheduledDate,
-        scheduledEnd: o.scheduledEnd,
         start,
         end,
         allDay: false,
       };
     });
-  }, [workOrders]);
+  }, [events]);
 
-  /* ===== Search logic (enhanced) =====
-     - If the search box is empty, show the classic "Unscheduled" list.
-     - If there's a search query, search ACROSS ALL WORK ORDERS (scheduled & unscheduled).
-       This lets you pull up scheduled work orders and drag them to reschedule. */
+  /* ===== Unscheduled bar search =====
+     - If the search box is empty, show the backend unscheduled feed (already filtered).
+     - If there's a query, search ACROSS ALL WORK ORDERS (scheduled & unscheduled). */
   const listForStrip = useMemo(() => {
     const q = norm(unscheduledSearch);
     if (!q) return unscheduledOrders;
 
     const tokens = q.split(/\s+/).filter(Boolean);
-    const pool = allOrders; // search everything when there's a query
+    const pool = allOrders;
 
     return pool.filter((o) => {
       const hayCustomer = norm(o.customer);
@@ -467,19 +501,15 @@ export default function WorkOrderCalendar() {
     if (!statusTarget || !statusChoice) return;
     setStatusSaving(true);
     try {
-      // Try dedicated endpoint first; fallback to /edit
+      // Dedicated status endpoint; fallback to edit multipart
       try {
         await api.put(`/work-orders/${statusTarget.id}/status`, { status: statusChoice });
       } catch {
-        const form = new FormData();
-        form.append("status", statusChoice);
-        await api.put(`/work-orders/${statusTarget.id}/edit`, form, {
-          headers: { "Content-Type": "multipart/form-data" },
-        });
+        await api.put(`/work-orders/${statusTarget.id}/edit`, { status: statusChoice });
       }
       setStatusModalOpen(false);
       if (dayForModal) await openDayModal(dayForModal);
-      fetchWorkOrders();
+      await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
     } catch (e) {
       console.error("⚠️ Error updating status:", e);
       alert("Failed to update status.");
@@ -532,12 +562,10 @@ export default function WorkOrderCalendar() {
             {unscheduledSearch ? (
               <>
                 Showing {listForStrip.length} match{listForStrip.length === 1 ? "" : "es"} across{" "}
-                {allOrders.length} total work order{allOrders.length === 1 ? "" : "s"} (drag any item to reschedule).
+                {allOrders.length} total work order{allOrders.length === 1 ? "" : "s"} (drag any item to schedule/reschedule).
               </>
             ) : (
-              <>
-                Showing {listForStrip.length} of {unscheduledOrders.length} (Statuses: New, Scheduled, Needs to be Scheduled)
-              </>
+              <>Showing {listForStrip.length} item(s) (from /work-orders/unscheduled)</>
             )}
           </div>
 
@@ -550,7 +578,7 @@ export default function WorkOrderCalendar() {
                 order.siteAddress || order.serviceAddress || order.address || "";
               const isScheduled = !!order.scheduledDate;
 
-              // Build a friendly current-time label if scheduled
+              // Friendly current-time label if scheduled
               let currentWhen = "";
               if (isScheduled) {
                 const s = fromDbString(order.scheduledDate);
@@ -629,7 +657,7 @@ export default function WorkOrderCalendar() {
               );
             })}
             {!listForStrip.length && (
-              <div className="empty-text">No matches for that search.</div>
+              <div className="empty-text">No matches.</div>
             )}
           </div>
         </div>
@@ -638,7 +666,7 @@ export default function WorkOrderCalendar() {
         <div className="calendar-container">
           <DnDCalendar
             localizer={localizer}
-            events={events}
+            events={rbcEvents}
             startAccessor="start"
             endAccessor="end"
             step={15}
@@ -667,11 +695,10 @@ export default function WorkOrderCalendar() {
         </div>
       </div>
 
-      {/* ---------- Day list modal (ACTUALLY WIDER) ---------- */}
+      {/* ---------- Day list modal ---------- */}
       {dayModalOpen && (
         <div className="modal-overlay" onClick={() => setDayModalOpen(false)}>
           <div
-            // Using a custom wide shell to avoid any width caps from .modal-content CSS
             onClick={(e) => e.stopPropagation()}
             style={{
               background: "#fff",
@@ -688,7 +715,7 @@ export default function WorkOrderCalendar() {
             <h4 className="mb-3">{dayModalTitle}</h4>
             {dayOrders.length ? (
               <ul className="list-group" style={{ overflowY: "auto" }}>
-                {dayOrders.map((o, idx) => {
+                {dayOrders.map((o) => {
                   const s = fromDbString(o.scheduledDate);
                   const e = fromDbString(o.scheduledEnd);
                   const label =
@@ -707,20 +734,12 @@ export default function WorkOrderCalendar() {
                     <li
                       key={o.id}
                       className="list-group-item"
-                      draggable
-                      onDragStart={() => handleDayDragStart(idx, o)}
-                      onDragOver={(ev) => handleDayDragOver(ev, idx)}
-                      onDrop={(ev) => handleDayDrop(ev, idx)}
                       style={{
-                        cursor: "grab",
-                        background:
-                          overIndex === idx && dragIndex !== null ? "#f1f5f9" : "white",
                         display: "grid",
                         gridTemplateColumns: "1fr auto",
                         alignItems: "center",
                         gap: 16,
                       }}
-                      title="Drag to reorder or onto the calendar"
                     >
                       {/* LEFT: details */}
                       <div style={{ minWidth: 0 }}>
