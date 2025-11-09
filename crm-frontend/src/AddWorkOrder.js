@@ -4,6 +4,9 @@ import { useNavigate } from "react-router-dom";
 import api from "./api";
 import "./AddWorkOrder.css";
 
+// Keep this in sync with CalendarPage.js and server DEFAULT_WINDOW_MINUTES
+const DEFAULT_WINDOW_MIN = 120;
+
 // Keep this list in sync with WorkOrders.js and server.js
 const STATUS_LIST = [
   "New",
@@ -29,6 +32,21 @@ function decodeRoleFromJWT() {
   }
 }
 
+function toEndTimeFromStartISO(localDateTimeStr) {
+  // localDateTimeStr is from <input type="datetime-local"> e.g. "2025-11-02T08:00"
+  if (!localDateTimeStr) return "";
+  const [d, t] = localDateTimeStr.split("T");
+  if (!d || !t) return "";
+  const [hh, mm] = t.split(":").map((v) => parseInt(v, 10));
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return "";
+  const start = new Date();
+  start.setHours(hh, mm, 0, 0);
+  const end = new Date(start.getTime() + DEFAULT_WINDOW_MIN * 60000);
+  const eh = String(end.getHours()).padStart(2, "0");
+  const em = String(end.getMinutes()).padStart(2, "0");
+  return `${eh}:${em}`; // "HH:mm"
+}
+
 export default function AddWorkOrder() {
   const navigate = useNavigate();
   const role = decodeRoleFromJWT();
@@ -38,15 +56,15 @@ export default function AddWorkOrder() {
     customer: "",
     workOrderNumber: "",
     poNumber: "",
-    siteLocation: "", // ✅ NAME of the place (e.g., "Panda Express")
-    siteAddress: "",  // ✅ Street address (autocomplete)
+    siteLocation: "", // name of the place (e.g., "Panda Express")
+    siteAddress: "",  // street address (autocomplete)
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
     assignedTo: "",
     customerPhone: "",
     customerEmail: "",
-    scheduledDate: "", // ✅ NEW — "YYYY-MM-DDTHH:mm" (local time) for <input type="datetime-local">
+    scheduledDate: "", // "YYYY-MM-DDTHH:mm" (local time)
   });
 
   const [pdfFile, setPdfFile] = useState(null);                 // Work Order sign-off PDF
@@ -77,6 +95,13 @@ export default function AddWorkOrder() {
       })
       .catch((e) => console.error("Error loading assignees:", e));
   }, []);
+
+  // ---------- auto-toggle status when picking a schedule
+  useEffect(() => {
+    if (workOrder.scheduledDate && workOrder.status !== "Scheduled") {
+      setWorkOrder((prev) => ({ ...prev, status: "Scheduled" }));
+    }
+  }, [workOrder.scheduledDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- Google Maps Autocomplete (for Site Address only)
   useEffect(() => {
@@ -129,7 +154,7 @@ export default function AddWorkOrder() {
           place?.formatted_address ||
           place?.name ||
           siteAddressInputRef.current.value;
-        setWorkOrder((prev) => ({ ...prev, siteAddress: addr })); // ✅ fill address
+        setWorkOrder((prev) => ({ ...prev, siteAddress: addr })); // fill address
       });
       autocompleteRef.current = ac;
     } catch (e) {
@@ -200,21 +225,31 @@ export default function AddWorkOrder() {
     form.append("customer", workOrder.customer);
     form.append("workOrderNumber", workOrder.workOrderNumber || "");
     form.append("poNumber", workOrder.poNumber || "");
-    form.append("siteLocation", workOrder.siteLocation || ""); // ✅ name
-    form.append("siteAddress", workOrder.siteAddress || "");   // ✅ address
+    form.append("siteLocation", workOrder.siteLocation || ""); // name
+    form.append("siteAddress", workOrder.siteAddress || "");   // address
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
-    form.append("status", workOrder.status || "Needs to be Scheduled");
+
+    // If scheduled, force status = Scheduled so it appears on the calendar feed
+    const willBeScheduled = !!workOrder.scheduledDate;
+    const statusToSend = willBeScheduled ? "Scheduled" : (workOrder.status || "Needs to be Scheduled");
+    form.append("status", statusToSend);
+
     form.append("customerPhone", workOrder.customerPhone || "");
     form.append("customerEmail", workOrder.customerEmail || "");
     if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
 
-    // ✅ NEW — send scheduledDate exactly as the datetime-local value (server normalizes/uses it)
+    // Send schedule fields
     if (workOrder.scheduledDate) {
+      // Server accepts "YYYY-MM-DDTHH:mm" or "YYYY-MM-DD HH:mm"
       form.append("scheduledDate", workOrder.scheduledDate);
+
+      // Also provide an endTime (start + DEFAULT_WINDOW_MIN) so scheduledEnd is explicit
+      const computedEnd = toEndTimeFromStartISO(workOrder.scheduledDate); // "HH:mm"
+      if (computedEnd) form.append("endTime", computedEnd);
     }
 
-    // Files — use distinct field names the server can route correctly
+    // Files — field names normalized by server (workorderpdf / estimatepdf)
     if (pdfFile) form.append("workOrderPdf", pdfFile);
     if (estimatePdfFile) form.append("estimatePdf", estimatePdfFile);
     if (photoFile) form.append("photoFile", photoFile);
@@ -224,7 +259,10 @@ export default function AddWorkOrder() {
       await api.post("/work-orders", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      navigate("/work-orders");
+
+      // If we scheduled it here, go straight to the calendar so it's visible immediately
+      if (willBeScheduled) navigate("/calendar");
+      else navigate("/work-orders");
     } catch (err) {
       const msg =
         err?.response?.data?.error ||
@@ -397,9 +435,13 @@ export default function AddWorkOrder() {
               </option>
             ))}
           </select>
+          <small className="help-text">
+            If you set a Scheduled Date &amp; Time below, status will be saved as{" "}
+            <strong>Scheduled</strong> so it appears on the Calendar.
+          </small>
         </div>
 
-        {/* ✅ NEW — Scheduled Date & Time */}
+        {/* Scheduled Date & Time */}
         <div className="form-group">
           <label className="form-label">Scheduled Date & Time</label>
           <input
@@ -410,6 +452,9 @@ export default function AddWorkOrder() {
             className="form-control-custom"
             placeholder="mm/dd/yyyy, --:-- --"
           />
+          <small className="help-text">
+            Calendar window defaults to {DEFAULT_WINDOW_MIN} minutes. You can adjust later from the Calendar.
+          </small>
         </div>
 
         {/* Uploads */}
