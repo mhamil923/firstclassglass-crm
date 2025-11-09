@@ -144,9 +144,8 @@ function windowSql({ dateSql, endTime, timeWindow }) {
     const tw = String(timeWindow).trim();
     const wm = /^(\d{1,2}(?::\d{2})?)\s*-\s*(\d{1,2}(?::\d{2})?)$/.exec(tw);
     if (wm) {
-      const startHm = parseHHmm(wm[1]);
       const endHm   = parseHHmm(wm[2]);
-      if (startHm && endHm) {
+      if (endHm) {
         const endD = roundUpDateToHour(new Date(Y, Mo - 1, D, endHm.h, endHm.m, 0));
         endSql = toSqlDateTimeFromParts(endD.getFullYear(), endD.getMonth()+1, endD.getDate(), endD.getHours(), 0, 0);
       }
@@ -553,13 +552,20 @@ app.get('/work-orders/:id(\\d+)', authenticate, async (req, res) => {
   }
 });
 
+// ✅ Unscheduled bar — show only the statuses you want
 app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
       'SELECT * FROM work_orders WHERE scheduledDate IS NULL ORDER BY id DESC'
     );
-    res.json(rows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) })));
-  } catch (err) { console.error('Unscheduled list error:', err); res.status(500).json({ error: 'Failed to fetch unscheduled.' }); }
+    const normalized = rows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) }));
+    const ALLOWED = new Set(['New','Scheduled','Needs to be Scheduled']);
+    const filtered = normalized.filter(r => ALLOWED.has(r.status));
+    res.json(filtered);
+  } catch (err) {
+    console.error('Unscheduled list error:', err);
+    res.status(500).json({ error: 'Failed to fetch unscheduled.' });
+  }
 });
 
 app.get('/work-orders/search', authenticate, async (req, res) => {
@@ -666,7 +672,7 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
   }
 });
 
-// CREATE — now persists scheduledDate & scheduledEnd
+// CREATE — persists scheduledDate & scheduledEnd
 app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -752,7 +758,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
   }
 });
 
-// EDIT — now updates/clears scheduledDate & scheduledEnd
+// EDIT — updates/clears scheduledDate & scheduledEnd
 app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -877,7 +883,7 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       customerEmail = existing.customerEmail,
       notes = existing.notes,
 
-      // NEW schedule fields
+      // schedule fields
       scheduledDate: scheduledDateRaw = undefined, // undefined = not sent; '' = clear; otherwise set
       endTime = null,
       timeWindow = null
@@ -926,7 +932,7 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
   }
 });
 
-// NOTES — simple setter or append (now tolerant to text/plain & alt field names)
+// NOTES — simple setter or append (tolerant to text/plain & alias fields)
 app.put('/work-orders/:id(\\d+)/notes', authenticate, async (req, res) => {
   try {
     const wid = Number(req.params.id);
@@ -971,6 +977,74 @@ app.put('/work-orders/:id(\\d+)/status', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Work-order status update error:', err);
     res.status(500).json({ error: 'Failed to update status.' });
+  }
+});
+
+// ─── CALENDAR FEED (NEW) — day/week/month friendly ──────────────────────────
+// GET /calendar/events?start=YYYY-MM-DD&end=YYYY-MM-DD
+app.get('/calendar/events', authenticate, async (req, res) => {
+  try {
+    const startQ = String(req.query.start || '').trim();
+    const endQ   = String(req.query.end   || '').trim();
+
+    // Helper to coerce to full-day SQL range if only date is provided
+    const asSqlDayStart = (dStr) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dStr);
+      if (m) return `${m[1]}-${m[2]}-${m[3]} 00:00:00`;
+      return parseDateTimeFlexible(dStr) || null;
+    };
+    const asSqlDayEnd = (dStr) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dStr);
+      if (m) return `${m[1]}-${m[2]}-${m[3]} 23:59:59`;
+      const p = parseDateTimeFlexible(dStr);
+      if (!p) return null;
+      // If a time was supplied, keep it; otherwise just return parsed time
+      return p;
+    };
+
+    const today = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const defaultStart = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())} 00:00:00`;
+    const d60 = new Date(today); d60.setDate(d60.getDate() + 60);
+    const defaultEnd = `${d60.getFullYear()}-${pad(d60.getMonth()+1)}-${pad(d60.getDate())} 23:59:59`;
+
+    const startSql = startQ ? asSqlDayStart(startQ) : defaultStart;
+    const endSql   = endQ   ? asSqlDayEnd(endQ)     : defaultEnd;
+
+    const [rows] = await db.execute(
+      `SELECT id, workOrderNumber, customer, siteLocation, siteAddress, problemDescription, status,
+              scheduledDate, scheduledEnd
+         FROM work_orders
+        WHERE scheduledDate IS NOT NULL
+          AND scheduledDate <= ?
+          AND (scheduledEnd IS NULL OR scheduledEnd >= ?)
+        ORDER BY scheduledDate ASC`,
+      [endSql, startSql]
+    );
+
+    const events = rows.map(r => ({
+      id: r.id,
+      title: [
+        r.workOrderNumber ? `WO ${r.workOrderNumber}` : null,
+        r.customer || null,
+        r.siteLocation || r.siteAddress || null
+      ].filter(Boolean).join(' • '),
+      start: r.scheduledDate,
+      end:   r.scheduledEnd || null,
+      allDay: false,
+      meta: {
+        status: displayStatusOrDefault(r.status),
+        customer: r.customer,
+        siteLocation: r.siteLocation,
+        siteAddress: r.siteAddress,
+        problemDescription: r.problemDescription
+      }
+    }));
+
+    res.json(events);
+  } catch (err) {
+    console.error('Calendar events error:', err);
+    res.status(500).json({ error: 'Failed to load calendar events.' });
   }
 });
 
