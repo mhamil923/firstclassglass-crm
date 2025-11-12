@@ -6,6 +6,8 @@ import Table from "react-bootstrap/Table";
 import { useNavigate } from "react-router-dom";
 import "./Home.css";
 
+const REFRESH_MS = 60_000; // auto-refresh orders every 60s
+
 export default function Home() {
   const [orders, setOrders] = useState([]);
   const navigate = useNavigate();
@@ -14,13 +16,18 @@ export default function Home() {
   const parseNotes = (notes) => {
     if (!notes) return [];
     if (Array.isArray(notes)) return notes;
-    try {
-      const arr = JSON.parse(notes);
-      return Array.isArray(arr) ? arr : [];
-    } catch {
-      return [];
+    if (typeof notes === "string") {
+      try {
+        const arr = JSON.parse(notes);
+        return Array.isArray(arr) ? arr : [];
+      } catch {
+        return [];
+      }
     }
+    // object or unknown
+    return [];
   };
+
   const norm = (v) => (v ?? "").toString().trim();
 
   // local “read/dismissed” tracking for note notifications
@@ -42,8 +49,9 @@ export default function Home() {
   const makeNoteKey = (orderId, createdAt) => `${orderId}:${createdAt}`;
 
   const fetchOrders = useCallback(() => {
+    // add a cache-buster param to avoid any intermediate caching
     api
-      .get("/work-orders")
+      .get("/work-orders", { params: { t: Date.now() } })
       .then((response) => {
         const data = Array.isArray(response.data) ? response.data : [];
         setOrders(data);
@@ -56,9 +64,24 @@ export default function Home() {
 
   useEffect(() => {
     fetchOrders();
+
+    // refresh when tab regains focus OR becomes visible
     const onFocus = () => fetchOrders();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") fetchOrders();
+    };
+
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    // gentle polling to keep notes fresh while user idles on dashboard
+    const interval = setInterval(fetchOrders, REFRESH_MS);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(interval);
+    };
   }, [fetchOrders]);
 
   // Parse as local unless string already has a zone
@@ -96,8 +119,41 @@ export default function Home() {
 
   const woCell = (o) => o?.workOrderNumber || "—";
 
+  // ---- robust note timestamp extraction
+  const getNoteCreated = (n) => {
+    // support multiple shapes: createdAt | created_at | date | timestamp
+    let raw =
+      n?.createdAt ??
+      n?.created_at ??
+      n?.date ??
+      n?.timestamp ??
+      null;
+
+    if (raw == null) return null;
+
+    // if numeric, assume ms (if too small, treat as seconds)
+    if (typeof raw === "number") {
+      if (raw < 10_000_000_000) {
+        // seconds -> ms
+        raw = raw * 1000;
+      }
+      return moment(raw);
+    }
+
+    // string: accept ISO / “YYYY-MM-DD HH:mm:ss”
+    if (typeof raw === "string") {
+      // if strict ISO works, use it
+      if (moment(raw, moment.ISO_8601, true).isValid()) return moment(raw);
+      // else try common server format
+      const m = moment(raw, ["YYYY-MM-DD HH:mm:ss", "YYYY-MM-DD"], true);
+      return m.isValid() ? m : moment(raw); // final best effort
+    }
+
+    return null;
+  };
+
   // ===== Notes (This Week) =====
-  // Build a flat list of notes (with order context) created within last 7 days
+  // Build a flat list of notes (with order context) created within last 7 days (inclusive)
   const weeklyNotes = useMemo(() => {
     const dismissed = readDismissedSet();
     const oneWeekAgo = moment().subtract(7, "days");
@@ -109,11 +165,18 @@ export default function Home() {
 
       for (let i = 0; i < list.length; i++) {
         const n = list[i];
-        const created = n?.createdAt ? moment(n.createdAt) : null;
+        const created = getNoteCreated(n);
         if (!created || !created.isValid()) continue;
-        if (created.isBefore(oneWeekAgo)) continue;
 
-        const key = makeNoteKey(o.id, n.createdAt);
+        // include notes that are on/after the 7-day cutoff
+        if (!created.isSameOrAfter(oneWeekAgo)) continue;
+
+        const createdKey =
+          typeof n?.createdAt === "string" || typeof n?.createdAt === "number"
+            ? n.createdAt
+            : created.toISOString();
+
+        const key = makeNoteKey(o.id, createdKey);
         if (dismissed.has(key)) continue;
 
         out.push({
@@ -122,10 +185,13 @@ export default function Home() {
           workOrderNumber: o.workOrderNumber || null,
           customer: o.customer || "—",
           siteLocation:
-            norm(o.siteName) || norm(o.siteLocationName) || norm(o.siteLocation) || "—",
-          text: n?.text || "",
-          by: n?.by || "",
-          createdAt: n.createdAt,
+            norm(o.siteLocation) ||
+            norm(o.siteName) ||
+            norm(o.siteLocationName) ||
+            "—",
+          text: n?.text || n?.note || n?.message || "",
+          by: n?.by || n?.user || n?.author || "",
+          createdAt: created.toISOString(),
         });
       }
     }
