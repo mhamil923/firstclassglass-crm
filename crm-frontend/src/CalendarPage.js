@@ -170,6 +170,7 @@ export default function WorkOrderCalendar() {
   const [editEndTime, setEditEndTime] = useState(""); // HH:mm (window end)
 
   // Drag from Unscheduled OR Day modal → calendar
+  the
   const [dragItem, setDragItem] = useState(null);
 
   // Status modal
@@ -180,7 +181,6 @@ export default function WorkOrderCalendar() {
 
   /* ========= initial fetches ========= */
   useEffect(() => {
-    // all work orders (for search) and unscheduled bar feed
     refreshLists();
   }, []);
 
@@ -231,14 +231,12 @@ export default function WorkOrderCalendar() {
       const { start, end } = visibleRangeFor(view, currentDate);
       const { data } = await api.get("/calendar/events", { params: { start, end } });
       const list = Array.isArray(data) ? data : [];
-      // map server events to rbc events (preserve meta)
       const mapped = list.map((ev) => {
         const startD = fromDbString(ev.start) || new Date();
         const endD =
           fromDbString(ev.end) ||
           moment(startD).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
 
-        // Provide extra fields for UI convenience
         return {
           ...ev,
           start: startD,
@@ -255,14 +253,21 @@ export default function WorkOrderCalendar() {
     }
   }, [view, currentDate]);
 
-  /* ===== schedule helpers (use PUT /work-orders/:id/edit) ===== */
+  /* ===== schedule helpers (MULTER route requires multipart/form-data) ===== */
   async function setSchedulePayload(orderId, { date, time, endTime, status }) {
-    // server expects scheduledDate as "YYYY-MM-DD HH:mm" and optional endTime "HH:mm"
-    const scheduledDate = `${date} ${time}`;
-    const payload = { scheduledDate, endTime };
-    if (status) payload.status = status;
+    // Compose fields the server expects:
+    // - scheduledDate: "YYYY-MM-DD HH:mm" (or "YYYY-MM-DDTHH:mm")
+    // - endTime: "HH:mm" (optional)
+    // - status: (we force "Scheduled" on schedule ops)
+    const form = new FormData();
+    const startStr = `${date} ${time}`;
+    form.append("scheduledDate", startStr);
+    if (endTime) form.append("endTime", endTime);
+    form.append("status", status || "Scheduled");
 
-    await api.put(`/work-orders/${orderId}/edit`, payload);
+    await api.put(`/work-orders/${orderId}/edit`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
   }
 
   function minutesWindowForOrder(orderLike) {
@@ -322,8 +327,16 @@ export default function WorkOrderCalendar() {
   async function unschedule(orderId) {
     if (!window.confirm("Remove this work order from the calendar?")) return;
     try {
-      // Clearing: send empty string for scheduledDate so server nulls both start/end
-      await api.put(`/work-orders/${orderId}/edit`, { scheduledDate: "" });
+      // Clearing: per server.js, send scheduledDate="" to null both scheduledDate & scheduledEnd
+      const form = new FormData();
+      form.append("scheduledDate", "");
+      // also push it back into a visible bucket in the Unscheduled bar
+      form.append("status", "Needs to be Scheduled");
+
+      await api.put(`/work-orders/${orderId}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
       setEditModalOpen(false);
       if (dayForModal) await openDayModal(dayForModal);
       await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
@@ -333,7 +346,7 @@ export default function WorkOrderCalendar() {
     }
   }
 
-  /* ===== Day modal helpers (no special backend route required) ===== */
+  /* ===== Day modal helpers ===== */
   async function openDayModal(dateLike) {
     const day = moment(dateLike).startOf("day");
     const startStr = day.format("YYYY-MM-DD");
@@ -356,7 +369,6 @@ export default function WorkOrderCalendar() {
         scheduledEnd: ev.end,
       }));
 
-      // Sort by start time for readability
       list.sort((a, b) => {
         const sa = new Date(a.scheduledDate).getTime();
         const sb = new Date(b.scheduledDate).getTime();
@@ -428,7 +440,6 @@ export default function WorkOrderCalendar() {
   }
 
   function onSelectEvent(event) {
-    // We might have richer info in allOrders
     const full =
       allOrders.find((o) => Number(o.id) === Number(event.id)) || event;
     openEditModal(full);
@@ -454,7 +465,6 @@ export default function WorkOrderCalendar() {
         fromDbString(o.end) ||
         moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
 
-      // Keep idLabel & title consistent with server meta
       const idLabel = displayWOThenPO(o);
       const title = o.customer ? `${o.customer} — ${idLabel}` : idLabel;
 
@@ -468,9 +478,7 @@ export default function WorkOrderCalendar() {
     });
   }, [events]);
 
-  /* ===== Unscheduled bar search =====
-     - If the search box is empty, show the backend unscheduled feed (already filtered).
-     - If there's a query, search ACROSS ALL WORK ORDERS (scheduled & unscheduled). */
+  /* ===== Unscheduled bar search ===== */
   const listForStrip = useMemo(() => {
     const q = norm(unscheduledSearch);
     if (!q) return unscheduledOrders;
@@ -501,11 +509,14 @@ export default function WorkOrderCalendar() {
     if (!statusTarget || !statusChoice) return;
     setStatusSaving(true);
     try {
-      // Dedicated status endpoint; fallback to edit multipart
       try {
         await api.put(`/work-orders/${statusTarget.id}/status`, { status: statusChoice });
       } catch {
-        await api.put(`/work-orders/${statusTarget.id}/edit`, { status: statusChoice });
+        const fd = new FormData();
+        fd.append("status", statusChoice);
+        await api.put(`/work-orders/${statusTarget.id}/edit`, fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
       }
       setStatusModalOpen(false);
       if (dayForModal) await openDayModal(dayForModal);
