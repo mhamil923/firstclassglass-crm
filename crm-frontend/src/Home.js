@@ -12,44 +12,21 @@ export default function Home() {
   const [orders, setOrders] = useState([]);
   const navigate = useNavigate();
 
-  // ---- helpers ----
-  const parseNotes = (notes) => {
-    if (!notes) return [];
-    if (Array.isArray(notes)) return notes;
-    if (typeof notes === "string") {
-      try {
-        const arr = JSON.parse(notes);
-        return Array.isArray(arr) ? arr : [];
-      } catch {
-        return [];
-      }
-    }
-    // object or unknown
-    return [];
-  };
-
+  /* =========================
+     Utilities
+  ========================= */
   const norm = (v) => (v ?? "").toString().trim();
 
-  // local “read/dismissed” tracking for note notifications
-  const DISMISSED_KEY = "dismissedNotes:v1";
-  const readDismissedSet = () => {
-    try {
-      const raw = localStorage.getItem(DISMISSED_KEY);
-      const arr = raw ? JSON.parse(raw) : [];
-      return new Set(Array.isArray(arr) ? arr : []);
-    } catch {
-      return new Set();
-    }
+  // Parse as local unless string already has a zone (Z or +hh:mm)
+  const parseAsLocal = (dt) => {
+    if (!dt) return null;
+    const s = String(dt);
+    const hasZone = /[zZ]|[+\-]\d\d:?\d\d$/.test(s);
+    return hasZone ? moment(s).local() : moment(s);
   };
-  const writeDismissedSet = (set) => {
-    try {
-      localStorage.setItem(DISMISSED_KEY, JSON.stringify(Array.from(set)));
-    } catch {}
-  };
-  const makeNoteKey = (orderId, createdAt) => `${orderId}:${createdAt}`;
 
+  // Cache-busted fetch so recent changes always appear
   const fetchOrders = useCallback(() => {
-    // add a cache-buster param to avoid any intermediate caching
     api
       .get("/work-orders", { params: { t: Date.now() } })
       .then((response) => {
@@ -84,14 +61,9 @@ export default function Home() {
     };
   }, [fetchOrders]);
 
-  // Parse as local unless string already has a zone
-  const parseAsLocal = (dt) => {
-    if (!dt) return null;
-    const s = String(dt);
-    const hasZone = /[zZ]|[+\-]\d\d:?\d\d$/.test(s);
-    return hasZone ? moment(s).local() : moment(s);
-  };
-
+  /* =========================
+     Agenda / Upcoming blocks
+  ========================= */
   const todayStr = moment().format("YYYY-MM-DD");
 
   const agendaOrders = orders.filter((o) => {
@@ -115,68 +87,157 @@ export default function Home() {
   const fmtDateTime = (dt) => {
     const m = parseAsLocal(dt);
     return m && m.isValid() ? m.format("YYYY-MM-DD HH:mm") : "";
+    // You can change to m.format("MMM D, YYYY h:mm A") if you prefer
   };
 
   const woCell = (o) => o?.workOrderNumber || "—";
 
-  // ---- robust note timestamp extraction
-  const getNoteCreated = (n) => {
-    // support multiple shapes: createdAt | created_at | date | timestamp
+  /* =========================
+     Notes (robust extraction)
+  ========================= */
+
+  // 1) Accept arrays, JSON strings, and line-based blobs.
+  const parseNotesField = (notesLike) => {
+    if (!notesLike) return [];
+    if (Array.isArray(notesLike)) return notesLike;
+
+    if (typeof notesLike === "string") {
+      // Try JSON first
+      try {
+        const arr = JSON.parse(notesLike);
+        if (Array.isArray(arr)) return arr;
+      } catch {
+        // Not JSON; treat as plain text blob. Split by blank lines, then lines.
+        const lines = notesLike
+          .split(/\r?\n\r?\n|\r?\n/g)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        // Convert each line into a note object with best-guess fields
+        return lines.map((line) => ({ text: line }));
+      }
+      return [];
+    }
+
+    // Unknown object; try to coerce common shapes to an array
+    if (typeof notesLike === "object") {
+      // Some backends store as {items:[...]} or {list:[...]}
+      if (Array.isArray(notesLike.items)) return notesLike.items;
+      if (Array.isArray(notesLike.list)) return notesLike.list;
+      if (Array.isArray(notesLike.notes)) return notesLike.notes;
+    }
+
+    return [];
+  };
+
+  // 2) Try to get a moment() for the note creation time from many shapes
+  const extractNoteMoment = (note, order) => {
+    // Priority order of fields that might exist
     let raw =
-      n?.createdAt ??
-      n?.created_at ??
-      n?.date ??
-      n?.timestamp ??
+      note?.createdAt ??
+      note?.created_at ??
+      note?.date ??
+      note?.timestamp ??
+      note?.time ??
       null;
+
+    // If not provided, try to pull a date-like token from the note text:
+    // - ISO-like 2025-11-12 14:03 (with optional seconds)
+    // - ISO 2025-11-12T14:03:22Z
+    // - US 11/12/2025 2:03 PM (time optional)
+    if (raw == null && typeof note?.text === "string") {
+      const t = note.text;
+      const isoMatch =
+        t.match(/\b\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:Z|[+\-]\d{2}:?\d{2})?\b/) ||
+        t.match(/\b\d{4}-\d{2}-\d{2}\b/);
+      const usMatch =
+        t.match(/\b\d{1,2}\/\d{1,2}\/\d{2,4}(?:[ T]\d{1,2}:\d{2}(?:\s?[AP]M)?)?\b/i);
+      raw = (isoMatch && isoMatch[0]) || (usMatch && usMatch[0]) || null;
+    }
+
+    // Fallbacks to order-level timestamps if the note lacks one
+    if (raw == null) {
+      raw = order?.lastNoteAt || order?.updatedAt || order?.createdAt || null;
+    }
 
     if (raw == null) return null;
 
-    // if numeric, assume ms (if too small, treat as seconds)
+    // Numbers: assume ms (if too small, it's seconds)
     if (typeof raw === "number") {
-      if (raw < 10_000_000_000) {
-        // seconds -> ms
-        raw = raw * 1000;
-      }
+      if (raw < 10_000_000_000) raw = raw * 1000; // seconds -> ms
       return moment(raw);
     }
 
-    // string: accept ISO / “YYYY-MM-DD HH:mm:ss”
     if (typeof raw === "string") {
-      // if strict ISO works, use it
       if (moment(raw, moment.ISO_8601, true).isValid()) return moment(raw);
-      // else try common server format
-      const m = moment(raw, ["YYYY-MM-DD HH:mm:ss", "YYYY-MM-DD"], true);
-      return m.isValid() ? m : moment(raw); // final best effort
+      // Try common formats, then best-effort parse
+      const tryFmt = moment(raw, ["YYYY-MM-DD HH:mm:ss", "YYYY-MM-DD", "M/D/YYYY h:mm A", "M/D/YYYY"], true);
+      return tryFmt.isValid() ? tryFmt : moment(raw);
     }
 
     return null;
   };
 
-  // ===== Notes (This Week) =====
-  // Build a flat list of notes (with order context) created within last 7 days (inclusive)
+  // 3) Merge from multiple potential fields on each order
+  const getAllNotesForOrder = (order) => {
+    const candidates = [
+      order?.notes,
+      order?.internalNotes,
+      order?.comments,
+      order?.noteLog,
+      order?.activity?.notes,
+      order?.latestNotes,
+    ];
+    const all = [];
+    for (const c of candidates) {
+      const arr = parseNotesField(c);
+      if (arr?.length) all.push(...arr);
+    }
+    return all;
+  };
+
+  // Local “read/dismissed” tracking
+  const DISMISSED_KEY = "dismissedNotes:v1";
+  const readDismissedSet = () => {
+    try {
+      const raw = localStorage.getItem(DISMISSED_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch {
+      return new Set();
+    }
+  };
+  const writeDismissedSet = (set) => {
+    try {
+      localStorage.setItem(DISMISSED_KEY, JSON.stringify(Array.from(set)));
+    } catch {}
+  };
+
+  // Use a more stable key (prevents duplicates when createdAt missing)
+  const makeNoteKey = (orderId, createdISO, text) =>
+    `${orderId}:${createdISO}:${(text || "").slice(0, 64)}`;
+
+  // 4) Build "This Week" list robustly
   const weeklyNotes = useMemo(() => {
     const dismissed = readDismissedSet();
-    const oneWeekAgo = moment().subtract(7, "days");
+    const cutoff = moment().subtract(7, "days");
     const out = [];
 
     for (const o of orders) {
-      const list = parseNotes(o.notes);
-      if (!list.length) continue;
+      const rawNotes = getAllNotesForOrder(o);
+      if (!rawNotes.length) continue;
 
-      for (let i = 0; i < list.length; i++) {
-        const n = list[i];
-        const created = getNoteCreated(n);
+      for (const n of rawNotes) {
+        const created = extractNoteMoment(n, o);
         if (!created || !created.isValid()) continue;
 
-        // include notes that are on/after the 7-day cutoff
-        if (!created.isSameOrAfter(oneWeekAgo)) continue;
+        // Include notes on/after cutoff (inclusive)
+        if (!created.isSameOrAfter(cutoff)) continue;
 
-        const createdKey =
-          typeof n?.createdAt === "string" || typeof n?.createdAt === "number"
-            ? n.createdAt
-            : created.toISOString();
+        const createdISO = created.toISOString();
+        const text = n?.text || n?.note || n?.message || String(n || "");
+        const by = n?.by || n?.user || n?.author || "";
 
-        const key = makeNoteKey(o.id, createdKey);
+        const key = makeNoteKey(o.id, createdISO, text);
         if (dismissed.has(key)) continue;
 
         out.push({
@@ -189,25 +250,23 @@ export default function Home() {
             norm(o.siteName) ||
             norm(o.siteLocationName) ||
             "—",
-          text: n?.text || n?.note || n?.message || "",
-          by: n?.by || n?.user || n?.author || "",
-          createdAt: created.toISOString(),
+          text,
+          by,
+          createdAt: createdISO,
         });
       }
     }
 
-    // Newest first
+    // newest first
     out.sort((a, b) => moment(b.createdAt).valueOf() - moment(a.createdAt).valueOf());
     return out;
   }, [orders]);
 
   const onClickNote = (note) => {
-    // Mark this specific note as dismissed so it disappears next render
     const dismissed = readDismissedSet();
     dismissed.add(note.key);
     writeDismissedSet(dismissed);
 
-    // Navigate to the WO and ask detail page to focus/highlight latest note
     navigate(`/view-work-order/${note.orderId}`, {
       state: { highlightLatestNote: true },
     });
@@ -221,6 +280,9 @@ export default function Home() {
     fetchOrders();
   };
 
+  /* =========================
+     Render
+  ========================= */
   return (
     <div className="home-container">
       <h2 className="home-title">Welcome to the CRM Dashboard</h2>
