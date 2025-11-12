@@ -33,14 +33,31 @@ const STATUS_OPTIONS = [
 /* =========================
    Helpers
 ========================= */
-function fromDbString(dbString) {
-  if (!dbString) return null;
+function fromDbString(val) {
+  if (val == null) return null;
+
+  // Already a Date
+  if (val instanceof Date) return val;
+
+  // Moment
+  if (moment.isMoment(val)) return val.toDate();
+
+  // Timestamp (ms)
+  if (typeof val === "number" && Number.isFinite(val)) return new Date(val);
+
+  // Coerce to string safely
+  const s = String(val);
+  if (!s.trim()) return null;
+
+  // Accept both "YYYY-MM-DD" and "YYYY-MM-DD HH:mm:ss"
   const m =
-    dbString.trim().length <= 10
-      ? moment(dbString, "YYYY-MM-DD").startOf("day")
-      : moment(dbString.replace("T", " "), "YYYY-MM-DD HH:mm:ss");
-  return m.toDate();
+    s.trim().length <= 10
+      ? moment(s, "YYYY-MM-DD").startOf("day")
+      : moment(s.replace("T", " "), "YYYY-MM-DD HH:mm:ss");
+
+  return m.isValid() ? m.toDate() : null;
 }
+
 const fmtDate = (d) => moment(d).format("YYYY-MM-DD");
 const fmtTime = (d) => moment(d).format("HH:mm");
 const diffMinutes = (a, b) => Math.max(0, Math.round((+b - +a) / 60000));
@@ -349,21 +366,29 @@ export default function WorkOrderCalendar() {
       const { data } = await api.get("/calendar/events", {
         params: { start: startStr, end: endStr },
       });
-      const list = (Array.isArray(data) ? data : []).map((ev) => ({
-        id: ev.id,
-        customer: ev.meta?.customer ?? ev.customer,
-        siteLocation: ev.meta?.siteLocation ?? ev.siteLocation,
-        siteAddress: ev.meta?.siteAddress ?? ev.siteAddress,
-        workOrderNumber: ev.workOrderNumber,
-        poNumber: ev.poNumber,
-        problemDescription: ev.meta?.problemDescription ?? ev.problemDescription,
-        scheduledDate: ev.start,
-        scheduledEnd: ev.end,
-      }));
+
+      // Normalize to shape the modal expects; keep dates as strings we know how to parse
+      const list = (Array.isArray(data) ? data : []).map((ev) => {
+        const start = fromDbString(ev.start) || null;
+        const end = fromDbString(ev.end) || (start ? moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate() : null);
+        return {
+          id: ev.id,
+          customer: ev.meta?.customer ?? ev.customer,
+          siteLocation: ev.meta?.siteLocation ?? ev.siteLocation,
+          siteAddress: ev.meta?.siteAddress ?? ev.siteAddress,
+          workOrderNumber: ev.workOrderNumber,
+          poNumber: ev.poNumber,
+          problemDescription: ev.meta?.problemDescription ?? ev.problemDescription,
+          scheduledDate: start,
+          scheduledEnd: end,
+          serviceAddress: ev.serviceAddress,
+          address: ev.address,
+        };
+      });
 
       list.sort((a, b) => {
-        const sa = new Date(a.scheduledDate).getTime();
-        const sb = new Date(b.scheduledDate).getTime();
+        const sa = a.scheduledDate ? +a.scheduledDate : 0;
+        const sb = b.scheduledDate ? +b.scheduledDate : 0;
         return sa - sb;
       });
 
