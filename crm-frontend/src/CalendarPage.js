@@ -170,7 +170,6 @@ export default function WorkOrderCalendar() {
   const [editEndTime, setEditEndTime] = useState(""); // HH:mm (window end)
 
   // Drag from Unscheduled OR Day modal → calendar
-  the
   const [dragItem, setDragItem] = useState(null);
 
   // Status modal
@@ -255,10 +254,6 @@ export default function WorkOrderCalendar() {
 
   /* ===== schedule helpers (MULTER route requires multipart/form-data) ===== */
   async function setSchedulePayload(orderId, { date, time, endTime, status }) {
-    // Compose fields the server expects:
-    // - scheduledDate: "YYYY-MM-DD HH:mm" (or "YYYY-MM-DDTHH:mm")
-    // - endTime: "HH:mm" (optional)
-    // - status: (we force "Scheduled" on schedule ops)
     const form = new FormData();
     const startStr = `${date} ${time}`;
     form.append("scheduledDate", startStr);
@@ -327,10 +322,8 @@ export default function WorkOrderCalendar() {
   async function unschedule(orderId) {
     if (!window.confirm("Remove this work order from the calendar?")) return;
     try {
-      // Clearing: per server.js, send scheduledDate="" to null both scheduledDate & scheduledEnd
       const form = new FormData();
       form.append("scheduledDate", "");
-      // also push it back into a visible bucket in the Unscheduled bar
       form.append("status", "Needs to be Scheduled");
 
       await api.put(`/work-orders/${orderId}/edit`, form, {
@@ -353,7 +346,6 @@ export default function WorkOrderCalendar() {
     const endStr = day.format("YYYY-MM-DD");
 
     try {
-      // Pull that day’s events directly from calendar feed
       const { data } = await api.get("/calendar/events", {
         params: { start: startStr, end: endStr },
       });
