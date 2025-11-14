@@ -403,7 +403,7 @@ export default function ViewWorkOrder() {
   const [keepOldInAttachments, setKeepOldInAttachments] = useState(true);
   const [busyPoUpload, setBusyPoUpload] = useState(false);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
-  const [busyImageUpload, setBusyImageUpload] = useState(false); // NEW: image upload busy state
+  const [busyImageUpload, setBusyImageUpload] = useState(false); // image upload busy state
 
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
@@ -717,16 +717,21 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // NEW: upload image/photo attachment
+  // Upload image/photo attachments (now supports multiple)
   const handleUploadImageAttachment = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
 
-    const isImage =
-      file.type?.startsWith("image/") ||
-      /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(file.name || "");
-    if (!isImage) {
-      alert("Please choose an image file (jpg, png, etc.).");
+    // validate all are images
+    const bad = files.find((file) => {
+      const isImage =
+        file.type?.startsWith("image/") ||
+        /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(file.name || "");
+      return !isImage;
+    });
+
+    if (bad) {
+      alert("Please choose only image files (jpg, png, etc.).");
       e.target.value = "";
       return;
     }
@@ -735,7 +740,9 @@ export default function ViewWorkOrder() {
     try {
       const form = new FormData();
       // keep field name in sync with mobile AddWorkOrder.js
-      form.append("photoFile", file);
+      files.forEach((file) => {
+        form.append("photoFile", file);
+      });
 
       await api.put(`/work-orders/${id}/edit`, form, {
         headers: {
@@ -746,8 +753,8 @@ export default function ViewWorkOrder() {
 
       await fetchWorkOrder();
     } catch (error) {
-      console.error("⚠️ Error uploading image:", error);
-      alert(error?.response?.data?.error || "Failed to upload image.");
+      console.error("⚠️ Error uploading images:", error);
+      alert(error?.response?.data?.error || "Failed to upload images.");
     } finally {
       setBusyImageUpload(false);
       e.target.value = "";
@@ -1212,10 +1219,11 @@ export default function ViewWorkOrder() {
               Image Attachments
             </h3>
             <label className="btn">
-              {busyImageUpload ? "Uploading…" : "Upload Photo"}
+              {busyImageUpload ? "Uploading…" : "Upload Photos"}
               <input
                 type="file"
                 accept="image/*"
+                multiple
                 onChange={handleUploadImageAttachment}
                 style={{ display: "none" }}
                 disabled={busyImageUpload}
