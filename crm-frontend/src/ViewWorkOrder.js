@@ -761,8 +761,29 @@ export default function ViewWorkOrder() {
     }
   };
 
-  const handleDeleteAttachment = async () => {
-    alert("Deleting attachments requires a backend route. Not implemented.");
+  // NEW: delete a specific attachment (image or PDF) by its relative path key
+  const handleDeleteAttachment = async (relPath) => {
+    if (!relPath) return;
+    const confirm = window.confirm("Delete this attachment permanently?");
+    if (!confirm) return;
+
+    try {
+      // This expects a backend DELETE route:
+      // DELETE /work-orders/:id/attachments
+      // with JSON body: { key: relPath }
+      await api.delete(`/work-orders/${id}/attachments`, {
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders(),
+        },
+        data: { key: relPath },
+      });
+
+      await fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error deleting attachment:", error);
+      alert(error?.response?.data?.error || "Failed to delete attachment.");
+    }
   };
 
   /* ---------- Status ---------- */
@@ -1193,7 +1214,7 @@ export default function ViewWorkOrder() {
                     onExpand={() =>
                       openLightbox("pdf", href, fileName)
                     }
-                    onDelete={handleDeleteAttachment}
+                    onDelete={() => handleDeleteAttachment(relPath)}
                   />
                 );
               })}
@@ -1254,7 +1275,7 @@ export default function ViewWorkOrder() {
                     onExpand={() =>
                       openLightbox("image", href, fileName)
                     }
-                    onDelete={handleDeleteAttachment}
+                    onDelete={() => handleDeleteAttachment(relPath)}
                   />
                 );
               })}
@@ -1327,3 +1348,4 @@ export default function ViewWorkOrder() {
     </div>
   );
 }
+
