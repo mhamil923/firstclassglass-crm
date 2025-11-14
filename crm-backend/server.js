@@ -82,7 +82,7 @@ function toSqlDateTimeFromParts(Y, M, D, h = 0, m = 0, s = 0) {
 }
 function addMinutesToSql(sqlStr, minutes) {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(sqlStr);
-  if (!m) return sqlStr;
+ 	if (!m) return sqlStr;
   const Y = Number(m[1]), Mo = Number(m[2]), D = Number(m[3]);
   const h = Number(m[4]), mi = Number(m[5]), s = Number(m[6] || 0);
   const d = new Date(Y, Mo - 1, D, h, mi, s);
@@ -1287,6 +1287,69 @@ async function deleteWorkOrderById(wid, { purgeFiles = true } = {}) {
   return { ok: true };
 }
 
+// NEW: delete a single attachment (image or PDF) from a work order
+app.delete('/work-orders/:id(\\d+)/attachments', authenticate, async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const b = coerceBody(req);
+    const keyRaw = b.key ?? b.path ?? b.file ?? b.attachment ?? b.k;
+    if (!keyRaw || !String(keyRaw).trim()) {
+      return res.status(400).json({ error: 'key is required' });
+    }
+
+    const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    if (!row) return res.status(404).json({ error: 'Work order not found.' });
+
+    const rmNorm = normalizeStoredKey(keyRaw);
+    let { pdfPath, estimatePdfPath, poPdfPath, photoPath } = row;
+    let changed = false;
+
+    const normEq = (val) =>
+      !!val && normalizeStoredKey(val) === rmNorm;
+
+    // If this key happens to be used as one of the main PDFs, clear it too
+    if (normEq(pdfPath)) { pdfPath = null; changed = true; }
+    if (normEq(estimatePdfPath)) { estimatePdfPath = null; changed = true; }
+    if (normEq(poPdfPath)) { poPdfPath = null; changed = true; }
+
+    // Strip from photoPath attachments list
+    const parts = (photoPath || '').split(',').map(s => s.trim()).filter(Boolean);
+    const kept = parts.filter(p => !normEq(p));
+    if (kept.length !== parts.length) {
+      photoPath = kept.join(',');
+      changed = true;
+    }
+
+    if (!changed) {
+      // Key is not attached to this work order
+      return res.status(404).json({ error: 'Attachment not found on this work order.' });
+    }
+
+    await db.execute(
+      `UPDATE work_orders
+         SET pdfPath = ?, estimatePdfPath = ?, poPdfPath = ?, photoPath = ?
+       WHERE id = ?`,
+      [pdfPath || null, estimatePdfPath || null, poPdfPath || null, photoPath || null, wid]
+    );
+
+    // Best-effort physical file delete (same behavior as PDF replacement logic)
+    await deleteKeyIfExists(keyRaw);
+
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    res.json({
+      ok: true,
+      workOrderId: wid,
+      key: keyRaw,
+      workOrder: updated
+        ? { ...updated, status: displayStatusOrDefault(updated.status) }
+        : null,
+    });
+  } catch (e) {
+    console.error('Delete attachment error:', e);
+    res.status(500).json({ error: 'Failed to delete attachment.' });
+  }
+});
+
 // Canonical REST delete
 app.delete('/work-orders/:id(\\d+)', authenticate, async (req, res) => {
   try {
@@ -1360,3 +1423,4 @@ app.use((err, req, res, next) => {
 // ─── START ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 80;
 app.listen(PORT, '0.0.0.0', () => console.log(`✅ Server listening on 0.0.0.0:${PORT}`));
+
