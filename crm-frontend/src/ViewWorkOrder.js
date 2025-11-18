@@ -77,7 +77,14 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
 
   if (!editing) {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
         <div>{initialPo ? initialPo : <em>None</em>}</div>
         <button className="btn btn-primary" onClick={() => setEditing(true)}>
           {initialPo ? "Update PO #" : "Add PO #"}
@@ -87,19 +94,35 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+      }}
+    >
       <input
         type="text"
         value={po}
         onChange={(e) => setPo(e.target.value)}
         className="form-input"
         placeholder="Enter PO # (optional)"
-        style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
+        style={{
+          height: 36,
+          borderRadius: 8,
+          border: "1px solid #cbd5e1",
+          padding: "0 10px",
+        }}
       />
       <button className="btn btn-primary" disabled={saving} onClick={save}>
         {saving ? "Saving…" : "Save"}
       </button>
-      <button className="btn btn-ghost" disabled={saving} onClick={() => setEditing(false)}>
+      <button
+        className="btn btn-ghost"
+        disabled={saving}
+        onClick={() => setEditing(false)}
+      >
         Cancel
       </button>
     </div>
@@ -194,7 +217,11 @@ function Lightbox({ open, onClose, kind, src, title }) {
           </strong>
           <div style={{ display: "flex", gap: 8 }}>
             {kind === "image" && (
-              <button className="btn btn-light" onClick={handleDownload} disabled={downloading}>
+              <button
+                className="btn btn-light"
+                onClick={handleDownload}
+                disabled={downloading}
+              >
                 {downloading ? "Preparing…" : "Download"}
               </button>
             )}
@@ -416,8 +443,7 @@ export default function ViewWorkOrder() {
   });
   const openLightbox = (kind, src, title) =>
     setLightbox({ open: true, kind, src, title });
-  const closeLightbox = () =>
-    setLightbox((l) => ({ ...l, open: false }));
+  const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
   const fetchWorkOrder = async () => {
     try {
@@ -768,9 +794,6 @@ export default function ViewWorkOrder() {
     if (!confirm) return;
 
     try {
-      // This expects a backend DELETE route:
-      // DELETE /work-orders/:id/attachments
-      // with JSON body: { key: relPath }
       await api.delete(`/work-orders/${id}/attachments`, {
         headers: {
           "Content-Type": "application/json",
@@ -817,21 +840,21 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /* ---------- Notes (FIXED) ---------- */
+  /* ---------- Notes (add + delete) ---------- */
   const handleAddNote = async () => {
     const text = newNote.trim();
     if (!text) return;
 
     try {
-      // 1) Primary: EXACTLY like your successful curl
+      // primary: JSON body
       await api.put(
         `/work-orders/${id}/notes`,
         { notes: text, append: true },
         { headers: { "Content-Type": "application/json", ...authHeaders() } }
       );
     } catch (err1) {
-      // 2) Fallback: some deployments accept `text` instead of `notes`
       try {
+        // fallback field name
         await api.put(
           `/work-orders/${id}/notes`,
           { text, append: true },
@@ -855,10 +878,13 @@ export default function ViewWorkOrder() {
     await fetchWorkOrder();
   };
 
+  // 🔧 FIXED: delete note by rewriting the entire notes field via /edit,
+  // which allows notes to be empty (unlike /notes endpoint).
   const handleDeleteNote = async (displayIdx) => {
     if (!window.confirm("Delete this note?")) return;
+
     try {
-      // Rebuild notes by removing selected one (no delete endpoint available)
+      // Put notes in chronological order (oldest first)
       const byOldest = [...parsedNotes].sort(
         (a, b) =>
           (a.createdAt ? Date.parse(a.createdAt) : 0) -
@@ -867,6 +893,7 @@ export default function ViewWorkOrder() {
       const target = displayNotes[displayIdx];
       if (!target) return;
 
+      // Remove the selected note
       const kept = byOldest.filter(
         (e) =>
           !(
@@ -875,13 +902,18 @@ export default function ViewWorkOrder() {
             (e.by || "") === (target.by || "")
           )
       );
-      const newBody = formatNotesText(kept);
 
-      await api.put(
-        `/work-orders/${id}/notes`,
-        { notes: newBody, append: false },
-        { headers: { "Content-Type": "application/json", ...authHeaders() } }
-      );
+      const newBody = kept.length ? formatNotesText(kept) : "";
+
+      const form = new FormData();
+      form.append("notes", newBody);
+
+      await api.put(`/work-orders/${id}/edit`, form, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+          ...authHeaders(),
+        },
+      });
 
       await fetchWorkOrder();
     } catch (error) {
@@ -908,7 +940,10 @@ export default function ViewWorkOrder() {
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
             </button>
-            <button className="back-btn" onClick={() => navigate("/work-orders")}>
+            <button
+              className="back-btn"
+              onClick={() => navigate("/work-orders")}
+            >
               ← Back to List
             </button>
           </div>
@@ -1011,8 +1046,7 @@ export default function ViewWorkOrder() {
               className="attachments"
               style={{
                 display: "grid",
-                gridTemplateColumns:
-                  "repeat(auto-fill, minmax(160px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
                 gap: 12,
               }}
             >
@@ -1097,8 +1131,7 @@ export default function ViewWorkOrder() {
               className="attachments"
               style={{
                 display: "grid",
-                gridTemplateColumns:
-                  "repeat(auto-fill, minmax(160px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
                 gap: 12,
               }}
             >
@@ -1106,8 +1139,7 @@ export default function ViewWorkOrder() {
                 kind="pdf"
                 href={estimateHref}
                 fileName={
-                  (estimatePdfPath || "").split("/").pop() ||
-                  "estimate.pdf"
+                  (estimatePdfPath || "").split("/").pop() || "estimate.pdf"
                 }
                 onExpand={() =>
                   openLightbox("pdf", estimateHref, "Estimate PDF")
@@ -1147,20 +1179,15 @@ export default function ViewWorkOrder() {
               className="attachments"
               style={{
                 display: "grid",
-                gridTemplateColumns:
-                  "repeat(auto-fill, minmax(160px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
                 gap: 12,
               }}
             >
               <FileTile
                 kind="pdf"
                 href={poHref}
-                fileName={
-                  (poPdfPath || "").split("/").pop() || "po.pdf"
-                }
-                onExpand={() =>
-                  openLightbox("pdf", poHref, "PO PDF")
-                }
+                fileName={(poPdfPath || "").split("/").pop() || "po.pdf"}
+                onExpand={() => openLightbox("pdf", poHref, "PO PDF")}
               />
             </div>
           ) : (
@@ -1196,8 +1223,7 @@ export default function ViewWorkOrder() {
               className="attachments"
               style={{
                 display: "grid",
-                gridTemplateColumns:
-                  "repeat(auto-fill, minmax(160px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
                 gap: 12,
               }}
             >
@@ -1211,9 +1237,7 @@ export default function ViewWorkOrder() {
                     kind="pdf"
                     href={href}
                     fileName={fileName}
-                    onExpand={() =>
-                      openLightbox("pdf", href, fileName)
-                    }
+                    onExpand={() => openLightbox("pdf", href, fileName)}
                     onDelete={() => handleDeleteAttachment(relPath)}
                   />
                 );
@@ -1257,8 +1281,7 @@ export default function ViewWorkOrder() {
               className="attachments"
               style={{
                 display: "grid",
-                gridTemplateColumns:
-                  "repeat(auto-fill, minmax(160px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
                 gap: 12,
               }}
             >
@@ -1272,9 +1295,7 @@ export default function ViewWorkOrder() {
                     kind="image"
                     href={href}
                     fileName={fileName}
-                    onExpand={() =>
-                      openLightbox("image", href, fileName)
-                    }
+                    onExpand={() => openLightbox("image", href, fileName)}
                     onDelete={() => handleDeleteAttachment(relPath)}
                   />
                 );
@@ -1321,9 +1342,7 @@ export default function ViewWorkOrder() {
                   <div className="note-header">
                     <small className="note-timestamp">
                       {n.createdAt
-                        ? moment(n.createdAt).format(
-                            "YYYY-MM-DD HH:mm"
-                          )
+                        ? moment(n.createdAt).format("YYYY-MM-DD HH:mm")
                         : "—"}
                       {n.by ? ` — ${n.by}` : ""}
                     </small>
