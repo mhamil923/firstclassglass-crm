@@ -19,21 +19,12 @@ const todayKey = () => {
   return `historyReport.searches.${y}-${m}-${day}`;
 };
 
-function summarizeFilters(f) {
-  const bits = [];
-  if (norm(f.customer)) bits.push(`Customer: ${norm(f.customer)}`);
-  if (norm(f.workOrderNumber)) bits.push(`WO: ${norm(f.workOrderNumber)}`);
-  if (norm(f.poNumber)) bits.push(`PO: ${norm(f.poNumber)}`);
-  if (norm(f.siteLocation)) bits.push(`Site: ${norm(f.siteLocation)}`);
-  return bits.join(" · ") || "—";
+function summarizeQuery(q) {
+  const v = norm(q);
+  return v || "—";
 }
-function canonicalKey(f) {
-  return JSON.stringify({
-    c: norm(f.customer).toLowerCase(),
-    wo: norm(f.workOrderNumber).toLowerCase(),
-    po: norm(f.poNumber).toLowerCase(),
-    s: norm(f.siteLocation).toLowerCase(),
-  });
+function canonicalKeyFromQuery(q) {
+  return norm(q).toLowerCase();
 }
 function loadHistory() {
   try {
@@ -49,15 +40,13 @@ function saveHistory(items) {
     localStorage.setItem(todayKey(), JSON.stringify(items.slice(0, MAX_HISTORY)));
   } catch {}
 }
-function addToHistory(f) {
-  if (!norm(f.customer) && !norm(f.workOrderNumber) && !norm(f.poNumber) && !norm(f.siteLocation)) {
-    return loadHistory();
-  }
+function addToHistory(query) {
+  if (!norm(query)) return loadHistory();
   const now = Date.now();
-  const key = canonicalKey(f);
+  const key = canonicalKeyFromQuery(query);
   const curr = loadHistory();
   const filtered = curr.filter((it) => it.key !== key);
-  const next = [{ key, when: now, filters: f }, ...filtered].slice(0, MAX_HISTORY);
+  const next = [{ key, when: now, query }, ...filtered].slice(0, MAX_HISTORY);
   saveHistory(next);
   return next;
 }
@@ -66,12 +55,7 @@ function addToHistory(f) {
 export default function HistoryReport() {
   const navigate = useNavigate();
 
-  const [filters, setFilters] = useState({
-    customer: "",
-    poNumber: "",
-    workOrderNumber: "",
-    siteLocation: "",
-  });
+  const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -82,53 +66,47 @@ export default function HistoryReport() {
     setHistory(loadHistory());
   }, []);
 
-  const handleChange = (e) => {
-    setFilters((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  // Core search: pull all work orders and filter on the client
+  const performSearch = async (searchText) => {
+    const q = norm(searchText).toLowerCase();
+    setLoading(true);
+    try {
+      const { data } = await api.get("/work-orders");
+      const all = Array.isArray(data) ? data : [];
+
+      const filtered = q
+        ? all.filter((o) => {
+            const customer = (o.customer || "").toString().toLowerCase();
+            const wo = (o.workOrderNumber || "").toString().toLowerCase();
+            const po = (o.poNumber || "").toString().toLowerCase();
+            const site = (o.siteLocation || "").toString().toLowerCase();
+            return (
+              customer.includes(q) ||
+              wo.includes(q) ||
+              po.includes(q) ||
+              site.includes(q)
+            );
+          })
+        : all;
+
+      setResults(filtered);
+      setHistory(addToHistory(searchText));
+    } catch (err) {
+      console.error("Search failed:", err);
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSearch = async (e) => {
     if (e) e.preventDefault();
-    setLoading(true);
-    try {
-      const { data } = await api.get("/work-orders/search", {
-        params: {
-          customer: filters.customer || "",
-          poNumber: filters.poNumber || "",
-          siteLocation: filters.siteLocation || "",
-          workOrderNumber: filters.workOrderNumber || "",
-        },
-      });
-      setResults(Array.isArray(data) ? data : []);
-      setHistory(addToHistory(filters));
-    } catch (err) {
-      console.error("Search failed:", err);
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
+    await performSearch(query);
   };
 
   const runFromHistory = async (h) => {
-    setFilters(h.filters);
-    setLoading(true);
-    try {
-      const { data } = await api.get("/work-orders/search", {
-        params: {
-          customer: h.filters.customer || "",
-          poNumber: h.filters.poNumber || "",
-          siteLocation: h.filters.siteLocation || "",
-          workOrderNumber: h.filters.workOrderNumber || "",
-        },
-      });
-      setResults(Array.isArray(data) ? data : []);
-      const bumped = addToHistory(h.filters);
-      setHistory(bumped);
-    } catch (err) {
-      console.error("Search failed:", err);
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
+    setQuery(h.query);
+    await performSearch(h.query);
   };
 
   const removeHistoryItem = (key) => {
@@ -183,42 +161,19 @@ export default function HistoryReport() {
           border: "1px solid #eef2f7",
         }}
       >
-        {/* Full-width, evenly spaced inputs with aligned Search button */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(4, minmax(180px, 1fr)) 140px",
+            gridTemplateColumns: "minmax(260px, 1fr) 140px",
             gap: 12,
             alignItems: "center",
           }}
         >
           <input
-            name="customer"
             className="form-control"
-            placeholder="Customer"
-            value={filters.customer}
-            onChange={handleChange}
-          />
-          <input
-            name="workOrderNumber"
-            className="form-control"
-            placeholder="Work Order Number"
-            value={filters.workOrderNumber}
-            onChange={handleChange}
-          />
-          <input
-            name="poNumber"
-            className="form-control"
-            placeholder="PO Number"
-            value={filters.poNumber}
-            onChange={handleChange}
-          />
-          <input
-            name="siteLocation"
-            className="form-control"
-            placeholder="Site Location"
-            value={filters.siteLocation}
-            onChange={handleChange}
+            placeholder="Search by Customer, WO #, PO #, or Site Location"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
           />
 
           <button
@@ -259,12 +214,16 @@ export default function HistoryReport() {
 
           <div className="d-flex flex-wrap" style={{ gap: 8 }}>
             {history.map((h) => {
-              const label = summarizeFilters(h.filters);
+              const label = summarizeQuery(h.query);
               return (
                 <div key={h.key} className="recent-chip" title={label} style={chipStyle}>
                   <button
                     className="btn btn-sm btn-link p-0 text-reset"
-                    style={{ textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis" }}
+                    style={{
+                      textDecoration: "none",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
                     onClick={() => runFromHistory(h)}
                   >
                     {label}
@@ -324,7 +283,9 @@ export default function HistoryReport() {
                     <td>{o.siteLocation || "—"}</td>
                     <td>{o.status || "—"}</td>
                     <td>{o.assignedToName || "—"}</td>
-                    <td>{o.scheduledDate ? o.scheduledDate.substring(0, 16) : "—"}</td>
+                    <td>
+                      {o.scheduledDate ? o.scheduledDate.substring(0, 16) : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
