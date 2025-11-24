@@ -8,7 +8,7 @@ import "./WorkOrders.css";
 
 /**
  * STATUS LIST (display & dropdown order; "Parts In" removed)
- * Chip bar renders: Today + STATUS_LIST in this exact order.
+ * Chip bar normally renders: Today + STATUS_LIST in this exact order.
  * Added "Approved" between "Waiting for Approval" and "Waiting on Parts".
  */
 const STATUS_LIST = [
@@ -132,7 +132,9 @@ function parseLatestNote(notes) {
   const lines = s.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return null;
 
-  const lastBracket = [...lines].reverse().find((l) => /^\[[^\]]+\]\s*/.test(l)) || lines[lines.length - 1];
+  const lastBracket =
+    [...lines].reverse().find((l) => /^\[[^\]]+\]\s*/.test(l)) ||
+    lines[lines.length - 1];
 
   // Try to parse "[timestamp] author: text"
   const m = lastBracket.match(/^\[([^\]]+)\]\s*([^:]+):\s*(.*)$/);
@@ -146,16 +148,27 @@ function parseLatestNote(notes) {
 export default function WorkOrders() {
   const navigate = useNavigate();
 
-  // role
+  // role + username from token
   const token = localStorage.getItem("jwt");
   let userRole = null;
+  let username = null;
   if (token) {
     try {
-      userRole = jwtDecode(token).role;
+      const decoded = jwtDecode(token);
+      userRole = decoded.role;
+      username = decoded.username || decoded.user || null;
     } catch {
       console.warn("Invalid JWT");
     }
   }
+
+  // 🔒 Special restriction for user "jeffsr"
+  const isJeffSr = username && username.toLowerCase() === "jeffsr";
+
+  // For jeffsr, only show these status tabs; everyone else gets the full list.
+  const visibleStatusList = isJeffSr
+    ? ["Needs to be Quoted", "Needs to be Invoiced"]
+    : STATUS_LIST;
 
   // state
   const [workOrders, setWorkOrders] = useState([]);
@@ -190,7 +203,10 @@ export default function WorkOrders() {
       const res = await api.get("/work-orders", { headers: authHeaders() });
       const data = Array.isArray(res.data) ? res.data : [];
       // normalize status for rendering & filtering
-      const canon = data.map((o) => ({ ...o, status: toCanonicalStatus(o.status) }));
+      const canon = data.map((o) => ({
+        ...o,
+        status: toCanonicalStatus(o.status),
+      }));
       setWorkOrders(canon);
       return canon;
     } catch (err) {
@@ -292,10 +308,7 @@ export default function WorkOrders() {
         await fetchWorkOrders();
       } catch (err2) {
         console.error("Error assigning tech:", err2);
-        alert(
-          err2?.response?.data?.error ||
-            "Failed to assign technician."
-        );
+        alert(err2?.response?.data?.error || "Failed to assign technician.");
       }
     }
   };
@@ -353,7 +366,12 @@ export default function WorkOrders() {
       const po = displayPO(o.workOrderNumber, o.poNumber).toLowerCase();
       const cust = norm(o.customer).toLowerCase();
       const site = norm(o.siteLocation).toLowerCase();
-      return wo.includes(q) || po.includes(q) || cust.includes(q) || site.includes(q);
+      return (
+        wo.includes(q) ||
+        po.includes(q) ||
+        cust.includes(q) ||
+        site.includes(q)
+      );
     });
   }, [filteredOrders, poSearch]);
 
@@ -390,7 +408,9 @@ export default function WorkOrders() {
       closePartsModal();
 
       const count = ids.length;
-      setFlashMsg(`Moved ${count} work order${count === 1 ? "" : "s"} to “${PARTS_NEXT}”.`);
+      setFlashMsg(
+        `Moved ${count} work order${count === 1 ? "" : "s"} to “${PARTS_NEXT}”.`
+      );
       window.setTimeout(() => setFlashMsg(""), 3000);
     } catch (err) {
       console.error("Bulk update failed:", err);
@@ -400,9 +420,9 @@ export default function WorkOrders() {
         err?.response?.data?.error ||
         (status === 401
           ? "Missing or invalid token. Please sign in again."
-          : (status === 403
-            ? "Forbidden: one or more selected items aren’t assigned to you."
-            : `Failed to move selected to “${PARTS_NEXT}”.`));
+          : status === 403
+          ? "Forbidden: one or more selected items aren’t assigned to you."
+          : `Failed to move selected to “${PARTS_NEXT}”.`);
       alert(msg);
     } finally {
       setIsUpdatingParts(false);
@@ -426,10 +446,18 @@ export default function WorkOrders() {
 
       <div className="section-card">
         <div className="chips-toolbar">
-          <div className="chips-row" role="tablist" aria-label="Work order filters">
+          <div
+            className="chips-row"
+            role="tablist"
+            aria-label="Work order filters"
+          >
             {[
               { key: "Today", label: "Today", count: chipCounts.Today },
-              ...STATUS_LIST.map((s) => ({ key: s, label: s, count: chipCounts[s] })),
+              ...visibleStatusList.map((s) => ({
+                key: s,
+                label: s,
+                count: chipCounts[s],
+              })),
             ].map(({ key, label, count }) => {
               const active = selectedFilter === key;
               return (
@@ -447,8 +475,14 @@ export default function WorkOrders() {
           </div>
 
           {normStatus(selectedFilter) === normStatus(PARTS_WAITING) &&
-            filteredOrders.some((o) => normStatus(o.status) === normStatus(PARTS_WAITING)) && (
-              <button type="button" className="btn btn-parts" onClick={openPartsModal}>
+            filteredOrders.some(
+              (o) => normStatus(o.status) === normStatus(PARTS_WAITING)
+            ) && (
+              <button
+                type="button"
+                className="btn btn-parts"
+                onClick={openPartsModal}
+              >
                 Mark Parts In
               </button>
             )}
@@ -475,9 +509,10 @@ export default function WorkOrders() {
                 : null;
 
               // ---- Robust location/address logic ----
-              const rawLocField = norm(order.siteLocation);               // may be a name (new) OR an address (legacy)
-              const explicitName = norm(order.siteName) || norm(order.siteLocationName);
-              let siteLocationName = explicitName;                        // prefer explicit name fields
+              const rawLocField = norm(order.siteLocation); // may be a name (new) OR an address (legacy)
+              const explicitName =
+                norm(order.siteName) || norm(order.siteLocationName);
+              let siteLocationName = explicitName; // prefer explicit name fields
 
               // Build address from explicit address-type fields
               let siteAddress =
@@ -503,15 +538,26 @@ export default function WorkOrders() {
                   <td>
                     <div
                       className="wo-po-cell"
-                      style={{ display: "flex", flexDirection: "column", gap: 2 }}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 2,
+                      }}
                     >
                       {order.workOrderNumber ? (
-                        <div><strong>WO:</strong> {order.workOrderNumber}</div>
+                        <div>
+                          <strong>WO:</strong> {order.workOrderNumber}
+                        </div>
                       ) : (
-                        <div><strong>WO:</strong> —</div>
+                        <div>
+                          <strong>WO:</strong> —
+                        </div>
                       )}
                       {displayPO(order.workOrderNumber, order.poNumber) ? (
-                        <div><strong>PO:</strong> {displayPO(order.workOrderNumber, order.poNumber)}</div>
+                        <div>
+                          <strong>PO:</strong>{" "}
+                          {displayPO(order.workOrderNumber, order.poNumber)}
+                        </div>
                       ) : null}
                     </div>
                   </td>
@@ -528,7 +574,9 @@ export default function WorkOrders() {
                     {siteAddress ? (
                       <span
                         className="link-text"
-                        onClick={(e) => openAddressInMaps(e, siteAddress, siteLocationName)}
+                        onClick={(e) =>
+                          openAddressInMaps(e, siteAddress, siteLocationName)
+                        }
                       >
                         {siteAddress}
                       </span>
@@ -544,7 +592,9 @@ export default function WorkOrders() {
                     {latest?.text && (
                       <div
                         className="latest-note"
-                        title={`${latest.text}${noteTime ? ` • ${noteTime}` : ""}`}
+                        title={`${latest.text}${
+                          noteTime ? ` • ${noteTime}` : ""
+                        }`}
                         style={{
                           marginTop: 6,
                           fontSize: 12,
@@ -557,7 +607,10 @@ export default function WorkOrders() {
                           whiteSpace: "normal",
                         }}
                       >
-                        <span role="img" aria-label="note">📝</span> {latest.text}
+                        <span role="img" aria-label="note">
+                          📝
+                        </span>{" "}
+                        {latest.text}
                         {noteTime ? ` • ${noteTime}` : ""}
                       </div>
                     )}
@@ -584,7 +637,9 @@ export default function WorkOrders() {
                         className="form-select"
                         value={order.assignedTo || ""}
                         onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => assignToTech(order.id, e.target.value, e)}
+                        onChange={(e) =>
+                          assignToTech(order.id, e.target.value, e)
+                        }
                       >
                         <option value="">-- assign tech --</option>
                         {techUsers.map((t) => (
@@ -611,7 +666,9 @@ export default function WorkOrders() {
             {filteredOrders.length === 0 && (
               <tr>
                 <td colSpan={userRole !== "tech" ? 8 : 7}>
-                  <div className="empty-state">No work orders for this filter.</div>
+                  <div className="empty-state">
+                    No work orders for this filter.
+                  </div>
                 </td>
               </tr>
             )}
@@ -621,11 +678,22 @@ export default function WorkOrders() {
 
       {/* ---------- Parts Modal (moves to Needs to be Scheduled) ---------- */}
       {isPartsModalOpen && (
-        <div className="modal-overlay" onClick={closePartsModal} role="dialog" aria-modal="true">
+        <div
+          className="modal-overlay"
+          onClick={closePartsModal}
+          role="dialog"
+          aria-modal="true"
+        >
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Mark Parts as Received</h3>
-              <button className="modal-close" onClick={closePartsModal} aria-label="Close">×</button>
+              <button
+                className="modal-close"
+                onClick={closePartsModal}
+                aria-label="Close"
+              >
+                ×
+              </button>
             </div>
 
             <div className="modal-body">
@@ -657,7 +725,9 @@ export default function WorkOrders() {
 
               <div className="modal-list">
                 {visibleWaitingRows.length === 0 ? (
-                  <div className="empty-state">No POs in “{PARTS_WAITING}”.</div>
+                  <div className="empty-state">
+                    No POs in “{PARTS_WAITING}”.
+                  </div>
                 ) : (
                   <table className="mini-table">
                     <thead>
@@ -682,9 +752,13 @@ export default function WorkOrders() {
                               />
                             </td>
                             <td>{o.workOrderNumber || "—"}</td>
-                            <td>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
+                            <td>
+                              {displayPO(o.workOrderNumber, o.poNumber) || "—"}
+                            </td>
                             <td>{o.customer || "—"}</td>
-                            <td title={o.siteLocation}>{o.siteLocation || "—"}</td>
+                            <td title={o.siteLocation}>
+                              {o.siteLocation || "—"}
+                            </td>
                           </tr>
                         );
                       })}
@@ -701,9 +775,15 @@ export default function WorkOrders() {
                 disabled={isUpdatingParts || selectedIds.size === 0}
                 onClick={markSelectedAsPartsIn}
               >
-                {isUpdatingParts ? "Updating…" : `Mark Parts In (${selectedIds.size})`}
+                {isUpdatingParts
+                  ? "Updating…"
+                  : `Mark Parts In (${selectedIds.size})`}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={closePartsModal}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={closePartsModal}
+              >
                 Cancel
               </button>
             </div>
