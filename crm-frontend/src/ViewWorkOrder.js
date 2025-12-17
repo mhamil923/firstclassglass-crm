@@ -77,14 +77,7 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
 
   if (!editing) {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          flexWrap: "wrap",
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div>{initialPo ? initialPo : <em>None</em>}</div>
         <button className="btn btn-primary" onClick={() => setEditing(true)}>
           {initialPo ? "Update PO #" : "Add PO #"}
@@ -94,14 +87,7 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        flexWrap: "wrap",
-      }}
-    >
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <input
         type="text"
         value={po}
@@ -118,11 +104,7 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
       <button className="btn btn-primary" disabled={saving} onClick={save}>
         {saving ? "Saving…" : "Save"}
       </button>
-      <button
-        className="btn btn-ghost"
-        disabled={saving}
-        onClick={() => setEditing(false)}
-      >
+      <button className="btn btn-ghost" disabled={saving} onClick={() => setEditing(false)}>
         Cancel
       </button>
     </div>
@@ -217,11 +199,7 @@ function Lightbox({ open, onClose, kind, src, title }) {
           </strong>
           <div style={{ display: "flex", gap: 8 }}>
             {kind === "image" && (
-              <button
-                className="btn btn-light"
-                onClick={handleDownload}
-                disabled={downloading}
-              >
+              <button className="btn btn-light" onClick={handleDownload} disabled={downloading}>
                 {downloading ? "Preparing…" : "Download"}
               </button>
             )}
@@ -296,17 +274,9 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
     >
       <div style={{ width: "100%", height: 200, background: "#f8fafc" }}>
         {isPdf ? (
-          <iframe
-            title={fileName}
-            src={href}
-            style={{ width: "100%", height: "100%", border: "none" }}
-          />
+          <iframe title={fileName} src={href} style={{ width: "100%", height: "100%", border: "none" }} />
         ) : (
-          <img
-            src={href}
-            alt={fileName}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
+          <img src={href} alt={fileName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         )}
       </div>
 
@@ -328,12 +298,7 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
           Expand
         </button>
         {onDelete && (
-          <button
-            className="btn btn-danger"
-            onClick={onDelete}
-            title="Delete"
-            style={{ flex: "0 0 auto" }}
-          >
+          <button className="btn btn-danger" onClick={onDelete} title="Delete" style={{ flex: "0 0 auto" }}>
             ✕
           </button>
         )}
@@ -430,10 +395,15 @@ export default function ViewWorkOrder() {
   const [keepOldInAttachments, setKeepOldInAttachments] = useState(true);
   const [busyPoUpload, setBusyPoUpload] = useState(false);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
-  const [busyImageUpload, setBusyImageUpload] = useState(false); // image upload busy state
+  const [busyImageUpload, setBusyImageUpload] = useState(false);
 
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
+
+  // ✅ NEW: Assign Tech
+  const [techOptions, setTechOptions] = useState([]); // [{id,name}]
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [localAssigned, setLocalAssigned] = useState(""); // id or name depending on backend
 
   const [lightbox, setLightbox] = useState({
     open: false,
@@ -441,8 +411,7 @@ export default function ViewWorkOrder() {
     src: "",
     title: "",
   });
-  const openLightbox = (kind, src, title) =>
-    setLightbox({ open: true, kind, src, title });
+  const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
   const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
   const fetchWorkOrder = async () => {
@@ -452,14 +421,73 @@ export default function ViewWorkOrder() {
       });
       setWorkOrder(response.data || null);
       setLocalStatus(response.data?.status || "");
+
+      // ✅ NEW: try to infer current assigned tech from common fields
+      const assigned =
+        response.data?.assignedTechId ??
+        response.data?.assignedTo ??
+        response.data?.assignedTech ??
+        response.data?.techId ??
+        response.data?.technicianId ??
+        response.data?.tech ??
+        "";
+      setLocalAssigned(assigned ? String(assigned) : "");
     } catch (error) {
       console.error("⚠️ Error fetching work order:", error);
     }
   };
 
+  // ✅ NEW: fetch list of techs (tries a few common endpoints)
+  const fetchTechs = async () => {
+    try {
+      // Try common patterns first
+      const tries = [
+        () => api.get(`/users?role=tech`, { headers: authHeaders() }),
+        () => api.get(`/users`, { headers: authHeaders() }),
+        () => api.get(`/technicians`, { headers: authHeaders() }),
+      ];
+
+      let data = null;
+      for (const fn of tries) {
+        try {
+          const res = await fn();
+          if (res?.data) {
+            data = res.data;
+            break;
+          }
+        } catch (e) {
+          // keep trying
+        }
+      }
+
+      if (!data) return;
+
+      const arr = Array.isArray(data) ? data : Array.isArray(data?.users) ? data.users : Array.isArray(data?.techs) ? data.techs : [];
+      const normalized = arr
+        .map((u) => {
+          const id = u?.id ?? u?.userId ?? u?._id ?? u?.techId ?? u?.technicianId ?? u?.email ?? u?.username ?? u?.name;
+          const name =
+            u?.name ??
+            [u?.firstName, u?.lastName].filter(Boolean).join(" ") ||
+            u?.fullName ||
+            u?.email ||
+            u?.username ||
+            (id ? String(id) : "");
+          return id ? { id: String(id), name: String(name) } : null;
+        })
+        .filter(Boolean);
+
+      setTechOptions(normalized);
+    } catch (e) {
+      console.error("⚠️ Error fetching tech list:", e);
+    }
+  };
+
   useEffect(() => {
     fetchWorkOrder();
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchTechs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const { entries: parsedNotes } = useMemo(() => {
     const raw = workOrder?.notes ?? null;
@@ -525,6 +553,7 @@ export default function ViewWorkOrder() {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
+  // ✅ FIXED PRINT TEMPLATE (className -> class, and desc-box actually used)
   const handlePrint = () => {
     const siteDisplayName = (siteLocation || customer || "").trim();
     const siteAddr = (siteAddress || "").trim();
@@ -594,9 +623,7 @@ export default function ViewWorkOrder() {
       </tr>
       <tr>
         <th class="label">Address</th>
-        <td><pre style="margin:0;white-space:pre-wrap">${safe(
-          billingAddress || ""
-        )}</pre></td>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
         <th class="label">Address</th>
         <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
       </tr>
@@ -608,30 +635,28 @@ export default function ViewWorkOrder() {
       </tr>
     </table>
 
-    <div className="desc-title">Problem Description: ${safe(
-      problemDescription || ""
-    )}</div>
-    <div className="desc-box"></div>
+    <div class="desc-title">Problem Description</div>
+    <div class="desc-box">${safe(problemDescription || "")}</div>
 
-    <div className="auth-title">AUTHORIZATION TO PAY</div>
-    <div className="auth-note">
+    <div class="auth-title">AUTHORIZATION TO PAY</div>
+    <div class="auth-note">
       I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL
       SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE
       SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
     </div>
 
-    <div className="sign-row">
+    <div class="sign-row">
       <div>
-        <div className="sign-line"></div>
-        <div className="sign-label">Customer Signature:</div>
+        <div class="sign-line"></div>
+        <div class="sign-label">Customer Signature:</div>
       </div>
       <div>
-        <div className="sign-line"></div>
-        <div className="sign-label">Date:</div>
+        <div class="sign-line"></div>
+        <div class="sign-label">Date:</div>
       </div>
     </div>
 
-    <div className="fine">
+    <div class="fine">
       NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST
       DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
     </div>
@@ -671,10 +696,7 @@ export default function ViewWorkOrder() {
         form.append("keepOldInAttachments", "1");
       }
       await api.put(`/work-orders/${id}/edit`, form, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-          ...authHeaders(),
-        },
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
       await fetchWorkOrder();
       alert("PDF replaced successfully.");
@@ -700,10 +722,7 @@ export default function ViewWorkOrder() {
       const form = new FormData();
       form.append("estimatePdf", file);
       await api.put(`/work-orders/${id}/edit`, form, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-          ...authHeaders(),
-        },
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
       await fetchWorkOrder();
     } catch (error) {
@@ -728,10 +747,7 @@ export default function ViewWorkOrder() {
       const form = new FormData();
       form.append("poPdf", file);
       await api.put(`/work-orders/${id}/edit`, form, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-          ...authHeaders(),
-        },
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
       await fetchWorkOrder();
     } catch (error) {
@@ -748,7 +764,6 @@ export default function ViewWorkOrder() {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
-    // validate all are images
     const bad = files.find((file) => {
       const isImage =
         file.type?.startsWith("image/") ||
@@ -765,16 +780,10 @@ export default function ViewWorkOrder() {
     setBusyImageUpload(true);
     try {
       const form = new FormData();
-      // keep field name in sync with mobile AddWorkOrder.js
-      files.forEach((file) => {
-        form.append("photoFile", file);
-      });
+      files.forEach((file) => form.append("photoFile", file));
 
       await api.put(`/work-orders/${id}/edit`, form, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-          ...authHeaders(),
-        },
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
 
       await fetchWorkOrder();
@@ -787,7 +796,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // NEW: delete a specific attachment (image or PDF) by its relative path key
   const handleDeleteAttachment = async (relPath) => {
     if (!relPath) return;
     const confirm = window.confirm("Delete this attachment permanently?");
@@ -795,10 +803,7 @@ export default function ViewWorkOrder() {
 
     try {
       await api.delete(`/work-orders/${id}/attachments`, {
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders(),
-        },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         data: { key: relPath },
       });
 
@@ -816,19 +821,12 @@ export default function ViewWorkOrder() {
     setStatusSaving(true);
     try {
       try {
-        await api.put(
-          `/work-orders/${id}/status`,
-          { status: newStatus },
-          { headers: authHeaders() }
-        );
+        await api.put(`/work-orders/${id}/status`, { status: newStatus }, { headers: authHeaders() });
       } catch {
         const form = new FormData();
         form.append("status", newStatus);
         await api.put(`/work-orders/${id}/edit`, form, {
-          headers: {
-            "Content-Type": "multipart/form-data",
-            ...authHeaders(),
-          },
+          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
         });
       }
       await fetchWorkOrder();
@@ -840,13 +838,48 @@ export default function ViewWorkOrder() {
     }
   };
 
+  // ✅ NEW: Assign Tech change handler (tries /assign then falls back to /edit)
+  const handleAssignChange = async (e) => {
+    const next = e.target.value; // "" means unassigned
+    setLocalAssigned(next);
+    setAssignSaving(true);
+
+    try {
+      // Try a clean JSON assign endpoint first
+      try {
+        await api.put(
+          `/work-orders/${id}/assign`,
+          { assignedTo: next || null },
+          { headers: { "Content-Type": "application/json", ...authHeaders() } }
+        );
+      } catch (errAssign) {
+        // Fallback: write into /edit (multipart) with a few common field names
+        const form = new FormData();
+        form.append("assignedTo", next || "");
+        form.append("assignedTechId", next || "");
+        form.append("technicianId", next || "");
+        await api.put(`/work-orders/${id}/edit`, form, {
+          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+        });
+      }
+
+      await fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error assigning tech:", error);
+      alert(error?.response?.data?.error || "Failed to assign tech.");
+      // revert to server value by refetch
+      await fetchWorkOrder();
+    } finally {
+      setAssignSaving(false);
+    }
+  };
+
   /* ---------- Notes (add + delete) ---------- */
   const handleAddNote = async () => {
     const text = newNote.trim();
     if (!text) return;
 
     try {
-      // primary: JSON body
       await api.put(
         `/work-orders/${id}/notes`,
         { notes: text, append: true },
@@ -854,7 +887,6 @@ export default function ViewWorkOrder() {
       );
     } catch (err1) {
       try {
-        // fallback field name
         await api.put(
           `/work-orders/${id}/notes`,
           { text, append: true },
@@ -878,13 +910,10 @@ export default function ViewWorkOrder() {
     await fetchWorkOrder();
   };
 
-  // 🔧 FIXED: delete note by rewriting the entire notes field via /edit,
-  // which allows notes to be empty (unlike /notes endpoint).
   const handleDeleteNote = async (displayIdx) => {
     if (!window.confirm("Delete this note?")) return;
 
     try {
-      // Put notes in chronological order (oldest first)
       const byOldest = [...parsedNotes].sort(
         (a, b) =>
           (a.createdAt ? Date.parse(a.createdAt) : 0) -
@@ -893,7 +922,6 @@ export default function ViewWorkOrder() {
       const target = displayNotes[displayIdx];
       if (!target) return;
 
-      // Remove the selected note
       const kept = byOldest.filter(
         (e) =>
           !(
@@ -909,10 +937,7 @@ export default function ViewWorkOrder() {
       form.append("notes", newBody);
 
       await api.put(`/work-orders/${id}/edit`, form, {
-        headers: {
-          "Content-Type": "multipart/form-data",
-          ...authHeaders(),
-        },
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
 
       await fetchWorkOrder();
@@ -924,7 +949,6 @@ export default function ViewWorkOrder() {
 
   return (
     <div className="view-container">
-      {/* Lightbox */}
       <Lightbox
         open={lightbox.open}
         onClose={closeLightbox}
@@ -940,10 +964,7 @@ export default function ViewWorkOrder() {
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
             </button>
-            <button
-              className="back-btn"
-              onClick={() => navigate("/work-orders")}
-            >
+            <button className="back-btn" onClick={() => navigate("/work-orders")}>
               ← Back to List
             </button>
           </div>
@@ -994,6 +1015,27 @@ export default function ViewWorkOrder() {
             </span>
           </li>
 
+          {/* ✅ NEW: Assign dropdown */}
+          <li className="detail-item">
+            <span className="detail-label">Assigned Tech:</span>
+            <span className="detail-value">
+              <select
+                value={localAssigned || ""}
+                onChange={handleAssignChange}
+                disabled={assignSaving}
+                style={{ padding: 6, minWidth: 220 }}
+              >
+                <option value="">Unassigned</option>
+                {techOptions.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+              {assignSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
+            </span>
+          </li>
+
           <li className="detail-item">
             <span className="detail-label">Customer:</span>
             <span className="detail-value">{customer || "—"}</span>
@@ -1012,28 +1054,20 @@ export default function ViewWorkOrder() {
           </li>
           <li className="detail-item">
             <span className="detail-label">Site Address:</span>
-            <span className="detail-value pre-wrap">
-              {siteAddress || "—"}
-            </span>
+            <span className="detail-value pre-wrap">{siteAddress || "—"}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Billing Address:</span>
-            <span className="detail-value pre-wrap">
-              {billingAddress || "—"}
-            </span>
+            <span className="detail-value pre-wrap">{billingAddress || "—"}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Problem Description:</span>
-            <span className="detail-value pre-wrap">
-              {problemDescription || "—"}
-            </span>
+            <span className="detail-value pre-wrap">{problemDescription || "—"}</span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Scheduled Date:</span>
             <span className="detail-value">
-              {scheduledDate
-                ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
-                : "Not Scheduled"}
+              {scheduledDate ? moment(scheduledDate).format("YYYY-MM-DD HH:mm") : "Not Scheduled"}
             </span>
           </li>
         </ul>
@@ -1054,9 +1088,7 @@ export default function ViewWorkOrder() {
                 kind="pdf"
                 href={signedHref}
                 fileName={(pdfPath || "").split("/").pop() || "signed.pdf"}
-                onExpand={() =>
-                  openLightbox("pdf", signedHref, "Signed PDF")
-                }
+                onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")}
               />
             </div>
           ) : (
@@ -1078,19 +1110,9 @@ export default function ViewWorkOrder() {
           {signedHref && (
             <div
               className="mt-2"
-              style={{
-                display: "flex",
-                gap: 12,
-                alignItems: "center",
-                flexWrap: "wrap",
-              }}
+              style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}
             >
-              <a
-                className="btn btn-light"
-                href={signedHref}
-                target="_blank"
-                rel="noreferrer"
-              >
+              <a className="btn btn-light" href={signedHref} target="_blank" rel="noreferrer">
                 Open in new tab
               </a>
               <label className="btn">
@@ -1103,19 +1125,11 @@ export default function ViewWorkOrder() {
                   disabled={busyReplace}
                 />
               </label>
-              <label
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <input
                   type="checkbox"
                   checked={keepOldInAttachments}
-                  onChange={(e) =>
-                    setKeepOldInAttachments(e.target.checked)
-                  }
+                  onChange={(e) => setKeepOldInAttachments(e.target.checked)}
                 />
                 Move existing signed PDF to attachments
               </label>
@@ -1138,28 +1152,17 @@ export default function ViewWorkOrder() {
               <FileTile
                 kind="pdf"
                 href={estimateHref}
-                fileName={
-                  (estimatePdfPath || "").split("/").pop() || "estimate.pdf"
-                }
-                onExpand={() =>
-                  openLightbox("pdf", estimateHref, "Estimate PDF")
-                }
+                fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
+                onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
               />
             </div>
           ) : (
             <p className="empty-text">No estimate PDF attached.</p>
           )}
 
-          <div
-            className="attachment-upload"
-            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-          >
+          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label className="btn">
-              {busyEstimateUpload
-                ? "Uploading…"
-                : estimateHref
-                ? "Replace Estimate PDF"
-                : "Upload Estimate PDF"}
+              {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
               <input
                 type="file"
                 accept="application/pdf"
@@ -1194,16 +1197,9 @@ export default function ViewWorkOrder() {
             <p className="empty-text">No PO PDF attached.</p>
           )}
 
-          <div
-            className="attachment-upload"
-            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-          >
+          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label className="btn">
-              {busyPoUpload
-                ? "Uploading…"
-                : poHref
-                ? "Replace PO PDF"
-                : "Upload PO PDF"}
+              {busyPoUpload ? "Uploading…" : poHref ? "Replace PO PDF" : "Upload PO PDF"}
               <input
                 type="file"
                 accept="application/pdf"
@@ -1229,8 +1225,7 @@ export default function ViewWorkOrder() {
             >
               {otherPdfAttachments.map((relPath, i) => {
                 const href = pdfThumbUrl(relPath);
-                const fileName =
-                  relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
+                const fileName = relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
                 return (
                   <FileTile
                     key={`${relPath}-${i}`}
@@ -1287,8 +1282,7 @@ export default function ViewWorkOrder() {
             >
               {attachmentImages.map((relPath, i) => {
                 const href = urlFor(relPath);
-                const fileName =
-                  relPath.split("/").pop() || `image-${i + 1}.jpg`;
+                const fileName = relPath.split("/").pop() || `image-${i + 1}.jpg`;
                 return (
                   <FileTile
                     key={`${relPath}-${i}`}
@@ -1310,10 +1304,7 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
 
-          <button
-            className="toggle-note-btn"
-            onClick={() => setShowNoteInput((v) => !v)}
-          >
+          <button className="toggle-note-btn" onClick={() => setShowNoteInput((v) => !v)}>
             {showNoteInput ? "Cancel" : "Add Note"}
           </button>
 
@@ -1335,15 +1326,10 @@ export default function ViewWorkOrder() {
           {displayNotes.length > 0 ? (
             <ul className="notes-list">
               {displayNotes.map((n, idx) => (
-                <li
-                  key={`${n.createdAt || "na"}-${idx}`}
-                  className="note-item"
-                >
+                <li key={`${n.createdAt || "na"}-${idx}`} className="note-item">
                   <div className="note-header">
                     <small className="note-timestamp">
-                      {n.createdAt
-                        ? moment(n.createdAt).format("YYYY-MM-DD HH:mm")
-                        : "—"}
+                      {n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "—"}
                       {n.by ? ` — ${n.by}` : ""}
                     </small>
                     <button
@@ -1367,4 +1353,3 @@ export default function ViewWorkOrder() {
     </div>
   );
 }
-
