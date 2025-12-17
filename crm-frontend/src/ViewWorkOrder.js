@@ -26,7 +26,7 @@ const authHeaders = () => {
 };
 
 /* ---------- helpers to clean up legacy data (PO# == WO#) ---------- */
-const norm = (v) => (v ?? "").toString().trim();
+const norm = (v) => (v === null || v === undefined ? "" : String(v)).trim();
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayWO = (wo) => norm(wo) || "—";
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
@@ -58,14 +58,13 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   const save = async () => {
     setSaving(true);
     try {
-      const next = po.trim() || null;
+      const next = po.trim() || "";
       const form = new FormData();
-      if (next === null) form.append("poNumber", "");
-      else form.append("poNumber", next);
+      form.append("poNumber", next);
       await api.put(`/work-orders/${orderId}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
-      onSaved?.(next);
+      onSaved?.(next || null);
       setEditing(false);
     } catch (e) {
       console.error("Failed to save PO #", e);
@@ -118,8 +117,7 @@ function Lightbox({ open, onClose, kind, src, title }) {
 
   const inferredName =
     (title && /\.[a-z0-9]{2,5}$/i.test(title) && title) ||
-    (src?.split("/").pop() || "").split("?")[0] ||
-    "download.jpg";
+    (((src || "").split("/").pop() || "").split("?")[0] || "download.jpg");
 
   const handleDownload = async (e) => {
     e.stopPropagation();
@@ -312,23 +310,25 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
 /* -------------------------------------------------------------------------- */
 function parseNotesArrayOrText(raw) {
   if (!raw) return { entries: [], originalOrder: [] };
+
   if (Array.isArray(raw)) {
     const entries = raw.map((n, i) => ({
-      text: String(n?.text ?? "").trim(),
-      createdAt: n?.createdAt || n?.time || null,
-      by: n?.by || n?.author || n?.user || null,
+      text: String((n && n.text) || "").trim(),
+      createdAt: (n && (n.createdAt || n.time)) || null,
+      by: (n && (n.by || n.author || n.user)) || null,
       __order: i,
     }));
     return { entries, originalOrder: entries.map((e) => e.__order) };
   }
+
   if (typeof raw === "string") {
     try {
       const arr = JSON.parse(raw);
       if (Array.isArray(arr)) {
         const entries = arr.map((n, i) => ({
-          text: String(n?.text ?? "").trim(),
-          createdAt: n?.createdAt || n?.time || null,
-          by: n?.by || n?.author || n?.user || null,
+          text: String((n && n.text) || "").trim(),
+          createdAt: (n && (n.createdAt || n.time)) || null,
+          by: (n && (n.by || n.author || n.user)) || null,
           __order: i,
         }));
         return { entries, originalOrder: entries.map((e) => e.__order) };
@@ -351,7 +351,7 @@ function parseNotesArrayOrText(raw) {
       if (current) entries.push({ ...current });
       current = {
         createdAt: m[1],
-        by: m[2].trim(),
+        by: (m[2] || "").trim(),
         text: m[3] ? m[3] : "",
         __order: entries.length,
       };
@@ -400,10 +400,10 @@ export default function ViewWorkOrder() {
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
 
-  // ✅ NEW: Assign Tech
-  const [techOptions, setTechOptions] = useState([]); // [{id,name}]
+  // ✅ Assign dropdown
+  const [techOptions, setTechOptions] = useState([]); // [{ id, name }]
   const [assignSaving, setAssignSaving] = useState(false);
-  const [localAssigned, setLocalAssigned] = useState(""); // id or name depending on backend
+  const [localAssignedTo, setLocalAssignedTo] = useState("");
 
   const [lightbox, setLightbox] = useState({
     open: false,
@@ -414,83 +414,70 @@ export default function ViewWorkOrder() {
   const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
   const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
+  const fetchTechOptions = async () => {
+    // Try common endpoints; whichever works first wins.
+    const tries = ["/users", "/techs", "/technicians", "/employees"];
+    for (let i = 0; i < tries.length; i++) {
+      try {
+        const res = await api.get(tries[i], { headers: authHeaders() });
+        const arr = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.users) ? res.data.users : [];
+        if (!arr.length) continue;
+
+        const mapped = arr
+          .map((u) => {
+            const idVal = u?.id || u?._id || u?.userId || u?.uid || u?.email || u?.name;
+            const nameVal =
+              u?.name ||
+              u?.fullName ||
+              u?.displayName ||
+              [u?.firstName, u?.lastName].filter(Boolean).join(" ") ||
+              u?.email ||
+              String(idVal || "").trim();
+
+            if (!idVal || !nameVal) return null;
+            return { id: String(idVal), name: String(nameVal) };
+          })
+          .filter(Boolean);
+
+        if (mapped.length) {
+          // Sort A-Z
+          mapped.sort((a, b) => a.name.localeCompare(b.name));
+          setTechOptions(mapped);
+          return;
+        }
+      } catch {
+        // keep trying
+      }
+    }
+
+    // If nothing found, leave empty (dropdown will show "No techs found")
+    setTechOptions([]);
+  };
+
   const fetchWorkOrder = async () => {
     try {
-      const response = await api.get(`/work-orders/${id}`, {
-        headers: authHeaders(),
-      });
-      setWorkOrder(response.data || null);
-      setLocalStatus(response.data?.status || "");
+      const response = await api.get(`/work-orders/${id}`, { headers: authHeaders() });
+      const data = response.data || null;
+      setWorkOrder(data);
+      setLocalStatus((data && data.status) || "");
 
-      // ✅ NEW: try to infer current assigned tech from common fields
+      // pick up assigned tech from a few possible fields
       const assigned =
-        response.data?.assignedTechId ??
-        response.data?.assignedTo ??
-        response.data?.assignedTech ??
-        response.data?.techId ??
-        response.data?.technicianId ??
-        response.data?.tech ??
-        "";
-      setLocalAssigned(assigned ? String(assigned) : "");
+        (data && (data.assignedTo || data.assignedTech || data.technician || data.techId || data.assignedToUserId)) || "";
+      setLocalAssignedTo(assigned ? String(assigned) : "");
     } catch (error) {
       console.error("⚠️ Error fetching work order:", error);
     }
   };
 
-  // ✅ NEW: fetch list of techs (tries a few common endpoints)
-  const fetchTechs = async () => {
-    try {
-      // Try common patterns first
-      const tries = [
-        () => api.get(`/users?role=tech`, { headers: authHeaders() }),
-        () => api.get(`/users`, { headers: authHeaders() }),
-        () => api.get(`/technicians`, { headers: authHeaders() }),
-      ];
-
-      let data = null;
-      for (const fn of tries) {
-        try {
-          const res = await fn();
-          if (res?.data) {
-            data = res.data;
-            break;
-          }
-        } catch (e) {
-          // keep trying
-        }
-      }
-
-      if (!data) return;
-
-      const arr = Array.isArray(data) ? data : Array.isArray(data?.users) ? data.users : Array.isArray(data?.techs) ? data.techs : [];
-      const normalized = arr
-        .map((u) => {
-          const id = u?.id ?? u?.userId ?? u?._id ?? u?.techId ?? u?.technicianId ?? u?.email ?? u?.username ?? u?.name;
-          const name =
-            u?.name ??
-            [u?.firstName, u?.lastName].filter(Boolean).join(" ") ||
-            u?.fullName ||
-            u?.email ||
-            u?.username ||
-            (id ? String(id) : "");
-          return id ? { id: String(id), name: String(name) } : null;
-        })
-        .filter(Boolean);
-
-      setTechOptions(normalized);
-    } catch (e) {
-      console.error("⚠️ Error fetching tech list:", e);
-    }
-  };
-
   useEffect(() => {
     fetchWorkOrder();
-    fetchTechs();
+    fetchTechOptions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const { entries: parsedNotes } = useMemo(() => {
-    const raw = workOrder?.notes ?? null;
+    const raw = workOrder ? workOrder.notes : null;
     return parseNotesArrayOrText(raw);
   }, [workOrder]);
 
@@ -547,13 +534,12 @@ export default function ViewWorkOrder() {
 
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`;
   const safe = (x) =>
-    (x ?? "")
-      .toString()
+    (x === null || x === undefined ? "" : String(x))
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-  // ✅ FIXED PRINT TEMPLATE (className -> class, and desc-box actually used)
+  // ✅ FIXED print template: class= (not className=) + force bottom section down
   const handlePrint = () => {
     const siteDisplayName = (siteLocation || customer || "").trim();
     const siteAddr = (siteAddress || "").trim();
@@ -569,6 +555,13 @@ export default function ViewWorkOrder() {
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; -webkit-print-color-adjust: exact; }
     .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; page-break-inside: avoid; }
+
+    /* ✅ Use a vertical layout where bottom block is pinned */
+    .layout { min-height: 10.0in; display: flex; flex-direction: column; }
+    .top { flex: 0 0 auto; }
+    .fill { flex: 1 1 auto; display:flex; flex-direction:column; }
+    .bottom { flex: 0 0 auto; }
+
     .hdr { display: grid; grid-template-columns: 120px 1fr 220px; align-items: center; column-gap: 12px; }
     .logo { width: 100%; height: auto; }
     .company h1 { margin: 0; font-size: 18px; font-weight: 700; }
@@ -581,8 +574,10 @@ export default function ViewWorkOrder() {
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
     .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
     .label { width: 18%; }
-    .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: center; }
-    .desc-box { border: 1px solid #000; height: 6.0in; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; }
+
+    .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: left; }
+    .desc-box { border: 1px solid #000; flex: 1 1 auto; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; min-height: 5.5in; }
+
     .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 6px; }
     .auth-note { font-size: 8.5px; text-align: center; margin-top: 4px; }
     .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 16px; margin-top: 10px; align-items: end; }
@@ -593,72 +588,80 @@ export default function ViewWorkOrder() {
 </head>
 <body>
   <div class="sheet">
-    <div class="hdr">
-      <img class="logo" src="${safe(LOGO_URL)}" alt="First Class Glass logo" />
-      <div class="company">
-        <h1>First Class Glass &amp; Mirror, INC.</h1>
-        <div class="addr">
-          1513 Industrial Dr, Itasca, Illinois 60143 • 630-250-9777<br/>
-          FCG@FirstClassGlassMirror.com
+    <div class="layout">
+      <div class="top">
+        <div class="hdr">
+          <img class="logo" src="${safe(LOGO_URL)}" alt="First Class Glass logo" />
+          <div class="company">
+            <h1>First Class Glass &amp; Mirror, INC.</h1>
+            <div class="addr">
+              1513 Industrial Dr, Itasca, Illinois 60143 • 630-250-9777<br/>
+              FCG@FirstClassGlassMirror.com
+            </div>
+          </div>
+          <div class="agree">
+            <div class="title">Agreement</div>
+            <div class="no">No. ${safe(agreementNo)}</div>
+          </div>
+        </div>
+
+        <div class="spacer-8"></div>
+
+        <table class="two-col">
+          <tr>
+            <th colspan="2">Agreement Submitted To:</th>
+            <th colspan="2">Work To Be Performed At:</th>
+          </tr>
+          <tr>
+            <th class="label">Name</th>
+            <td>${safe(customer || "")}</td>
+            <th class="label">Name</th>
+            <td>${safe(siteDisplayName)}</td>
+          </tr>
+          <tr>
+            <th class="label">Address</th>
+            <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
+            <th class="label">Address</th>
+            <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
+          </tr>
+          <tr>
+            <th class="label">Phone</th>
+            <td>${safe(customerPhone || "")}</td>
+            <th class="label">Phone</th>
+            <td></td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="fill">
+        <div class="desc-title">Problem Description:</div>
+        <div class="desc-box">${safe(problemDescription || "")}</div>
+      </div>
+
+      <div class="bottom">
+        <div class="auth-title">AUTHORIZATION TO PAY</div>
+        <div class="auth-note">
+          I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL
+          SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE
+          SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
+        </div>
+
+        <div class="sign-row">
+          <div>
+            <div class="sign-line"></div>
+            <div class="sign-label">Customer Signature:</div>
+          </div>
+          <div>
+            <div class="sign-line"></div>
+            <div class="sign-label">Date:</div>
+          </div>
+        </div>
+
+        <div class="fine">
+          NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST
+          DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
         </div>
       </div>
-      <div class="agree">
-        <div class="title">Agreement</div>
-        <div class="no">No. ${safe(agreementNo)}</div>
-      </div>
-    </div>
-
-    <div class="spacer-8"></div>
-
-    <table class="two-col">
-      <tr>
-        <th colspan="2">Agreement Submitted To:</th>
-        <th colspan="2">Work To Be Performed At:</th>
-      </tr>
-      <tr>
-        <th class="label">Name</th>
-        <td>${safe(customer || "")}</td>
-        <th class="label">Name</th>
-        <td>${safe(siteDisplayName)}</td>
-      </tr>
-      <tr>
-        <th class="label">Address</th>
-        <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
-        <th class="label">Address</th>
-        <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
-      </tr>
-      <tr>
-        <th class="label">Phone</th>
-        <td>${safe(customerPhone || "")}</td>
-        <th class="label">Phone</th>
-        <td></td>
-      </tr>
-    </table>
-
-    <div class="desc-title">Problem Description</div>
-    <div class="desc-box">${safe(problemDescription || "")}</div>
-
-    <div class="auth-title">AUTHORIZATION TO PAY</div>
-    <div class="auth-note">
-      I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL
-      SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE
-      SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
-    </div>
-
-    <div class="sign-row">
-      <div>
-        <div class="sign-line"></div>
-        <div class="sign-label">Customer Signature:</div>
-      </div>
-      <div>
-        <div class="sign-line"></div>
-        <div class="sign-label">Date:</div>
-      </div>
-    </div>
-
-    <div class="fine">
-      NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST
-      DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
     </div>
   </div>
   <script>
@@ -759,14 +762,13 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Upload image/photo attachments (now supports multiple)
   const handleUploadImageAttachment = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
     const bad = files.find((file) => {
       const isImage =
-        file.type?.startsWith("image/") ||
+        (file.type && file.type.startsWith("image/")) ||
         /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(file.name || "");
       return !isImage;
     });
@@ -838,37 +840,36 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // ✅ NEW: Assign Tech change handler (tries /assign then falls back to /edit)
+  /* ---------- ✅ Assign Tech ---------- */
   const handleAssignChange = async (e) => {
-    const next = e.target.value; // "" means unassigned
-    setLocalAssigned(next);
+    const next = e.target.value;
+    setLocalAssignedTo(next);
     setAssignSaving(true);
 
     try {
-      // Try a clean JSON assign endpoint first
+      // Try a dedicated endpoint first (if you add one later, this will work)
       try {
-        await api.put(
-          `/work-orders/${id}/assign`,
-          { assignedTo: next || null },
-          { headers: { "Content-Type": "application/json", ...authHeaders() } }
-        );
-      } catch (errAssign) {
-        // Fallback: write into /edit (multipart) with a few common field names
+        await api.put(`/work-orders/${id}/assign`, { assignedTo: next || "" }, { headers: authHeaders() });
+      } catch {
+        // Fallback: write via /edit using common field names
         const form = new FormData();
+
+        // Pick ONE canonical field you want server to use.
+        // These fallbacks cover most setups:
         form.append("assignedTo", next || "");
-        form.append("assignedTechId", next || "");
-        form.append("technicianId", next || "");
+        form.append("assignedTech", next || "");
+        form.append("assignedToUserId", next || "");
+        form.append("techId", next || "");
+
         await api.put(`/work-orders/${id}/edit`, form, {
           headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
         });
       }
 
       await fetchWorkOrder();
-    } catch (error) {
-      console.error("⚠️ Error assigning tech:", error);
-      alert(error?.response?.data?.error || "Failed to assign tech.");
-      // revert to server value by refetch
-      await fetchWorkOrder();
+    } catch (err) {
+      console.error("Assign tech failed:", err);
+      alert(err?.response?.data?.error || "Failed to assign tech.");
     } finally {
       setAssignSaving(false);
     }
@@ -880,18 +881,10 @@ export default function ViewWorkOrder() {
     if (!text) return;
 
     try {
-      await api.put(
-        `/work-orders/${id}/notes`,
-        { notes: text, append: true },
-        { headers: { "Content-Type": "application/json", ...authHeaders() } }
-      );
+      await api.put(`/work-orders/${id}/notes`, { notes: text, append: true }, { headers: { "Content-Type": "application/json", ...authHeaders() } });
     } catch (err1) {
       try {
-        await api.put(
-          `/work-orders/${id}/notes`,
-          { text, append: true },
-          { headers: { "Content-Type": "application/json", ...authHeaders() } }
-        );
+        await api.put(`/work-orders/${id}/notes`, { text, append: true }, { headers: { "Content-Type": "application/json", ...authHeaders() } });
       } catch (err2) {
         console.error("Add note failed:", err1, err2);
         const msg =
@@ -916,8 +909,7 @@ export default function ViewWorkOrder() {
     try {
       const byOldest = [...parsedNotes].sort(
         (a, b) =>
-          (a.createdAt ? Date.parse(a.createdAt) : 0) -
-          (b.createdAt ? Date.parse(b.createdAt) : 0)
+          (a.createdAt ? Date.parse(a.createdAt) : 0) - (b.createdAt ? Date.parse(b.createdAt) : 0)
       );
       const target = displayNotes[displayIdx];
       if (!target) return;
@@ -996,12 +988,7 @@ export default function ViewWorkOrder() {
           <li className="detail-item">
             <span className="detail-label">Status:</span>
             <span className="detail-value">
-              <select
-                value={localStatus}
-                onChange={handleStatusChange}
-                disabled={statusSaving}
-                style={{ padding: 6 }}
-              >
+              <select value={localStatus} onChange={handleStatusChange} disabled={statusSaving} style={{ padding: 6 }}>
                 <option value="" disabled>
                   Select status…
                 </option>
@@ -1015,22 +1002,28 @@ export default function ViewWorkOrder() {
             </span>
           </li>
 
-          {/* ✅ NEW: Assign dropdown */}
+          {/* ✅ Assign dropdown */}
           <li className="detail-item">
             <span className="detail-label">Assigned Tech:</span>
             <span className="detail-value">
               <select
-                value={localAssigned || ""}
+                value={localAssignedTo}
                 onChange={handleAssignChange}
                 disabled={assignSaving}
-                style={{ padding: 6, minWidth: 220 }}
+                style={{ padding: 6, minWidth: 240 }}
               >
                 <option value="">Unassigned</option>
-                {techOptions.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
+                {techOptions.length ? (
+                  techOptions.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value="" disabled>
+                    No techs found
                   </option>
-                ))}
+                )}
               </select>
               {assignSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
             </span>
@@ -1108,10 +1101,7 @@ export default function ViewWorkOrder() {
           )}
 
           {signedHref && (
-            <div
-              className="mt-2"
-              style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}
-            >
+            <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <a className="btn btn-light" href={signedHref} target="_blank" rel="noreferrer">
                 Open in new tab
               </a>
@@ -1141,14 +1131,7 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Estimate PDF</h3>
           {estimateHref ? (
-            <div
-              className="attachments"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                gap: 12,
-              }}
-            >
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
               <FileTile
                 kind="pdf"
                 href={estimateHref}
@@ -1178,14 +1161,7 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">PO Order PDF</h3>
           {poHref ? (
-            <div
-              className="attachments"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                gap: 12,
-              }}
-            >
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
               <FileTile
                 kind="pdf"
                 href={poHref}
@@ -1215,14 +1191,7 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Other PDF Attachments</h3>
           {otherPdfAttachments.length ? (
-            <div
-              className="attachments"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                gap: 12,
-              }}
-            >
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
               {otherPdfAttachments.map((relPath, i) => {
                 const href = pdfThumbUrl(relPath);
                 const fileName = relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
@@ -1245,16 +1214,7 @@ export default function ViewWorkOrder() {
 
         {/* Images */}
         <div className="section-card">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 8,
-              gap: 8,
-              flexWrap: "wrap",
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
             <h3 className="section-header" style={{ marginBottom: 0 }}>
               Image Attachments
             </h3>
@@ -1272,14 +1232,7 @@ export default function ViewWorkOrder() {
           </div>
 
           {attachmentImages.length ? (
-            <div
-              className="attachments"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                gap: 12,
-              }}
-            >
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
               {attachmentImages.map((relPath, i) => {
                 const href = urlFor(relPath);
                 const fileName = relPath.split("/").pop() || `image-${i + 1}.jpg`;
@@ -1332,12 +1285,7 @@ export default function ViewWorkOrder() {
                       {n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "—"}
                       {n.by ? ` — ${n.by}` : ""}
                     </small>
-                    <button
-                      type="button"
-                      className="note-delete-btn"
-                      title="Delete note"
-                      onClick={() => handleDeleteNote(idx)}
-                    >
+                    <button type="button" className="note-delete-btn" title="Delete note" onClick={() => handleDeleteNote(idx)}>
                       ✕
                     </button>
                   </div>
