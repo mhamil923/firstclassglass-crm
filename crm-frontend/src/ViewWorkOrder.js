@@ -19,8 +19,13 @@ const STATUS_OPTIONS = [
   "Completed",
 ];
 
-/** ✅ Only show these techs (exactly as requested) */
-const TECH_OPTIONS = ["Unassigned", "Jeff", "jeffsr", "Adin"];
+/**
+ * IMPORTANT:
+ * Tech dropdown should behave exactly like WorkOrdersScreen.js:
+ * - show only your techs
+ * - store the string name (not ids)
+ */
+const TECH_OPTIONS = ["", "Jeff", "jeffsr", "Adin"]; // "" = Unassigned
 
 /* ---------- auth header (match WorkOrders.js) ---------- */
 const authHeaders = () => {
@@ -44,19 +49,22 @@ const isPdfFile = (file) =>
 
 /* ---------- Small helpers ---------- */
 const isPdfKey = (key) => /\.pdf(\?|$)/i.test(key);
-
 const urlFor = (relPath) =>
   `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
 const pdfThumbUrl = (relPath) => `${urlFor(relPath)}#page=1&view=FitH`;
 
-/** Draw notes are stored as images too — we separate them by filename pattern.
- * Mobile code uses names like: drawing-note-<timestamp>.jpg
- * We also catch a few other likely prefixes just in case.
- */
-const isDrawNoteKey = (relPath) => {
-  const base = (relPath || "").split("/").pop() || "";
-  return /(^|[^a-z])(drawing-note|drawing_|sketch|draw-note|drawnote)/i.test(base);
+const fileNameFromKey = (key) => (key || "").split("/").pop() || key || "";
+const isLikelyDrawNote = (key) => {
+  const name = fileNameFromKey(key).toLowerCase();
+  return (
+    name.includes("drawing-note") ||
+    name.startsWith("drawing_") ||
+    name.includes("draw-note") ||
+    name.includes("sketch")
+  );
 };
+const isImageKey = (key) =>
+  !!key && !isPdfKey(key) && /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(key);
 
 /* ---------- Inline PO# Editor ---------- */
 function PONumberEditor({ orderId, initialPo, onSaved }) {
@@ -107,7 +115,12 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
         onChange={(e) => setPo(e.target.value)}
         className="form-input"
         placeholder="Enter PO # (optional)"
-        style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
+        style={{
+          height: 36,
+          borderRadius: 8,
+          border: "1px solid #cbd5e1",
+          padding: "0 10px",
+        }}
       />
       <button className="btn btn-primary" disabled={saving} onClick={save}>
         {saving ? "Saving…" : "Save"}
@@ -224,18 +237,39 @@ function Lightbox({ open, onClose, kind, src, title }) {
         </div>
 
         {kind === "image" ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", padding: 8 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "#f8fafc",
+              padding: 8,
+            }}
+          >
             <img
               src={src}
               alt={title || "preview"}
-              style={{ maxWidth: "92vw", maxHeight: "82vh", width: "auto", height: "auto", objectFit: "contain", display: "block" }}
+              style={{
+                maxWidth: "92vw",
+                maxHeight: "82vh",
+                width: "auto",
+                height: "auto",
+                objectFit: "contain",
+                display: "block",
+              }}
             />
           </div>
         ) : (
           <iframe
             title={title || "preview"}
             src={src}
-            style={{ width: "92vw", maxWidth: "1200px", height: "82vh", border: "none", background: "#f8fafc" }}
+            style={{
+              width: "92vw",
+              maxWidth: "1200px",
+              height: "82vh",
+              border: "none",
+              background: "#f8fafc",
+            }}
           />
         )}
       </div>
@@ -268,7 +302,14 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
       </div>
 
       <div style={{ padding: "6px 8px", fontSize: 12, wordBreak: "break-all" }}>
-        <a href={href} target="__blank" rel="noopener noreferrer" title={fileName} className="link" style={{ textDecoration: "none" }}>
+        <a
+          href={href}
+          target="__blank"
+          rel="noopener noreferrer"
+          title={fileName}
+          className="link"
+          style={{ textDecoration: "none" }}
+        >
           {fileName}
         </a>
       </div>
@@ -329,7 +370,12 @@ function parseNotesArrayOrText(raw) {
     const m = line.match(startRe);
     if (m) {
       if (current) entries.push({ ...current });
-      current = { createdAt: m[1], by: m[2].trim(), text: m[3] ? m[3] : "", __order: entries.length };
+      current = {
+        createdAt: m[1],
+        by: m[2].trim(),
+        text: m[3] ? m[3] : "",
+        __order: entries.length,
+      };
       continue;
     }
     if (/^\s*$/.test(line)) {
@@ -375,12 +421,16 @@ export default function ViewWorkOrder() {
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
 
+  // ✅ Assigned tech state (fixes “it flips back to Unassigned”)
   const [techSaving, setTechSaving] = useState(false);
-  const [localTech, setLocalTech] = useState("Unassigned");
+  const [localAssignedTech, setLocalAssignedTech] = useState("");
 
-  const [downloadingAll, setDownloadingAll] = useState(false);
-
-  const [lightbox, setLightbox] = useState({ open: false, kind: "pdf", src: "", title: "" });
+  const [lightbox, setLightbox] = useState({
+    open: false,
+    kind: "pdf",
+    src: "",
+    title: "",
+  });
   const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
   const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
@@ -389,19 +439,16 @@ export default function ViewWorkOrder() {
       const response = await api.get(`/work-orders/${id}`, { headers: authHeaders() });
       const data = response.data || null;
       setWorkOrder(data);
+
       setLocalStatus(data?.status || "");
 
-      // Try to read assigned tech from likely backend fields
-      const currentTech =
-        data?.assignedTech ??
-        data?.assignedTo ??
-        data?.tech ??
-        data?.assignedUser ??
-        data?.assignedUserName ??
-        "";
+      // Pull assigned tech from any likely backend field, but store as NAME string
+      const assignedRaw =
+        (data?.assignedTech ?? data?.assignedTo ?? data?.tech ?? data?.techName ?? "") || "";
+      const assignedName = norm(assignedRaw);
 
-      const normalized = (currentTech || "").toString().trim();
-      setLocalTech(normalized && TECH_OPTIONS.includes(normalized) ? normalized : "Unassigned");
+      // Only allow your techs; otherwise show Unassigned
+      setLocalAssignedTech(TECH_OPTIONS.includes(assignedName) ? assignedName : "");
     } catch (error) {
       console.error("⚠️ Error fetching work order:", error);
     }
@@ -465,12 +512,11 @@ export default function ViewWorkOrder() {
     .filter(isPdfKey)
     .filter((p) => p !== pdfPath && p !== estimatePdfPath && p !== poPdfPath);
 
-  // All image-type attachments
-  const allImageKeys = attachments.filter((p) => !isPdfKey(p));
+  const allImageAttachments = attachments.filter(isImageKey);
 
-  // ✅ split: normal photos vs draw notes
-  const imageAttachments = allImageKeys.filter((p) => !isDrawNoteKey(p));
-  const drawNoteAttachments = allImageKeys.filter((p) => isDrawNoteKey(p));
+  // ✅ Split draw notes from regular images
+  const drawNoteImages = allImageAttachments.filter(isLikelyDrawNote);
+  const photoImages = allImageAttachments.filter((k) => !isLikelyDrawNote(k));
 
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`;
   const safe = (x) =>
@@ -485,9 +531,6 @@ export default function ViewWorkOrder() {
     const siteAddr = (siteAddress || "").trim();
     const agreementNo = cleanedPo || id;
 
-    // ✅ FIXED print template:
-    // - uses class= (not className)
-    // - footer is pushed to bottom using flex + margin-top:auto
     const html = `<!doctype html>
 <html>
 <head>
@@ -497,15 +540,7 @@ export default function ViewWorkOrder() {
     @page { size: Letter; margin: 0.5in; }
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; -webkit-print-color-adjust: exact; }
-    .sheet {
-      width: 100%;
-      max-width: 8.5in;
-      margin: 0 auto;
-      page-break-inside: avoid;
-      min-height: 10.0in;
-      display: flex;
-      flex-direction: column;
-    }
+    .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; page-break-inside: avoid; }
     .hdr { display: grid; grid-template-columns: 120px 1fr 220px; align-items: center; column-gap: 12px; }
     .logo { width: 100%; height: auto; }
     .company h1 { margin: 0; font-size: 18px; font-weight: 700; }
@@ -518,15 +553,14 @@ export default function ViewWorkOrder() {
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
     .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
     .label { width: 18%; }
-    .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; }
-    .desc-box { border: 1px solid #000; padding: 10px; white-space: pre-wrap; font-size: 12px; min-height: 5.8in; }
-    .footer { margin-top: auto; }
-    .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 10px; }
-    .auth-note { font-size: 9px; text-align: center; margin-top: 4px; line-height: 1.25; }
-    .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 16px; margin-top: 12px; align-items: end; }
+    .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: left; }
+    .desc-box { border: 1px solid #000; height: 6.0in; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; }
+    .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 6px; }
+    .auth-note { font-size: 8.5px; text-align: center; margin-top: 4px; }
+    .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 16px; margin-top: 10px; align-items: end; }
     .sign-line { border-bottom: 1px solid #000; height: 16px; }
     .sign-label { font-size: 10px; margin-top: 2px; }
-    .fine { font-size: 8px; color: #000; margin-top: 8px; text-align: left; }
+    .fine { font-size: 8px; color: #000; margin-top: 6px; text-align: left; }
   </style>
 </head>
 <body>
@@ -573,32 +607,30 @@ export default function ViewWorkOrder() {
       </tr>
     </table>
 
-    <div class="desc-title">Problem Description:</div>
-    <div class="desc-box">${safe(problemDescription || "")}</div>
+    <div class="desc-title">Problem Description: ${safe(problemDescription || "")}</div>
+    <div class="desc-box"></div>
 
-    <div class="footer">
-      <div class="auth-title">AUTHORIZATION TO PAY</div>
-      <div class="auth-note">
-        I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL
-        SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE
-        SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
-      </div>
+    <div class="auth-title">AUTHORIZATION TO PAY</div>
+    <div class="auth-note">
+      I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL
+      SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE
+      SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
+    </div>
 
-      <div class="sign-row">
-        <div>
-          <div class="sign-line"></div>
-          <div class="sign-label">Customer Signature:</div>
-        </div>
-        <div>
-          <div class="sign-line"></div>
-          <div class="sign-label">Date:</div>
-        </div>
+    <div class="sign-row">
+      <div>
+        <div class="sign-line"></div>
+        <div class="sign-label">Customer Signature:</div>
       </div>
+      <div>
+        <div class="sign-line"></div>
+        <div class="sign-label">Date:</div>
+      </div>
+    </div>
 
-      <div class="fine">
-        NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST
-        DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
-      </div>
+    <div class="fine">
+      NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST
+      DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
     </div>
   </div>
   <script>
@@ -699,13 +731,13 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // Upload image/photo attachments (now supports multiple)
   const handleUploadImageAttachment = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
     const bad = files.find((file) => {
-      const isImage = file.type?.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(file.name || "");
+      const isImage =
+        file.type?.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(file.name || "");
       return !isImage;
     });
 
@@ -734,7 +766,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  // delete a specific attachment by its relative path key
   const handleDeleteAttachment = async (relPath) => {
     if (!relPath) return;
     const confirm = window.confirm("Delete this attachment permanently?");
@@ -745,6 +776,7 @@ export default function ViewWorkOrder() {
         headers: { "Content-Type": "application/json", ...authHeaders() },
         data: { key: relPath },
       });
+
       await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error deleting attachment:", error);
@@ -776,43 +808,41 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /* ✅ Assigned Tech (only Jeff/jeffsr/Adin) */
-  const handleTechChange = async (e) => {
-    const nextTech = e.target.value;
-    setLocalTech(nextTech);
+  /* ---------- Assigned Tech (FIXED) ---------- */
+  const handleAssignedTechChange = async (e) => {
+    const next = e.target.value; // "" = Unassigned, otherwise "Jeff" / "jeffsr" / "Adin"
+    const prev = localAssignedTech;
+
+    setLocalAssignedTech(next);
     setTechSaving(true);
 
-    const valueToSend = nextTech === "Unassigned" ? "" : nextTech;
-
     try {
-      // Primary: update via /edit (multipart)
-      const form = new FormData();
-      form.append("assignedTech", valueToSend);
-
+      // Primary: dedicated endpoint if it exists
       try {
+        await api.put(
+          `/work-orders/${id}/assign`,
+          { assignedTech: next || null },
+          { headers: { "Content-Type": "application/json", ...authHeaders() } }
+        );
+      } catch (errAssign) {
+        // Fallback: /edit with FormData, try common field names
+        const form = new FormData();
+        const valueToSend = next || "";
+        form.append("assignedTech", valueToSend);
+        form.append("assignedTo", valueToSend);
+        form.append("tech", valueToSend);
+        form.append("techName", valueToSend);
+
         await api.put(`/work-orders/${id}/edit`, form, {
           headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
         });
-      } catch (err1) {
-        // Fallback key names (in case backend uses a different field)
-        try {
-          const form2 = new FormData();
-          form2.append("assignedTo", valueToSend);
-          await api.put(`/work-orders/${id}/edit`, form2, {
-            headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-          });
-        } catch (err2) {
-          const form3 = new FormData();
-          form3.append("tech", valueToSend);
-          await api.put(`/work-orders/${id}/edit`, form3, {
-            headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-          });
-        }
       }
 
       await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error updating assigned tech:", error);
+      // revert UI if backend rejects
+      setLocalAssignedTech(prev);
       alert(error?.response?.data?.error || "Failed to update assigned tech.");
     } finally {
       setTechSaving(false);
@@ -825,13 +855,26 @@ export default function ViewWorkOrder() {
     if (!text) return;
 
     try {
-      await api.put(`/work-orders/${id}/notes`, { notes: text, append: true }, { headers: { "Content-Type": "application/json", ...authHeaders() } });
+      await api.put(
+        `/work-orders/${id}/notes`,
+        { notes: text, append: true },
+        { headers: { "Content-Type": "application/json", ...authHeaders() } }
+      );
     } catch (err1) {
       try {
-        await api.put(`/work-orders/${id}/notes`, { text, append: true }, { headers: { "Content-Type": "application/json", ...authHeaders() } });
+        await api.put(
+          `/work-orders/${id}/notes`,
+          { text, append: true },
+          { headers: { "Content-Type": "application/json", ...authHeaders() } }
+        );
       } catch (err2) {
         console.error("Add note failed:", err1, err2);
-        const msg = err2?.response?.data?.error || err1?.response?.data?.error || err2?.message || err1?.message || "Failed to add note.";
+        const msg =
+          err2?.response?.data?.error ||
+          err1?.response?.data?.error ||
+          err2?.message ||
+          err1?.message ||
+          "Failed to add note.";
         alert(msg);
         return;
       }
@@ -847,16 +890,23 @@ export default function ViewWorkOrder() {
 
     try {
       const byOldest = [...parsedNotes].sort(
-        (a, b) => (a.createdAt ? Date.parse(a.createdAt) : 0) - (b.createdAt ? Date.parse(b.createdAt) : 0)
+        (a, b) =>
+          (a.createdAt ? Date.parse(a.createdAt) : 0) - (b.createdAt ? Date.parse(b.createdAt) : 0)
       );
       const target = displayNotes[displayIdx];
       if (!target) return;
 
       const kept = byOldest.filter(
-        (e) => !(e.createdAt === target.createdAt && e.text === target.text && (e.by || "") === (target.by || ""))
+        (e) =>
+          !(
+            e.createdAt === target.createdAt &&
+            e.text === target.text &&
+            (e.by || "") === (target.by || "")
+          )
       );
 
       const newBody = kept.length ? formatNotesText(kept) : "";
+
       const form = new FormData();
       form.append("notes", newBody);
 
@@ -871,54 +921,32 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /** ✅ Download all NORMAL photos (not draw notes) */
-  const downloadAllPhotos = async () => {
-    if (!imageAttachments.length) return;
+  /* ---------- Download All Photos ---------- */
+  const downloadMany = async (keys) => {
+    if (!keys || !keys.length) return;
 
-    // Browsers may block multiple downloads unless user allows it.
-    const ok = window.confirm(
-      `This will download ${imageAttachments.length} photo(s).\n\nIf your browser blocks multiple downloads, click "Allow" when it prompts.\n\nContinue?`
-    );
-    if (!ok) return;
+    // Browser may block multiple downloads unless user allows it.
+    // We trigger them sequentially from ONE button click.
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const href = urlFor(key);
+      const fileName = fileNameFromKey(key) || `photo-${i + 1}.jpg`;
 
-    setDownloadingAll(true);
-    try {
-      for (let i = 0; i < imageAttachments.length; i++) {
-        const relPath = imageAttachments[i];
-        const href = urlFor(relPath);
-        const fileName = relPath.split("/").pop() || `photo-${i + 1}.jpg`;
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = fileName;
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
 
-        // Use blob download to force file save
-        // (small delay between downloads helps reduce popup/multi-download blocking)
-        // eslint-disable-next-line no-await-in-loop
-        const res = await fetch(href, { mode: "cors", credentials: "omit" });
-        if (!res.ok) throw new Error(`Download failed: ${fileName} (HTTP ${res.status})`);
-        // eslint-disable-next-line no-await-in-loop
-        const blob = await res.blob();
-        const objectUrl = URL.createObjectURL(blob);
-
-        const a = document.createElement("a");
-        a.href = objectUrl;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(objectUrl);
-
-        // eslint-disable-next-line no-await-in-loop
-        await new Promise((r) => setTimeout(r, 250));
-      }
-    } catch (e) {
-      console.error(e);
-      alert(e?.message || "Failed to download all photos.");
-    } finally {
-      setDownloadingAll(false);
+      // tiny delay helps reliability
+      await new Promise((r) => setTimeout(r, 250));
     }
   };
 
   return (
     <div className="view-container">
-      {/* Lightbox */}
       <Lightbox open={lightbox.open} onClose={closeLightbox} kind={lightbox.kind} src={lightbox.src} title={lightbox.title} />
 
       <div className="view-card">
@@ -974,14 +1002,20 @@ export default function ViewWorkOrder() {
             </span>
           </li>
 
-          {/* ✅ Assigned Tech dropdown (ONLY Jeff / jeffsr / Adin) */}
+          {/* ✅ Assigned Tech */}
           <li className="detail-item">
             <span className="detail-label">Assigned Tech:</span>
             <span className="detail-value">
-              <select value={localTech} onChange={handleTechChange} disabled={techSaving} style={{ padding: 6 }}>
-                {TECH_OPTIONS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
+              <select
+                value={localAssignedTech}
+                onChange={handleAssignedTechChange}
+                disabled={techSaving}
+                style={{ padding: 6, minWidth: 220 }}
+              >
+                <option value="">Unassigned</option>
+                {TECH_OPTIONS.filter((t) => t).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
                   </option>
                 ))}
               </select>
@@ -1030,12 +1064,7 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">Sign-Off Sheet PDF</h3>
           {signedHref ? (
             <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-              <FileTile
-                kind="pdf"
-                href={signedHref}
-                fileName={(pdfPath || "").split("/").pop() || "signed.pdf"}
-                onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")}
-              />
+              <FileTile kind="pdf" href={signedHref} fileName={(pdfPath || "").split("/").pop() || "signed.pdf"} onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")} />
             </div>
           ) : (
             <div>
@@ -1069,12 +1098,7 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">Estimate PDF</h3>
           {estimateHref ? (
             <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-              <FileTile
-                kind="pdf"
-                href={estimateHref}
-                fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
-                onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
-              />
+              <FileTile kind="pdf" href={estimateHref} fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"} onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")} />
             </div>
           ) : (
             <p className="empty-text">No estimate PDF attached.</p>
@@ -1132,16 +1156,16 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* ✅ Image Attachments (REAL photos only) */}
+        {/* Images */}
         <div className="section-card">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
             <h3 className="section-header" style={{ marginBottom: 0 }}>
               Image Attachments
             </h3>
 
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <button className="btn btn-light" onClick={downloadAllPhotos} disabled={downloadingAll || !imageAttachments.length}>
-                {downloadingAll ? "Downloading…" : `Download All (${imageAttachments.length})`}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn btn-light" onClick={() => downloadMany(photoImages)} disabled={!photoImages.length}>
+                ⬇️ Download All Photos
               </button>
 
               <label className="btn">
@@ -1151,9 +1175,9 @@ export default function ViewWorkOrder() {
             </div>
           </div>
 
-          {imageAttachments.length ? (
+          {photoImages.length ? (
             <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-              {imageAttachments.map((relPath, i) => {
+              {photoImages.map((relPath, i) => {
                 const href = urlFor(relPath);
                 const fileName = relPath.split("/").pop() || `image-${i + 1}.jpg`;
                 return (
@@ -1169,17 +1193,25 @@ export default function ViewWorkOrder() {
               })}
             </div>
           ) : (
-            <p className="empty-text">No photos attached.</p>
+            <p className="empty-text">No images attached.</p>
           )}
         </div>
 
-        {/* ✅ Draw Notes (separate section) */}
+        {/* ✅ Draw Notes */}
         <div className="section-card">
-          <h3 className="section-header">Draw Notes</h3>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+            <h3 className="section-header" style={{ marginBottom: 0 }}>
+              Draw Notes
+            </h3>
 
-          {drawNoteAttachments.length ? (
+            <button className="btn btn-light" onClick={() => downloadMany(drawNoteImages)} disabled={!drawNoteImages.length}>
+              ⬇️ Download All Draw Notes
+            </button>
+          </div>
+
+          {drawNoteImages.length ? (
             <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-              {drawNoteAttachments.map((relPath, i) => {
+              {drawNoteImages.map((relPath, i) => {
                 const href = urlFor(relPath);
                 const fileName = relPath.split("/").pop() || `draw-note-${i + 1}.jpg`;
                 return (
