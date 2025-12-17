@@ -26,7 +26,7 @@ const authHeaders = () => {
 };
 
 /* ---------- helpers to clean up legacy data (PO# == WO#) ---------- */
-const norm = (v) => (v === null || v === undefined ? "" : String(v)).trim();
+const norm = (v) => (v ?? "").toString().trim();
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayWO = (wo) => norm(wo) || "—";
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
@@ -58,13 +58,15 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   const save = async () => {
     setSaving(true);
     try {
-      const next = po.trim() || "";
+      const next = po.trim() || null;
       const form = new FormData();
-      form.append("poNumber", next);
+      if (next === null) form.append("poNumber", "");
+      else form.append("poNumber", next);
+
       await api.put(`/work-orders/${orderId}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
-      onSaved?.(next || null);
+      onSaved?.(next);
       setEditing(false);
     } catch (e) {
       console.error("Failed to save PO #", e);
@@ -93,12 +95,7 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
         onChange={(e) => setPo(e.target.value)}
         className="form-input"
         placeholder="Enter PO # (optional)"
-        style={{
-          height: 36,
-          borderRadius: 8,
-          border: "1px solid #cbd5e1",
-          padding: "0 10px",
-        }}
+        style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
       />
       <button className="btn btn-primary" disabled={saving} onClick={save}>
         {saving ? "Saving…" : "Save"}
@@ -117,7 +114,8 @@ function Lightbox({ open, onClose, kind, src, title }) {
 
   const inferredName =
     (title && /\.[a-z0-9]{2,5}$/i.test(title) && title) ||
-    (((src || "").split("/").pop() || "").split("?")[0] || "download.jpg");
+    (src?.split("/").pop() || "").split("?")[0] ||
+    "download.jpg";
 
   const handleDownload = async (e) => {
     e.stopPropagation();
@@ -214,39 +212,18 @@ function Lightbox({ open, onClose, kind, src, title }) {
         </div>
 
         {kind === "image" ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "#f8fafc",
-              padding: 8,
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", padding: 8 }}>
             <img
               src={src}
               alt={title || "preview"}
-              style={{
-                maxWidth: "92vw",
-                maxHeight: "82vh",
-                width: "auto",
-                height: "auto",
-                objectFit: "contain",
-                display: "block",
-              }}
+              style={{ maxWidth: "92vw", maxHeight: "82vh", width: "auto", height: "auto", objectFit: "contain", display: "block" }}
             />
           </div>
         ) : (
           <iframe
             title={title || "preview"}
             src={src}
-            style={{
-              width: "92vw",
-              maxWidth: "1200px",
-              height: "82vh",
-              border: "none",
-              background: "#f8fafc",
-            }}
+            style={{ width: "92vw", maxWidth: "1200px", height: "82vh", border: "none", background: "#f8fafc" }}
           />
         )}
       </div>
@@ -279,14 +256,7 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
       </div>
 
       <div style={{ padding: "6px 8px", fontSize: 12, wordBreak: "break-all" }}>
-        <a
-          href={href}
-          target="__blank"
-          rel="noopener noreferrer"
-          title={fileName}
-          className="link"
-          style={{ textDecoration: "none" }}
-        >
+        <a href={href} target="__blank" rel="noopener noreferrer" title={fileName} className="link" style={{ textDecoration: "none" }}>
           {fileName}
         </a>
       </div>
@@ -313,9 +283,9 @@ function parseNotesArrayOrText(raw) {
 
   if (Array.isArray(raw)) {
     const entries = raw.map((n, i) => ({
-      text: String((n && n.text) || "").trim(),
-      createdAt: (n && (n.createdAt || n.time)) || null,
-      by: (n && (n.by || n.author || n.user)) || null,
+      text: String(n?.text ?? "").trim(),
+      createdAt: n?.createdAt || n?.time || null,
+      by: n?.by || n?.author || n?.user || null,
       __order: i,
     }));
     return { entries, originalOrder: entries.map((e) => e.__order) };
@@ -326,9 +296,9 @@ function parseNotesArrayOrText(raw) {
       const arr = JSON.parse(raw);
       if (Array.isArray(arr)) {
         const entries = arr.map((n, i) => ({
-          text: String((n && n.text) || "").trim(),
-          createdAt: (n && (n.createdAt || n.time)) || null,
-          by: (n && (n.by || n.author || n.user)) || null,
+          text: String(n?.text ?? "").trim(),
+          createdAt: n?.createdAt || n?.time || null,
+          by: n?.by || n?.author || n?.user || null,
           __order: i,
         }));
         return { entries, originalOrder: entries.map((e) => e.__order) };
@@ -351,7 +321,7 @@ function parseNotesArrayOrText(raw) {
       if (current) entries.push({ ...current });
       current = {
         createdAt: m[1],
-        by: (m[2] || "").trim(),
+        by: m[2].trim(),
         text: m[3] ? m[3] : "",
         __order: entries.length,
       };
@@ -383,6 +353,29 @@ function formatNotesText(entriesInOrder) {
 }
 /* -------------------------------------------------------------------------- */
 
+/* ---------- Assigned Tech helpers ---------- */
+const getUserLabel = (u) => {
+  if (!u) return "";
+  return (
+    u.displayName ||
+    u.fullName ||
+    u.name ||
+    u.username ||
+    u.email ||
+    (u.firstName || u.lastName ? `${u.firstName || ""} ${u.lastName || ""}`.trim() : "") ||
+    (u.id != null ? `User ${u.id}` : "")
+  );
+};
+
+const normalizeUsersPayload = (data) => {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.users)) return data.users;
+  if (Array.isArray(data.techs)) return data.techs;
+  if (Array.isArray(data.data)) return data.data;
+  return [];
+};
+
 export default function ViewWorkOrder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -400,10 +393,11 @@ export default function ViewWorkOrder() {
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
 
-  // ✅ Assign dropdown
-  const [techOptions, setTechOptions] = useState([]); // [{ id, name }]
-  const [assignSaving, setAssignSaving] = useState(false);
-  const [localAssignedTo, setLocalAssignedTo] = useState("");
+  // Assigned Tech (FIXED: show names not numbers)
+  const [techs, setTechs] = useState([]);
+  const [techsLoading, setTechsLoading] = useState(false);
+  const [techSaving, setTechSaving] = useState(false);
+  const [localAssignedTechId, setLocalAssignedTechId] = useState(""); // store id as string (or "")
 
   const [lightbox, setLightbox] = useState({
     open: false,
@@ -414,70 +408,101 @@ export default function ViewWorkOrder() {
   const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
   const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
-  const fetchTechOptions = async () => {
-    // Try common endpoints; whichever works first wins.
-    const tries = ["/users", "/techs", "/technicians", "/employees"];
-    for (let i = 0; i < tries.length; i++) {
-      try {
-        const res = await api.get(tries[i], { headers: authHeaders() });
-        const arr = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.users) ? res.data.users : [];
-        if (!arr.length) continue;
-
-        const mapped = arr
-          .map((u) => {
-            const idVal = u?.id || u?._id || u?.userId || u?.uid || u?.email || u?.name;
-            const nameVal =
-              u?.name ||
-              u?.fullName ||
-              u?.displayName ||
-              [u?.firstName, u?.lastName].filter(Boolean).join(" ") ||
-              u?.email ||
-              String(idVal || "").trim();
-
-            if (!idVal || !nameVal) return null;
-            return { id: String(idVal), name: String(nameVal) };
-          })
-          .filter(Boolean);
-
-        if (mapped.length) {
-          // Sort A-Z
-          mapped.sort((a, b) => a.name.localeCompare(b.name));
-          setTechOptions(mapped);
-          return;
-        }
-      } catch {
-        // keep trying
-      }
-    }
-
-    // If nothing found, leave empty (dropdown will show "No techs found")
-    setTechOptions([]);
-  };
-
   const fetchWorkOrder = async () => {
     try {
       const response = await api.get(`/work-orders/${id}`, { headers: authHeaders() });
-      const data = response.data || null;
-      setWorkOrder(data);
-      setLocalStatus((data && data.status) || "");
+      setWorkOrder(response.data || null);
+      setLocalStatus(response.data?.status || "");
 
-      // pick up assigned tech from a few possible fields
-      const assigned =
-        (data && (data.assignedTo || data.assignedTech || data.technician || data.techId || data.assignedToUserId)) || "";
-      setLocalAssignedTo(assigned ? String(assigned) : "");
+      // try to initialize assigned tech id from the work order fields
+      const raw =
+        response.data?.assignedTechId ??
+        response.data?.assignedUserId ??
+        response.data?.techId ??
+        response.data?.assignedTech ??
+        response.data?.assignedTo ??
+        response.data?.assignedUser ??
+        "";
+
+      setLocalAssignedTechId(raw === null || raw === undefined ? "" : String(raw));
     } catch (error) {
       console.error("⚠️ Error fetching work order:", error);
     }
   };
 
+  const fetchTechs = async () => {
+    setTechsLoading(true);
+    try {
+      // Try multiple endpoints (one of these will match your backend)
+      const endpoints = [
+        "/users",
+        "/users?role=tech",
+        "/techs",
+        "/technicians",
+      ];
+
+      let list = [];
+      for (const ep of endpoints) {
+        try {
+          const res = await api.get(ep, { headers: authHeaders() });
+          list = normalizeUsersPayload(res.data);
+          if (Array.isArray(list) && list.length) break;
+        } catch {
+          // keep trying
+        }
+      }
+
+      // Normalize and sort by label
+      const cleaned = (list || [])
+        .map((u) => ({
+          ...u,
+          id: u.id ?? u.userId ?? u._id ?? u.uid ?? u.value,
+          label: getUserLabel(u),
+        }))
+        .filter((u) => u.id != null && String(u.id).trim() !== "")
+        .sort((a, b) => (a.label || "").localeCompare(b.label || "", undefined, { sensitivity: "base" }));
+
+      setTechs(cleaned);
+    } finally {
+      setTechsLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchWorkOrder();
-    fetchTechOptions();
+    fetchTechs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // If your workOrder stores assigned tech as a NAME sometimes, convert it to matching ID once techs load
+  useEffect(() => {
+    if (!workOrder || !techs.length) return;
+
+    const current = localAssignedTechId;
+    // If already numeric-ish or matches an id, leave it.
+    const directMatch = techs.find((t) => String(t.id) === String(current));
+    if (directMatch) return;
+
+    // Try match by name/username
+    const raw =
+      workOrder.assignedTech ||
+      workOrder.assignedTo ||
+      workOrder.assignedUser ||
+      "";
+
+    const rawStr = String(raw || "").trim().toLowerCase();
+    if (!rawStr) return;
+
+    const byLabel = techs.find((t) => (t.label || "").toLowerCase() === rawStr);
+    const byUsername = techs.find((t) => String(t.username || "").toLowerCase() === rawStr);
+
+    const found = byLabel || byUsername;
+    if (found) setLocalAssignedTechId(String(found.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [techs.length]);
+
   const { entries: parsedNotes } = useMemo(() => {
-    const raw = workOrder ? workOrder.notes : null;
+    const raw = workOrder?.notes ?? null;
     return parseNotesArrayOrText(raw);
   }, [workOrder]);
 
@@ -534,12 +559,12 @@ export default function ViewWorkOrder() {
 
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`;
   const safe = (x) =>
-    (x === null || x === undefined ? "" : String(x))
+    (x ?? "")
+      .toString()
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-  // ✅ FIXED print template: class= (not className=) + force bottom section down
   const handlePrint = () => {
     const siteDisplayName = (siteLocation || customer || "").trim();
     const siteAddr = (siteAddress || "").trim();
@@ -555,13 +580,6 @@ export default function ViewWorkOrder() {
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; -webkit-print-color-adjust: exact; }
     .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; page-break-inside: avoid; }
-
-    /* ✅ Use a vertical layout where bottom block is pinned */
-    .layout { min-height: 10.0in; display: flex; flex-direction: column; }
-    .top { flex: 0 0 auto; }
-    .fill { flex: 1 1 auto; display:flex; flex-direction:column; }
-    .bottom { flex: 0 0 auto; }
-
     .hdr { display: grid; grid-template-columns: 120px 1fr 220px; align-items: center; column-gap: 12px; }
     .logo { width: 100%; height: auto; }
     .company h1 { margin: 0; font-size: 18px; font-weight: 700; }
@@ -574,10 +592,8 @@ export default function ViewWorkOrder() {
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
     .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
     .label { width: 18%; }
-
-    .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: left; }
-    .desc-box { border: 1px solid #000; flex: 1 1 auto; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; min-height: 5.5in; }
-
+    .desc-title { border: 1px solid #000; border-bottom: none; padding: 6px 8px; font-size: 11px; font-weight: 700; text-align: center; }
+    .desc-box { border: 1px solid #000; height: 6.0in; padding: 10px; white-space: pre-wrap; font-size: 12px; overflow: hidden; }
     .auth-title { text-align: center; font-size: 12px; font-weight: 700; margin-top: 6px; }
     .auth-note { font-size: 8.5px; text-align: center; margin-top: 4px; }
     .sign-row { display: grid; grid-template-columns: 1fr 160px; gap: 16px; margin-top: 10px; align-items: end; }
@@ -588,80 +604,72 @@ export default function ViewWorkOrder() {
 </head>
 <body>
   <div class="sheet">
-    <div class="layout">
-      <div class="top">
-        <div class="hdr">
-          <img class="logo" src="${safe(LOGO_URL)}" alt="First Class Glass logo" />
-          <div class="company">
-            <h1>First Class Glass &amp; Mirror, INC.</h1>
-            <div class="addr">
-              1513 Industrial Dr, Itasca, Illinois 60143 • 630-250-9777<br/>
-              FCG@FirstClassGlassMirror.com
-            </div>
-          </div>
-          <div class="agree">
-            <div class="title">Agreement</div>
-            <div class="no">No. ${safe(agreementNo)}</div>
-          </div>
-        </div>
-
-        <div class="spacer-8"></div>
-
-        <table class="two-col">
-          <tr>
-            <th colspan="2">Agreement Submitted To:</th>
-            <th colspan="2">Work To Be Performed At:</th>
-          </tr>
-          <tr>
-            <th class="label">Name</th>
-            <td>${safe(customer || "")}</td>
-            <th class="label">Name</th>
-            <td>${safe(siteDisplayName)}</td>
-          </tr>
-          <tr>
-            <th class="label">Address</th>
-            <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
-            <th class="label">Address</th>
-            <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
-          </tr>
-          <tr>
-            <th class="label">Phone</th>
-            <td>${safe(customerPhone || "")}</td>
-            <th class="label">Phone</th>
-            <td></td>
-          </tr>
-        </table>
-      </div>
-
-      <div class="fill">
-        <div class="desc-title">Problem Description:</div>
-        <div class="desc-box">${safe(problemDescription || "")}</div>
-      </div>
-
-      <div class="bottom">
-        <div class="auth-title">AUTHORIZATION TO PAY</div>
-        <div class="auth-note">
-          I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL
-          SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE
-          SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
-        </div>
-
-        <div class="sign-row">
-          <div>
-            <div class="sign-line"></div>
-            <div class="sign-label">Customer Signature:</div>
-          </div>
-          <div>
-            <div class="sign-line"></div>
-            <div class="sign-label">Date:</div>
-          </div>
-        </div>
-
-        <div class="fine">
-          NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST
-          DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
+    <div class="hdr">
+      <img class="logo" src="${safe(LOGO_URL)}" alt="First Class Glass logo" />
+      <div class="company">
+        <h1>First Class Glass &amp; Mirror, INC.</h1>
+        <div class="addr">
+          1513 Industrial Dr, Itasca, Illinois 60143 • 630-250-9777<br/>
+          FCG@FirstClassGlassMirror.com
         </div>
       </div>
+      <div class="agree">
+        <div class="title">Agreement</div>
+        <div class="no">No. ${safe(agreementNo)}</div>
+      </div>
+    </div>
+
+    <div class="spacer-8"></div>
+
+    <table class="two-col">
+      <tr>
+        <th colspan="2">Agreement Submitted To:</th>
+        <th colspan="2">Work To Be Performed At:</th>
+      </tr>
+      <tr>
+        <th class="label">Name</th>
+        <td>${safe(customer || "")}</td>
+        <th class="label">Name</th>
+        <td>${safe(siteDisplayName)}</td>
+      </tr>
+      <tr>
+        <th class="label">Address</th>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
+        <th class="label">Address</th>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
+      </tr>
+      <tr>
+        <th class="label">Phone</th>
+        <td>${safe(customerPhone || "")}</td>
+        <th class="label">Phone</th>
+        <td></td>
+      </tr>
+    </table>
+
+    <div class="desc-title">Problem Description: ${safe(problemDescription || "")}</div>
+    <div class="desc-box"></div>
+
+    <div class="auth-title">AUTHORIZATION TO PAY</div>
+    <div class="auth-note">
+      I ACKNOWLEDGE RECEIPT OF GOODS AND SERVICES REQUESTED AND THAT ALL
+      SERVICES WERE PERFORMED IN A PROFESSIONAL MANNER TO MY COMPLETE
+      SATISFACTION. I UNDERSTAND THAT I AM PERSONALLY RESPONSIBLE FOR PAYMENT.
+    </div>
+
+    <div class="sign-row">
+      <div>
+        <div class="sign-line"></div>
+        <div class="sign-label">Customer Signature:</div>
+      </div>
+      <div>
+        <div class="sign-line"></div>
+        <div class="sign-label">Date:</div>
+      </div>
+    </div>
+
+    <div class="fine">
+      NOTE: A $25 SERVICE CHARGE WILL BE ASSESSED FOR ANY CHECKS RETURNED. PAST
+      DUE ACCOUNTS ARE SUBJECT TO 5% PER MONTH FINANCE CHARGE.
     </div>
   </div>
   <script>
@@ -768,7 +776,7 @@ export default function ViewWorkOrder() {
 
     const bad = files.find((file) => {
       const isImage =
-        (file.type && file.type.startsWith("image/")) ||
+        file.type?.startsWith("image/") ||
         /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(file.name || "");
       return !isImage;
     });
@@ -840,38 +848,33 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /* ---------- ✅ Assign Tech ---------- */
-  const handleAssignChange = async (e) => {
-    const next = e.target.value;
-    setLocalAssignedTo(next);
-    setAssignSaving(true);
+  /* ---------- Assigned Tech (FIXED labels) ---------- */
+  const handleAssignedTechChange = async (e) => {
+    const nextId = e.target.value; // "" or id string
+    setLocalAssignedTechId(nextId);
+    setTechSaving(true);
 
     try {
-      // Try a dedicated endpoint first (if you add one later, this will work)
-      try {
-        await api.put(`/work-orders/${id}/assign`, { assignedTo: next || "" }, { headers: authHeaders() });
-      } catch {
-        // Fallback: write via /edit using common field names
-        const form = new FormData();
+      const form = new FormData();
 
-        // Pick ONE canonical field you want server to use.
-        // These fallbacks cover most setups:
-        form.append("assignedTo", next || "");
-        form.append("assignedTech", next || "");
-        form.append("assignedToUserId", next || "");
-        form.append("techId", next || "");
+      // Send both names commonly used on backends; harmless if ignored.
+      // IMPORTANT: keep the VALUE as ID so your DB stores the correct relationship.
+      form.append("assignedTechId", nextId || "");
+      form.append("assignedUserId", nextId || "");
+      form.append("techId", nextId || "");
+      form.append("assignedTech", nextId || "");
+      form.append("assignedTo", nextId || "");
 
-        await api.put(`/work-orders/${id}/edit`, form, {
-          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-        });
-      }
+      await api.put(`/work-orders/${id}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+      });
 
       await fetchWorkOrder();
-    } catch (err) {
-      console.error("Assign tech failed:", err);
-      alert(err?.response?.data?.error || "Failed to assign tech.");
+    } catch (error) {
+      console.error("⚠️ Error updating assigned tech:", error);
+      alert(error?.response?.data?.error || "Failed to update assigned tech.");
     } finally {
-      setAssignSaving(false);
+      setTechSaving(false);
     }
   };
 
@@ -909,8 +912,10 @@ export default function ViewWorkOrder() {
     try {
       const byOldest = [...parsedNotes].sort(
         (a, b) =>
-          (a.createdAt ? Date.parse(a.createdAt) : 0) - (b.createdAt ? Date.parse(b.createdAt) : 0)
+          (a.createdAt ? Date.parse(a.createdAt) : 0) -
+          (b.createdAt ? Date.parse(b.createdAt) : 0)
       );
+
       const target = displayNotes[displayIdx];
       if (!target) return;
 
@@ -941,13 +946,7 @@ export default function ViewWorkOrder() {
 
   return (
     <div className="view-container">
-      <Lightbox
-        open={lightbox.open}
-        onClose={closeLightbox}
-        kind={lightbox.kind}
-        src={lightbox.src}
-        title={lightbox.title}
-      />
+      <Lightbox open={lightbox.open} onClose={closeLightbox} kind={lightbox.kind} src={lightbox.src} title={lightbox.title} />
 
       <div className="view-card">
         <div className="view-header-row">
@@ -962,7 +961,6 @@ export default function ViewWorkOrder() {
           </div>
         </div>
 
-        {/* BASIC INFO */}
         <ul className="detail-list">
           <li className="detail-item">
             <span className="detail-label">Work Order #:</span>
@@ -1002,30 +1000,24 @@ export default function ViewWorkOrder() {
             </span>
           </li>
 
-          {/* ✅ Assign dropdown */}
+          {/* ✅ FIXED Assigned Tech dropdown */}
           <li className="detail-item">
             <span className="detail-label">Assigned Tech:</span>
             <span className="detail-value">
               <select
-                value={localAssignedTo}
-                onChange={handleAssignChange}
-                disabled={assignSaving}
-                style={{ padding: 6, minWidth: 240 }}
+                value={localAssignedTechId}
+                onChange={handleAssignedTechChange}
+                disabled={techSaving || techsLoading}
+                style={{ padding: 6, minWidth: 220 }}
               >
-                <option value="">Unassigned</option>
-                {techOptions.length ? (
-                  techOptions.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))
-                ) : (
-                  <option value="" disabled>
-                    No techs found
+                <option value="">{techsLoading ? "Loading techs…" : "Unassigned"}</option>
+                {techs.map((t) => (
+                  <option key={String(t.id)} value={String(t.id)}>
+                    {t.label || `User ${t.id}`}
                   </option>
-                )}
+                ))}
               </select>
-              {assignSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
+              {(techSaving || techsLoading) && <small style={{ marginLeft: 8 }}>{techSaving ? "Saving…" : "Loading…"}</small>}
             </span>
           </li>
 
@@ -1089,13 +1081,7 @@ export default function ViewWorkOrder() {
               <p className="empty-text">No PDF attached.</p>
               <label className="btn">
                 {busyReplace ? "Uploading…" : "Upload Signed PDF"}
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleReplacePdfUpload}
-                  style={{ display: "none" }}
-                  disabled={busyReplace}
-                />
+                <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
               </label>
             </div>
           )}
@@ -1107,20 +1093,10 @@ export default function ViewWorkOrder() {
               </a>
               <label className="btn">
                 {busyReplace ? "Replacing…" : "Replace Signed PDF"}
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleReplacePdfUpload}
-                  style={{ display: "none" }}
-                  disabled={busyReplace}
-                />
+                <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
               </label>
               <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <input
-                  type="checkbox"
-                  checked={keepOldInAttachments}
-                  onChange={(e) => setKeepOldInAttachments(e.target.checked)}
-                />
+                <input type="checkbox" checked={keepOldInAttachments} onChange={(e) => setKeepOldInAttachments(e.target.checked)} />
                 Move existing signed PDF to attachments
               </label>
             </div>
@@ -1146,13 +1122,7 @@ export default function ViewWorkOrder() {
           <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label className="btn">
               {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={handleUploadOrReplaceEstimatePdf}
-                style={{ display: "none" }}
-                disabled={busyEstimateUpload}
-              />
+              <input type="file" accept="application/pdf" onChange={handleUploadOrReplaceEstimatePdf} style={{ display: "none" }} disabled={busyEstimateUpload} />
             </label>
           </div>
         </div>
@@ -1162,12 +1132,7 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">PO Order PDF</h3>
           {poHref ? (
             <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-              <FileTile
-                kind="pdf"
-                href={poHref}
-                fileName={(poPdfPath || "").split("/").pop() || "po.pdf"}
-                onExpand={() => openLightbox("pdf", poHref, "PO PDF")}
-              />
+              <FileTile kind="pdf" href={poHref} fileName={(poPdfPath || "").split("/").pop() || "po.pdf"} onExpand={() => openLightbox("pdf", poHref, "PO PDF")} />
             </div>
           ) : (
             <p className="empty-text">No PO PDF attached.</p>
@@ -1176,13 +1141,7 @@ export default function ViewWorkOrder() {
           <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label className="btn">
               {busyPoUpload ? "Uploading…" : poHref ? "Replace PO PDF" : "Upload PO PDF"}
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={handleUploadOrReplacePoPdf}
-                style={{ display: "none" }}
-                disabled={busyPoUpload}
-              />
+              <input type="file" accept="application/pdf" onChange={handleUploadOrReplacePoPdf} style={{ display: "none" }} disabled={busyPoUpload} />
             </label>
           </div>
         </div>
@@ -1220,14 +1179,7 @@ export default function ViewWorkOrder() {
             </h3>
             <label className="btn">
               {busyImageUpload ? "Uploading…" : "Upload Photos"}
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleUploadImageAttachment}
-                style={{ display: "none" }}
-                disabled={busyImageUpload}
-              />
+              <input type="file" accept="image/*" multiple onChange={handleUploadImageAttachment} style={{ display: "none" }} disabled={busyImageUpload} />
             </label>
           </div>
 
@@ -1263,13 +1215,7 @@ export default function ViewWorkOrder() {
 
           {showNoteInput && (
             <div className="add-note">
-              <textarea
-                className="note-input"
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                placeholder="Write your note here..."
-                rows={3}
-              />
+              <textarea className="note-input" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Write your note here..." rows={3} />
               <button className="toggle-note-btn" onClick={handleAddNote}>
                 Submit Note
               </button>
