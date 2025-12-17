@@ -19,13 +19,8 @@ const STATUS_OPTIONS = [
   "Completed",
 ];
 
-/**
- * IMPORTANT:
- * Tech dropdown should behave exactly like WorkOrdersScreen.js:
- * - show only your techs
- * - store the string name (not ids)
- */
-const TECH_OPTIONS = ["", "Jeff", "jeffsr", "Adin"]; // "" = Unassigned
+// Only show these techs in ViewWorkOrder tech dropdown
+const ALLOWED_TECH_USERNAMES = new Set(["Jeff", "jeffsr", "Adin"]);
 
 /* ---------- auth header (match WorkOrders.js) ---------- */
 const authHeaders = () => {
@@ -54,17 +49,38 @@ const urlFor = (relPath) =>
 const pdfThumbUrl = (relPath) => `${urlFor(relPath)}#page=1&view=FitH`;
 
 const fileNameFromKey = (key) => (key || "").split("/").pop() || key || "";
-const isLikelyDrawNote = (key) => {
-  const name = fileNameFromKey(key).toLowerCase();
-  return (
-    name.includes("drawing-note") ||
-    name.startsWith("drawing_") ||
-    name.includes("draw-note") ||
-    name.includes("sketch")
-  );
-};
 const isImageKey = (key) =>
   !!key && !isPdfKey(key) && /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(key);
+
+// Weak heuristic only (your filenames are random, so this won’t catch everything)
+const isLikelyDrawNoteByName = (key) => {
+  const name = fileNameFromKey(key).toLowerCase();
+  return (
+    name.includes("drawing") ||
+    name.includes("draw") ||
+    name.includes("sketch") ||
+    name.includes("note")
+  );
+};
+
+// localStorage category override (per work order)
+const drawNoteStoreKey = (workOrderId) => `wo:${workOrderId}:drawNoteKeys`;
+function loadDrawNoteOverrides(workOrderId) {
+  try {
+    const raw = localStorage.getItem(drawNoteStoreKey(workOrderId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  } catch {
+    return new Set();
+  }
+}
+function saveDrawNoteOverrides(workOrderId, set) {
+  try {
+    localStorage.setItem(drawNoteStoreKey(workOrderId), JSON.stringify([...set]));
+  } catch {
+    // ignore
+  }
+}
 
 /* ---------- Inline PO# Editor ---------- */
 function PONumberEditor({ orderId, initialPo, onSaved }) {
@@ -83,9 +99,11 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
       const form = new FormData();
       if (next === null) form.append("poNumber", "");
       else form.append("poNumber", next);
+
       await api.put(`/work-orders/${orderId}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
+
       onSaved?.(next);
       setEditing(false);
     } catch (e) {
@@ -147,7 +165,7 @@ function Lightbox({ open, onClose, kind, src, title }) {
     if (downloading) return;
     setDownloading(true);
     try {
-      const res = await fetch(src, { mode: "cors", credentials: "omit" });
+      const res = await fetch(src, { credentials: "omit" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
@@ -278,13 +296,13 @@ function Lightbox({ open, onClose, kind, src, title }) {
 }
 
 /* ---------- Tile component (image or pdf) ---------- */
-function FileTile({ kind, href, fileName, onDelete, onExpand }) {
+function FileTile({ kind, href, fileName, onDelete, onExpand, extraAction }) {
   const isPdf = kind === "pdf";
   return (
     <div
       className="attachment-item"
       style={{
-        width: 160,
+        width: 170,
         borderRadius: 10,
         overflow: "hidden",
         border: "1px solid #e5e7eb",
@@ -313,6 +331,10 @@ function FileTile({ kind, href, fileName, onDelete, onExpand }) {
           {fileName}
         </a>
       </div>
+
+      {extraAction ? (
+        <div style={{ padding: "0 8px 8px 8px" }}>{extraAction}</div>
+      ) : null}
 
       <div style={{ display: "flex", gap: 6, padding: "0 8px 8px 8px" }}>
         <button className="btn btn-light" onClick={onExpand} style={{ flex: 1 }}>
@@ -409,6 +431,12 @@ export default function ViewWorkOrder() {
   const navigate = useNavigate();
 
   const [workOrder, setWorkOrder] = useState(null);
+
+  // Tech dropdown: use numeric assignedTo like WorkOrders.js
+  const [techUsers, setTechUsers] = useState([]);
+  const [techSaving, setTechSaving] = useState(false);
+  const [localAssignedTo, setLocalAssignedTo] = useState(""); // "" or numeric string
+
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
@@ -421,9 +449,8 @@ export default function ViewWorkOrder() {
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
 
-  // ✅ Assigned tech state (fixes “it flips back to Unassigned”)
-  const [techSaving, setTechSaving] = useState(false);
-  const [localAssignedTech, setLocalAssignedTech] = useState("");
+  // Draw-note overrides
+  const [drawNoteOverrides, setDrawNoteOverrides] = useState(new Set());
 
   const [lightbox, setLightbox] = useState({
     open: false,
@@ -434,6 +461,21 @@ export default function ViewWorkOrder() {
   const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
   const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
+  const fetchTechUsers = async () => {
+    try {
+      const res = await api.get("/users", {
+        params: { assignees: 1 },
+        headers: authHeaders(),
+      });
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const filtered = rows.filter((u) => ALLOWED_TECH_USERNAMES.has(String(u.username || "")));
+      setTechUsers(filtered);
+    } catch (e) {
+      console.error("Error fetching assignable tech users:", e);
+      setTechUsers([]);
+    }
+  };
+
   const fetchWorkOrder = async () => {
     try {
       const response = await api.get(`/work-orders/${id}`, { headers: authHeaders() });
@@ -442,13 +484,12 @@ export default function ViewWorkOrder() {
 
       setLocalStatus(data?.status || "");
 
-      // Pull assigned tech from any likely backend field, but store as NAME string
-      const assignedRaw =
-        (data?.assignedTech ?? data?.assignedTo ?? data?.tech ?? data?.techName ?? "") || "";
-      const assignedName = norm(assignedRaw);
+      // IMPORTANT: assignedTo is numeric ID in your backend
+      const assignedToVal = data?.assignedTo ?? "";
+      setLocalAssignedTo(assignedToVal === null || assignedToVal === undefined ? "" : String(assignedToVal));
 
-      // Only allow your techs; otherwise show Unassigned
-      setLocalAssignedTech(TECH_OPTIONS.includes(assignedName) ? assignedName : "");
+      // Load draw-note overrides for this WO
+      setDrawNoteOverrides(loadDrawNoteOverrides(id));
     } catch (error) {
       console.error("⚠️ Error fetching work order:", error);
     }
@@ -456,7 +497,9 @@ export default function ViewWorkOrder() {
 
   useEffect(() => {
     fetchWorkOrder();
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchTechUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const { entries: parsedNotes } = useMemo(() => {
     const raw = workOrder?.notes ?? null;
@@ -514,9 +557,21 @@ export default function ViewWorkOrder() {
 
   const allImageAttachments = attachments.filter(isImageKey);
 
-  // ✅ Split draw notes from regular images
-  const drawNoteImages = allImageAttachments.filter(isLikelyDrawNote);
-  const photoImages = allImageAttachments.filter((k) => !isLikelyDrawNote(k));
+  // Determine draw notes using overrides first, then weak filename heuristic
+  const isDrawNote = (key) => drawNoteOverrides.has(key) || isLikelyDrawNoteByName(key);
+
+  const drawNoteImages = allImageAttachments.filter((k) => isDrawNote(k));
+  const photoImages = allImageAttachments.filter((k) => !isDrawNote(k));
+
+  const toggleDrawNote = (key) => {
+    setDrawNoteOverrides((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      saveDrawNoteOverrides(id, next);
+      return next;
+    });
+  };
 
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`;
   const safe = (x) =>
@@ -750,7 +805,7 @@ export default function ViewWorkOrder() {
     setBusyImageUpload(true);
     try {
       const form = new FormData();
-      files.forEach((file) => form.append("photoFile", file));
+      files.forEach((file) => form.append("photoFile", file)); // server accepts any fieldname for images
 
       await api.put(`/work-orders/${id}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
@@ -808,31 +863,25 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /* ---------- Assigned Tech (FIXED) ---------- */
+  /* ---------- Assigned Tech (MATCH WorkOrders.js) ---------- */
   const handleAssignedTechChange = async (e) => {
-    const next = e.target.value; // "" = Unassigned, otherwise "Jeff" / "jeffsr" / "Adin"
-    const prev = localAssignedTech;
+    const nextTechId = e.target.value; // "" or numeric string
+    const prev = localAssignedTo;
 
-    setLocalAssignedTech(next);
+    setLocalAssignedTo(nextTechId);
     setTechSaving(true);
 
     try {
-      // Primary: dedicated endpoint if it exists
+      // Try /assign first (if you ever add it), then fallback to /edit with FormData (works with your server.js)
       try {
         await api.put(
           `/work-orders/${id}/assign`,
-          { assignedTech: next || null },
+          { assignedTo: nextTechId || null },
           { headers: { "Content-Type": "application/json", ...authHeaders() } }
         );
-      } catch (errAssign) {
-        // Fallback: /edit with FormData, try common field names
+      } catch {
         const form = new FormData();
-        const valueToSend = next || "";
-        form.append("assignedTech", valueToSend);
-        form.append("assignedTo", valueToSend);
-        form.append("tech", valueToSend);
-        form.append("techName", valueToSend);
-
+        form.append("assignedTo", nextTechId || "");
         await api.put(`/work-orders/${id}/edit`, form, {
           headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
         });
@@ -841,9 +890,8 @@ export default function ViewWorkOrder() {
       await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error updating assigned tech:", error);
-      // revert UI if backend rejects
-      setLocalAssignedTech(prev);
-      alert(error?.response?.data?.error || "Failed to update assigned tech.");
+      setLocalAssignedTo(prev);
+      alert(error?.response?.data?.error || "Failed to assign technician.");
     } finally {
       setTechSaving(false);
     }
@@ -921,27 +969,37 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /* ---------- Download All Photos ---------- */
+  /* ---------- Download Many (FIXED: downloads ALL, no stuck page) ---------- */
   const downloadMany = async (keys) => {
     if (!keys || !keys.length) return;
 
-    // Browser may block multiple downloads unless user allows it.
-    // We trigger them sequentially from ONE button click.
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       const href = urlFor(key);
-      const fileName = fileNameFromKey(key) || `photo-${i + 1}.jpg`;
+      const fileName = fileNameFromKey(key) || `file-${i + 1}`;
 
-      const a = document.createElement("a");
-      a.href = href;
-      a.download = fileName;
-      a.rel = "noopener noreferrer";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      try {
+        const res = await fetch(href, { credentials: "omit" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      // tiny delay helps reliability
-      await new Promise((r) => setTimeout(r, 250));
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        URL.revokeObjectURL(objectUrl);
+
+        // small delay = more reliable multi-download
+        await new Promise((r) => setTimeout(r, 200));
+      } catch (err) {
+        console.error("Download failed for:", key, err);
+        // don’t open tabs; just continue to the next one
+      }
     }
   };
 
@@ -1002,20 +1060,20 @@ export default function ViewWorkOrder() {
             </span>
           </li>
 
-          {/* ✅ Assigned Tech */}
+          {/* ✅ Assigned Tech (numeric ID like WorkOrders.js) */}
           <li className="detail-item">
             <span className="detail-label">Assigned Tech:</span>
             <span className="detail-value">
               <select
-                value={localAssignedTech}
+                value={localAssignedTo}
                 onChange={handleAssignedTechChange}
                 disabled={techSaving}
                 style={{ padding: 6, minWidth: 220 }}
               >
                 <option value="">Unassigned</option>
-                {TECH_OPTIONS.filter((t) => t).map((name) => (
-                  <option key={name} value={name}>
-                    {name}
+                {techUsers.map((t) => (
+                  <option key={t.id} value={String(t.id)}>
+                    {t.username}
                   </option>
                 ))}
               </select>
@@ -1156,7 +1214,7 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* Images */}
+        {/* Photos */}
         <div className="section-card">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
             <h3 className="section-header" style={{ marginBottom: 0 }}>
@@ -1176,7 +1234,7 @@ export default function ViewWorkOrder() {
           </div>
 
           {photoImages.length ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12 }}>
               {photoImages.map((relPath, i) => {
                 const href = urlFor(relPath);
                 const fileName = relPath.split("/").pop() || `image-${i + 1}.jpg`;
@@ -1188,6 +1246,11 @@ export default function ViewWorkOrder() {
                     fileName={fileName}
                     onExpand={() => openLightbox("image", href, fileName)}
                     onDelete={() => handleDeleteAttachment(relPath)}
+                    extraAction={
+                      <button className="btn btn-ghost" type="button" onClick={() => toggleDrawNote(relPath)} style={{ width: "100%" }}>
+                        Move to Draw Notes
+                      </button>
+                    }
                   />
                 );
               })}
@@ -1197,7 +1260,7 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* ✅ Draw Notes */}
+        {/* Draw Notes */}
         <div className="section-card">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
             <h3 className="section-header" style={{ marginBottom: 0 }}>
@@ -1210,7 +1273,7 @@ export default function ViewWorkOrder() {
           </div>
 
           {drawNoteImages.length ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12 }}>
               {drawNoteImages.map((relPath, i) => {
                 const href = urlFor(relPath);
                 const fileName = relPath.split("/").pop() || `draw-note-${i + 1}.jpg`;
@@ -1222,6 +1285,11 @@ export default function ViewWorkOrder() {
                     fileName={fileName}
                     onExpand={() => openLightbox("image", href, fileName)}
                     onDelete={() => handleDeleteAttachment(relPath)}
+                    extraAction={
+                      <button className="btn btn-ghost" type="button" onClick={() => toggleDrawNote(relPath)} style={{ width: "100%" }}>
+                        Move to Photos
+                      </button>
+                    }
                   />
                 );
               })}
