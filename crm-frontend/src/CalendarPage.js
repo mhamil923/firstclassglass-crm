@@ -58,16 +58,75 @@ const fmtTime = (d) => moment(d).format("HH:mm");
 const diffMinutes = (a, b) => Math.max(0, Math.round((+b - +a) / 60000));
 const isSameDay = (a, b) => moment(a).isSame(b, "day");
 
+const norm = (v) => (v ?? "").toString().trim().toLowerCase();
+
+/** Safely get a nested value by trying multiple paths */
+function pickFirst(obj, paths = []) {
+  for (const path of paths) {
+    const parts = path.split(".");
+    let cur = obj;
+    let ok = true;
+    for (const p of parts) {
+      if (cur && Object.prototype.hasOwnProperty.call(cur, p)) cur = cur[p];
+      else {
+        ok = false;
+        break;
+      }
+    }
+    if (ok && cur != null) {
+      const s = String(cur).trim();
+      if (s) return s;
+    }
+  }
+  return "";
+}
+
+/** Robust Work Order / PO label resolver (handles meta + alternate server keys) */
+const getWorkOrderNumber = (obj) =>
+  pickFirst(obj, [
+    "workOrderNumber",
+    "work_order_number",
+    "workOrderNo",
+    "workOrderNO",
+    "woNumber",
+    "wo_number",
+    "meta.workOrderNumber",
+    "meta.work_order_number",
+    "meta.workOrderNo",
+    "meta.woNumber",
+  ]);
+
+const getPoNumber = (obj) =>
+  pickFirst(obj, [
+    "poNumber",
+    "po_number",
+    "poNo",
+    "meta.poNumber",
+    "meta.po_number",
+    "meta.poNo",
+  ]);
+
+const getSiteLocation = (obj) =>
+  pickFirst(obj, [
+    "siteLocation",
+    "site_location",
+    "siteName",
+    "site_name",
+    "location",
+    "meta.siteLocation",
+    "meta.site_location",
+    "meta.siteName",
+    "meta.location",
+  ]);
+
 /** Prefer Work Order #, else PO #, else N/A — and return a labeled string */
 const displayWOThenPO = (obj) => {
-  const wo = (obj?.workOrderNumber ?? "").toString().trim();
-  const po = (obj?.poNumber ?? "").toString().trim();
+  const wo = getWorkOrderNumber(obj);
+  const po = getPoNumber(obj);
   if (wo) return `WO #${wo}`;
   if (po) return `PO #${po}`;
   return "N/A";
 };
-
-const norm = (v) => (v ?? "").toString().trim().toLowerCase();
 
 /** Multi-line clamp inline styles */
 const clamp1 = {
@@ -107,7 +166,7 @@ function CustomEvent({ event }) {
   const idLabel = displayWOThenPO(event);
   const problem = event.problemDescription || event.meta?.problemDescription;
 
-  const siteLocation = event.siteLocation ?? event.meta?.siteLocation;
+  const siteLocation = event.siteLocation ?? event.meta?.siteLocation ?? getSiteLocation(event);
   const siteAddress =
     event.siteAddress ??
     event.meta?.siteAddress ??
@@ -244,19 +303,27 @@ export default function WorkOrderCalendar() {
       const { data } = await api.get("/calendar/events", { params: { start, end } });
       const list = Array.isArray(data) ? data : [];
       const mapped = list.map((ev) => {
-        const startD = fromDbString(ev.start) || new Date();
+        const startD = fromDbString(ev.start) || fromDbString(ev.scheduledDate) || new Date();
         const endD =
           fromDbString(ev.end) ||
+          fromDbString(ev.scheduledEnd) ||
           moment(startD).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
 
         return {
           ...ev,
+          // normalize times
           start: startD,
           end: endD,
+
+          // normalize common fields
           customer: ev.meta?.customer ?? ev.customer,
-          siteLocation: ev.meta?.siteLocation ?? ev.siteLocation,
+          siteLocation: ev.meta?.siteLocation ?? ev.siteLocation ?? getSiteLocation(ev),
           siteAddress: ev.meta?.siteAddress ?? ev.siteAddress,
           problemDescription: ev.meta?.problemDescription ?? ev.problemDescription,
+
+          // normalize identifiers so WO # stops showing N/A
+          workOrderNumber: getWorkOrderNumber(ev),
+          poNumber: getPoNumber(ev),
         };
       });
       setEvents(mapped);
@@ -377,7 +444,7 @@ export default function WorkOrderCalendar() {
         list = Array.isArray(data) ? data : [];
       }
 
-      // 3) SAFEGUARD: filter to exact day client-side
+      // 3) SAFEGUARD: filter to exact day client-side + normalize identifiers
       const normalized = list
         .map((ev) => {
           const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
@@ -389,15 +456,16 @@ export default function WorkOrderCalendar() {
           return {
             id: ev.id,
             customer: ev.meta?.customer ?? ev.customer,
-            siteLocation: ev.meta?.siteLocation ?? ev.siteLocation,
+            siteLocation: ev.meta?.siteLocation ?? ev.siteLocation ?? getSiteLocation(ev),
             siteAddress: ev.meta?.siteAddress ?? ev.siteAddress,
-            workOrderNumber: ev.workOrderNumber,
-            poNumber: ev.poNumber,
+            workOrderNumber: getWorkOrderNumber(ev),
+            poNumber: getPoNumber(ev),
             problemDescription: ev.meta?.problemDescription ?? ev.problemDescription,
             scheduledDate: s,
             scheduledEnd: e,
             serviceAddress: ev.serviceAddress,
             address: ev.address,
+            status: ev.status ?? ev.meta?.status,
           };
         })
         .filter((o) => o.scheduledDate && isSameDay(o.scheduledDate, day));
@@ -473,8 +541,7 @@ export default function WorkOrderCalendar() {
   }
 
   function onSelectEvent(event) {
-    const full =
-      allOrders.find((o) => Number(o.id) === Number(event.id)) || event;
+    const full = allOrders.find((o) => Number(o.id) === Number(event.id)) || event;
     openEditModal(full);
   }
 
@@ -494,9 +561,7 @@ export default function WorkOrderCalendar() {
   const rbcEvents = useMemo(() => {
     return events.map((o) => {
       const start = fromDbString(o.start) || new Date();
-      const end =
-        fromDbString(o.end) ||
-        moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
+      const end = fromDbString(o.end) || moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
 
       const idLabel = displayWOThenPO(o);
       const title = o.customer ? `${o.customer} — ${idLabel}` : idLabel;
@@ -511,7 +576,7 @@ export default function WorkOrderCalendar() {
     });
   }, [events]);
 
-  /* ===== Unscheduled bar search ===== */
+  /* ===== Unscheduled bar search (NOW includes Site Location) ===== */
   const listForStrip = useMemo(() => {
     const q = norm(unscheduledSearch);
     if (!q) return unscheduledOrders;
@@ -521,10 +586,15 @@ export default function WorkOrderCalendar() {
 
     return pool.filter((o) => {
       const hayCustomer = norm(o.customer);
-      const hayPO = norm(o.poNumber);
-      const hayWO = norm(o.workOrderNumber);
+      const hayPO = norm(getPoNumber(o));
+      const hayWO = norm(getWorkOrderNumber(o));
+      const haySiteLoc = norm(getSiteLocation(o));
       return tokens.every(
-        (t) => hayCustomer.includes(t) || hayPO.includes(t) || hayWO.includes(t)
+        (t) =>
+          hayCustomer.includes(t) ||
+          hayPO.includes(t) ||
+          hayWO.includes(t) ||
+          haySiteLoc.includes(t)
       );
     });
   }, [unscheduledOrders, allOrders, unscheduledSearch]);
@@ -587,15 +657,12 @@ export default function WorkOrderCalendar() {
               <input
                 type="text"
                 className="form-control"
-                placeholder="Search customer, WO #, or PO # (includes scheduled)"
+                placeholder="Search customer, site location, WO #, or PO # (includes scheduled)"
                 value={unscheduledSearch}
                 onChange={(e) => setUnscheduledSearch(e.target.value)}
               />
               {unscheduledSearch ? (
-                <button
-                  className="btn btn-outline-secondary"
-                  onClick={clearUnscheduledSearch}
-                >
+                <button className="btn btn-outline-secondary" onClick={clearUnscheduledSearch}>
                   Clear
                 </button>
               ) : null}
@@ -606,7 +673,8 @@ export default function WorkOrderCalendar() {
             {unscheduledSearch ? (
               <>
                 Showing {listForStrip.length} match{listForStrip.length === 1 ? "" : "es"} across{" "}
-                {allOrders.length} total work order{allOrders.length === 1 ? "" : "s"} (drag any item to schedule/reschedule).
+                {allOrders.length} total work order{allOrders.length === 1 ? "" : "s"} (drag any item
+                to schedule/reschedule).
               </>
             ) : (
               <>Showing {listForStrip.length} item(s) (from /work-orders/unscheduled)</>
@@ -617,9 +685,8 @@ export default function WorkOrderCalendar() {
             {listForStrip.map((order) => {
               const idLabel = displayWOThenPO(order);
               const customerLabel = order.customer ? order.customer : "Work Order";
-              const siteLoc = order.siteLocation || "";
-              const siteAddr =
-                order.siteAddress || order.serviceAddress || order.address || "";
+              const siteLoc = getSiteLocation(order) || "";
+              const siteAddr = order.siteAddress || order.serviceAddress || order.address || "";
               const isScheduled = !!order.scheduledDate;
 
               // Friendly current-time label if scheduled
@@ -648,9 +715,7 @@ export default function WorkOrderCalendar() {
                     <div className="fw-bold" style={clamp1}>
                       {customerLabel} — {idLabel}
                     </div>
-                    {isScheduled && (
-                      <span className="badge text-bg-secondary">Scheduled</span>
-                    )}
+                    {isScheduled && <span className="badge text-bg-secondary">Scheduled</span>}
                   </div>
 
                   {siteLoc ? (
@@ -675,34 +740,21 @@ export default function WorkOrderCalendar() {
                   <div className="unscheduled-actions">
                     <button
                       className="btn btn-xs btn-outline-light me-1"
-                      onClick={() =>
-                        openEditModal(
-                          order,
-                          currentDate // fallback date
-                        )
-                      }
+                      onClick={() => openEditModal(order, currentDate)}
                     >
                       {isScheduled ? "Edit/Reschedule…" : "Schedule…"}
                     </button>
-                    <button
-                      className="btn btn-xs btn-light me-1"
-                      onClick={() => openStatusPicker(order)}
-                    >
+                    <button className="btn btn-xs btn-light me-1" onClick={() => openStatusPicker(order)}>
                       Status…
                     </button>
-                    <button
-                      className="btn btn-xs btn-light"
-                      onClick={() => navigateToView(order.id)}
-                    >
+                    <button className="btn btn-xs btn-light" onClick={() => navigateToView(order.id)}>
                       Open
                     </button>
                   </div>
                 </div>
               );
             })}
-            {!listForStrip.length && (
-              <div className="empty-text">No matches.</div>
-            )}
+            {!listForStrip.length && <div className="empty-text">No matches.</div>}
           </div>
         </div>
 
@@ -771,7 +823,7 @@ export default function WorkOrderCalendar() {
                           .format("hh:mm A")}`
                       : "";
                   const idLabel = displayWOThenPO(o);
-                  const siteLoc = o.siteLocation || "";
+                  const siteLoc = getSiteLocation(o) || o.siteLocation || "";
                   const siteAddr = o.siteAddress || o.serviceAddress || o.address || "";
 
                   return (
@@ -808,32 +860,17 @@ export default function WorkOrderCalendar() {
                       </div>
 
                       {/* RIGHT: actions */}
-                      <div
-                        className="d-flex align-items-center flex-wrap"
-                        style={{ gap: 8, justifySelf: "end" }}
-                      >
-                        <button
-                          className="btn btn-sm btn-primary"
-                          onClick={() => openEditModal(o, dayForModal)}
-                        >
+                      <div className="d-flex align-items-center flex-wrap" style={{ gap: 8, justifySelf: "end" }}>
+                        <button className="btn btn-sm btn-primary" onClick={() => openEditModal(o, dayForModal)}>
                           Edit Time…
                         </button>
-                        <button
-                          className="btn btn-sm btn-outline-secondary"
-                          onClick={() => navigateToView(o.id)}
-                        >
+                        <button className="btn btn-sm btn-outline-secondary" onClick={() => navigateToView(o.id)}>
                           Open
                         </button>
-                        <button
-                          className="btn btn-sm btn-outline-dark"
-                          onClick={() => openStatusPicker(o)}
-                        >
+                        <button className="btn btn-sm btn-outline-dark" onClick={() => openStatusPicker(o)}>
                           Status…
                         </button>
-                        <button
-                          className="btn btn-sm btn-outline-danger"
-                          onClick={() => unschedule(o.id)}
-                        >
+                        <button className="btn btn-sm btn-outline-danger" onClick={() => unschedule(o.id)}>
                           Unschedule
                         </button>
                       </div>
@@ -845,10 +882,7 @@ export default function WorkOrderCalendar() {
               <p className="empty-text mb-0">No work orders scheduled on this day.</p>
             )}
             <div className="text-end mt-3">
-              <button
-                className="btn btn-secondary"
-                onClick={() => setDayModalOpen(false)}
-              >
+              <button className="btn btn-secondary" onClick={() => setDayModalOpen(false)}>
                 Close
               </button>
             </div>
@@ -865,8 +899,7 @@ export default function WorkOrderCalendar() {
               <>
                 <div className="mb-2" style={{ minWidth: 0 }}>
                   <div className="fw-bold" style={clamp1}>
-                    {editOrder.customer ? `${editOrder.customer}` : `Work Order`} —{" "}
-                    {displayWOThenPO(editOrder)}
+                    {editOrder.customer ? `${editOrder.customer}` : `Work Order`} — {displayWOThenPO(editOrder)}
                   </div>
                   {editOrder.problemDescription ? (
                     <small className="text-muted" style={clamp2}>
@@ -878,38 +911,20 @@ export default function WorkOrderCalendar() {
                 <div className="row g-2">
                   <div className="col-5">
                     <label className="form-label small">Date</label>
-                    <input
-                      className="form-control"
-                      type="date"
-                      value={editDate}
-                      onChange={(e) => setEditDate(e.target.value)}
-                    />
+                    <input className="form-control" type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
                   </div>
                   <div className="col-3">
                     <label className="form-label small">Start</label>
-                    <input
-                      className="form-control"
-                      type="time"
-                      value={editTime}
-                      onChange={(e) => setEditTime(e.target.value)}
-                    />
+                    <input className="form-control" type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} />
                   </div>
                   <div className="col-4">
                     <label className="form-label small">End</label>
-                    <input
-                      className="form-control"
-                      type="time"
-                      value={editEndTime}
-                      onChange={(e) => setEditEndTime(e.target.value)}
-                    />
+                    <input className="form-control" type="time" value={editEndTime} onChange={(e) => setEditEndTime(e.target.value)} />
                   </div>
                 </div>
 
                 <div className="d-flex justify-content-end mt-3">
-                  <button
-                    className="btn btn-outline-danger me-2"
-                    onClick={() => unschedule(editOrder.id)}
-                  >
+                  <button className="btn btn-outline-danger me-2" onClick={() => unschedule(editOrder.id)}>
                     Unschedule
                   </button>
                   <button className="btn btn-primary" onClick={saveEditModal}>
@@ -931,25 +946,19 @@ export default function WorkOrderCalendar() {
               <>
                 <div className="mb-2" style={{ minWidth: 0 }}>
                   <div className="fw-bold" style={clamp1}>
-                    {statusTarget.customer ? statusTarget.customer : "Work Order"} —{" "}
-                    {displayWOThenPO(statusTarget)}
+                    {statusTarget.customer ? statusTarget.customer : "Work Order"} — {displayWOThenPO(statusTarget)}
                   </div>
                   <small className="text-muted">
                     Current: <strong>{statusTarget.status || "—"}</strong>
                   </small>
                 </div>
 
-                <div
-                  className="list-group mb-3"
-                  style={{ maxHeight: 260, overflowY: "auto" }}
-                >
+                <div className="list-group mb-3" style={{ maxHeight: 260, overflowY: "auto" }}>
                   {STATUS_OPTIONS.map((s) => (
                     <button
                       key={s}
                       type="button"
-                      className={`list-group-item list-group-item-action ${
-                        statusChoice === s ? "active" : ""
-                      }`}
+                      className={`list-group-item list-group-item-action ${statusChoice === s ? "active" : ""}`}
                       onClick={() => setStatusChoice(s)}
                     >
                       {s}
@@ -958,18 +967,10 @@ export default function WorkOrderCalendar() {
                 </div>
 
                 <div className="d-flex justify-content-end">
-                  <button
-                    className="btn btn-ghost btn-outline-secondary me-2"
-                    onClick={cancelStatusChange}
-                    disabled={statusSaving}
-                  >
+                  <button className="btn btn-ghost btn-outline-secondary me-2" onClick={cancelStatusChange} disabled={statusSaving}>
                     Cancel
                   </button>
-                  <button
-                    className="btn btn-primary"
-                    onClick={confirmStatusChange}
-                    disabled={statusSaving || !statusChoice}
-                  >
+                  <button className="btn btn-primary" onClick={confirmStatusChange} disabled={statusSaving || !statusChoice}>
                     {statusSaving ? "Saving…" : "Confirm"}
                   </button>
                 </div>
