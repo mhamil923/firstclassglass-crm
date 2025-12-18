@@ -1011,35 +1011,46 @@ app.get('/calendar/events', authenticate, async (req, res) => {
     const startSql = startQ ? asSqlDayStart(startQ) : defaultStart;
     const endSql   = endQ   ? asSqlDayEnd(endQ)     : defaultEnd;
 
-    const [rows] = await db.execute(
-      `SELECT id, workOrderNumber, customer, siteLocation, siteAddress, problemDescription, status,
-              scheduledDate, scheduledEnd
-         FROM work_orders
-        WHERE scheduledDate IS NOT NULL
-          AND scheduledDate <= ?
-          AND (scheduledEnd IS NULL OR scheduledEnd >= ?)
-        ORDER BY scheduledDate ASC`,
-      [endSql, startSql]
-    );
+const [rows] = await db.execute(
+  `SELECT id, workOrderNumber, poNumber, customer, siteLocation, siteAddress, problemDescription, status,
+          scheduledDate, scheduledEnd
+     FROM work_orders
+    WHERE scheduledDate IS NOT NULL
+      AND scheduledDate <= ?
+      AND (scheduledEnd IS NULL OR scheduledEnd >= ?)
+    ORDER BY scheduledDate ASC`,
+  [endSql, startSql]
+);
 
-    const events = rows.map(r => ({
-      id: r.id,
-      title: [
-        r.workOrderNumber ? `WO ${r.workOrderNumber}` : null,
-        r.customer || null,
-        r.siteLocation || r.siteAddress || null
-      ].filter(Boolean).join(' • '),
-      start: r.scheduledDate,
-      end:   r.scheduledEnd || null,
-      allDay: false,
-      meta: {
-        status: displayStatusOrDefault(r.status),
-        customer: r.customer,
-        siteLocation: r.siteLocation,
-        siteAddress: r.siteAddress,
-        problemDescription: r.problemDescription
-      }
-    }));
+const events = rows.map(r => ({
+  id: r.id,
+
+  // IMPORTANT: include these so CalendarPage.js can display them (no more N/A)
+  workOrderNumber: r.workOrderNumber || null,
+  poNumber: r.poNumber || null,
+
+  title: [
+    r.customer || null,
+    (r.workOrderNumber ? `WO #${r.workOrderNumber}` : (r.poNumber ? `PO #${r.poNumber}` : null)),
+    r.siteLocation || r.siteAddress || null
+  ].filter(Boolean).join(' — '),
+
+  start: r.scheduledDate,
+  end:   r.scheduledEnd || null,
+  allDay: false,
+
+  meta: {
+    status: displayStatusOrDefault(r.status),
+    customer: r.customer,
+    siteLocation: r.siteLocation,
+    siteAddress: r.siteAddress,
+    problemDescription: r.problemDescription,
+
+    // (optional but nice) also include in meta for popovers/debugging
+    workOrderNumber: r.workOrderNumber || null,
+    poNumber: r.poNumber || null,
+  }
+}));
 
     res.json(events);
   } catch (err) {
