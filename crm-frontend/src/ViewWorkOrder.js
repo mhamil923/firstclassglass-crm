@@ -44,8 +44,7 @@ const isPdfFile = (file) =>
 
 /* ---------- Small helpers ---------- */
 const isPdfKey = (key) => /\.pdf(\?|$)/i.test(key);
-const urlFor = (relPath) =>
-  `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
+const urlFor = (relPath) => `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
 const pdfThumbUrl = (relPath) => `${urlFor(relPath)}#page=1&view=FitH`;
 
 const fileNameFromKey = (key) => (key || "").split("/").pop() || key || "";
@@ -55,12 +54,7 @@ const isImageKey = (key) =>
 // Weak heuristic only (your filenames are random, so this won’t catch everything)
 const isLikelyDrawNoteByName = (key) => {
   const name = fileNameFromKey(key).toLowerCase();
-  return (
-    name.includes("drawing") ||
-    name.includes("draw") ||
-    name.includes("sketch") ||
-    name.includes("note")
-  );
+  return name.includes("drawing") || name.includes("draw") || name.includes("sketch") || name.includes("note");
 };
 
 // localStorage category override (per work order)
@@ -133,12 +127,7 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
         onChange={(e) => setPo(e.target.value)}
         className="form-input"
         placeholder="Enter PO # (optional)"
-        style={{
-          height: 36,
-          borderRadius: 8,
-          border: "1px solid #cbd5e1",
-          padding: "0 10px",
-        }}
+        style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
       />
       <button className="btn btn-primary" disabled={saving} onClick={save}>
         {saving ? "Saving…" : "Save"}
@@ -320,21 +309,12 @@ function FileTile({ kind, href, fileName, onDelete, onExpand, extraAction }) {
       </div>
 
       <div style={{ padding: "6px 8px", fontSize: 12, wordBreak: "break-all" }}>
-        <a
-          href={href}
-          target="__blank"
-          rel="noopener noreferrer"
-          title={fileName}
-          className="link"
-          style={{ textDecoration: "none" }}
-        >
+        <a href={href} target="__blank" rel="noopener noreferrer" title={fileName} className="link" style={{ textDecoration: "none" }}>
           {fileName}
         </a>
       </div>
 
-      {extraAction ? (
-        <div style={{ padding: "0 8px 8px 8px" }}>{extraAction}</div>
-      ) : null}
+      {extraAction ? <div style={{ padding: "0 8px 8px 8px" }}>{extraAction}</div> : null}
 
       <div style={{ display: "flex", gap: 6, padding: "0 8px 8px 8px" }}>
         <button className="btn btn-light" onClick={onExpand} style={{ flex: 1 }}>
@@ -452,21 +432,13 @@ export default function ViewWorkOrder() {
   // Draw-note overrides
   const [drawNoteOverrides, setDrawNoteOverrides] = useState(new Set());
 
-  const [lightbox, setLightbox] = useState({
-    open: false,
-    kind: "pdf",
-    src: "",
-    title: "",
-  });
+  const [lightbox, setLightbox] = useState({ open: false, kind: "pdf", src: "", title: "" });
   const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
   const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
   const fetchTechUsers = async () => {
     try {
-      const res = await api.get("/users", {
-        params: { assignees: 1 },
-        headers: authHeaders(),
-      });
+      const res = await api.get("/users", { params: { assignees: 1 }, headers: authHeaders() });
       const rows = Array.isArray(res.data) ? res.data : [];
       const filtered = rows.filter((u) => ALLOWED_TECH_USERNAMES.has(String(u.username || "")));
       setTechUsers(filtered);
@@ -507,11 +479,7 @@ export default function ViewWorkOrder() {
   }, [workOrder]);
 
   const displayNotes = useMemo(() => {
-    const withSortKey = parsedNotes.map((n, i) => ({
-      ...n,
-      __idx: i,
-      __t: n.createdAt ? Date.parse(n.createdAt) || 0 : 0,
-    }));
+    const withSortKey = parsedNotes.map((n, i) => ({ ...n, __idx: i, __t: n.createdAt ? Date.parse(n.createdAt) || 0 : 0 }));
     return withSortKey.sort((a, b) => b.__t - a.__t);
   }, [parsedNotes]);
 
@@ -542,6 +510,8 @@ export default function ViewWorkOrder() {
   } = workOrder;
 
   const cleanedPo = displayPO(workOrderNumber, poNumber);
+  const cleanedWo = displayWO(workOrderNumber);
+
   const signedHref = pdfPath ? pdfThumbUrl(pdfPath) : null;
   const estimateHref = estimatePdfPath ? pdfThumbUrl(estimatePdfPath) : null;
   const poHref = poPdfPath ? pdfThumbUrl(poPdfPath) : null;
@@ -551,10 +521,7 @@ export default function ViewWorkOrder() {
     .map((p) => p.trim())
     .filter(Boolean);
 
-  const otherPdfAttachments = attachments
-    .filter(isPdfKey)
-    .filter((p) => p !== pdfPath && p !== estimatePdfPath && p !== poPdfPath);
-
+  const otherPdfAttachments = attachments.filter(isPdfKey).filter((p) => p !== pdfPath && p !== estimatePdfPath && p !== poPdfPath);
   const allImageAttachments = attachments.filter(isImageKey);
 
   // Determine draw notes using overrides first, then weak filename heuristic
@@ -581,28 +548,41 @@ export default function ViewWorkOrder() {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
+  const buildIdBlock = (agreementNo) => {
+    // AgreementNo = what you used for printing (PO or id)
+    // We ALSO include WO# now.
+    return `
+      <div class="idbox">
+        <div><b>PO #:</b> ${safe(agreementNo || "")}</div>
+        <div><b>WO #:</b> ${safe(cleanedWo)}</div>
+        <div><b>Date:</b> ____/____/____</div>
+      </div>
+    `;
+  };
+
+  /* ---------------- PRINT: Work Order (existing) ---------------- */
   const handlePrint = () => {
     const siteDisplayName = (siteLocation || customer || "").trim();
     const siteAddr = (siteAddress || "").trim();
-    const agreementNo = cleanedPo || id;
+    const agreementNo = cleanedPo || id; // what you already used as "Agreement No."
 
     const html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Agreement ${safe(agreementNo)}</title>
+  <title>Work Order ${safe(agreementNo)}</title>
   <style>
     @page { size: Letter; margin: 0.5in; }
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; -webkit-print-color-adjust: exact; }
     .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; page-break-inside: avoid; }
-    .hdr { display: grid; grid-template-columns: 120px 1fr 220px; align-items: center; column-gap: 12px; }
+    .hdr { display: grid; grid-template-columns: 120px 1fr 260px; align-items: start; column-gap: 12px; }
     .logo { width: 100%; height: auto; }
     .company h1 { margin: 0; font-size: 18px; font-weight: 700; }
     .company .addr { margin-top: 2px; font-size: 10px; line-height: 1.2; }
-    .agree { text-align: right; }
-    .agree .title { font-size: 18px; font-weight: 700; text-transform: uppercase; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 2px; }
-    .agree .no { margin-top: 6px; font-size: 12px; }
+    .idbox { border: 2px solid #000; padding: 10px; font-size: 12px; line-height: 1.35; }
+    .idbox div { margin: 2px 0; }
+    .title { margin-top: 8px; font-size: 18px; font-weight: 700; text-transform: uppercase; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 2px; }
     .spacer-8 { height: 8px; }
     table { border-collapse: collapse; width: 100%; }
     .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
@@ -628,11 +608,9 @@ export default function ViewWorkOrder() {
           1513 Industrial Dr, Itasca, Illinois 60143 • 630-250-9777<br/>
           FCG@FirstClassGlassMirror.com
         </div>
+        <div class="title">Work Order</div>
       </div>
-      <div class="agree">
-        <div class="title">Agreement</div>
-        <div class="no">No. ${safe(agreementNo)}</div>
-      </div>
+      ${buildIdBlock(agreementNo)}
     </div>
 
     <div class="spacer-8"></div>
@@ -690,6 +668,184 @@ export default function ViewWorkOrder() {
   </div>
   <script>
     window.onload = function() { setTimeout(function(){ window.print(); window.close(); }, 150); };
+  </script>
+</body>
+</html>`;
+
+    const w = window.open("", "_blank", "width=1000,height=1200");
+    if (!w) {
+      alert("Popup blocked. Please allow popups to print.");
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  };
+
+  /* ---------------- PRINT: To Quote (new) ---------------- */
+  const handlePrintToQuote = () => {
+    const siteDisplayName = (siteLocation || customer || "").trim();
+    const siteAddr = (siteAddress || "").trim();
+    const agreementNo = cleanedPo || id;
+
+    const notesText = (displayNotes || [])
+      .slice()
+      .reverse()
+      .map((n) => {
+        const ts = n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "";
+        const by = n.by ? ` — ${n.by}` : "";
+        return `${ts}${by}\n${n.text || ""}`.trim();
+      })
+      .filter(Boolean)
+      .join("\n\n--------------------------------\n\n");
+
+    const photos = photoImages || [];
+    const draws = drawNoteImages || [];
+
+    const photoPages = photos
+      .map((k, idx) => {
+        const src = urlFor(k);
+        const name = fileNameFromKey(k);
+        return `
+          <div class="page">
+            <div class="page-hdr">
+              <div><b>Work Order:</b> ${safe(cleanedWo)} &nbsp;&nbsp; <b>PO #:</b> ${safe(agreementNo)}</div>
+              <div class="small">${safe(name || `photo-${idx + 1}`)}</div>
+            </div>
+            <div class="imgwrap">
+              <img src="${safe(src)}" alt="${safe(name)}" />
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    const drawPages = draws
+      .map((k, idx) => {
+        const src = urlFor(k);
+        const name = fileNameFromKey(k);
+        return `
+          <div class="page">
+            <div class="page-hdr">
+              <div><b>Draw Note</b> — <b>WO #:</b> ${safe(cleanedWo)} &nbsp;&nbsp; <b>PO #:</b> ${safe(agreementNo)}</div>
+              <div class="small">${safe(name || `draw-${idx + 1}`)}</div>
+            </div>
+            <div class="imgwrap">
+              <img src="${safe(src)}" alt="${safe(name)}" />
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Print To Quote ${safe(agreementNo)}</title>
+  <style>
+    @page { size: Letter; margin: 0.5in; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, "Segoe UI", Roboto, sans-serif; color: #000; -webkit-print-color-adjust: exact; }
+    .sheet { width: 100%; max-width: 8.5in; margin: 0 auto; }
+    .cover { page-break-after: always; }
+    .hdr { display: grid; grid-template-columns: 120px 1fr 260px; align-items: start; column-gap: 12px; }
+    .logo { width: 100%; height: auto; }
+    .company h1 { margin: 0; font-size: 18px; font-weight: 700; }
+    .company .addr { margin-top: 2px; font-size: 10px; line-height: 1.2; }
+    .idbox { border: 2px solid #000; padding: 10px; font-size: 12px; line-height: 1.35; }
+    .idbox div { margin: 2px 0; }
+    .title { margin-top: 8px; font-size: 18px; font-weight: 700; text-transform: uppercase; border-bottom: 2px solid #000; display: inline-block; padding-bottom: 2px; }
+    .spacer-8 { height: 8px; }
+
+    table { border-collapse: collapse; width: 100%; }
+    .two-col th, .two-col td { border: 1px solid #000; font-size: 11px; padding: 6px 8px; vertical-align: middle; }
+    .two-col th { background: #fff; font-weight: 700; text-transform: uppercase; }
+    .label { width: 18%; }
+
+    .section-title { margin: 12px 0 6px 0; font-size: 12px; font-weight: 700; text-transform: uppercase; }
+    .box { border: 1px solid #000; padding: 10px; white-space: pre-wrap; font-size: 11.5px; }
+    .box.notes { min-height: 2.0in; }
+    .box.problem { min-height: 1.2in; }
+
+    /* Full-page image pages (1 per page) */
+    .page { page-break-after: always; }
+    .page:last-child { page-break-after: auto; }
+    .page-hdr { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; border-bottom: 2px solid #000; padding-bottom: 6px; }
+    .page-hdr .small { font-size: 10px; color: #222; max-width: 60%; text-align: right; word-break: break-all; }
+    .imgwrap { width: 100%; height: calc(11in - 1in - 40px); display: flex; align-items: center; justify-content: center; }
+    .imgwrap img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+    .fine { font-size: 8px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+  <!-- COVER PAGE (details + notes) -->
+  <div class="sheet cover">
+    <div class="hdr">
+      <img class="logo" src="${safe(LOGO_URL)}" alt="First Class Glass logo" />
+      <div class="company">
+        <h1>First Class Glass &amp; Mirror, INC.</h1>
+        <div class="addr">
+          1513 Industrial Dr, Itasca, Illinois 60143 • 630-250-9777<br/>
+          FCG@FirstClassGlassMirror.com
+        </div>
+        <div class="title">Print To Quote</div>
+      </div>
+      ${buildIdBlock(agreementNo)}
+    </div>
+
+    <div class="spacer-8"></div>
+
+    <table class="two-col">
+      <tr>
+        <th colspan="2">Agreement Submitted To:</th>
+        <th colspan="2">Work To Be Performed At:</th>
+      </tr>
+      <tr>
+        <th class="label">Name</th>
+        <td>${safe(customer || "")}</td>
+        <th class="label">Name</th>
+        <td>${safe(siteDisplayName)}</td>
+      </tr>
+      <tr>
+        <th class="label">Address</th>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
+        <th class="label">Address</th>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
+      </tr>
+      <tr>
+        <th class="label">Phone</th>
+        <td>${safe(customerPhone || "")}</td>
+        <th class="label">Phone</th>
+        <td></td>
+      </tr>
+    </table>
+
+    <div class="section-title">Problem Description</div>
+    <div class="box problem">${safe(problemDescription || "")}</div>
+
+    <div class="section-title">Notes</div>
+    <div class="box notes">${safe(notesText || "No notes.")}</div>
+
+    <div class="fine">
+      This packet prints: Cover + Notes + Draw Notes (1/page) + Photos (1/page).
+    </div>
+  </div>
+
+  <!-- DRAW NOTES (1 per page) -->
+  ${drawPages}
+
+  <!-- PHOTOS (1 per page) -->
+  ${photoPages}
+
+  <script>
+    // Wait a beat so images have a chance to load, then print.
+    // (If you see blank pages sometimes, increase the timeout to 1000-1500ms.)
+    window.onload = function() {
+      setTimeout(function(){ window.print(); window.close(); }, 700);
+    };
   </script>
 </body>
 </html>`;
@@ -791,8 +947,7 @@ export default function ViewWorkOrder() {
     if (!files.length) return;
 
     const bad = files.find((file) => {
-      const isImage =
-        file.type?.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(file.name || "");
+      const isImage = file.type?.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(file.name || "");
       return !isImage;
     });
 
@@ -872,7 +1027,6 @@ export default function ViewWorkOrder() {
     setTechSaving(true);
 
     try {
-      // Try /assign first (if you ever add it), then fallback to /edit with FormData (works with your server.js)
       try {
         await api.put(
           `/work-orders/${id}/assign`,
@@ -886,7 +1040,6 @@ export default function ViewWorkOrder() {
           headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
         });
       }
-
       await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error updating assigned tech:", error);
@@ -903,18 +1056,10 @@ export default function ViewWorkOrder() {
     if (!text) return;
 
     try {
-      await api.put(
-        `/work-orders/${id}/notes`,
-        { notes: text, append: true },
-        { headers: { "Content-Type": "application/json", ...authHeaders() } }
-      );
+      await api.put(`/work-orders/${id}/notes`, { notes: text, append: true }, { headers: { "Content-Type": "application/json", ...authHeaders() } });
     } catch (err1) {
       try {
-        await api.put(
-          `/work-orders/${id}/notes`,
-          { text, append: true },
-          { headers: { "Content-Type": "application/json", ...authHeaders() } }
-        );
+        await api.put(`/work-orders/${id}/notes`, { text, append: true }, { headers: { "Content-Type": "application/json", ...authHeaders() } });
       } catch (err2) {
         console.error("Add note failed:", err1, err2);
         const msg =
@@ -937,20 +1082,12 @@ export default function ViewWorkOrder() {
     if (!window.confirm("Delete this note?")) return;
 
     try {
-      const byOldest = [...parsedNotes].sort(
-        (a, b) =>
-          (a.createdAt ? Date.parse(a.createdAt) : 0) - (b.createdAt ? Date.parse(b.createdAt) : 0)
-      );
+      const byOldest = [...parsedNotes].sort((a, b) => (a.createdAt ? Date.parse(a.createdAt) : 0) - (b.createdAt ? Date.parse(b.createdAt) : 0));
       const target = displayNotes[displayIdx];
       if (!target) return;
 
       const kept = byOldest.filter(
-        (e) =>
-          !(
-            e.createdAt === target.createdAt &&
-            e.text === target.text &&
-            (e.by || "") === (target.by || "")
-          )
+        (e) => !(e.createdAt === target.createdAt && e.text === target.text && (e.by || "") === (target.by || ""))
       );
 
       const newBody = kept.length ? formatNotesText(kept) : "";
@@ -969,7 +1106,7 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /* ---------- Download Many (FIXED: downloads ALL, no stuck page) ---------- */
+  /* ---------- Download Many (downloads ALL, no stuck page) ---------- */
   const downloadMany = async (keys) => {
     if (!keys || !keys.length) return;
 
@@ -994,11 +1131,9 @@ export default function ViewWorkOrder() {
 
         URL.revokeObjectURL(objectUrl);
 
-        // small delay = more reliable multi-download
         await new Promise((r) => setTimeout(r, 200));
       } catch (err) {
         console.error("Download failed for:", key, err);
-        // don’t open tabs; just continue to the next one
       }
     }
   };
@@ -1010,9 +1145,12 @@ export default function ViewWorkOrder() {
       <div className="view-card">
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
-          <div className="view-actions">
+          <div className="view-actions" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
+            </button>
+            <button className="btn btn-primary" onClick={handlePrintToQuote}>
+              🧾 Print to Quote
             </button>
             <button className="back-btn" onClick={() => navigate("/work-orders")}>
               ← Back to List
@@ -1064,12 +1202,7 @@ export default function ViewWorkOrder() {
           <li className="detail-item">
             <span className="detail-label">Assigned Tech:</span>
             <span className="detail-value">
-              <select
-                value={localAssignedTo}
-                onChange={handleAssignedTechChange}
-                disabled={techSaving}
-                style={{ padding: 6, minWidth: 220 }}
-              >
+              <select value={localAssignedTo} onChange={handleAssignedTechChange} disabled={techSaving} style={{ padding: 6, minWidth: 220 }}>
                 <option value="">Unassigned</option>
                 {techUsers.map((t) => (
                   <option key={t.id} value={String(t.id)}>
@@ -1309,13 +1442,7 @@ export default function ViewWorkOrder() {
 
           {showNoteInput && (
             <div className="add-note">
-              <textarea
-                className="note-input"
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                placeholder="Write your note here..."
-                rows={3}
-              />
+              <textarea className="note-input" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Write your note here..." rows={3} />
               <button className="toggle-note-btn" onClick={handleAddNote}>
                 Submit Note
               </button>
