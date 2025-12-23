@@ -57,10 +57,21 @@ app.use(bodyParser.text({ type: 'text/plain', limit: '1mb' }));
 function coerceBody(req) {
   if (req.body == null) return {};
   if (typeof req.body === 'object') return req.body;
-  // req.body is a string (text/plain)
   const str = String(req.body).trim();
   if (!str) return {};
   try { return JSON.parse(str); } catch (_) { return { text: str, value: str, notes: str }; }
+}
+
+// ─── ROUTE PARAM GUARDS (FIX FOR ROUTE GENERATORS) ───────────────────────────
+// Many route generators choke on regex params like :id(\\d+). We use plain :id
+// and validate in middleware instead.
+function requireNumericParam(paramName) {
+  return (req, res, next) => {
+    const raw = String(req.params[paramName] ?? '').trim();
+    if (!/^\d+$/.test(raw)) return res.status(400).json({ error: `${paramName} must be a numeric id` });
+    req.params[paramName] = raw;
+    next();
+  };
 }
 
 // ─── MYSQL ──────────────────────────────────────────────────────────────────
@@ -82,7 +93,7 @@ function toSqlDateTimeFromParts(Y, M, D, h = 0, m = 0, s = 0) {
 }
 function addMinutesToSql(sqlStr, minutes) {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(sqlStr);
- 	if (!m) return sqlStr;
+  if (!m) return sqlStr;
   const Y = Number(m[1]), Mo = Number(m[2]), D = Number(m[3]);
   const h = Number(m[4]), mi = Number(m[5]), s = Number(m[6] || 0);
   const d = new Date(Y, Mo - 1, D, h, mi, s);
@@ -225,8 +236,6 @@ const STATUS_SYNONYMS = new Map([
   ['needs to invoice','Needs to be Invoiced'],
   ['approved','Approved'],
 ]);
-
-// Additional tolerant short-codes (what the UI sometimes sends, e.g. "Ne")
 const STATUS_SHORT = new Map([
   ['ne', 'New'],
   ['sc', 'Scheduled'],
@@ -238,7 +247,6 @@ const STATUS_SHORT = new Map([
   ['ni', 'Needs to be Invoiced'],
   ['co', 'Completed'],
 ]);
-
 function canonStatus(input) {
   const k = statusKey(input);
   return STATUS_LOOKUP.get(k) || STATUS_SYNONYMS.get(k) || STATUS_SHORT.get(k) || null;
@@ -479,9 +487,9 @@ app.get('/customers', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) { console.error('Customers list error:', err); res.status(500).json({ error: 'Failed to fetch customers.' }); }
 });
-app.get('/customers/:id(\\d+)', authenticate, async (req, res) => {
+app.get('/customers/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
-    const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers WHERE id = ?', [req.params.id]);
+    const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers WHERE id = ?', [Number(req.params.id)]);
     if (!rows.length) return res.status(404).json({ error: 'Customer not found.' });
     res.json(rows[0]);
   } catch (err) { console.error('Customer get error:', err); res.status(500).json({ error: 'Failed to fetch customer.' }); }
@@ -530,29 +538,8 @@ app.get('/work-orders', authenticate, async (req, res) => {
   }
 });
 
-// GET single by ID — (frontend "View Work Order" page)
-app.get('/work-orders/:id(\\d+)', authenticate, async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const [[row]] = await db.execute(
-      `SELECT w.*, u.username AS assignedToName
-         FROM work_orders w
-         LEFT JOIN users u ON w.assignedTo = u.id
-        WHERE w.id = ?`,
-      [id]
-    );
-    if (!row) return res.status(404).json({ error: 'Not found.' });
-    row.status = (row.status && canonStatus(row.status))
-      ? canonStatus(row.status)
-      : displayStatusOrDefault(row.status);
-    res.json(row);
-  } catch (err) {
-    console.error('Work-order get-by-id error:', err);
-    res.status(500).json({ error: 'Failed to fetch work order.' });
-  }
-});
-
 // ✅ Unscheduled bar — show only the statuses you want
+// IMPORTANT: this must be defined BEFORE /work-orders/:id now that :id is generic
 app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -672,6 +659,29 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
   }
 });
 
+// GET single by ID — (frontend "View Work Order" page)
+// IMPORTANT: define AFTER the specific /work-orders/* routes
+app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [[row]] = await db.execute(
+      `SELECT w.*, u.username AS assignedToName
+         FROM work_orders w
+         LEFT JOIN users u ON w.assignedTo = u.id
+        WHERE w.id = ?`,
+      [id]
+    );
+    if (!row) return res.status(404).json({ error: 'Not found.' });
+    row.status = (row.status && canonStatus(row.status))
+      ? canonStatus(row.status)
+      : displayStatusOrDefault(row.status);
+    res.json(row);
+  } catch (err) {
+    console.error('Work-order get-by-id error:', err);
+    res.status(500).json({ error: 'Failed to fetch work order.' });
+  }
+});
+
 // CREATE — persists scheduledDate & scheduledEnd
 app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
@@ -685,27 +695,20 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
       notes = null,
 
-      // NEW fields accepted from AddWorkOrder
-      scheduledDate: scheduledDateRaw = null,   // e.g. "2025-10-27 08:00" or "2025-10-27T08:00"
-      endTime = null,                            // optional "HH" or "HH:mm"
-      timeWindow = null                          // optional "08-12"
+      scheduledDate: scheduledDateRaw = null,
+      endTime = null,
+      timeWindow = null
     } = req.body;
 
     if (!customer || !billingAddress || !problemDescription) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Normalize schedule inputs
     let startSqlMaybe = (scheduledDateRaw === '') ? null : parseDateTimeFlexible(scheduledDateRaw);
-    const { startSql, endSql } = windowSql({
-      dateSql: startSqlMaybe,
-      endTime,
-      timeWindow
-    });
+    const { startSql, endSql } = windowSql({ dateSql: startSqlMaybe, endTime, timeWindow });
     const scheduledDate = startSql || null;
     const scheduledEnd  = endSql   || null;
 
-    // Files
     const files = req.files || [];
     const primaryPdf   = pickPdfByFields(files, FIELD_SETS.work);
     const estimatePdf  = pickPdfByFields(files, FIELD_SETS.est);
@@ -724,7 +727,6 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
 
     const cStatus = canonStatus(status) || 'New';
 
-    // ⬇️ scheduledDate & scheduledEnd included
     const cols = [
       'workOrderNumber','poNumber','customer','siteLocation','siteAddress','billingAddress',
       'problemDescription','status','pdfPath','estimatePdfPath','poPdfPath','photoPath',
@@ -759,10 +761,10 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
 });
 
 // EDIT — updates/clears scheduledDate & scheduledEnd
-app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), async (req, res) => {
+app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
-    const wid = req.params.id;
+    const wid = Number(req.params.id);
     const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!existing) return res.status(404).json({ error: 'Not found.' });
 
@@ -787,7 +789,6 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
     let estimatePdfPath = existing.estimatePdfPath;
     let poPdfPath       = existing.poPdfPath;
 
-    // PRIMARY PDF
     if (primaryPdf) {
       const newPath = fileKey(primaryPdf);
       const oldPath = existing.pdfPath;
@@ -812,7 +813,6 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       }
     }
 
-    // ESTIMATE PDF
     if (estimatePdf) {
       const newPath = fileKey(estimatePdf);
       const oldPath = existing.estimatePdfPath;
@@ -837,7 +837,6 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       }
     }
 
-    // PO PDF
     if (poPdf) {
       const newPath = fileKey(poPdf);
       const oldPath = existing.poPdfPath;
@@ -883,21 +882,18 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       customerEmail = existing.customerEmail,
       notes = existing.notes,
 
-      // schedule fields
-      scheduledDate: scheduledDateRaw = undefined, // undefined = not sent; '' = clear; otherwise set
+      scheduledDate: scheduledDateRaw = undefined,
       endTime = null,
       timeWindow = null
     } = body;
 
     const cStatus = canonStatus(status) || existing.status;
 
-    // Compute schedule updates
     let scheduledDate = existing.scheduledDate || null;
     let scheduledEnd  = existing.scheduledEnd  || null;
 
     if (scheduledDateRaw !== undefined) {
       if (scheduledDateRaw === '') {
-        // explicit clear
         scheduledDate = null;
         scheduledEnd  = null;
       } else {
@@ -908,7 +904,6 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
       }
     }
 
-    // Clean, explicit param build
     let sql = `UPDATE work_orders
                  SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
                      problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
@@ -932,8 +927,8 @@ app.put('/work-orders/:id(\\d+)/edit', authenticate, withMulter(upload.any()), a
   }
 });
 
-// NOTES — simple setter or append (tolerant to text/plain & alias fields)
-app.put('/work-orders/:id(\\d+)/notes', authenticate, async (req, res) => {
+// NOTES
+app.put('/work-orders/:id/notes', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const wid = Number(req.params.id);
     const b = coerceBody(req);
@@ -960,8 +955,8 @@ app.put('/work-orders/:id(\\d+)/notes', authenticate, async (req, res) => {
   }
 });
 
-// STATUS only (tolerant; also accepts text/plain & alias fields)
-app.put('/work-orders/:id(\\d+)/status', authenticate, async (req, res) => {
+// STATUS only
+app.put('/work-orders/:id/status', authenticate, requireNumericParam('id'), async (req, res) => {
   const b = coerceBody(req);
   const incoming = b.status ?? b.value ?? b.newStatus ?? b.s ?? b.text;
   if (incoming == null || String(incoming).trim() === '') {
@@ -970,8 +965,8 @@ app.put('/work-orders/:id(\\d+)/status', authenticate, async (req, res) => {
   try {
     const c = canonStatus(incoming);
     if (!c) return res.status(400).json({ error: 'Invalid status value' });
-    await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [c, req.params.id]);
-    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [req.params.id]);
+    await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [c, Number(req.params.id)]);
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [Number(req.params.id)]);
     if (!updated) return res.status(404).json({ error: 'Not found.' });
     res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
   } catch (err) {
@@ -981,13 +976,11 @@ app.put('/work-orders/:id(\\d+)/status', authenticate, async (req, res) => {
 });
 
 // ─── CALENDAR FEED (NEW) — day/week/month friendly ──────────────────────────
-// GET /calendar/events?start=YYYY-MM-DD&end=YYYY-MM-DD
 app.get('/calendar/events', authenticate, async (req, res) => {
   try {
     const startQ = String(req.query.start || '').trim();
     const endQ   = String(req.query.end   || '').trim();
 
-    // Helper to coerce to full-day SQL range if only date is provided
     const asSqlDayStart = (dStr) => {
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dStr);
       if (m) return `${m[1]}-${m[2]}-${m[3]} 00:00:00`;
@@ -998,7 +991,6 @@ app.get('/calendar/events', authenticate, async (req, res) => {
       if (m) return `${m[1]}-${m[2]}-${m[3]} 23:59:59`;
       const p = parseDateTimeFlexible(dStr);
       if (!p) return null;
-      // If a time was supplied, keep it; otherwise just return parsed time
       return p;
     };
 
@@ -1011,46 +1003,39 @@ app.get('/calendar/events', authenticate, async (req, res) => {
     const startSql = startQ ? asSqlDayStart(startQ) : defaultStart;
     const endSql   = endQ   ? asSqlDayEnd(endQ)     : defaultEnd;
 
-const [rows] = await db.execute(
-  `SELECT id, workOrderNumber, poNumber, customer, siteLocation, siteAddress, problemDescription, status,
-          scheduledDate, scheduledEnd
-     FROM work_orders
-    WHERE scheduledDate IS NOT NULL
-      AND scheduledDate <= ?
-      AND (scheduledEnd IS NULL OR scheduledEnd >= ?)
-    ORDER BY scheduledDate ASC`,
-  [endSql, startSql]
-);
+    const [rows] = await db.execute(
+      `SELECT id, workOrderNumber, poNumber, customer, siteLocation, siteAddress, problemDescription, status,
+              scheduledDate, scheduledEnd
+         FROM work_orders
+        WHERE scheduledDate IS NOT NULL
+          AND scheduledDate <= ?
+          AND (scheduledEnd IS NULL OR scheduledEnd >= ?)
+        ORDER BY scheduledDate ASC`,
+      [endSql, startSql]
+    );
 
-const events = rows.map(r => ({
-  id: r.id,
-
-  // IMPORTANT: include these so CalendarPage.js can display them (no more N/A)
-  workOrderNumber: r.workOrderNumber || null,
-  poNumber: r.poNumber || null,
-
-  title: [
-    r.customer || null,
-    (r.workOrderNumber ? `WO #${r.workOrderNumber}` : (r.poNumber ? `PO #${r.poNumber}` : null)),
-    r.siteLocation || r.siteAddress || null
-  ].filter(Boolean).join(' — '),
-
-  start: r.scheduledDate,
-  end:   r.scheduledEnd || null,
-  allDay: false,
-
-  meta: {
-    status: displayStatusOrDefault(r.status),
-    customer: r.customer,
-    siteLocation: r.siteLocation,
-    siteAddress: r.siteAddress,
-    problemDescription: r.problemDescription,
-
-    // (optional but nice) also include in meta for popovers/debugging
-    workOrderNumber: r.workOrderNumber || null,
-    poNumber: r.poNumber || null,
-  }
-}));
+    const events = rows.map(r => ({
+      id: r.id,
+      workOrderNumber: r.workOrderNumber || null,
+      poNumber: r.poNumber || null,
+      title: [
+        r.customer || null,
+        (r.workOrderNumber ? `WO #${r.workOrderNumber}` : (r.poNumber ? `PO #${r.poNumber}` : null)),
+        r.siteLocation || r.siteAddress || null
+      ].filter(Boolean).join(' — '),
+      start: r.scheduledDate,
+      end:   r.scheduledEnd || null,
+      allDay: false,
+      meta: {
+        status: displayStatusOrDefault(r.status),
+        customer: r.customer,
+        siteLocation: r.siteLocation,
+        siteAddress: r.siteAddress,
+        problemDescription: r.problemDescription,
+        workOrderNumber: r.workOrderNumber || null,
+        poNumber: r.poNumber || null,
+      }
+    }));
 
     res.json(events);
   } catch (err) {
@@ -1062,7 +1047,6 @@ const events = rows.map(r => ({
 // ─── KEY NORMALIZATION / REPAIR HELPERS ─────────────────────────────────────
 function logFiles(...args){ if (FILES_VERBOSE === '1') console.log('[files]', ...args); }
 
-/** Normalize stored/legacy keys to "uploads/xyz.pdf" */
 function normalizeStoredKey(raw) {
   if (!raw) return null;
   let v = String(raw).trim();
@@ -1094,7 +1078,6 @@ async function s3HeadKey(Key) {
   } catch (e) { return { ok: false, err: e }; }
 }
 
-// Bulk repair endpoints (optional ops)
 async function fixRowKeys(row) {
   const upd = {};
   const fields = ['pdfPath','estimatePdfPath','poPdfPath'];
@@ -1111,7 +1094,8 @@ async function fixRowKeys(row) {
   }
   return upd;
 }
-app.post('/work-orders/:id(\\d+)/fix-keys', authenticate, authorize('admin','dispatcher'), async (req, res) => {
+
+app.post('/work-orders/:id/fix-keys', authenticate, authorize('admin','dispatcher'), requireNumericParam('id'), async (req, res) => {
   try {
     const wid = Number(req.params.id);
     const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
@@ -1215,7 +1199,7 @@ app.get('/files', async (req, res) => {
                .createReadStream()
                .on('error', () => { if (!res.headersSent) res.status(500).end(); })
                .pipe(res);
-    } // <— close S3 branch
+    }
 
     // Local mode
     const uploadsDir = path.resolve(__dirname, 'uploads');
@@ -1284,7 +1268,6 @@ async function deleteWorkOrderById(wid, { purgeFiles = true } = {}) {
   const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
   if (!row) return { ok: false, code: 404, error: 'Not found' };
 
-  // delete files (best effort)
   if (purgeFiles) {
     const keys = []
       .concat(row.pdfPath || [])
@@ -1298,8 +1281,7 @@ async function deleteWorkOrderById(wid, { purgeFiles = true } = {}) {
   return { ok: true };
 }
 
-// NEW: delete a single attachment (image or PDF) from a work order
-app.delete('/work-orders/:id(\\d+)/attachments', authenticate, async (req, res) => {
+app.delete('/work-orders/:id/attachments', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const wid = Number(req.params.id);
     const b = coerceBody(req);
@@ -1318,12 +1300,10 @@ app.delete('/work-orders/:id(\\d+)/attachments', authenticate, async (req, res) 
     const normEq = (val) =>
       !!val && normalizeStoredKey(val) === rmNorm;
 
-    // If this key happens to be used as one of the main PDFs, clear it too
     if (normEq(pdfPath)) { pdfPath = null; changed = true; }
     if (normEq(estimatePdfPath)) { estimatePdfPath = null; changed = true; }
     if (normEq(poPdfPath)) { poPdfPath = null; changed = true; }
 
-    // Strip from photoPath attachments list
     const parts = (photoPath || '').split(',').map(s => s.trim()).filter(Boolean);
     const kept = parts.filter(p => !normEq(p));
     if (kept.length !== parts.length) {
@@ -1332,7 +1312,6 @@ app.delete('/work-orders/:id(\\d+)/attachments', authenticate, async (req, res) 
     }
 
     if (!changed) {
-      // Key is not attached to this work order
       return res.status(404).json({ error: 'Attachment not found on this work order.' });
     }
 
@@ -1343,7 +1322,6 @@ app.delete('/work-orders/:id(\\d+)/attachments', authenticate, async (req, res) 
       [pdfPath || null, estimatePdfPath || null, poPdfPath || null, photoPath || null, wid]
     );
 
-    // Best-effort physical file delete (same behavior as PDF replacement logic)
     await deleteKeyIfExists(keyRaw);
 
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
@@ -1361,8 +1339,7 @@ app.delete('/work-orders/:id(\\d+)/attachments', authenticate, async (req, res) 
   }
 });
 
-// Canonical REST delete
-app.delete('/work-orders/:id(\\d+)', authenticate, async (req, res) => {
+app.delete('/work-orders/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const wid = Number(req.params.id);
     const result = await deleteWorkOrderById(wid, { purgeFiles: true });
@@ -1374,8 +1351,7 @@ app.delete('/work-orders/:id(\\d+)', authenticate, async (req, res) => {
   }
 });
 
-// Method-override style: POST ?_method=DELETE
-app.post('/work-orders/:id(\\d+)', authenticate, async (req, res, next) => {
+app.post('/work-orders/:id', authenticate, requireNumericParam('id'), async (req, res, next) => {
   if (String(req.query._method || '').toUpperCase() !== 'DELETE') return next();
   try {
     const wid = Number(req.params.id);
@@ -1388,8 +1364,7 @@ app.post('/work-orders/:id(\\d+)', authenticate, async (req, res, next) => {
   }
 });
 
-// Explicit action route
-app.post('/work-orders/:id(\\d+)/delete', authenticate, async (req, res) => {
+app.post('/work-orders/:id/delete', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const wid = Number(req.params.id);
     const result = await deleteWorkOrderById(wid, { purgeFiles: true });
@@ -1401,7 +1376,6 @@ app.post('/work-orders/:id(\\d+)/delete', authenticate, async (req, res) => {
   }
 });
 
-// Bulk/body style: DELETE /work-orders  { id }
 app.delete('/work-orders', authenticate, async (req, res) => {
   try {
     const b = coerceBody(req);
@@ -1434,4 +1408,3 @@ app.use((err, req, res, next) => {
 // ─── START ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 80;
 app.listen(PORT, '0.0.0.0', () => console.log(`✅ Server listening on 0.0.0.0:${PORT}`));
-
