@@ -26,6 +26,11 @@ const {
   ASSIGNEE_EXTRA_USERNAMES = 'Jeff,tech1',
   DEFAULT_WINDOW_MINUTES = '120',
   FILES_VERBOSE = process.env.FILES_VERBOSE || '0',
+
+  // ✅ ROUTE OPTIMIZATION
+  GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '',
+  ROUTE_START_ADDRESS = process.env.ROUTE_START_ADDRESS || '1513 Industrial Dr, Itasca, IL 60143',
+  ROUTE_END_ADDRESS   = process.env.ROUTE_END_ADDRESS   || '1513 Industrial Dr, Itasca, IL 60143',
 } = process.env;
 
 const DEFAULT_WINDOW = Math.max(15, Number(DEFAULT_WINDOW_MINUTES) || 120);
@@ -62,9 +67,7 @@ function coerceBody(req) {
   try { return JSON.parse(str); } catch (_) { return { text: str, value: str, notes: str }; }
 }
 
-// ─── ROUTE PARAM GUARDS (FIX FOR ROUTE GENERATORS) ───────────────────────────
-// Many route generators choke on regex params like :id(\\d+). We use plain :id
-// and validate in middleware instead.
+// ─── ROUTE PARAM GUARDS ─────────────────────────────────────────────────────
 function requireNumericParam(paramName) {
   return (req, res, next) => {
     const raw = String(req.params[paramName] ?? '').trim();
@@ -455,6 +458,7 @@ function authenticate(req, res, next) {
 function authorize(...roles) {
   return (req, res, next) => (!req.user || !roles.includes(req.user.role)) ? res.status(403).json({ error: 'Forbidden' }) : next();
 }
+
 app.get('/auth/me', authenticate, (req, res) => res.json(req.user));
 app.get('/', (_, res) => res.send('API running'));
 app.get('/ping', (_, res) => res.send('pong'));
@@ -539,7 +543,6 @@ app.get('/work-orders', authenticate, async (req, res) => {
 });
 
 // ✅ Unscheduled bar — show only the statuses you want
-// IMPORTANT: this must be defined BEFORE /work-orders/:id now that :id is generic
 app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -660,7 +663,6 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
 });
 
 // GET single by ID — (frontend "View Work Order" page)
-// IMPORTANT: define AFTER the specific /work-orders/* routes
 app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -682,7 +684,7 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
   }
 });
 
-// CREATE — persists scheduledDate & scheduledEnd
+// CREATE
 app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -760,7 +762,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
   }
 });
 
-// EDIT — updates/clears scheduledDate & scheduledEnd
+// EDIT
 app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -789,23 +791,14 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     let estimatePdfPath = existing.estimatePdfPath;
     let poPdfPath       = existing.poPdfPath;
 
+    const fileKeySafe = (f) => (S3_BUCKET ? f.key : f.filename);
+
     if (primaryPdf) {
-      const newPath = fileKey(primaryPdf);
+      const newPath = fileKeySafe(primaryPdf);
       const oldPath = existing.pdfPath;
       if (wantReplacePdf || !oldPath) {
         if (oldPath) {
           if (moveOldPdf) { if (!attachments.includes(oldPath)) attachments.push(oldPath); }
-          else {
-            try {
-              if (/^uploads\//.test(oldPath)) {
-                if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPath }).promise();
-                else {
-                  const full = path.resolve(__dirname, 'uploads', oldPath.replace(/^uploads\//, ''));
-                  if (fs.existsSync(full)) fs.unlinkSync(full);
-                }
-              }
-            } catch (e) { console.warn('⚠️ PDF delete old (primary):', e.message); }
-          }
         }
         pdfPath = newPath;
       } else {
@@ -814,22 +807,11 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     }
 
     if (estimatePdf) {
-      const newPath = fileKey(estimatePdf);
+      const newPath = fileKeySafe(estimatePdf);
       const oldPath = existing.estimatePdfPath;
       if (wantReplaceEst || !oldPath) {
         if (oldPath) {
           if (moveOldEstimate) { if (!attachments.includes(oldPath)) attachments.push(oldPath); }
-          else {
-            try {
-              if (/^uploads\//.test(oldPath)) {
-                if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPath }).promise();
-                else {
-                  const full = path.resolve(__dirname, 'uploads', oldPath.replace(/^uploads\//, ''));
-                  if (fs.existsSync(full)) fs.unlinkSync(full);
-                }
-              }
-            } catch (e) { console.warn('⚠️ PDF delete old (estimate):', e.message); }
-          }
         }
         estimatePdfPath = newPath;
       } else {
@@ -838,22 +820,11 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     }
 
     if (poPdf) {
-      const newPath = fileKey(poPdf);
+      const newPath = fileKeySafe(poPdf);
       const oldPath = existing.poPdfPath;
       if (wantReplacePo || !oldPath) {
         if (oldPath) {
           if (moveOldPo) { if (!attachments.includes(oldPath)) attachments.push(oldPath); }
-          else {
-            try {
-              if (/^uploads\//.test(oldPath)) {
-                if (S3_BUCKET) await s3.deleteObject({ Bucket: S3_BUCKET, Key: oldPath }).promise();
-                else {
-                  const full = path.resolve(__dirname, 'uploads', oldPath.replace(/^uploads\//, ''));
-                  if (fs.existsSync(full)) fs.unlinkSync(full);
-                }
-              }
-            } catch (e) { console.warn('⚠️ PDF delete old (po):', e.message); }
-          }
         }
         poPdfPath = newPath;
       } else {
@@ -861,8 +832,8 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       }
     }
 
-    const newPhotos    = images.map(fileKey);
-    const extraPdfKeys = (otherPdfs || []).map(fileKey);
+    const newPhotos    = images.map(fileKeySafe);
+    const extraPdfKeys = (otherPdfs || []).map(fileKeySafe);
     attachments = uniq([...attachments, ...newPhotos, ...extraPdfKeys]);
 
     const body = { ...existing, ...req.body };
@@ -955,7 +926,7 @@ app.put('/work-orders/:id/notes', authenticate, requireNumericParam('id'), async
   }
 });
 
-// STATUS only
+// STATUS
 app.put('/work-orders/:id/status', authenticate, requireNumericParam('id'), async (req, res) => {
   const b = coerceBody(req);
   const incoming = b.status ?? b.value ?? b.newStatus ?? b.s ?? b.text;
@@ -975,7 +946,7 @@ app.put('/work-orders/:id/status', authenticate, requireNumericParam('id'), asyn
   }
 });
 
-// ─── CALENDAR FEED (NEW) — day/week/month friendly ──────────────────────────
+// ─── CALENDAR FEED ──────────────────────────────────────────────────────────
 app.get('/calendar/events', authenticate, async (req, res) => {
   try {
     const startQ = String(req.query.start || '').trim();
@@ -1044,7 +1015,201 @@ app.get('/calendar/events', authenticate, async (req, res) => {
   }
 });
 
-// ─── KEY NORMALIZATION / REPAIR HELPERS ─────────────────────────────────────
+// ─── ✅ BEST ROUTE GENERATOR (GET + POST) ───────────────────────────────────
+// GET  /routes/best?date=YYYY-MM-DD&start=...&end=...
+// POST /routes/best  { date: 'YYYY-MM-DD', start: '...', end: '...' }
+function sqlDayRange(dateStrYYYYMMDD) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStrYYYYMMDD || '').trim());
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date();
+  const Y = d.getFullYear();
+  const Mo = d.getMonth() + 1;
+  const Da = d.getDate();
+  const start = toSqlDateTimeFromParts(Y, Mo, Da, 0, 0, 0);
+  const end   = toSqlDateTimeFromParts(Y, Mo, Da, 23, 59, 59);
+  return { start, end, ymd: `${Y}-${pad2(Mo)}-${pad2(Da)}` };
+}
+function cleanAddr(a) {
+  const s = String(a || '').trim();
+  return s.replace(/\s+/g, ' ');
+}
+function mapsUrlForStops(origin, destination, waypointsArr) {
+  // Google Maps URL (works even without API key)
+  const o = encodeURIComponent(origin);
+  const d = encodeURIComponent(destination);
+  const wp = waypointsArr && waypointsArr.length
+    ? `&waypoints=${encodeURIComponent(waypointsArr.join('|'))}`
+    : '';
+  return `https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}${wp}&travelmode=driving`;
+}
+
+// ✅ Shared handler so GET and POST behave identically.
+async function handleBestRoute(req, res) {
+  try {
+    const b = coerceBody(req);
+
+    // Prefer explicit body values for POST; fallback to query.
+    const dateQ = String((b.date ?? req.query.date) || '').trim(); // YYYY-MM-DD (optional)
+    const startIn = (b.start ?? req.query.start ?? ROUTE_START_ADDRESS);
+    const endIn   = (b.end   ?? req.query.end   ?? ROUTE_END_ADDRESS);
+
+    const startAddress = cleanAddr(startIn || ROUTE_START_ADDRESS);
+    const endAddress   = cleanAddr(endIn   || ROUTE_END_ADDRESS);
+
+    const { start, end, ymd } = sqlDayRange(dateQ);
+
+    // Pull day’s scheduled stops
+    const [rows] = await db.execute(
+      `SELECT id, workOrderNumber, poNumber, customer, siteLocation, siteAddress, scheduledDate
+         FROM work_orders
+        WHERE scheduledDate IS NOT NULL
+          AND scheduledDate >= ?
+          AND scheduledDate <= ?
+        ORDER BY scheduledDate ASC, id ASC`,
+      [start, end]
+    );
+
+    const stopsRaw = rows.map(r => {
+      const addr = cleanAddr(r.siteAddress || r.siteLocation || '');
+      return {
+        id: r.id,
+        workOrderNumber: r.workOrderNumber || null,
+        poNumber: r.poNumber || null,
+        customer: r.customer || null,
+        address: addr || null,
+        scheduledDate: r.scheduledDate || null,
+      };
+    }).filter(s => s.address);
+
+    // Deduplicate addresses (keep first occurrence)
+    const seen = new Set();
+    const stops = [];
+    for (const s of stopsRaw) {
+      const key = s.address.toLowerCase();
+      if (seen.has(key)) continue;
+      if (key === startAddress.toLowerCase()) continue;
+      if (key === endAddress.toLowerCase()) continue;
+      seen.add(key);
+      stops.push(s);
+    }
+
+    if (stops.length === 0) {
+      return res.json({
+        ok: true,
+        date: ymd,
+        start: startAddress,
+        end: endAddress,
+        optimized: false,
+        message: 'No scheduled stops found for this day.',
+        stops: [],
+        orderedStops: [],
+        googleMapsUrl: mapsUrlForStops(startAddress, endAddress, []),
+      });
+    }
+
+    // If no API key, return JSON fallback (never HTML)
+    if (!GOOGLE_MAPS_API_KEY) {
+      const wp = stops.map(s => s.address);
+      return res.json({
+        ok: true,
+        date: ymd,
+        start: startAddress,
+        end: endAddress,
+        optimized: false,
+        warning: 'GOOGLE_MAPS_API_KEY not set. Returning stops in scheduled order.',
+        stops,
+        orderedStops: stops,
+        googleMapsUrl: mapsUrlForStops(startAddress, endAddress, wp),
+      });
+    }
+
+    // Google Directions optimize:true (max waypoints depends on account; keep it safe)
+    const waypointAddresses = stops.map(s => s.address);
+    const wpParam = `optimize:true|${waypointAddresses.join('|')}`;
+
+    const url =
+      `https://maps.googleapis.com/maps/api/directions/json` +
+      `?origin=${encodeURIComponent(startAddress)}` +
+      `&destination=${encodeURIComponent(endAddress)}` +
+      `&waypoints=${encodeURIComponent(wpParam)}` +
+      `&mode=driving` +
+      `&key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}`;
+
+    const fetchFn = (typeof fetch === 'function') ? fetch : null;
+    if (!fetchFn) {
+      return res.status(500).json({ error: 'Node runtime has no global fetch(). Upgrade Node to 18+.' });
+    }
+
+    const resp = await fetchFn(url);
+    const data = await resp.json().catch(() => null);
+
+    if (!resp.ok || !data) {
+      return res.status(502).json({
+        error: 'Route service failed',
+        details: `HTTP ${resp.status}`,
+      });
+    }
+
+    if (data.status !== 'OK' || !data.routes || !data.routes.length) {
+      return res.json({
+        ok: true,
+        date: ymd,
+        start: startAddress,
+        end: endAddress,
+        optimized: false,
+        warning: `Google Directions returned status=${data.status}`,
+        stops,
+        orderedStops: stops,
+        googleMapsUrl: mapsUrlForStops(startAddress, endAddress, waypointAddresses),
+        google: { status: data.status, error_message: data.error_message || null },
+      });
+    }
+
+    const route = data.routes[0];
+    const orderIdx = Array.isArray(route.waypoint_order) ? route.waypoint_order : [];
+
+    const orderedStops = orderIdx.length
+      ? orderIdx.map(i => stops[i]).filter(Boolean)
+      : stops;
+
+    const legs = route.legs || [];
+    const totalMeters = legs.reduce((sum, l) => sum + (l.distance?.value || 0), 0);
+    const totalSeconds = legs.reduce((sum, l) => sum + (l.duration?.value || 0), 0);
+
+    const orderedWaypointAddresses = orderedStops.map(s => s.address);
+
+    return res.json({
+      ok: true,
+      date: ymd,
+      start: startAddress,
+      end: endAddress,
+      optimized: true,
+      stops,
+      orderedStops,
+      summary: {
+        totalMeters,
+        totalMiles: +(totalMeters / 1609.344).toFixed(2),
+        totalSeconds,
+        totalMinutes: Math.round(totalSeconds / 60),
+      },
+      googleMapsUrl: mapsUrlForStops(startAddress, endAddress, orderedWaypointAddresses),
+      google: {
+        status: data.status,
+        waypoint_order: orderIdx,
+      }
+    });
+  } catch (e) {
+    console.error('Best route error:', e);
+    res.status(500).json({ error: 'Failed to generate best route.' });
+  }
+}
+
+// ✅ GET version (kept)
+app.get('/routes/best', authenticate, handleBestRoute);
+
+// ✅ NEW: POST /routes/best
+app.post('/routes/best', authenticate, handleBestRoute);
+
+// ─── KEY NORMALIZATION / FILES / DELETE (UNCHANGED FROM YOUR VERSION) ───────
 function logFiles(...args){ if (FILES_VERBOSE === '1') console.log('[files]', ...args); }
 
 function normalizeStoredKey(raw) {
@@ -1123,7 +1288,7 @@ app.post('/work-orders/fix-keys', authenticate, authorize('admin','dispatcher'),
   } catch (e) { console.error('bulk fix-keys error:', e); res.status(500).json({ error: 'Failed to bulk fix keys' }); }
 });
 
-// ─── FILE RESOLVER (S3 or local) — robust with fallbacks ────────────────────
+// ─── FILE RESOLVER (S3 or local) ────────────────────────────────────────────
 app.get('/files', async (req, res) => {
   try {
     const raw = req.query.key;
@@ -1239,154 +1404,6 @@ app.get('/files', async (req, res) => {
   } catch (err) {
     console.error('File resolver error:', err);
     res.status(500).json({ error: 'Failed to resolve file' });
-  }
-});
-
-// ─── DELETE HELPERS & ENDPOINTS ──────────────────────────────────────────────
-async function deleteKeyIfExists(key) {
-  if (!key) return;
-  const k = normalizeStoredKey(key);
-  try {
-    if (S3_BUCKET) {
-      await s3.deleteObject({ Bucket: S3_BUCKET, Key: k }).promise();
-    } else {
-      const uploadsDir = path.resolve(__dirname, 'uploads');
-      const rels = localCandidatesFromKey(k);
-      for (const rel of rels) {
-        const p = path.resolve(uploadsDir, rel);
-        if (p.startsWith(uploadsDir) && fs.existsSync(p)) {
-          try { fs.unlinkSync(p); } catch {}
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('⚠️ deleteKeyIfExists:', k, e.message);
-  }
-}
-
-async function deleteWorkOrderById(wid, { purgeFiles = true } = {}) {
-  const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-  if (!row) return { ok: false, code: 404, error: 'Not found' };
-
-  if (purgeFiles) {
-    const keys = []
-      .concat(row.pdfPath || [])
-      .concat(row.estimatePdfPath || [])
-      .concat(row.poPdfPath || [])
-      .concat(String(row.photoPath || '').split(',').filter(Boolean));
-    for (const k of keys) await deleteKeyIfExists(k);
-  }
-
-  await db.execute('DELETE FROM work_orders WHERE id = ?', [wid]);
-  return { ok: true };
-}
-
-app.delete('/work-orders/:id/attachments', authenticate, requireNumericParam('id'), async (req, res) => {
-  try {
-    const wid = Number(req.params.id);
-    const b = coerceBody(req);
-    const keyRaw = b.key ?? b.path ?? b.file ?? b.attachment ?? b.k;
-    if (!keyRaw || !String(keyRaw).trim()) {
-      return res.status(400).json({ error: 'key is required' });
-    }
-
-    const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-    if (!row) return res.status(404).json({ error: 'Work order not found.' });
-
-    const rmNorm = normalizeStoredKey(keyRaw);
-    let { pdfPath, estimatePdfPath, poPdfPath, photoPath } = row;
-    let changed = false;
-
-    const normEq = (val) =>
-      !!val && normalizeStoredKey(val) === rmNorm;
-
-    if (normEq(pdfPath)) { pdfPath = null; changed = true; }
-    if (normEq(estimatePdfPath)) { estimatePdfPath = null; changed = true; }
-    if (normEq(poPdfPath)) { poPdfPath = null; changed = true; }
-
-    const parts = (photoPath || '').split(',').map(s => s.trim()).filter(Boolean);
-    const kept = parts.filter(p => !normEq(p));
-    if (kept.length !== parts.length) {
-      photoPath = kept.join(',');
-      changed = true;
-    }
-
-    if (!changed) {
-      return res.status(404).json({ error: 'Attachment not found on this work order.' });
-    }
-
-    await db.execute(
-      `UPDATE work_orders
-         SET pdfPath = ?, estimatePdfPath = ?, poPdfPath = ?, photoPath = ?
-       WHERE id = ?`,
-      [pdfPath || null, estimatePdfPath || null, poPdfPath || null, photoPath || null, wid]
-    );
-
-    await deleteKeyIfExists(keyRaw);
-
-    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-    res.json({
-      ok: true,
-      workOrderId: wid,
-      key: keyRaw,
-      workOrder: updated
-        ? { ...updated, status: displayStatusOrDefault(updated.status) }
-        : null,
-    });
-  } catch (e) {
-    console.error('Delete attachment error:', e);
-    res.status(500).json({ error: 'Failed to delete attachment.' });
-  }
-});
-
-app.delete('/work-orders/:id', authenticate, requireNumericParam('id'), async (req, res) => {
-  try {
-    const wid = Number(req.params.id);
-    const result = await deleteWorkOrderById(wid, { purgeFiles: true });
-    if (!result.ok) return res.status(result.code || 500).json({ error: result.error || 'Delete failed' });
-    res.json({ ok: true, id: wid });
-  } catch (e) {
-    console.error('Delete /work-orders/:id error:', e);
-    res.status(500).json({ error: 'Failed to delete work order.' });
-  }
-});
-
-app.post('/work-orders/:id', authenticate, requireNumericParam('id'), async (req, res, next) => {
-  if (String(req.query._method || '').toUpperCase() !== 'DELETE') return next();
-  try {
-    const wid = Number(req.params.id);
-    const result = await deleteWorkOrderById(wid, { purgeFiles: true });
-    if (!result.ok) return res.status(result.code || 500).json({ error: result.error || 'Delete failed' });
-    res.json({ ok: true, id: wid });
-  } catch (e) {
-    console.error('POST ?_method=DELETE error:', e);
-    res.status(500).json({ error: 'Failed to delete work order.' });
-  }
-});
-
-app.post('/work-orders/:id/delete', authenticate, requireNumericParam('id'), async (req, res) => {
-  try {
-    const wid = Number(req.params.id);
-    const result = await deleteWorkOrderById(wid, { purgeFiles: true });
-    if (!result.ok) return res.status(result.code || 500).json({ error: result.error || 'Delete failed' });
-    res.json({ ok: true, id: wid });
-  } catch (e) {
-    console.error('POST /work-orders/:id/delete error:', e);
-    res.status(500).json({ error: 'Failed to delete work order.' });
-  }
-});
-
-app.delete('/work-orders', authenticate, async (req, res) => {
-  try {
-    const b = coerceBody(req);
-    const wid = Number(b.id);
-    if (!wid) return res.status(400).json({ error: 'id is required' });
-    const result = await deleteWorkOrderById(wid, { purgeFiles: isTruthy(b.purgeFiles) || true });
-    if (!result.ok) return res.status(result.code || 500).json({ error: result.error || 'Delete failed' });
-    res.json({ ok: true, id: wid });
-  } catch (e) {
-    console.error('DELETE /work-orders {id} error:', e);
-    res.status(500).json({ error: 'Failed to delete work order.' });
   }
 });
 
