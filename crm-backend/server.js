@@ -284,6 +284,8 @@ async function ensureCols() {
     { name: 'dayOrder',          type: 'INT NULL' },
     { name: 'workOrderNumber',   type: 'VARCHAR(64) NULL' },
     { name: 'siteAddress',       type: 'VARCHAR(255) NULL' },
+    // ✅ IMPORTANT: prevent crashes if queries join on assignedTo
+    { name: 'assignedTo',        type: 'INT NULL' },
   ];
   try {
     for (const { name, type } of colsToEnsure) {
@@ -323,6 +325,21 @@ async function ensureCols() {
   catch (e) { console.warn('⚠️ assignedTo detect:', e.message); }
 }
 ensureCols().catch(e => console.warn('⚠️ ensureCols:', e.message));
+
+// ✅ Safe query builder so we don’t crash if assignedTo column is missing
+function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', limitSql = '' } = {}) {
+  const hasA = !!SCHEMA.hasAssignedTo;
+  const join = hasA ? 'LEFT JOIN users u ON w.assignedTo = u.id' : '';
+  const assignedSel = hasA ? 'u.username AS assignedToName' : 'NULL AS assignedToName';
+  return `
+    SELECT w.*, ${assignedSel}
+      FROM work_orders w
+      ${join}
+      ${whereSql}
+      ${orderSql}
+      ${limitSql}
+  `;
+}
 
 // ─── MULTER ─────────────────────────────────────────────────────────────────
 const allowMime = (fOrMime) => {
@@ -528,12 +545,7 @@ const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
 // LIST ALL — (frontend dashboard calls this)
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
-    const [raw] = await db.execute(
-      `SELECT w.*, u.username AS assignedToName
-         FROM work_orders w
-         LEFT JOIN users u ON w.assignedTo = u.id
-       ORDER BY w.id DESC`
-    );
+    const [raw] = await db.execute(workOrdersSelectSQL({ orderSql: 'ORDER BY w.id DESC' }));
     const rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status) }));
     res.json(rows);
   } catch (err) {
@@ -586,14 +598,12 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
       terms.push(`COALESCE(w.poNumber,'') LIKE ?`);       params.push(`%${combined}%`);
     }
     const where = terms.length ? `WHERE ${terms.join(' AND ')}` : '';
+
     const [rows] = await db.execute(
-      `SELECT w.*, u.username AS assignedToName
-         FROM work_orders w
-         LEFT JOIN users u ON w.assignedTo = u.id
-       ${where}
-       ORDER BY w.id DESC`,
+      workOrdersSelectSQL({ whereSql: where, orderSql: 'ORDER BY w.id DESC' }),
       params
     );
+
     res.json(rows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) })));
   } catch (err) {
     console.error('Work-orders search error:', err);
@@ -606,16 +616,17 @@ app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
     const po = decodeURIComponent(String(req.params.poNumber || '').trim());
     const useLike = String(req.query.like || '').trim() === '1';
     if (!po) return res.status(400).json({ error: 'poNumber is required' });
-    let sql =
-      `SELECT w.*, u.username AS assignedToName
-         FROM work_orders w
-         LEFT JOIN users u ON w.assignedTo = u.id
-        WHERE `;
+
+    let where = 'WHERE ';
     const params = [];
-    if (useLike) { sql += 'COALESCE(w.poNumber, \'\') LIKE ?'; params.push(`%${po}%`); }
-    else         { sql += 'COALESCE(w.poNumber, \'\') = ?';     params.push(po); }
-    sql += ' ORDER BY w.id DESC';
-    const [rows] = await db.execute(sql, params);
+    if (useLike) { where += 'COALESCE(w.poNumber, \'\') LIKE ?'; params.push(`%${po}%`); }
+    else         { where += 'COALESCE(w.poNumber, \'\') = ?';     params.push(po); }
+
+    const [rows] = await db.execute(
+      workOrdersSelectSQL({ whereSql: where, orderSql: 'ORDER BY w.id DESC' }),
+      params
+    );
+
     res.json(rows.map(r => ({ ...r, status: displayStatusOrDefault(r.status) })));
   } catch (err) {
     console.error('By-PO lookup error:', err);
@@ -629,16 +640,17 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
     const useLike = String(req.query.like || '').trim() === '1';
     const format = String(req.query.format || '').trim().toLowerCase();
     if (!po) return res.status(400).json({ error: 'poNumber is required' });
-    let sql =
-      `SELECT w.*, u.username AS assignedToName
-         FROM work_orders w
-         LEFT JOIN users u ON w.assignedTo = u.id
-        WHERE `;
+
+    let where = 'WHERE ';
     const params = [];
-    if (useLike) { sql += 'COALESCE(w.poNumber, \'\') LIKE ?'; params.push(`%${po}%`); }
-    else         { sql += 'COALESCE(w.poNumber, \'\') = ?';     params.push(po); }
-    sql += ' ORDER BY w.id DESC LIMIT 1';
-    const [rows] = await db.execute(sql, params);
+    if (useLike) { where += 'COALESCE(w.poNumber, \'\') LIKE ?'; params.push(`%${po}%`); }
+    else         { where += 'COALESCE(w.poNumber, \'\') = ?';     params.push(po); }
+
+    const [rows] = await db.execute(
+      workOrdersSelectSQL({ whereSql: where, orderSql: 'ORDER BY w.id DESC', limitSql: 'LIMIT 1' }),
+      params
+    );
+
     if (!rows.length) return res.status(404).json({ error: 'No work order found for that PO.' });
     const row = rows[0];
     const key = pickPdfKeyFromRow(row);
@@ -666,13 +678,14 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
 app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const [[row]] = await db.execute(
-      `SELECT w.*, u.username AS assignedToName
-         FROM work_orders w
-         LEFT JOIN users u ON w.assignedTo = u.id
-        WHERE w.id = ?`,
+
+    const where = 'WHERE w.id = ?';
+    const [rows] = await db.execute(
+      workOrdersSelectSQL({ whereSql: where, orderSql: '', limitSql: 'LIMIT 1' }),
       [id]
     );
+
+    const row = rows[0];
     if (!row) return res.status(404).json({ error: 'Not found.' });
     row.status = (row.status && canonStatus(row.status))
       ? canonStatus(row.status)
@@ -1017,7 +1030,7 @@ app.get('/calendar/events', authenticate, async (req, res) => {
 
 // ─── ✅ BEST ROUTE GENERATOR (GET + POST) ───────────────────────────────────
 // GET  /routes/best?date=YYYY-MM-DD&start=...&end=...
-// POST /routes/best  { date: 'YYYY-MM-DD', start: '...', end: '...' }
+// POST /routes/best  { start: '...', end: '...', stops: [{id,address,label}], travelMode: 'driving' }
 function sqlDayRange(dateStrYYYYMMDD) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStrYYYYMMDD || '').trim());
   const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date();
@@ -1033,7 +1046,6 @@ function cleanAddr(a) {
   return s.replace(/\s+/g, ' ');
 }
 function mapsUrlForStops(origin, destination, waypointsArr) {
-  // Google Maps URL (works even without API key)
   const o = encodeURIComponent(origin);
   const d = encodeURIComponent(destination);
   const wp = waypointsArr && waypointsArr.length
@@ -1048,81 +1060,104 @@ async function handleBestRoute(req, res) {
     const b = coerceBody(req);
 
     // Prefer explicit body values for POST; fallback to query.
-    const dateQ = String((b.date ?? req.query.date) || '').trim(); // YYYY-MM-DD (optional)
     const startIn = (b.start ?? req.query.start ?? ROUTE_START_ADDRESS);
     const endIn   = (b.end   ?? req.query.end   ?? ROUTE_END_ADDRESS);
+    const travelMode = String(b.travelMode || req.query.travelMode || 'driving').toLowerCase();
 
     const startAddress = cleanAddr(startIn || ROUTE_START_ADDRESS);
     const endAddress   = cleanAddr(endIn   || ROUTE_END_ADDRESS);
 
-    const { start, end, ymd } = sqlDayRange(dateQ);
+    // ✅ If stops provided in POST body, use them (this matches your frontend)
+    let stops = [];
+    if (Array.isArray(b.stops) && b.stops.length) {
+      stops = b.stops
+        .map(s => ({
+          id: s.id,
+          address: cleanAddr(s.address || ''),
+          label: s.label || null,
+        }))
+        .filter(s => s.address);
+    } else {
+      // GET fallback: build stops from scheduled work orders for a day
+      const dateQ = String((b.date ?? req.query.date) || '').trim(); // YYYY-MM-DD (optional)
+      const { start, end, ymd } = sqlDayRange(dateQ);
 
-    // Pull day’s scheduled stops
-    const [rows] = await db.execute(
-      `SELECT id, workOrderNumber, poNumber, customer, siteLocation, siteAddress, scheduledDate
-         FROM work_orders
-        WHERE scheduledDate IS NOT NULL
-          AND scheduledDate >= ?
-          AND scheduledDate <= ?
-        ORDER BY scheduledDate ASC, id ASC`,
-      [start, end]
-    );
+      const [rows] = await db.execute(
+        `SELECT id, workOrderNumber, poNumber, customer, siteLocation, siteAddress, scheduledDate
+           FROM work_orders
+          WHERE scheduledDate IS NOT NULL
+            AND scheduledDate >= ?
+            AND scheduledDate <= ?
+          ORDER BY scheduledDate ASC, id ASC`,
+        [start, end]
+      );
 
-    const stopsRaw = rows.map(r => {
-      const addr = cleanAddr(r.siteAddress || r.siteLocation || '');
-      return {
-        id: r.id,
-        workOrderNumber: r.workOrderNumber || null,
-        poNumber: r.poNumber || null,
-        customer: r.customer || null,
-        address: addr || null,
-        scheduledDate: r.scheduledDate || null,
-      };
-    }).filter(s => s.address);
+      const seen = new Set();
+      for (const r of rows) {
+        const addr = cleanAddr(r.siteAddress || r.siteLocation || '');
+        if (!addr) continue;
+        const k = addr.toLowerCase();
+        if (seen.has(k)) continue;
+        if (k === startAddress.toLowerCase()) continue;
+        if (k === endAddress.toLowerCase()) continue;
+        seen.add(k);
 
-    // Deduplicate addresses (keep first occurrence)
-    const seen = new Set();
-    const stops = [];
-    for (const s of stopsRaw) {
-      const key = s.address.toLowerCase();
-      if (seen.has(key)) continue;
-      if (key === startAddress.toLowerCase()) continue;
-      if (key === endAddress.toLowerCase()) continue;
-      seen.add(key);
-      stops.push(s);
+        const labelParts = [];
+        if (r.workOrderNumber) labelParts.push(`WO ${r.workOrderNumber}`);
+        if (r.poNumber) labelParts.push(`PO ${r.poNumber}`);
+        if (r.customer) labelParts.push(r.customer);
+        if (r.siteLocation) labelParts.push(r.siteLocation);
+
+        stops.push({
+          id: r.id,
+          address: addr,
+          label: labelParts.join(' • ') || null,
+        });
+      }
+
+      // include ymd in response for GET mode
+      res.setHeader('X-Route-Date', ymd);
     }
 
-    if (stops.length === 0) {
-      return res.json({
-        ok: true,
-        date: ymd,
-        start: startAddress,
-        end: endAddress,
-        optimized: false,
-        message: 'No scheduled stops found for this day.',
-        stops: [],
-        orderedStops: [],
-        googleMapsUrl: mapsUrlForStops(startAddress, endAddress, []),
-      });
-    }
+    const fallbackMapsUrl = mapsUrlForStops(startAddress, endAddress, stops.map(s => s.address));
 
-    // If no API key, return JSON fallback (never HTML)
-    if (!GOOGLE_MAPS_API_KEY) {
-      const wp = stops.map(s => s.address);
+    // If not enough stops, return clean JSON (never HTML)
+    if (stops.length < 2) {
       return res.json({
         ok: true,
-        date: ymd,
+        optimized: false,
+        message: stops.length === 0
+          ? 'No usable stops provided.'
+          : 'Need at least 2 stops to optimize.',
         start: startAddress,
         end: endAddress,
-        optimized: false,
-        warning: 'GOOGLE_MAPS_API_KEY not set. Returning stops in scheduled order.',
         stops,
         orderedStops: stops,
-        googleMapsUrl: mapsUrlForStops(startAddress, endAddress, wp),
+        orderedIds: stops.map(s => s.id),
+        totalDistanceMeters: null,
+        totalDurationSeconds: null,
+        googleMapsUrl: fallbackMapsUrl,
       });
     }
 
-    // Google Directions optimize:true (max waypoints depends on account; keep it safe)
+    // If no API key, return ordered as given (still matches frontend contract)
+    if (!GOOGLE_MAPS_API_KEY) {
+      return res.json({
+        ok: true,
+        optimized: false,
+        warning: 'GOOGLE_MAPS_API_KEY not set. Returning stops in current order.',
+        start: startAddress,
+        end: endAddress,
+        stops,
+        orderedStops: stops,
+        orderedIds: stops.map(s => s.id),
+        totalDistanceMeters: null,
+        totalDurationSeconds: null,
+        googleMapsUrl: fallbackMapsUrl,
+      });
+    }
+
+    // Google Directions optimize:true
     const waypointAddresses = stops.map(s => s.address);
     const wpParam = `optimize:true|${waypointAddresses.join('|')}`;
 
@@ -1131,7 +1166,7 @@ async function handleBestRoute(req, res) {
       `?origin=${encodeURIComponent(startAddress)}` +
       `&destination=${encodeURIComponent(endAddress)}` +
       `&waypoints=${encodeURIComponent(wpParam)}` +
-      `&mode=driving` +
+      `&mode=${encodeURIComponent(travelMode)}` +
       `&key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}`;
 
     const fetchFn = (typeof fetch === 'function') ? fetch : null;
@@ -1152,45 +1187,54 @@ async function handleBestRoute(req, res) {
     if (data.status !== 'OK' || !data.routes || !data.routes.length) {
       return res.json({
         ok: true,
-        date: ymd,
-        start: startAddress,
-        end: endAddress,
         optimized: false,
         warning: `Google Directions returned status=${data.status}`,
+        start: startAddress,
+        end: endAddress,
         stops,
         orderedStops: stops,
-        googleMapsUrl: mapsUrlForStops(startAddress, endAddress, waypointAddresses),
+        orderedIds: stops.map(s => s.id),
+        totalDistanceMeters: null,
+        totalDurationSeconds: null,
+        googleMapsUrl: fallbackMapsUrl,
         google: { status: data.status, error_message: data.error_message || null },
       });
     }
 
     const route = data.routes[0];
     const orderIdx = Array.isArray(route.waypoint_order) ? route.waypoint_order : [];
-
-    const orderedStops = orderIdx.length
+    const orderedStopsBase = orderIdx.length
       ? orderIdx.map(i => stops[i]).filter(Boolean)
       : stops;
 
-    const legs = route.legs || [];
-    const totalMeters = legs.reduce((sum, l) => sum + (l.distance?.value || 0), 0);
-    const totalSeconds = legs.reduce((sum, l) => sum + (l.duration?.value || 0), 0);
+    // legs: origin->stop1, stop1->stop2, ..., stopN->destination
+    const legs = Array.isArray(route.legs) ? route.legs : [];
+
+    // Attach per-stop leg stats (leg 0 corresponds to arriving at stop1, etc.)
+    const orderedStops = orderedStopsBase.map((s, idx) => {
+      const leg = legs[idx]; // idx=0 is origin->stop1
+      return {
+        ...s,
+        legDistanceMeters: leg?.distance?.value ?? null,
+        legDurationSeconds: leg?.duration?.value ?? null,
+      };
+    });
+
+    const totalDistanceMeters = legs.reduce((sum, l) => sum + (l?.distance?.value || 0), 0) || null;
+    const totalDurationSeconds = legs.reduce((sum, l) => sum + (l?.duration?.value || 0), 0) || null;
 
     const orderedWaypointAddresses = orderedStops.map(s => s.address);
 
     return res.json({
       ok: true,
-      date: ymd,
+      optimized: true,
       start: startAddress,
       end: endAddress,
-      optimized: true,
       stops,
       orderedStops,
-      summary: {
-        totalMeters,
-        totalMiles: +(totalMeters / 1609.344).toFixed(2),
-        totalSeconds,
-        totalMinutes: Math.round(totalSeconds / 60),
-      },
+      orderedIds: orderedStops.map(s => s.id),
+      totalDistanceMeters,
+      totalDurationSeconds,
       googleMapsUrl: mapsUrlForStops(startAddress, endAddress, orderedWaypointAddresses),
       google: {
         status: data.status,
@@ -1203,10 +1247,10 @@ async function handleBestRoute(req, res) {
   }
 }
 
-// ✅ GET version (kept)
+// ✅ GET version
 app.get('/routes/best', authenticate, handleBestRoute);
 
-// ✅ NEW: POST /routes/best
+// ✅ POST /routes/best (matches your frontend)
 app.post('/routes/best', authenticate, handleBestRoute);
 
 // ─── KEY NORMALIZATION / FILES / DELETE (UNCHANGED FROM YOUR VERSION) ───────
