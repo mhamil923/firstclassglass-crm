@@ -309,7 +309,14 @@ function FileTile({ kind, href, fileName, onDelete, onExpand, extraAction }) {
       </div>
 
       <div style={{ padding: "6px 8px", fontSize: 12, wordBreak: "break-all" }}>
-        <a href={href} target="__blank" rel="noopener noreferrer" title={fileName} className="link" style={{ textDecoration: "none" }}>
+        <a
+          href={href}
+          target="__blank"
+          rel="noopener noreferrer"
+          title={fileName}
+          className="link"
+          style={{ textDecoration: "none" }}
+        >
           {fileName}
         </a>
       </div>
@@ -539,6 +546,20 @@ export default function ViewWorkOrder() {
       return next;
     });
   };
+
+  // ✅ NEW: Date Created (robust field fallbacks)
+  const createdRaw =
+    workOrder?.createdAt ??
+    workOrder?.created_at ??
+    workOrder?.dateCreated ??
+    workOrder?.createdDate ??
+    workOrder?.createdOn ??
+    null;
+
+  const createdDisplay =
+    createdRaw && moment(createdRaw).isValid()
+      ? moment(createdRaw).format("YYYY-MM-DD HH:mm")
+      : "—";
 
   const LOGO_URL = `${window.location.origin}/fcg-logo.png`;
   const safe = (x) =>
@@ -1247,6 +1268,12 @@ export default function ViewWorkOrder() {
             <span className="detail-value">
               {scheduledDate ? moment(scheduledDate).format("YYYY-MM-DD HH:mm") : "Not Scheduled"}
             </span>
+          </li>
+
+          {/* ✅ NEW: Date Created (placed directly under Scheduled Date) */}
+          <li className="detail-item">
+            <span className="detail-label">Date Created:</span>
+            <span className="detail-value">{createdDisplay}</span>
           </li>
         </ul>
 
