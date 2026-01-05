@@ -259,7 +259,14 @@ function displayStatusOrDefault(s) {
 }
 
 // ─── SCHEMA HELPERS ─────────────────────────────────────────────────────────
-const SCHEMA = { hasAssignedTo: false, columnsReady: true };
+const SCHEMA = {
+  hasAssignedTo: false,
+  columnsReady: true,
+
+  // ✅ Date Created support
+  createdAtCol: null, // 'createdAt' or 'created_at' (or null until detected)
+};
+
 async function columnExists(table, col) {
   const [rows] = await db.query(`SHOW COLUMNS FROM \`${table}\` LIKE ?`, [col]);
   return rows.length > 0;
@@ -268,6 +275,7 @@ async function getColumnType(table, col) {
   const [rows] = await db.query(`SHOW COLUMNS FROM \`${table}\` LIKE ?`, [col]);
   return rows.length ? String(rows[0].Type || '').toLowerCase() : null;
 }
+
 async function ensureCols() {
   const colsToEnsure = [
     { name: 'scheduledDate',     type: 'DATETIME NULL' },
@@ -286,7 +294,11 @@ async function ensureCols() {
     { name: 'siteAddress',       type: 'VARCHAR(255) NULL' },
     // ✅ IMPORTANT: prevent crashes if queries join on assignedTo
     { name: 'assignedTo',        type: 'INT NULL' },
+
+    // ✅ Date Created column (only added if neither createdAt nor created_at exist)
+    // We do detection below before attempting to add.
   ];
+
   try {
     for (const { name, type } of colsToEnsure) {
       const [found] = await db.query(`SHOW COLUMNS FROM \`work_orders\` LIKE ?`, [name]);
@@ -299,6 +311,8 @@ async function ensureCols() {
     SCHEMA.columnsReady = false;
     console.warn(`⚠️ Schema ensure failed (check DB privileges): ${e.message}`);
   }
+
+  // --- scheduledDate / scheduledEnd type upgrades ---
   try {
     const t1 = await getColumnType('work_orders', 'scheduledDate');
     if (t1 && /^date(?!time)/.test(t1)) {
@@ -306,6 +320,7 @@ async function ensureCols() {
       console.log('ℹ️ Upgraded column scheduledDate to DATETIME');
     }
   } catch (e) { console.warn('⚠️ Type check/upgrade failed for scheduledDate:', e.message); }
+
   try {
     const t2 = await getColumnType('work_orders', 'scheduledEnd');
     if (t2 && /^date(?!time)/.test(t2)) {
@@ -313,6 +328,7 @@ async function ensureCols() {
       console.log('ℹ️ Upgraded column scheduledEnd to DATETIME');
     }
   } catch (e) { console.warn('⚠️ Type check/upgrade failed for scheduledEnd:', e.message); }
+
   try {
     const tPP = await getColumnType('work_orders', 'photoPath');
     const small = !tPP || /^varchar\(/.test(tPP) || /^tinytext$/.test(tPP) || /^text$/.test(tPP);
@@ -321,8 +337,38 @@ async function ensureCols() {
       console.log('ℹ️ Upgraded column photoPath to MEDIUMTEXT');
     }
   } catch (e) { console.warn('⚠️ Type check/upgrade failed for photoPath:', e.message); }
+
+  // --- detect assignedTo ---
   try { SCHEMA.hasAssignedTo = await columnExists('work_orders', 'assignedTo'); }
   catch (e) { console.warn('⚠️ assignedTo detect:', e.message); }
+
+  // ✅ Date Created detection / ensure
+  try {
+    const hasCreatedAt  = await columnExists('work_orders', 'createdAt');
+    const hasCreated_at = await columnExists('work_orders', 'created_at');
+
+    if (hasCreatedAt) {
+      SCHEMA.createdAtCol = 'createdAt';
+    } else if (hasCreated_at) {
+      SCHEMA.createdAtCol = 'created_at';
+    } else {
+      // add createdAt
+      await db.query(
+        `ALTER TABLE \`work_orders\` ADD COLUMN \`createdAt\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`
+      );
+      SCHEMA.createdAtCol = 'createdAt';
+      console.log('ℹ️ Added column createdAt (Date Created)');
+    }
+
+    // backfill if createdAt exists but has NULLs (rare, but safe)
+    if (SCHEMA.createdAtCol === 'createdAt') {
+      await db.query(`UPDATE \`work_orders\` SET \`createdAt\` = CURRENT_TIMESTAMP WHERE \`createdAt\` IS NULL`);
+    } else if (SCHEMA.createdAtCol === 'created_at') {
+      await db.query(`UPDATE \`work_orders\` SET \`created_at\` = CURRENT_TIMESTAMP WHERE \`created_at\` IS NULL`);
+    }
+  } catch (e) {
+    console.warn('⚠️ createdAt/created_at detect/ensure failed:', e.message);
+  }
 }
 ensureCols().catch(e => console.warn('⚠️ ensureCols:', e.message));
 
@@ -331,8 +377,18 @@ function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', l
   const hasA = !!SCHEMA.hasAssignedTo;
   const join = hasA ? 'LEFT JOIN users u ON w.assignedTo = u.id' : '';
   const assignedSel = hasA ? 'u.username AS assignedToName' : 'NULL AS assignedToName';
+
+  // ✅ Always expose Date Created to frontend as "createdAt"
+  // - If DB uses created_at, alias it.
+  // - If DB uses createdAt, selecting it as createdAt is harmless.
+  // - If unknown, return NULL (but ensureCols should set SCHEMA.createdAtCol).
+  const createdSel =
+    SCHEMA.createdAtCol === 'created_at' ? 'w.created_at AS createdAt' :
+    SCHEMA.createdAtCol === 'createdAt'  ? 'w.createdAt AS createdAt'  :
+    'NULL AS createdAt';
+
   return `
-    SELECT w.*, ${assignedSel}
+    SELECT w.*, ${assignedSel}, ${createdSel}
       FROM work_orders w
       ${join}
       ${whereSql}
