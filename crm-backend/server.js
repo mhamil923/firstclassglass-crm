@@ -31,6 +31,12 @@ const {
   GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '',
   ROUTE_START_ADDRESS = process.env.ROUTE_START_ADDRESS || '1513 Industrial Dr, Itasca, IL 60143',
   ROUTE_END_ADDRESS   = process.env.ROUTE_END_ADDRESS   || '1513 Industrial Dr, Itasca, IL 60143',
+
+  // ✅ AUTO STATUS RULE
+  AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS = process.env.AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS || '48',
+  // ✅ CHANGED DEFAULT HERE: 60 minutes (less DB activity)
+  AUTO_NEW_TO_NEEDS_SCHEDULED_INTERVAL_MINUTES = process.env.AUTO_NEW_TO_NEEDS_SCHEDULED_INTERVAL_MINUTES || '60',
+  AUTO_NEW_TO_NEEDS_SCHEDULED_ENABLED = process.env.AUTO_NEW_TO_NEEDS_SCHEDULED_ENABLED || '1',
 } = process.env;
 
 const DEFAULT_WINDOW = Math.max(15, Number(DEFAULT_WINDOW_MINUTES) || 120);
@@ -292,11 +298,7 @@ async function ensureCols() {
     { name: 'dayOrder',          type: 'INT NULL' },
     { name: 'workOrderNumber',   type: 'VARCHAR(64) NULL' },
     { name: 'siteAddress',       type: 'VARCHAR(255) NULL' },
-    // ✅ IMPORTANT: prevent crashes if queries join on assignedTo
     { name: 'assignedTo',        type: 'INT NULL' },
-
-    // ✅ Date Created column (only added if neither createdAt nor created_at exist)
-    // We do detection below before attempting to add.
   ];
 
   try {
@@ -312,7 +314,6 @@ async function ensureCols() {
     console.warn(`⚠️ Schema ensure failed (check DB privileges): ${e.message}`);
   }
 
-  // --- scheduledDate / scheduledEnd type upgrades ---
   try {
     const t1 = await getColumnType('work_orders', 'scheduledDate');
     if (t1 && /^date(?!time)/.test(t1)) {
@@ -338,7 +339,6 @@ async function ensureCols() {
     }
   } catch (e) { console.warn('⚠️ Type check/upgrade failed for photoPath:', e.message); }
 
-  // --- detect assignedTo ---
   try { SCHEMA.hasAssignedTo = await columnExists('work_orders', 'assignedTo'); }
   catch (e) { console.warn('⚠️ assignedTo detect:', e.message); }
 
@@ -352,7 +352,6 @@ async function ensureCols() {
     } else if (hasCreated_at) {
       SCHEMA.createdAtCol = 'created_at';
     } else {
-      // add createdAt
       await db.query(
         `ALTER TABLE \`work_orders\` ADD COLUMN \`createdAt\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`
       );
@@ -360,7 +359,6 @@ async function ensureCols() {
       console.log('ℹ️ Added column createdAt (Date Created)');
     }
 
-    // backfill if createdAt exists but has NULLs (rare, but safe)
     if (SCHEMA.createdAtCol === 'createdAt') {
       await db.query(`UPDATE \`work_orders\` SET \`createdAt\` = CURRENT_TIMESTAMP WHERE \`createdAt\` IS NULL`);
     } else if (SCHEMA.createdAtCol === 'created_at') {
@@ -378,10 +376,6 @@ function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', l
   const join = hasA ? 'LEFT JOIN users u ON w.assignedTo = u.id' : '';
   const assignedSel = hasA ? 'u.username AS assignedToName' : 'NULL AS assignedToName';
 
-  // ✅ Always expose Date Created to frontend as "createdAt"
-  // - If DB uses created_at, alias it.
-  // - If DB uses createdAt, selecting it as createdAt is harmless.
-  // - If unknown, return NULL (but ensureCols should set SCHEMA.createdAtCol).
   const createdSel =
     SCHEMA.createdAtCol === 'created_at' ? 'w.created_at AS createdAt' :
     SCHEMA.createdAtCol === 'createdAt'  ? 'w.createdAt AS createdAt'  :
@@ -396,6 +390,65 @@ function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', l
       ${limitSql}
   `;
 }
+
+// ─── ✅ AUTO STATUS TIMER JOB: New → Needs to be Scheduled after 48 hours ────
+function envOn(v, def = true) {
+  if (v == null) return def;
+  const s = String(v).trim().toLowerCase();
+  return ['1','true','yes','y','on'].includes(s);
+}
+
+async function autoMoveNewToNeedsScheduled() {
+  try {
+    if (!envOn(AUTO_NEW_TO_NEEDS_SCHEDULED_ENABLED, true)) return;
+
+    const hours = Math.max(1, Number(AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS) || 48);
+    const createdCol = SCHEMA.createdAtCol || 'createdAt';
+
+    // If schema detection hasn’t run yet, we skip safely
+    if (!SCHEMA.createdAtCol) return;
+
+    // Move ONLY:
+    // - status exactly 'New'
+    // - older than N hours
+    // - not already scheduled
+    const sql = `
+      UPDATE work_orders
+         SET status = 'Needs to be Scheduled'
+       WHERE status = 'New'
+         AND scheduledDate IS NULL
+         AND \`${createdCol}\` <= DATE_SUB(NOW(), INTERVAL ? HOUR)
+    `;
+    const [r] = await db.execute(sql, [hours]);
+
+    const changed = r?.affectedRows ?? 0;
+    if (changed > 0) {
+      console.log(`🕒 Auto-status: moved ${changed} work order(s) from New → Needs to be Scheduled (older than ${hours}h)`);
+    }
+  } catch (e) {
+    console.warn('⚠️ Auto-status job failed:', e.message);
+  }
+}
+
+function startAutoStatusJob() {
+  const minutes = Math.max(5, Number(AUTO_NEW_TO_NEEDS_SCHEDULED_INTERVAL_MINUTES) || 60);
+  const ms = minutes * 60 * 1000;
+
+  // Run once shortly after boot (gives ensureCols time to detect createdAt)
+  setTimeout(() => {
+    autoMoveNewToNeedsScheduled().catch(() => {});
+  }, 15_000).unref?.();
+
+  const t = setInterval(() => {
+    autoMoveNewToNeedsScheduled().catch(() => {});
+  }, ms);
+
+  // Don’t keep Node alive solely for this interval if nothing else is running
+  if (typeof t.unref === 'function') t.unref();
+
+  console.log(`🕒 Auto-status job enabled: checking every ${minutes} minute(s), threshold=${AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS}h`);
+}
+startAutoStatusJob();
 
 // ─── MULTER ─────────────────────────────────────────────────────────────────
 const allowMime = (fOrMime) => {
