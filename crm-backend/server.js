@@ -1,3 +1,5 @@
+// server.js (UPDATED - copy/paste entire file)
+
 // ─── IMPORTS ─────────────────────────────────────────────────────────────────
 const express    = require('express');
 const cors       = require('cors');
@@ -10,6 +12,9 @@ const AWS        = require('aws-sdk');    // v2 (works with multer-s3)
 const multerS3   = require('multer-s3');
 const bcrypt     = require('bcrypt');
 const jwt        = require('jsonwebtoken');
+
+// ✅ NEW: use axios so we don't depend on Node's global fetch() (EB can be Node < 18)
+const axios      = require('axios');
 
 process.env.TZ = process.env.APP_TZ || 'America/Chicago';
 
@@ -31,6 +36,10 @@ const {
   GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '',
   ROUTE_START_ADDRESS = process.env.ROUTE_START_ADDRESS || '1513 Industrial Dr, Itasca, IL 60143',
   ROUTE_END_ADDRESS   = process.env.ROUTE_END_ADDRESS   || '1513 Industrial Dr, Itasca, IL 60143',
+
+  // ✅ ROUTE: limits/timeouts (Google optimize:true max is 23 waypoints)
+  ROUTE_MAX_WAYPOINTS = process.env.ROUTE_MAX_WAYPOINTS || '23',
+  ROUTE_TIMEOUT_MS    = process.env.ROUTE_TIMEOUT_MS    || '20000',
 
   // ✅ AUTO STATUS RULE
   AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS = process.env.AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS || '48',
@@ -1140,6 +1149,12 @@ app.get('/calendar/events', authenticate, async (req, res) => {
 // ─── ✅ BEST ROUTE GENERATOR (GET + POST) ───────────────────────────────────
 // GET  /routes/best?date=YYYY-MM-DD&start=...&end=...
 // POST /routes/best  { start: '...', end: '...', stops: [{id,address,label}], travelMode: 'driving' }
+
+// NOTE: This implementation fixes 3 common issues:
+// 1) Works on Node < 18 (no reliance on global fetch) by using axios
+// 2) Prevents Google MAX_WAYPOINTS_EXCEEDED by trimming to 23 waypoints (env-configurable)
+// 3) Uses departure_time=now for traffic-aware "most efficient" routing
+
 function sqlDayRange(dateStrYYYYMMDD) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStrYYYYMMDD || '').trim());
   const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date();
@@ -1150,10 +1165,12 @@ function sqlDayRange(dateStrYYYYMMDD) {
   const end   = toSqlDateTimeFromParts(Y, Mo, Da, 23, 59, 59);
   return { start, end, ymd: `${Y}-${pad2(Mo)}-${pad2(Da)}` };
 }
+
 function cleanAddr(a) {
   const s = String(a || '').trim();
   return s.replace(/\s+/g, ' ');
 }
+
 function mapsUrlForStops(origin, destination, waypointsArr) {
   const o = encodeURIComponent(origin);
   const d = encodeURIComponent(destination);
@@ -1163,12 +1180,26 @@ function mapsUrlForStops(origin, destination, waypointsArr) {
   return `https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}${wp}&travelmode=driving`;
 }
 
-// ✅ Shared handler so GET and POST behave identically.
+function normalizeStops(arr) {
+  const raw = Array.isArray(arr) ? arr : [];
+  const seen = new Set();
+  const out = [];
+  for (const s of raw) {
+    const id = s?.id;
+    const address = cleanAddr(s?.address || '');
+    if (!address) continue;
+    const k = address.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ id, address, label: s?.label || null });
+  }
+  return out;
+}
+
 async function handleBestRoute(req, res) {
   try {
     const b = coerceBody(req);
 
-    // Prefer explicit body values for POST; fallback to query.
     const startIn = (b.start ?? req.query.start ?? ROUTE_START_ADDRESS);
     const endIn   = (b.end   ?? req.query.end   ?? ROUTE_END_ADDRESS);
     const travelMode = String(b.travelMode || req.query.travelMode || 'driving').toLowerCase();
@@ -1176,19 +1207,13 @@ async function handleBestRoute(req, res) {
     const startAddress = cleanAddr(startIn || ROUTE_START_ADDRESS);
     const endAddress   = cleanAddr(endIn   || ROUTE_END_ADDRESS);
 
-    // ✅ If stops provided in POST body, use them (this matches your frontend)
     let stops = [];
     if (Array.isArray(b.stops) && b.stops.length) {
-      stops = b.stops
-        .map(s => ({
-          id: s.id,
-          address: cleanAddr(s.address || ''),
-          label: s.label || null,
-        }))
-        .filter(s => s.address);
+      // POST: stops are provided by frontend
+      stops = normalizeStops(b.stops).filter(s => s.address);
     } else {
-      // GET fallback: build stops from scheduled work orders for a day
-      const dateQ = String((b.date ?? req.query.date) || '').trim(); // YYYY-MM-DD (optional)
+      // GET: build stops from scheduled work orders for a day (Today tab can call date=today)
+      const dateQ = String((b.date ?? req.query.date) || '').trim(); // YYYY-MM-DD optional
       const { start, end, ymd } = sqlDayRange(dateQ);
 
       const [rows] = await db.execute(
@@ -1201,15 +1226,15 @@ async function handleBestRoute(req, res) {
         [start, end]
       );
 
-      const seen = new Set();
+      const list = [];
       for (const r of rows) {
         const addr = cleanAddr(r.siteAddress || r.siteLocation || '');
         if (!addr) continue;
-        const k = addr.toLowerCase();
-        if (seen.has(k)) continue;
-        if (k === startAddress.toLowerCase()) continue;
-        if (k === endAddress.toLowerCase()) continue;
-        seen.add(k);
+
+        // avoid origin/destination duplicates
+        const lk = addr.toLowerCase();
+        if (lk === startAddress.toLowerCase()) continue;
+        if (lk === endAddress.toLowerCase()) continue;
 
         const labelParts = [];
         if (r.workOrderNumber) labelParts.push(`WO ${r.workOrderNumber}`);
@@ -1217,27 +1242,24 @@ async function handleBestRoute(req, res) {
         if (r.customer) labelParts.push(r.customer);
         if (r.siteLocation) labelParts.push(r.siteLocation);
 
-        stops.push({
+        list.push({
           id: r.id,
           address: addr,
           label: labelParts.join(' • ') || null,
         });
       }
-
-      // include ymd in response for GET mode
+      stops = normalizeStops(list);
       res.setHeader('X-Route-Date', ymd);
     }
 
+    // Fallback map URL in the existing order
     const fallbackMapsUrl = mapsUrlForStops(startAddress, endAddress, stops.map(s => s.address));
 
-    // If not enough stops, return clean JSON (never HTML)
     if (stops.length < 2) {
       return res.json({
         ok: true,
         optimized: false,
-        message: stops.length === 0
-          ? 'No usable stops provided.'
-          : 'Need at least 2 stops to optimize.',
+        message: stops.length === 0 ? 'No usable stops provided.' : 'Need at least 2 stops to optimize.',
         start: startAddress,
         end: endAddress,
         stops,
@@ -1249,7 +1271,15 @@ async function handleBestRoute(req, res) {
       });
     }
 
-    // If no API key, return ordered as given (still matches frontend contract)
+    // ✅ Enforce Google max waypoints for optimize:true
+    const maxWpts = Math.max(1, Number(ROUTE_MAX_WAYPOINTS) || 23);
+    let trimmed = false;
+    if (stops.length > maxWpts) {
+      stops = stops.slice(0, maxWpts);
+      trimmed = true;
+    }
+
+    // If no API key, return unoptimized but consistent response
     if (!GOOGLE_MAPS_API_KEY) {
       return res.json({
         ok: true,
@@ -1262,11 +1292,11 @@ async function handleBestRoute(req, res) {
         orderedIds: stops.map(s => s.id),
         totalDistanceMeters: null,
         totalDurationSeconds: null,
-        googleMapsUrl: fallbackMapsUrl,
+        googleMapsUrl: mapsUrlForStops(startAddress, endAddress, stops.map(s => s.address)),
       });
     }
 
-    // Google Directions optimize:true
+    // Google Directions optimize:true (traffic-aware)
     const waypointAddresses = stops.map(s => s.address);
     const wpParam = `optimize:true|${waypointAddresses.join('|')}`;
 
@@ -1276,28 +1306,21 @@ async function handleBestRoute(req, res) {
       `&destination=${encodeURIComponent(endAddress)}` +
       `&waypoints=${encodeURIComponent(wpParam)}` +
       `&mode=${encodeURIComponent(travelMode)}` +
+      `&departure_time=now` +
+      `&traffic_model=best_guess` +
+      `&alternatives=false` +
       `&key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}`;
 
-    const fetchFn = (typeof fetch === 'function') ? fetch : null;
-    if (!fetchFn) {
-      return res.status(500).json({ error: 'Node runtime has no global fetch(). Upgrade Node to 18+.' });
-    }
-
-    const resp = await fetchFn(url);
-    const data = await resp.json().catch(() => null);
-
-    if (!resp.ok || !data) {
-      return res.status(502).json({
-        error: 'Route service failed',
-        details: `HTTP ${resp.status}`,
-      });
-    }
-
-    if (data.status !== 'OK' || !data.routes || !data.routes.length) {
+    let data = null;
+    try {
+      const resp = await axios.get(url, { timeout: Math.max(2000, Number(ROUTE_TIMEOUT_MS) || 20000) });
+      data = resp?.data || null;
+    } catch (e) {
+      console.warn('⚠️ Google Directions call failed:', e?.message || e);
       return res.json({
         ok: true,
         optimized: false,
-        warning: `Google Directions returned status=${data.status}`,
+        warning: 'Route service failed; returning current order.',
         start: startAddress,
         end: endAddress,
         stops,
@@ -1305,8 +1328,26 @@ async function handleBestRoute(req, res) {
         orderedIds: stops.map(s => s.id),
         totalDistanceMeters: null,
         totalDurationSeconds: null,
-        googleMapsUrl: fallbackMapsUrl,
-        google: { status: data.status, error_message: data.error_message || null },
+        googleMapsUrl: mapsUrlForStops(startAddress, endAddress, stops.map(s => s.address)),
+        error: { message: String(e?.message || 'Route service error') },
+      });
+    }
+
+    if (!data || data.status !== 'OK' || !Array.isArray(data.routes) || !data.routes.length) {
+      return res.json({
+        ok: true,
+        optimized: false,
+        warning: `Google Directions returned status=${data?.status || 'UNKNOWN'}`,
+        start: startAddress,
+        end: endAddress,
+        stops,
+        orderedStops: stops,
+        orderedIds: stops.map(s => s.id),
+        totalDistanceMeters: null,
+        totalDurationSeconds: null,
+        googleMapsUrl: mapsUrlForStops(startAddress, endAddress, stops.map(s => s.address)),
+        google: { status: data?.status || 'UNKNOWN', error_message: data?.error_message || null },
+        ...(trimmed ? { trimmed: true, trimmedTo: maxWpts } : {}),
       });
     }
 
@@ -1316,21 +1357,21 @@ async function handleBestRoute(req, res) {
       ? orderIdx.map(i => stops[i]).filter(Boolean)
       : stops;
 
-    // legs: origin->stop1, stop1->stop2, ..., stopN->destination
     const legs = Array.isArray(route.legs) ? route.legs : [];
 
-    // Attach per-stop leg stats (leg 0 corresponds to arriving at stop1, etc.)
     const orderedStops = orderedStopsBase.map((s, idx) => {
-      const leg = legs[idx]; // idx=0 is origin->stop1
+      const leg = legs[idx]; // origin->stop1 is leg 0
       return {
         ...s,
         legDistanceMeters: leg?.distance?.value ?? null,
         legDurationSeconds: leg?.duration?.value ?? null,
+        legDurationInTrafficSeconds: leg?.duration_in_traffic?.value ?? null,
       };
     });
 
     const totalDistanceMeters = legs.reduce((sum, l) => sum + (l?.distance?.value || 0), 0) || null;
     const totalDurationSeconds = legs.reduce((sum, l) => sum + (l?.duration?.value || 0), 0) || null;
+    const totalDurationInTrafficSeconds = legs.reduce((sum, l) => sum + (l?.duration_in_traffic?.value || 0), 0) || null;
 
     const orderedWaypointAddresses = orderedStops.map(s => s.address);
 
@@ -1344,11 +1385,10 @@ async function handleBestRoute(req, res) {
       orderedIds: orderedStops.map(s => s.id),
       totalDistanceMeters,
       totalDurationSeconds,
+      totalDurationInTrafficSeconds,
       googleMapsUrl: mapsUrlForStops(startAddress, endAddress, orderedWaypointAddresses),
-      google: {
-        status: data.status,
-        waypoint_order: orderIdx,
-      }
+      google: { status: data.status, waypoint_order: orderIdx },
+      ...(trimmed ? { trimmed: true, trimmedTo: maxWpts } : {}),
     });
   } catch (e) {
     console.error('Best route error:', e);
@@ -1356,10 +1396,7 @@ async function handleBestRoute(req, res) {
   }
 }
 
-// ✅ GET version
 app.get('/routes/best', authenticate, handleBestRoute);
-
-// ✅ POST /routes/best (matches your frontend)
 app.post('/routes/best', authenticate, handleBestRoute);
 
 // ─── KEY NORMALIZATION / FILES / DELETE (UNCHANGED FROM YOUR VERSION) ───────
