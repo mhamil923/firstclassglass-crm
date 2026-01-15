@@ -8,9 +8,7 @@ export default function Navbar() {
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    // Remove the JWT from storage
     localStorage.removeItem("jwt");
-    // Redirect to the login page
     navigate("/login");
   };
 
@@ -20,6 +18,7 @@ export default function Navbar() {
         <Link className="navbar-brand" to="/">
           First Class Glass CRM
         </Link>
+
         <button
           className="navbar-toggler"
           type="button"
@@ -31,6 +30,7 @@ export default function Navbar() {
         >
           <span className="navbar-toggler-icon"></span>
         </button>
+
         <div className="collapse navbar-collapse" id="navbarNav">
           <ul className="navbar-nav ms-auto">
             <li className="nav-item">
@@ -38,26 +38,34 @@ export default function Navbar() {
                 Home
               </Link>
             </li>
+
             <li className="nav-item">
               <Link className="nav-link" to="/work-orders">
                 Work Orders
               </Link>
             </li>
+
             <li className="nav-item">
               <Link className="nav-link" to="/calendar">
                 Calendar
               </Link>
             </li>
+
+            {/* ✅ NEW: Purchase Orders tab */}
+            <li className="nav-item">
+              <Link className="nav-link" to="/purchase-orders">
+                Purchase Orders
+              </Link>
+            </li>
+
             <li className="nav-item">
               <Link className="nav-link" to="/history">
                 History
               </Link>
             </li>
+
             <li className="nav-item">
-              <button
-                className="logout-button"
-                onClick={handleLogout}
-              >
+              <button className="logout-button" onClick={handleLogout}>
                 Logout
               </button>
             </li>
