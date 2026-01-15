@@ -1,4 +1,4 @@
-// server.js (UPDATED - copy/paste entire file)
+// server.js (UPDATED with Purchase Orders support)
 
 // ─── IMPORTS ─────────────────────────────────────────────────────────────────
 const express    = require('express');
@@ -298,6 +298,8 @@ async function ensureCols() {
     { name: 'pdfPath',           type: 'VARCHAR(255) NULL' },
     { name: 'estimatePdfPath',   type: 'VARCHAR(255) NULL' },
     { name: 'poPdfPath',         type: 'VARCHAR(255) NULL' },
+    { name: 'poSupplier',        type: 'VARCHAR(128) NULL' },           // ← NEW
+    { name: 'poPickedUp',        type: 'TINYINT(1) NOT NULL DEFAULT 0' }, // ← NEW
     { name: 'photoPath',         type: 'MEDIUMTEXT NULL' },
     { name: 'notes',             type: 'TEXT NULL' },
     { name: 'billingPhone',      type: 'VARCHAR(32) NULL' },
@@ -658,6 +660,11 @@ const isTruthy = (v) => {
 };
 const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
 
+// NEW: helper for Purchase Orders status
+function poStatusFromRow(r) {
+  return Number(r.poPickedUp || 0) ? 'Picked Up' : 'On Order';
+}
+
 // ─── SEARCH/LIST/CRUD ───────────────────────────────────────────────────────
 
 // LIST ALL — (frontend dashboard calls this)
@@ -827,7 +834,8 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       assignedTo,
       billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
       notes = null,
-
+      poSupplier = null,          // NEW: supplier can also be set when creating WO
+      poPickedUp = 0,             // NEW: default 0
       scheduledDate: scheduledDateRaw = null,
       endTime = null,
       timeWindow = null
@@ -864,12 +872,14 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       'workOrderNumber','poNumber','customer','siteLocation','siteAddress','billingAddress',
       'problemDescription','status','pdfPath','estimatePdfPath','poPdfPath','photoPath',
       'billingPhone','sitePhone','customerPhone','customerEmail','notes',
+      'poSupplier','poPickedUp',           // NEW
       'scheduledDate','scheduledEnd'
     ];
     const vals = [
       workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
       problemDescription, cStatus, pdfPath, estimatePdfPath, poPdfPath, initialAttachments,
       billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes,
+      poSupplier || null, Number(poPickedUp) ? 1 : 0,
       scheduledDate, scheduledEnd
     ];
     if (SCHEMA.hasAssignedTo && assignedTo !== undefined && assignedTo !== '') {
@@ -983,7 +993,8 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       customerPhone = existing.customerPhone,
       customerEmail = existing.customerEmail,
       notes = existing.notes,
-
+      poSupplier = existing.poSupplier,                     // NEW
+      poPickedUp = existing.poPickedUp,                     // NEW
       scheduledDate: scheduledDateRaw = undefined,
       endTime = null,
       timeWindow = null
@@ -1010,11 +1021,13 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
                  SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
                      problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
                      billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?,
+                     poSupplier=?,poPickedUp=?,                         -- NEW
                      scheduledDate=?,scheduledEnd=?`;
     const params = [
       workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
       problemDescription, cStatus, pdfPath || null, estimatePdfPath || null, poPdfPath || null, attachments.join(','),
       billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes,
+      poSupplier || null, Number(poPickedUp) ? 1 : 0,
       scheduledDate, scheduledEnd
     ];
     if (SCHEMA.hasAssignedTo) { sql += `,assignedTo=?`; params.push((assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo)); }
@@ -1074,6 +1087,103 @@ app.put('/work-orders/:id/status', authenticate, requireNumericParam('id'), asyn
   } catch (err) {
     console.error('Work-order status update error:', err);
     res.status(500).json({ error: 'Failed to update status.' });
+  }
+});
+
+// ─── PURCHASE ORDERS (derived from work_orders) ─────────────────────────────
+
+// GET /purchase-orders?supplier=Chicago%20Tempered&status=on-order|picked-up
+app.get('/purchase-orders', authenticate, async (req, res) => {
+  try {
+    const supplierQ = String(req.query.supplier || '').trim();
+    const statusQ   = String(req.query.status || '').trim().toLowerCase();
+
+    const whereParts = [
+      `(COALESCE(w.poNumber,'') <> '' OR COALESCE(w.poPdfPath,'') <> '' OR COALESCE(w.poSupplier,'') <> '')`
+    ];
+    const params = [];
+
+    if (supplierQ) {
+      whereParts.push(`COALESCE(w.poSupplier,'') LIKE ?`);
+      params.push(`%${supplierQ}%`);
+    }
+
+    if (statusQ === 'on-order' || statusQ === 'on' || statusQ === 'open') {
+      whereParts.push(`COALESCE(w.poPickedUp,0) = 0`);
+    } else if (statusQ === 'picked-up' || statusQ === 'picked' || statusQ === 'closed') {
+      whereParts.push(`COALESCE(w.poPickedUp,0) = 1`);
+    }
+
+    const whereSql = `WHERE ${whereParts.join(' AND ')}`;
+
+    const [rows] = await db.execute(
+      workOrdersSelectSQL({
+        whereSql,
+        orderSql: 'ORDER BY w.poSupplier ASC, w.createdAt DESC, w.id DESC'
+      }),
+      params
+    );
+
+    const out = rows.map(r => ({
+      id: r.id,
+      workOrderId: r.id,
+      workOrderNumber: r.workOrderNumber || null,
+      poNumber: r.poNumber || null,
+      supplier: r.poSupplier || '',
+      customer: r.customer || '',
+      siteLocation: r.siteLocation || '',
+      siteAddress: r.siteAddress || '',
+      poPdfPath: r.poPdfPath || null,
+      poPickedUp: !!Number(r.poPickedUp || 0),
+      poStatus: poStatusFromRow(r),
+      createdAt: r.createdAt || null,
+      workOrderStatus: displayStatusOrDefault(r.status),
+    }));
+
+    res.json(out);
+  } catch (err) {
+    console.error('Purchase-orders list error:', err);
+    res.status(500).json({ error: 'Failed to fetch purchase orders.' });
+  }
+});
+
+// PUT /purchase-orders/:id/mark-picked-up   (id = work_orders.id)
+app.put('/purchase-orders/:id/mark-picked-up', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+
+    const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    if (!row) return res.status(404).json({ error: 'Work order not found.' });
+
+    const who = req.user?.username || 'system';
+    const stamp = new Date().toISOString().replace('T',' ').replace('Z','');
+    const poNumber = row.poNumber || '';
+    const supplier = row.poSupplier || '';
+
+    const line = `[${stamp}] ${who}: Purchase order ${poNumber || '(no PO #)'}${supplier ? ` (${supplier})` : ''} marked PICKED UP.`;
+    const newNotes = (row.notes || '') + (row.notes ? '\n\n' : '') + line;
+
+    await db.execute(
+      'UPDATE work_orders SET poPickedUp = 1, notes = ? WHERE id = ?',
+      [newNotes, wid]
+    );
+
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+
+    res.json({
+      id: updated.id,
+      workOrderId: updated.id,
+      workOrderNumber: updated.workOrderNumber || null,
+      poNumber: updated.poNumber || null,
+      supplier: updated.poSupplier || '',
+      poPickedUp: !!Number(updated.poPickedUp || 0),
+      poStatus: poStatusFromRow(updated),
+      notes: updated.notes || '',
+      workOrderStatus: displayStatusOrDefault(updated.status),
+    });
+  } catch (err) {
+    console.error('Purchase-order mark-picked-up error:', err);
+    res.status(500).json({ error: 'Failed to mark purchase order as picked up.' });
   }
 });
 
