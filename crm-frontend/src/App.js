@@ -13,9 +13,10 @@ import AddWorkOrder from "./AddWorkOrder";
 import EditWorkOrder from "./EditWorkOrder";
 import ViewWorkOrder from "./ViewWorkOrder";
 import CalendarPage from "./CalendarPage";
-import HistoryReport from "./HistoryReport";   // ← updated import
+import HistoryReport from "./HistoryReport";   // ← existing
 import Login from "./Login";
-import Navbar from "./Navbar";               
+import Navbar from "./Navbar";
+import PurchaseOrders from "./PurchaseOrders"; // ← NEW import
 import "bootstrap/dist/css/bootstrap.min.css";
 
 // A wrapper for protecting routes
@@ -88,7 +89,17 @@ export default function App() {
             path="/history"
             element={
               <PrivateRoute>
-                <HistoryReport />     {/* ← new route */}
+                <HistoryReport />
+              </PrivateRoute>
+            }
+          />
+
+          {/* NEW: Purchase Orders tab */}
+          <Route
+            path="/purchase-orders"
+            element={
+              <PrivateRoute>
+                <PurchaseOrders />
               </PrivateRoute>
             }
           />
