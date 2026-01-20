@@ -1,6 +1,7 @@
 // File: src/PurchaseOrders.js
 
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 const API_BASE =
   process.env.REACT_APP_API_BASE || "http://FCGG.us-east-2.elasticbeanstalk.com";
@@ -13,13 +14,7 @@ const SUPPLIERS = [
   "Casco",
 ];
 
-const STATUSES = [
-  "All Statuses",
-  "On Order",
-  "Ready for Pickup",
-  "Picked Up",
-  "Cancelled",
-];
+const STATUSES = ["All Statuses", "On Order", "Picked Up"];
 
 export default function PurchaseOrders() {
   const [purchaseOrders, setPurchaseOrders] = useState([]);
@@ -30,15 +25,6 @@ export default function PurchaseOrders() {
   const [statusFilter, setStatusFilter] = useState("On Order");
   const [search, setSearch] = useState("");
 
-  // Form state for creating a new PO
-  const [newSupplier, setNewSupplier] = useState("Chicago Tempered");
-  const [newPoNumber, setNewPoNumber] = useState("");
-  const [newDescription, setNewDescription] = useState("");
-  const [newRelatedWorkOrderId, setNewRelatedWorkOrderId] = useState("");
-  const [newNotes, setNewNotes] = useState("");
-  const [newPdfFile, setNewPdfFile] = useState(null);
-  const [saving, setSaving] = useState(false);
-
   const jwt = localStorage.getItem("jwt");
 
   const authHeaders = jwt
@@ -46,6 +32,8 @@ export default function PurchaseOrders() {
         Authorization: `Bearer ${jwt}`,
       }
     : {};
+
+  const navigate = useNavigate();
 
   const loadPurchaseOrders = async () => {
     try {
@@ -58,12 +46,13 @@ export default function PurchaseOrders() {
         params.set("supplier", supplierFilter);
       }
 
+      // Map UI status → backend query value
       if (statusFilter && statusFilter !== "All Statuses") {
-        params.set("status", statusFilter);
-      }
-
-      if (search.trim()) {
-        params.set("search", search.trim());
+        if (statusFilter === "On Order") {
+          params.set("status", "on-order");
+        } else if (statusFilter === "Picked Up") {
+          params.set("status", "picked-up");
+        }
       }
 
       const url = `${API_BASE}/purchase-orders${
@@ -98,89 +87,22 @@ export default function PurchaseOrders() {
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
-    loadPurchaseOrders();
-  };
-
-  const handleCreatePo = async (e) => {
-    e.preventDefault();
-    if (!newSupplier || !newPoNumber) {
-      alert("Supplier and PO Number are required.");
-      return;
-    }
-    if (!newPdfFile) {
-      const confirmNoPdf = window.confirm(
-        "No PDF selected. Create PO without attached PDF?"
-      );
-      if (!confirmNoPdf) return;
-    }
-
-    try {
-      setSaving(true);
-      setError("");
-
-      const formData = new FormData();
-      formData.append("supplier", newSupplier);
-      formData.append("poNumber", newPoNumber);
-      if (newDescription.trim()) formData.append("description", newDescription);
-      if (newRelatedWorkOrderId.trim()) {
-        formData.append("relatedWorkOrderId", newRelatedWorkOrderId.trim());
-      }
-      if (newNotes.trim()) formData.append("notes", newNotes.trim());
-      // Default status: On Order (backend also defaults, but we keep it explicit)
-      formData.append("status", "On Order");
-
-      if (newPdfFile) {
-        // any fieldname is fine; backend uses first PDF it finds
-        formData.append("poPdf", newPdfFile);
-      }
-
-      const res = await fetch(`${API_BASE}/purchase-orders`, {
-        method: "POST",
-        headers: {
-          ...authHeaders,
-          // Don't set Content-Type here; browser sets multipart boundary
-        },
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(
-          `Failed to create purchase order (${res.status}): ${text}`
-        );
-      }
-
-      // Reset the form
-      setNewPoNumber("");
-      setNewDescription("");
-      setNewRelatedWorkOrderId("");
-      setNewNotes("");
-      setNewPdfFile(null);
-
-      // Reload list
-      await loadPurchaseOrders();
-    } catch (err) {
-      console.error("Error creating purchase order:", err);
-      setError(err.message || "Failed to create purchase order.");
-    } finally {
-      setSaving(false);
-    }
+    // Search is applied client-side; data is already loaded.
   };
 
   const handleMarkPickedUp = async (po) => {
-    if (!window.confirm(`Mark PO ${po.poNumber} as Picked Up?`)) return;
+    if (!window.confirm(`Mark PO ${po.poNumber || ""} as Picked Up?`)) return;
 
     try {
-      const res = await fetch(`${API_BASE}/purchase-orders/${po.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          ...authHeaders,
-        },
-        body: JSON.stringify({
-          status: "Picked Up",
-        }),
-      });
+      const res = await fetch(
+        `${API_BASE}/purchase-orders/${po.id}/mark-picked-up`,
+        {
+          method: "PUT",
+          headers: {
+            ...authHeaders,
+          },
+        }
+      );
 
       if (!res.ok) {
         const text = await res.text();
@@ -189,19 +111,19 @@ export default function PurchaseOrders() {
 
       const updated = await res.json();
 
-      // Update local list
       setPurchaseOrders((prev) =>
-        prev.map((item) => (item.id === updated.id ? updated : item))
+        prev.map((item) =>
+          item.id === updated.id ? { ...item, ...updated } : item
+        )
       );
 
-      // Optional: let user know
-      if (updated.relatedWorkOrderId) {
+      if (updated.workOrderNumber) {
         alert(
-          `PO ${updated.poNumber} marked as Picked Up.\n` +
-            `Related Work Order #${updated.relatedWorkOrderId} status has been updated on the backend.`
+          `PO ${updated.poNumber || ""} marked as Picked Up.\n` +
+            `Related Work Order #${updated.workOrderNumber} has been updated on the backend.`
         );
       } else {
-        alert(`PO ${updated.poNumber} marked as Picked Up.`);
+        alert(`PO ${updated.poNumber || ""} marked as Picked Up.`);
       }
     } catch (err) {
       console.error("Error marking PO picked up:", err);
@@ -210,18 +132,39 @@ export default function PurchaseOrders() {
   };
 
   const handleOpenPdf = (po) => {
-    if (!po.pdfPath) {
+    if (!po.poPdfPath) {
       alert("No PDF attached to this purchase order.");
       return;
     }
-    const url = `${API_BASE}/files?key=${encodeURIComponent(po.pdfPath)}`;
+    const url = `${API_BASE}/files?key=${encodeURIComponent(po.poPdfPath)}`;
     window.open(url, "_blank", "noopener,noreferrer");
   };
 
-  const handleFileChange = (e) => {
-    const file = e.target.files && e.target.files[0];
-    setNewPdfFile(file || null);
+  const handleViewWorkOrder = (po) => {
+    if (!po.workOrderId) {
+      alert("No related work order linked to this purchase order.");
+      return;
+    }
+    navigate(`/work-orders/${po.workOrderId}`);
   };
+
+  const filteredPurchaseOrders = purchaseOrders.filter((po) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+
+    const fieldsToSearch = [
+      po.poNumber,
+      po.customer,
+      po.siteLocation,
+      po.siteAddress,
+      po.workOrderNumber,
+      po.supplier,
+    ];
+
+    return fieldsToSearch.some((val) =>
+      (val || "").toString().toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="container mt-4">
@@ -261,7 +204,9 @@ export default function PurchaseOrders() {
             </div>
             <div className="col-md-4">
               <form onSubmit={handleSearchSubmit}>
-                <label className="form-label">Search (PO #, description, notes)</label>
+                <label className="form-label">
+                  Search (PO #, customer, site, WO #)
+                </label>
                 <div className="input-group">
                   <input
                     type="text"
@@ -286,100 +231,19 @@ export default function PurchaseOrders() {
               </button>
             </div>
           </div>
+          <div className="mt-3 text-muted" style={{ fontSize: "0.9rem" }}>
+            Purchase orders are derived from work orders (PO Number, Supplier,
+            and PO PDF). To add or change a PO, edit the related work order.
+          </div>
         </div>
       </div>
 
-      {/* Create New PO */}
-      <div className="card mb-4">
-        <div className="card-header">Create New Purchase Order</div>
-        <div className="card-body">
-          <form onSubmit={handleCreatePo}>
-            <div className="row g-3">
-              <div className="col-md-3">
-                <label className="form-label">Supplier</label>
-                <select
-                  className="form-select"
-                  value={newSupplier}
-                  onChange={(e) => setNewSupplier(e.target.value)}
-                >
-                  {SUPPLIERS.filter((s) => s !== "All Suppliers").map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="col-md-3">
-                <label className="form-label">PO Number</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={newPoNumber}
-                  onChange={(e) => setNewPoNumber(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="col-md-3">
-                <label className="form-label">Related Work Order ID</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  value={newRelatedWorkOrderId}
-                  onChange={(e) => setNewRelatedWorkOrderId(e.target.value)}
-                  placeholder="Optional"
-                />
-              </div>
-              <div className="col-md-3">
-                <label className="form-label">PO PDF</label>
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  className="form-control"
-                  onChange={handleFileChange}
-                />
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">Description</label>
-                <textarea
-                  className="form-control"
-                  rows={2}
-                  value={newDescription}
-                  onChange={(e) => setNewDescription(e.target.value)}
-                  placeholder="What is this PO for?"
-                />
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">Notes</label>
-                <textarea
-                  className="form-control"
-                  rows={2}
-                  value={newNotes}
-                  onChange={(e) => setNewNotes(e.target.value)}
-                  placeholder="Any additional notes..."
-                />
-              </div>
-              <div className="col-12 text-end">
-                <button
-                  type="submit"
-                  className="btn btn-success"
-                  disabled={saving}
-                >
-                  {saving ? "Saving..." : "Create Purchase Order"}
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-      </div>
-
-      {/* Error */}
       {error && (
         <div className="alert alert-danger" role="alert">
           {error}
         </div>
       )}
 
-      {/* List */}
       <div className="card">
         <div className="card-header d-flex justify-content-between align-items-center">
           <span>Purchase Orders List</span>
@@ -392,36 +256,41 @@ export default function PurchaseOrders() {
                 <tr>
                   <th>Supplier</th>
                   <th>PO #</th>
-                  <th>Description</th>
-                  <th>Status</th>
-                  <th>Related WO</th>
+                  <th>Customer</th>
+                  <th>Site</th>
+                  <th>Work Order #</th>
+                  <th>PO Status</th>
                   <th>Created</th>
                   <th>PDF</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {purchaseOrders.length === 0 && !loading && (
+                {filteredPurchaseOrders.length === 0 && !loading && (
                   <tr>
-                    <td colSpan="8" className="text-center py-3">
+                    <td colSpan="9" className="text-center py-3">
                       No purchase orders found.
                     </td>
                   </tr>
                 )}
-                {purchaseOrders.map((po) => (
+                {filteredPurchaseOrders.map((po) => (
                   <tr key={po.id}>
-                    <td>{po.supplier}</td>
-                    <td>{po.poNumber}</td>
-                    <td>{po.description}</td>
-                    <td>{po.status}</td>
-                    <td>{po.relatedWorkOrderId || "-"}</td>
+                    <td>{po.supplier || "-"}</td>
+                    <td>{po.poNumber || "-"}</td>
+                    <td>{po.customer || "-"}</td>
+                    <td>{po.siteLocation || po.siteAddress || "-"}</td>
+                    <td>{po.workOrderNumber || "-"}</td>
+                    <td>
+                      {po.poStatus ||
+                        (po.poPickedUp ? "Picked Up" : "On Order")}
+                    </td>
                     <td>
                       {po.createdAt
                         ? new Date(po.createdAt).toLocaleString()
                         : "-"}
                     </td>
                     <td>
-                      {po.pdfPath ? (
+                      {po.poPdfPath ? (
                         <button
                           type="button"
                           className="btn btn-sm btn-outline-primary"
@@ -434,16 +303,22 @@ export default function PurchaseOrders() {
                       )}
                     </td>
                     <td>
-                      {po.status !== "Picked Up" && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-secondary me-2"
+                        onClick={() => handleViewWorkOrder(po)}
+                      >
+                        View Work Order
+                      </button>
+                      {!po.poPickedUp && (
                         <button
                           type="button"
-                          className="btn btn-sm btn-success me-2"
+                          className="btn btn-sm btn-success"
                           onClick={() => handleMarkPickedUp(po)}
                         >
                           Mark Picked Up
                         </button>
                       )}
-                      {/* You can add more actions here later (edit/delete) */}
                     </td>
                   </tr>
                 ))}
