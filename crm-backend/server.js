@@ -13,7 +13,7 @@ const multerS3   = require('multer-s3');
 const bcrypt     = require('bcrypt');
 const jwt        = require('jsonwebtoken');
 
-// ✅ NEW: use axios so we don't depend on Node's global fetch() (EB can be Node < 18)
+// ✅ use axios so we don't depend on Node's global fetch() (EB can be Node < 18)
 const axios      = require('axios');
 
 process.env.TZ = process.env.APP_TZ || 'America/Chicago';
@@ -32,18 +32,18 @@ const {
   DEFAULT_WINDOW_MINUTES = '120',
   FILES_VERBOSE = process.env.FILES_VERBOSE || '0',
 
-  // ✅ ROUTE OPTIMIZATION
+  // ROUTE OPTIMIZATION
   GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '',
   ROUTE_START_ADDRESS = process.env.ROUTE_START_ADDRESS || '1513 Industrial Dr, Itasca, IL 60143',
   ROUTE_END_ADDRESS   = process.env.ROUTE_END_ADDRESS   || '1513 Industrial Dr, Itasca, IL 60143',
 
-  // ✅ ROUTE: limits/timeouts (Google optimize:true max is 23 waypoints)
+  // ROUTE: limits/timeouts (Google optimize:true max is 23 waypoints)
   ROUTE_MAX_WAYPOINTS = process.env.ROUTE_MAX_WAYPOINTS || '23',
   ROUTE_TIMEOUT_MS    = process.env.ROUTE_TIMEOUT_MS    || '20000',
 
-  // ✅ AUTO STATUS RULE
+  // AUTO STATUS RULE
   AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS = process.env.AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS || '48',
-  // ✅ CHANGED DEFAULT HERE: 60 minutes (less DB activity)
+  // Interval: 60 minutes (less DB activity)
   AUTO_NEW_TO_NEEDS_SCHEDULED_INTERVAL_MINUTES = process.env.AUTO_NEW_TO_NEEDS_SCHEDULED_INTERVAL_MINUTES || '60',
   AUTO_NEW_TO_NEEDS_SCHEDULED_ENABLED = process.env.AUTO_NEW_TO_NEEDS_SCHEDULED_ENABLED || '1',
 } = process.env;
@@ -70,7 +70,7 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(bodyParser.json({ limit: '20mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '20mb' }));
 
-// CRITICAL: also accept text/plain bodies (many front-ends send this by mistake)
+// Also accept text/plain bodies
 app.use(bodyParser.text({ type: 'text/plain', limit: '1mb' }));
 
 // Coerce text bodies to objects the endpoints can use
@@ -277,9 +277,7 @@ function displayStatusOrDefault(s) {
 const SCHEMA = {
   hasAssignedTo: false,
   columnsReady: true,
-
-  // ✅ Date Created support
-  createdAtCol: null, // 'createdAt' or 'created_at' (or null until detected)
+  createdAtCol: null,
 };
 
 async function columnExists(table, col) {
@@ -298,8 +296,8 @@ async function ensureCols() {
     { name: 'pdfPath',           type: 'VARCHAR(255) NULL' },
     { name: 'estimatePdfPath',   type: 'VARCHAR(255) NULL' },
     { name: 'poPdfPath',         type: 'VARCHAR(255) NULL' },
-    { name: 'poSupplier',        type: 'VARCHAR(128) NULL' },           // ← NEW
-    { name: 'poPickedUp',        type: 'TINYINT(1) NOT NULL DEFAULT 0' }, // ← NEW
+    { name: 'poSupplier',        type: 'VARCHAR(128) NULL' },
+    { name: 'poPickedUp',        type: 'TINYINT(1) NOT NULL DEFAULT 0' },
     { name: 'photoPath',         type: 'MEDIUMTEXT NULL' },
     { name: 'notes',             type: 'TEXT NULL' },
     { name: 'billingPhone',      type: 'VARCHAR(32) NULL' },
@@ -353,7 +351,7 @@ async function ensureCols() {
   try { SCHEMA.hasAssignedTo = await columnExists('work_orders', 'assignedTo'); }
   catch (e) { console.warn('⚠️ assignedTo detect:', e.message); }
 
-  // ✅ Date Created detection / ensure
+  // Date Created detection / ensure
   try {
     const hasCreatedAt  = await columnExists('work_orders', 'createdAt');
     const hasCreated_at = await columnExists('work_orders', 'created_at');
@@ -381,7 +379,7 @@ async function ensureCols() {
 }
 ensureCols().catch(e => console.warn('⚠️ ensureCols:', e.message));
 
-// ✅ Safe query builder so we don’t crash if assignedTo column is missing
+// Safe query builder so we don’t crash if assignedTo column is missing
 function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', limitSql = '' } = {}) {
   const hasA = !!SCHEMA.hasAssignedTo;
   const join = hasA ? 'LEFT JOIN users u ON w.assignedTo = u.id' : '';
@@ -402,7 +400,7 @@ function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', l
   `;
 }
 
-// ─── ✅ AUTO STATUS TIMER JOB: New → Needs to be Scheduled after 48 hours ────
+// ─── AUTO STATUS TIMER JOB ───────────────────────────────────────────────────
 function envOn(v, def = true) {
   if (v == null) return def;
   const s = String(v).trim().toLowerCase();
@@ -416,13 +414,8 @@ async function autoMoveNewToNeedsScheduled() {
     const hours = Math.max(1, Number(AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS) || 48);
     const createdCol = SCHEMA.createdAtCol || 'createdAt';
 
-    // If schema detection hasn’t run yet, we skip safely
     if (!SCHEMA.createdAtCol) return;
 
-    // Move ONLY:
-    // - status exactly 'New'
-    // - older than N hours
-    // - not already scheduled
     const sql = `
       UPDATE work_orders
          SET status = 'Needs to be Scheduled'
@@ -445,16 +438,14 @@ function startAutoStatusJob() {
   const minutes = Math.max(5, Number(AUTO_NEW_TO_NEEDS_SCHEDULED_INTERVAL_MINUTES) || 60);
   const ms = minutes * 60 * 1000;
 
-  // Run once shortly after boot (gives ensureCols time to detect createdAt)
   setTimeout(() => {
     autoMoveNewToNeedsScheduled().catch(() => {});
-  }, 15_000).unref?.();
+  }, 15000).unref?.();
 
   const t = setInterval(() => {
     autoMoveNewToNeedsScheduled().catch(() => {});
   }, ms);
 
-  // Don’t keep Node alive solely for this interval if nothing else is running
   if (typeof t.unref === 'function') t.unref();
 
   console.log(`🕒 Auto-status job enabled: checking every ${minutes} minute(s), threshold=${AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS}h`);
@@ -660,14 +651,13 @@ const isTruthy = (v) => {
 };
 const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
 
-// NEW: helper for Purchase Orders status
 function poStatusFromRow(r) {
   return Number(r.poPickedUp || 0) ? 'Picked Up' : 'On Order';
 }
 
-// ─── SEARCH/LIST/CRUD ───────────────────────────────────────────────────────
+// ─── WORK ORDERS SEARCH/LIST/CRUD ───────────────────────────────────────────
 
-// LIST ALL — (frontend dashboard calls this)
+// LIST ALL
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
     const [raw] = await db.execute(workOrdersSelectSQL({ orderSql: 'ORDER BY w.id DESC' }));
@@ -679,7 +669,7 @@ app.get('/work-orders', authenticate, async (req, res) => {
   }
 });
 
-// ✅ Unscheduled bar — show only the statuses you want
+// Unscheduled bar
 app.get('/work-orders/unscheduled', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute(
@@ -799,7 +789,7 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
   }
 });
 
-// GET single by ID — (frontend "View Work Order" page)
+// GET single by ID
 app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -822,7 +812,7 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
   }
 });
 
-// CREATE
+// CREATE work order
 app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -834,8 +824,8 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       assignedTo,
       billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
       notes = null,
-      poSupplier = null,          // NEW: supplier can also be set when creating WO
-      poPickedUp = 0,             // NEW: default 0
+      poSupplier = null,
+      poPickedUp = 0,
       scheduledDate: scheduledDateRaw = null,
       endTime = null,
       timeWindow = null
@@ -872,7 +862,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       'workOrderNumber','poNumber','customer','siteLocation','siteAddress','billingAddress',
       'problemDescription','status','pdfPath','estimatePdfPath','poPdfPath','photoPath',
       'billingPhone','sitePhone','customerPhone','customerEmail','notes',
-      'poSupplier','poPickedUp',           // NEW
+      'poSupplier','poPickedUp',
       'scheduledDate','scheduledEnd'
     ];
     const vals = [
@@ -903,7 +893,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
   }
 });
 
-// EDIT
+// EDIT work order
 app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMulter(upload.any()), async (req, res) => {
   try {
     if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
@@ -993,8 +983,8 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       customerPhone = existing.customerPhone,
       customerEmail = existing.customerEmail,
       notes = existing.notes,
-      poSupplier = existing.poSupplier,                     // NEW
-      poPickedUp = existing.poPickedUp,                     // NEW
+      poSupplier = existing.poSupplier,
+      poPickedUp = existing.poPickedUp,
       scheduledDate: scheduledDateRaw = undefined,
       endTime = null,
       timeWindow = null
@@ -1021,7 +1011,7 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
                  SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
                      problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
                      billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?,
-                     poSupplier=?,poPickedUp=?,                         -- NEW
+                     poSupplier=?,poPickedUp=?,
                      scheduledDate=?,scheduledEnd=?`;
     const params = [
       workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
@@ -1191,7 +1181,7 @@ app.put('/purchase-orders/:id/mark-picked-up', authenticate, requireNumericParam
 app.get('/calendar/events', authenticate, async (req, res) => {
   try {
     const startQ = String(req.query.start || '').trim();
-    const endQ   = String(req.query.end   || '').trim();
+       const endQ   = String(req.query.end   || '').trim();
 
     const asSqlDayStart = (dStr) => {
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dStr);
@@ -1256,15 +1246,7 @@ app.get('/calendar/events', authenticate, async (req, res) => {
   }
 });
 
-// ─── ✅ BEST ROUTE GENERATOR (GET + POST) ───────────────────────────────────
-// GET  /routes/best?date=YYYY-MM-DD&start=...&end=...
-// POST /routes/best  { start: '...', end: '...', stops: [{id,address,label}], travelMode: 'driving' }
-
-// NOTE: This implementation fixes 3 common issues:
-// 1) Works on Node < 18 (no reliance on global fetch) by using axios
-// 2) Prevents Google MAX_WAYPOINTS_EXCEEDED by trimming to 23 waypoints (env-configurable)
-// 3) Uses departure_time=now for traffic-aware "most efficient" routing
-
+// ─── ROUTE OPTIMIZER (BEST ROUTE) ───────────────────────────────────────────
 function sqlDayRange(dateStrYYYYMMDD) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStrYYYYMMDD || '').trim());
   const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date();
@@ -1319,11 +1301,9 @@ async function handleBestRoute(req, res) {
 
     let stops = [];
     if (Array.isArray(b.stops) && b.stops.length) {
-      // POST: stops are provided by frontend
       stops = normalizeStops(b.stops).filter(s => s.address);
     } else {
-      // GET: build stops from scheduled work orders for a day (Today tab can call date=today)
-      const dateQ = String((b.date ?? req.query.date) || '').trim(); // YYYY-MM-DD optional
+      const dateQ = String((b.date ?? req.query.date) || '').trim();
       const { start, end, ymd } = sqlDayRange(dateQ);
 
       const [rows] = await db.execute(
@@ -1341,7 +1321,6 @@ async function handleBestRoute(req, res) {
         const addr = cleanAddr(r.siteAddress || r.siteLocation || '');
         if (!addr) continue;
 
-        // avoid origin/destination duplicates
         const lk = addr.toLowerCase();
         if (lk === startAddress.toLowerCase()) continue;
         if (lk === endAddress.toLowerCase()) continue;
@@ -1362,7 +1341,6 @@ async function handleBestRoute(req, res) {
       res.setHeader('X-Route-Date', ymd);
     }
 
-    // Fallback map URL in the existing order
     const fallbackMapsUrl = mapsUrlForStops(startAddress, endAddress, stops.map(s => s.address));
 
     if (stops.length < 2) {
@@ -1381,7 +1359,6 @@ async function handleBestRoute(req, res) {
       });
     }
 
-    // ✅ Enforce Google max waypoints for optimize:true
     const maxWpts = Math.max(1, Number(ROUTE_MAX_WAYPOINTS) || 23);
     let trimmed = false;
     if (stops.length > maxWpts) {
@@ -1389,7 +1366,6 @@ async function handleBestRoute(req, res) {
       trimmed = true;
     }
 
-    // If no API key, return unoptimized but consistent response
     if (!GOOGLE_MAPS_API_KEY) {
       return res.json({
         ok: true,
@@ -1406,7 +1382,6 @@ async function handleBestRoute(req, res) {
       });
     }
 
-    // Google Directions optimize:true (traffic-aware)
     const waypointAddresses = stops.map(s => s.address);
     const wpParam = `optimize:true|${waypointAddresses.join('|')}`;
 
@@ -1470,7 +1445,7 @@ async function handleBestRoute(req, res) {
     const legs = Array.isArray(route.legs) ? route.legs : [];
 
     const orderedStops = orderedStopsBase.map((s, idx) => {
-      const leg = legs[idx]; // origin->stop1 is leg 0
+      const leg = legs[idx];
       return {
         ...s,
         legDistanceMeters: leg?.distance?.value ?? null,
@@ -1509,7 +1484,7 @@ async function handleBestRoute(req, res) {
 app.get('/routes/best', authenticate, handleBestRoute);
 app.post('/routes/best', authenticate, handleBestRoute);
 
-// ─── KEY NORMALIZATION / FILES / DELETE (UNCHANGED FROM YOUR VERSION) ───────
+// ─── KEY NORMALIZATION / FILES ──────────────────────────────────────────────
 function logFiles(...args){ if (FILES_VERBOSE === '1') console.log('[files]', ...args); }
 
 function normalizeStoredKey(raw) {
@@ -1588,7 +1563,7 @@ app.post('/work-orders/fix-keys', authenticate, authorize('admin','dispatcher'),
   } catch (e) { console.error('bulk fix-keys error:', e); res.status(500).json({ error: 'Failed to bulk fix keys' }); }
 });
 
-// ─── FILE RESOLVER (S3 or local) ────────────────────────────────────────────
+// FILE RESOLVER (S3 or local)
 app.get('/files', async (req, res) => {
   try {
     const raw = req.query.key;
