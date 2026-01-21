@@ -22,6 +22,15 @@ const STATUS_OPTIONS = [
 // Only show these techs in ViewWorkOrder tech dropdown
 const ALLOWED_TECH_USERNAMES = new Set(["Jeff", "jeffsr", "Adin"]);
 
+// Supplier options (keep in sync with PurchaseOrders.js)
+const SUPPLIER_OPTIONS = [
+  "Chicago Tempered",
+  "CRL",
+  "Oldcastle",
+  "Casco",
+  "Other",
+];
+
 /* ---------- auth header (match WorkOrders.js) ---------- */
 const authHeaders = () => {
   const token = localStorage.getItem("jwt");
@@ -44,7 +53,8 @@ const isPdfFile = (file) =>
 
 /* ---------- Small helpers ---------- */
 const isPdfKey = (key) => /\.pdf(\?|$)/i.test(key);
-const urlFor = (relPath) => `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
+const urlFor = (relPath) =>
+  `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
 const pdfThumbUrl = (relPath) => `${urlFor(relPath)}#page=1&view=FitH`;
 
 const fileNameFromKey = (key) => (key || "").split("/").pop() || key || "";
@@ -54,7 +64,47 @@ const isImageKey = (key) =>
 // Weak heuristic only (your filenames are random, so this won’t catch everything)
 const isLikelyDrawNoteByName = (key) => {
   const name = fileNameFromKey(key).toLowerCase();
-  return name.includes("drawing") || name.includes("draw") || name.includes("sketch") || name.includes("note");
+  return (
+    name.includes("drawing") ||
+    name.includes("draw") ||
+    name.includes("sketch") ||
+    name.includes("note")
+  );
+};
+
+// Try to infer supplier from PO filename
+const inferSupplierFromFilename = (name) => {
+  if (!name) return "";
+  const n = name.toLowerCase();
+
+  // tweak these if your naming conventions change
+  if (n.includes("chicago") && n.includes("temper")) return "Chicago Tempered";
+  if (
+    n.includes("crl") ||
+    n.includes("c.r. laurence") ||
+    n.includes("c r laurence")
+  )
+    return "CRL";
+  if (n.includes("oldcastle")) return "Oldcastle";
+  if (n.includes("casco")) return "Casco";
+  return "";
+};
+
+// Try to infer PO number from filename
+// e.g. "PO_473_from_First_Class_Glass__Mirror_Inc._11168.pdf" -> "473"
+const inferPoNumberFromFilename = (name) => {
+  if (!name) return null;
+  const base = name.replace(/\.[^/.]+$/, ""); // strip extension
+
+  // Look for "PO_###" / "PO-###" / "PO ###"
+  let m = base.match(/po[_\-\s]*(\d{2,})/i);
+  if (m && m[1]) return m[1];
+
+  // Fallback: first group of 3+ digits
+  m = base.match(/(\d{3,})/);
+  if (m && m[1]) return m[1];
+
+  return null;
 };
 
 // localStorage category override (per work order)
@@ -110,7 +160,14 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
 
   if (!editing) {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
         <div>{initialPo ? initialPo : <em>None</em>}</div>
         <button className="btn btn-primary" onClick={() => setEditing(true)}>
           {initialPo ? "Update PO #" : "Add PO #"}
@@ -120,19 +177,35 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+      }}
+    >
       <input
         type="text"
         value={po}
         onChange={(e) => setPo(e.target.value)}
         className="form-input"
         placeholder="Enter PO # (optional)"
-        style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
+        style={{
+          height: 36,
+          borderRadius: 8,
+          border: "1px solid #cbd5e1",
+          padding: "0 10px",
+        }}
       />
       <button className="btn btn-primary" disabled={saving} onClick={save}>
         {saving ? "Saving…" : "Save"}
       </button>
-      <button className="btn btn-ghost" disabled={saving} onClick={() => setEditing(false)}>
+      <button
+        className="btn btn-ghost"
+        disabled={saving}
+        onClick={() => setEditing(false)}
+      >
         Cancel
       </button>
     </div>
@@ -227,7 +300,11 @@ function Lightbox({ open, onClose, kind, src, title }) {
           </strong>
           <div style={{ display: "flex", gap: 8 }}>
             {kind === "image" && (
-              <button className="btn btn-light" onClick={handleDownload} disabled={downloading}>
+              <button
+                className="btn btn-light"
+                onClick={handleDownload}
+                disabled={downloading}
+              >
                 {downloading ? "Preparing…" : "Download"}
               </button>
             )}
@@ -302,9 +379,17 @@ function FileTile({ kind, href, fileName, onDelete, onExpand, extraAction }) {
     >
       <div style={{ width: "100%", height: 200, background: "#f8fafc" }}>
         {isPdf ? (
-          <iframe title={fileName} src={href} style={{ width: "100%", height: "100%", border: "none" }} />
+          <iframe
+            title={fileName}
+            src={href}
+            style={{ width: "100%", height: "100%", border: "none" }}
+          />
         ) : (
-          <img src={href} alt={fileName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <img
+            src={href}
+            alt={fileName}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
         )}
       </div>
 
@@ -321,14 +406,21 @@ function FileTile({ kind, href, fileName, onDelete, onExpand, extraAction }) {
         </a>
       </div>
 
-      {extraAction ? <div style={{ padding: "0 8px 8px 8px" }}>{extraAction}</div> : null}
+      {extraAction ? (
+        <div style={{ padding: "0 8px 8px 8px" }}>{extraAction}</div>
+      ) : null}
 
       <div style={{ display: "flex", gap: 6, padding: "0 8px 8px 8px" }}>
         <button className="btn btn-light" onClick={onExpand} style={{ flex: 1 }}>
           Expand
         </button>
         {onDelete && (
-          <button className="btn btn-danger" onClick={onDelete} title="Delete" style={{ flex: "0 0 auto" }}>
+          <button
+            className="btn btn-danger"
+            onClick={onDelete}
+            title="Delete"
+            style={{ flex: "0 0 auto" }}
+          >
             ✕
           </button>
         )}
@@ -394,7 +486,8 @@ function parseNotesArrayOrText(raw) {
       }
       continue;
     }
-    if (current) current.text = (current.text ? current.text + "\n" : "") + line;
+    if (current)
+      current.text = (current.text ? current.text + "\n" : "") + line;
   }
   if (current) entries.push({ ...current });
 
@@ -436,18 +529,36 @@ export default function ViewWorkOrder() {
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
 
+  // PO supplier tracked locally for dropdown + inference
+  const [poSupplier, setPoSupplier] = useState("");
+
   // Draw-note overrides
   const [drawNoteOverrides, setDrawNoteOverrides] = useState(new Set());
 
-  const [lightbox, setLightbox] = useState({ open: false, kind: "pdf", src: "", title: "" });
-  const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
-  const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
+  const [lightbox, setLightbox] = useState({
+    open: false,
+    kind: "pdf",
+    src: "",
+    title: "",
+  });
+  const openLightbox = (kind, src, title) =>
+    setLightbox({ open: true, kind, src, title });
+  const closeLightbox = () =>
+    setLightbox((l) => ({
+      ...l,
+      open: false,
+    }));
 
   const fetchTechUsers = async () => {
     try {
-      const res = await api.get("/users", { params: { assignees: 1 }, headers: authHeaders() });
+      const res = await api.get("/users", {
+        params: { assignees: 1 },
+        headers: authHeaders(),
+      });
       const rows = Array.isArray(res.data) ? res.data : [];
-      const filtered = rows.filter((u) => ALLOWED_TECH_USERNAMES.has(String(u.username || "")));
+      const filtered = rows.filter((u) =>
+        ALLOWED_TECH_USERNAMES.has(String(u.username || ""))
+      );
       setTechUsers(filtered);
     } catch (e) {
       console.error("Error fetching assignable tech users:", e);
@@ -457,7 +568,9 @@ export default function ViewWorkOrder() {
 
   const fetchWorkOrder = async () => {
     try {
-      const response = await api.get(`/work-orders/${id}`, { headers: authHeaders() });
+      const response = await api.get(`/work-orders/${id}`, {
+        headers: authHeaders(),
+      });
       const data = response.data || null;
       setWorkOrder(data);
 
@@ -465,10 +578,17 @@ export default function ViewWorkOrder() {
 
       // IMPORTANT: assignedTo is numeric ID in your backend
       const assignedToVal = data?.assignedTo ?? "";
-      setLocalAssignedTo(assignedToVal === null || assignedToVal === undefined ? "" : String(assignedToVal));
+      setLocalAssignedTo(
+        assignedToVal === null || assignedToVal === undefined
+          ? ""
+          : String(assignedToVal)
+      );
 
       // Load draw-note overrides for this WO
       setDrawNoteOverrides(loadDrawNoteOverrides(id));
+
+      // Initialize PO supplier from backend value
+      setPoSupplier(data?.poSupplier || "");
     } catch (error) {
       console.error("⚠️ Error fetching work order:", error);
     }
@@ -486,7 +606,11 @@ export default function ViewWorkOrder() {
   }, [workOrder]);
 
   const displayNotes = useMemo(() => {
-    const withSortKey = parsedNotes.map((n, i) => ({ ...n, __idx: i, __t: n.createdAt ? Date.parse(n.createdAt) || 0 : 0 }));
+    const withSortKey = parsedNotes.map((n, i) => ({
+      ...n,
+      __idx: i,
+      __t: n.createdAt ? Date.parse(n.createdAt) || 0 : 0,
+    }));
     return withSortKey.sort((a, b) => b.__t - a.__t);
   }, [parsedNotes]);
 
@@ -513,6 +637,8 @@ export default function ViewWorkOrder() {
     customerEmail,
     estimatePdfPath,
     poPdfPath,
+    poSupplier: woPoSupplier,
+    poPickedUp,
     id: woId,
   } = workOrder;
 
@@ -528,11 +654,14 @@ export default function ViewWorkOrder() {
     .map((p) => p.trim())
     .filter(Boolean);
 
-  const otherPdfAttachments = attachments.filter(isPdfKey).filter((p) => p !== pdfPath && p !== estimatePdfPath && p !== poPdfPath);
+  const otherPdfAttachments = attachments
+    .filter(isPdfKey)
+    .filter((p) => p !== pdfPath && p !== estimatePdfPath && p !== poPdfPath);
   const allImageAttachments = attachments.filter(isImageKey);
 
   // Determine draw notes using overrides first, then weak filename heuristic
-  const isDrawNote = (key) => drawNoteOverrides.has(key) || isLikelyDrawNoteByName(key);
+  const isDrawNote = (key) =>
+    drawNoteOverrides.has(key) || isLikelyDrawNoteByName(key);
 
   const drawNoteImages = allImageAttachments.filter((k) => isDrawNote(k));
   const photoImages = allImageAttachments.filter((k) => !isDrawNote(k));
@@ -649,9 +778,13 @@ export default function ViewWorkOrder() {
       </tr>
       <tr>
         <th class="label">Address</th>
-        <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(
+          billingAddress || ""
+        )}</pre></td>
         <th class="label">Address</th>
-        <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(
+          siteAddr
+        )}</pre></td>
       </tr>
       <tr>
         <th class="label">Phone</th>
@@ -661,7 +794,9 @@ export default function ViewWorkOrder() {
       </tr>
     </table>
 
-    <div class="desc-title">Problem Description: ${safe(problemDescription || "")}</div>
+    <div class="desc-title">Problem Description: ${safe(
+      problemDescription || ""
+    )}</div>
     <div class="desc-box"></div>
 
     <div class="auth-title">AUTHORIZATION TO PAY</div>
@@ -713,7 +848,9 @@ export default function ViewWorkOrder() {
       .slice()
       .reverse()
       .map((n) => {
-        const ts = n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "";
+        const ts = n.createdAt
+          ? moment(n.createdAt).format("YYYY-MM-DD HH:mm")
+          : "";
         const by = n.by ? ` — ${n.by}` : "";
         return `${ts}${by}\n${n.text || ""}`.trim();
       })
@@ -730,7 +867,9 @@ export default function ViewWorkOrder() {
         return `
           <div class="page">
             <div class="page-hdr">
-              <div><b>Work Order:</b> ${safe(cleanedWo)} &nbsp;&nbsp; <b>PO #:</b> ${safe(agreementNo)}</div>
+              <div><b>Work Order:</b> ${safe(
+                cleanedWo
+              )} &nbsp;&nbsp; <b>PO #:</b> ${safe(agreementNo)}</div>
               <div class="small">${safe(name || `photo-${idx + 1}`)}</div>
             </div>
             <div class="imgwrap">
@@ -748,7 +887,9 @@ export default function ViewWorkOrder() {
         return `
           <div class="page">
             <div class="page-hdr">
-              <div><b>Draw Note</b> — <b>WO #:</b> ${safe(cleanedWo)} &nbsp;&nbsp; <b>PO #:</b> ${safe(agreementNo)}</div>
+              <div><b>Draw Note</b> — <b>WO #:</b> ${safe(
+                cleanedWo
+              )} &nbsp;&nbsp; <b>PO #:</b> ${safe(agreementNo)}</div>
               <div class="small">${safe(name || `draw-${idx + 1}`)}</div>
             </div>
             <div class="imgwrap">
@@ -832,9 +973,13 @@ export default function ViewWorkOrder() {
       </tr>
       <tr>
         <th class="label">Address</th>
-        <td><pre style="margin:0;white-space:pre-wrap">${safe(billingAddress || "")}</pre></td>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(
+          billingAddress || ""
+        )}</pre></td>
         <th class="label">Address</th>
-        <td><pre style="margin:0;white-space:pre-wrap">${safe(siteAddr)}</pre></td>
+        <td><pre style="margin:0;white-space:pre-wrap">${safe(
+          siteAddr
+        )}</pre></td>
       </tr>
       <tr>
         <th class="label">Phone</th>
@@ -950,6 +1095,24 @@ export default function ViewWorkOrder() {
     try {
       const form = new FormData();
       form.append("poPdf", file);
+      // ensure this becomes the canonical PO PDF even if an old one exists
+      form.append("setAsPoPdf", "1");
+
+      const fileName = file.name || "";
+      const currentSupplier = poSupplier || woPoSupplier || "";
+      const inferredSupplier = inferSupplierFromFilename(fileName);
+      const inferredPoNum = inferPoNumberFromFilename(fileName);
+
+      // Only auto-fill supplier if none set yet and we can infer it
+      if (!currentSupplier && inferredSupplier) {
+        form.append("poSupplier", inferredSupplier);
+      }
+
+      // Only auto-fill PO # if WO doesn't already have one and we can infer
+      if (!cleanedPo && inferredPoNum) {
+        form.append("poNumber", inferredPoNum);
+      }
+
       await api.put(`/work-orders/${id}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
@@ -968,7 +1131,9 @@ export default function ViewWorkOrder() {
     if (!files.length) return;
 
     const bad = files.find((file) => {
-      const isImage = file.type?.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(file.name || "");
+      const isImage =
+        file.type?.startsWith("image/") ||
+        /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(file.name || "");
       return !isImage;
     });
 
@@ -1022,12 +1187,19 @@ export default function ViewWorkOrder() {
     setStatusSaving(true);
     try {
       try {
-        await api.put(`/work-orders/${id}/status`, { status: newStatus }, { headers: authHeaders() });
+        await api.put(
+          `/work-orders/${id}/status`,
+          { status: newStatus },
+          { headers: authHeaders() }
+        );
       } catch {
         const form = new FormData();
         form.append("status", newStatus);
         await api.put(`/work-orders/${id}/edit`, form, {
-          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+          headers: {
+            "Content-Type": "multipart/form-data",
+            ...authHeaders(),
+          },
         });
       }
       await fetchWorkOrder();
@@ -1052,13 +1224,21 @@ export default function ViewWorkOrder() {
         await api.put(
           `/work-orders/${id}/assign`,
           { assignedTo: nextTechId || null },
-          { headers: { "Content-Type": "application/json", ...authHeaders() } }
+          {
+            headers: {
+              "Content-Type": "application/json",
+              ...authHeaders(),
+            },
+          }
         );
       } catch {
         const form = new FormData();
         form.append("assignedTo", nextTechId || "");
         await api.put(`/work-orders/${id}/edit`, form, {
-          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+          headers: {
+            "Content-Type": "multipart/form-data",
+            ...authHeaders(),
+          },
         });
       }
       await fetchWorkOrder();
@@ -1071,16 +1251,44 @@ export default function ViewWorkOrder() {
     }
   };
 
+  /* ---------- PO Supplier change ---------- */
+  const handlePoSupplierChange = async (e) => {
+    const next = e.target.value;
+    const prev = poSupplier || woPoSupplier || "";
+    setPoSupplier(next);
+
+    try {
+      const form = new FormData();
+      form.append("poSupplier", next || "");
+      await api.put(`/work-orders/${id}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+      });
+      await fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error updating PO supplier:", error);
+      setPoSupplier(prev); // revert
+      alert(error?.response?.data?.error || "Failed to update PO supplier.");
+    }
+  };
+
   /* ---------- Notes (add + delete) ---------- */
   const handleAddNote = async () => {
     const text = newNote.trim();
     if (!text) return;
 
     try {
-      await api.put(`/work-orders/${id}/notes`, { notes: text, append: true }, { headers: { "Content-Type": "application/json", ...authHeaders() } });
+      await api.put(
+        `/work-orders/${id}/notes`,
+        { notes: text, append: true },
+        { headers: { "Content-Type": "application/json", ...authHeaders() } }
+      );
     } catch (err1) {
       try {
-        await api.put(`/work-orders/${id}/notes`, { text, append: true }, { headers: { "Content-Type": "application/json", ...authHeaders() } });
+        await api.put(
+          `/work-orders/${id}/notes`,
+          { text, append: true },
+          { headers: { "Content-Type": "application/json", ...authHeaders() } }
+        );
       } catch (err2) {
         console.error("Add note failed:", err1, err2);
         const msg =
@@ -1103,12 +1311,21 @@ export default function ViewWorkOrder() {
     if (!window.confirm("Delete this note?")) return;
 
     try {
-      const byOldest = [...parsedNotes].sort((a, b) => (a.createdAt ? Date.parse(a.createdAt) : 0) - (b.createdAt ? Date.parse(b.createdAt) : 0));
+      const byOldest = [...parsedNotes].sort(
+        (a, b) =>
+          (a.createdAt ? Date.parse(a.createdAt) : 0) -
+          (b.createdAt ? Date.parse(b.createdAt) : 0)
+      );
       const target = displayNotes[displayIdx];
       if (!target) return;
 
       const kept = byOldest.filter(
-        (e) => !(e.createdAt === target.createdAt && e.text === target.text && (e.by || "") === (target.by || ""))
+        (e) =>
+          !(
+            e.createdAt === target.createdAt &&
+            e.text === target.text &&
+            (e.by || "") === (target.by || "")
+          )
       );
 
       const newBody = kept.length ? formatNotesText(kept) : "";
@@ -1161,19 +1378,31 @@ export default function ViewWorkOrder() {
 
   return (
     <div className="view-container">
-      <Lightbox open={lightbox.open} onClose={closeLightbox} kind={lightbox.kind} src={lightbox.src} title={lightbox.title} />
+      <Lightbox
+        open={lightbox.open}
+        onClose={closeLightbox}
+        kind={lightbox.kind}
+        src={lightbox.src}
+        title={lightbox.title}
+      />
 
       <div className="view-card">
         <div className="view-header-row">
           <h2 className="view-title">Work Order Details</h2>
-          <div className="view-actions" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div
+            className="view-actions"
+            style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
+          >
             <button className="btn btn-outline" onClick={handlePrint}>
               🖨️ Print Work Order
             </button>
             <button className="btn btn-primary" onClick={handlePrintToQuote}>
               🧾 Print to Quote
             </button>
-            <button className="back-btn" onClick={() => navigate("/work-orders")}>
+            <button
+              className="back-btn"
+              onClick={() => navigate("/work-orders")}
+            >
               ← Back to List
             </button>
           </div>
@@ -1205,7 +1434,12 @@ export default function ViewWorkOrder() {
           <li className="detail-item">
             <span className="detail-label">Status:</span>
             <span className="detail-value">
-              <select value={localStatus} onChange={handleStatusChange} disabled={statusSaving} style={{ padding: 6 }}>
+              <select
+                value={localStatus}
+                onChange={handleStatusChange}
+                disabled={statusSaving}
+                style={{ padding: 6 }}
+              >
                 <option value="" disabled>
                   Select status…
                 </option>
@@ -1215,7 +1449,9 @@ export default function ViewWorkOrder() {
                   </option>
                 ))}
               </select>
-              {statusSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
+              {statusSaving && (
+                <small style={{ marginLeft: 8 }}>Saving…</small>
+              )}
             </span>
           </li>
 
@@ -1223,7 +1459,12 @@ export default function ViewWorkOrder() {
           <li className="detail-item">
             <span className="detail-label">Assigned Tech:</span>
             <span className="detail-value">
-              <select value={localAssignedTo} onChange={handleAssignedTechChange} disabled={techSaving} style={{ padding: 6, minWidth: 220 }}>
+              <select
+                value={localAssignedTo}
+                onChange={handleAssignedTechChange}
+                disabled={techSaving}
+                style={{ padding: 6, minWidth: 220 }}
+              >
                 <option value="">Unassigned</option>
                 {techUsers.map((t) => (
                   <option key={t.id} value={String(t.id)}>
@@ -1231,7 +1472,9 @@ export default function ViewWorkOrder() {
                   </option>
                 ))}
               </select>
-              {techSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
+              {techSaving && (
+                <small style={{ marginLeft: 8 }}>Saving…</small>
+              )}
             </span>
           </li>
 
@@ -1253,20 +1496,28 @@ export default function ViewWorkOrder() {
           </li>
           <li className="detail-item">
             <span className="detail-label">Site Address:</span>
-            <span className="detail-value pre-wrap">{siteAddress || "—"}</span>
+            <span className="detail-value pre-wrap">
+              {siteAddress || "—"}
+            </span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Billing Address:</span>
-            <span className="detail-value pre-wrap">{billingAddress || "—"}</span>
+            <span className="detail-value pre-wrap">
+              {billingAddress || "—"}
+            </span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Problem Description:</span>
-            <span className="detail-value pre-wrap">{problemDescription || "—"}</span>
+            <span className="detail-value pre-wrap">
+              {problemDescription || "—"}
+            </span>
           </li>
           <li className="detail-item">
             <span className="detail-label">Scheduled Date:</span>
             <span className="detail-value">
-              {scheduledDate ? moment(scheduledDate).format("YYYY-MM-DD HH:mm") : "Not Scheduled"}
+              {scheduledDate
+                ? moment(scheduledDate).format("YYYY-MM-DD HH:mm")
+                : "Not Scheduled"}
             </span>
           </li>
 
@@ -1281,30 +1532,81 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Sign-Off Sheet PDF</h3>
           {signedHref ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-              <FileTile kind="pdf" href={signedHref} fileName={(pdfPath || "").split("/").pop() || "signed.pdf"} onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")} />
+            <div
+              className="attachments"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                gap: 12,
+              }}
+            >
+              <FileTile
+                kind="pdf"
+                href={signedHref}
+                fileName={(pdfPath || "").split("/").pop() || "signed.pdf"}
+                onExpand={() =>
+                  openLightbox("pdf", signedHref, "Signed PDF")
+                }
+              />
             </div>
           ) : (
             <div>
               <p className="empty-text">No PDF attached.</p>
               <label className="btn">
                 {busyReplace ? "Uploading…" : "Upload Signed PDF"}
-                <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleReplacePdfUpload}
+                  style={{ display: "none" }}
+                  disabled={busyReplace}
+                />
               </label>
             </div>
           )}
 
           {signedHref && (
-            <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <a className="btn btn-light" href={signedHref} target="_blank" rel="noreferrer">
+            <div
+              className="mt-2"
+              style={{
+                display: "flex",
+                gap: 12,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <a
+                className="btn btn-light"
+                href={signedHref}
+                target="_blank"
+                rel="noreferrer"
+              >
                 Open in new tab
               </a>
               <label className="btn">
                 {busyReplace ? "Replacing…" : "Replace Signed PDF"}
-                <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleReplacePdfUpload}
+                  style={{ display: "none" }}
+                  disabled={busyReplace}
+                />
               </label>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <input type="checkbox" checked={keepOldInAttachments} onChange={(e) => setKeepOldInAttachments(e.target.checked)} />
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={keepOldInAttachments}
+                  onChange={(e) =>
+                    setKeepOldInAttachments(e.target.checked)
+                  }
+                />
                 Move existing signed PDF to attachments
               </label>
             </div>
@@ -1315,17 +1617,46 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Estimate PDF</h3>
           {estimateHref ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-              <FileTile kind="pdf" href={estimateHref} fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"} onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")} />
+            <div
+              className="attachments"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                gap: 12,
+              }}
+            >
+              <FileTile
+                kind="pdf"
+                href={estimateHref}
+                fileName={
+                  (estimatePdfPath || "").split("/").pop() || "estimate.pdf"
+                }
+                onExpand={() =>
+                  openLightbox("pdf", estimateHref, "Estimate PDF")
+                }
+              />
             </div>
           ) : (
             <p className="empty-text">No estimate PDF attached.</p>
           )}
 
-          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div
+            className="attachment-upload"
+            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+          >
             <label className="btn">
-              {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
-              <input type="file" accept="application/pdf" onChange={handleUploadOrReplaceEstimatePdf} style={{ display: "none" }} disabled={busyEstimateUpload} />
+              {busyEstimateUpload
+                ? "Uploading…"
+                : estimateHref
+                ? "Replace Estimate PDF"
+                : "Upload Estimate PDF"}
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handleUploadOrReplaceEstimatePdf}
+                style={{ display: "none" }}
+                disabled={busyEstimateUpload}
+              />
             </label>
           </div>
         </div>
@@ -1333,18 +1664,76 @@ export default function ViewWorkOrder() {
         {/* PO PDF */}
         <div className="section-card">
           <h3 className="section-header">PO Order PDF</h3>
+
+          {/* ✅ Supplier selector (used by Purchase Orders page) */}
+          <div
+            style={{
+              marginBottom: 8,
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <label className="form-label" style={{ marginBottom: 0 }}>
+                Supplier:&nbsp;
+                <select
+                  value={poSupplier || ""}
+                  onChange={handlePoSupplierChange}
+                  style={{ padding: 6, minWidth: 180 }}
+                >
+                  <option value="">Select supplier…</option>
+                  {SUPPLIER_OPTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              This supplier is used on the Purchase Orders tab.
+            </div>
+          </div>
+
           {poHref ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-              <FileTile kind="pdf" href={poHref} fileName={(poPdfPath || "").split("/").pop() || "po.pdf"} onExpand={() => openLightbox("pdf", poHref, "PO PDF")} />
+            <div
+              className="attachments"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                gap: 12,
+              }}
+            >
+              <FileTile
+                kind="pdf"
+                href={poHref}
+                fileName={(poPdfPath || "").split("/").pop() || "po.pdf"}
+                onExpand={() => openLightbox("pdf", poHref, "PO PDF")}
+              />
             </div>
           ) : (
             <p className="empty-text">No PO PDF attached.</p>
           )}
 
-          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div
+            className="attachment-upload"
+            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+          >
             <label className="btn">
-              {busyPoUpload ? "Uploading…" : poHref ? "Replace PO PDF" : "Upload PO PDF"}
-              <input type="file" accept="application/pdf" onChange={handleUploadOrReplacePoPdf} style={{ display: "none" }} disabled={busyPoUpload} />
+              {busyPoUpload
+                ? "Uploading…"
+                : poHref
+                ? "Replace PO PDF"
+                : "Upload PO PDF"}
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handleUploadOrReplacePoPdf}
+                style={{ display: "none" }}
+                disabled={busyPoUpload}
+              />
             </label>
           </div>
         </div>
@@ -1353,17 +1742,27 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Other PDF Attachments</h3>
           {otherPdfAttachments.length ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            <div
+              className="attachments"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+                gap: 12,
+              }}
+            >
               {otherPdfAttachments.map((relPath, i) => {
                 const href = pdfThumbUrl(relPath);
-                const fileName = relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
+                const fileName =
+                  relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
                 return (
                   <FileTile
                     key={`${relPath}-${i}`}
                     kind="pdf"
                     href={href}
                     fileName={fileName}
-                    onExpand={() => openLightbox("pdf", href, fileName)}
+                    onExpand={() =>
+                      openLightbox("pdf", href, fileName)
+                    }
                     onDelete={() => handleDeleteAttachment(relPath)}
                   />
                 );
@@ -1376,38 +1775,73 @@ export default function ViewWorkOrder() {
 
         {/* Photos */}
         <div className="section-card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 8,
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
             <h3 className="section-header" style={{ marginBottom: 0 }}>
               Image Attachments
             </h3>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn btn-light" onClick={() => downloadMany(photoImages)} disabled={!photoImages.length}>
+              <button
+                className="btn btn-light"
+                onClick={() => downloadMany(photoImages)}
+                disabled={!photoImages.length}
+              >
                 ⬇️ Download All Photos
               </button>
 
               <label className="btn">
                 {busyImageUpload ? "Uploading…" : "Upload Photos"}
-                <input type="file" accept="image/*" multiple onChange={handleUploadImageAttachment} style={{ display: "none" }} disabled={busyImageUpload} />
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleUploadImageAttachment}
+                  style={{ display: "none" }}
+                  disabled={busyImageUpload}
+                />
               </label>
             </div>
           </div>
 
           {photoImages.length ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12 }}>
+            <div
+              className="attachments"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+                gap: 12,
+              }}
+            >
               {photoImages.map((relPath, i) => {
                 const href = urlFor(relPath);
-                const fileName = relPath.split("/").pop() || `image-${i + 1}.jpg`;
+                const fileName =
+                  relPath.split("/").pop() || `image-${i + 1}.jpg`;
                 return (
                   <FileTile
                     key={`${relPath}-${i}`}
                     kind="image"
                     href={href}
                     fileName={fileName}
-                    onExpand={() => openLightbox("image", href, fileName)}
+                    onExpand={() =>
+                      openLightbox("image", href, fileName)
+                    }
                     onDelete={() => handleDeleteAttachment(relPath)}
                     extraAction={
-                      <button className="btn btn-ghost" type="button" onClick={() => toggleDrawNote(relPath)} style={{ width: "100%" }}>
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        onClick={() => toggleDrawNote(relPath)}
+                        style={{ width: "100%" }}
+                      >
                         Move to Draw Notes
                       </button>
                     }
@@ -1422,31 +1856,59 @@ export default function ViewWorkOrder() {
 
         {/* Draw Notes */}
         <div className="section-card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 8,
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
             <h3 className="section-header" style={{ marginBottom: 0 }}>
               Draw Notes
             </h3>
 
-            <button className="btn btn-light" onClick={() => downloadMany(drawNoteImages)} disabled={!drawNoteImages.length}>
+            <button
+              className="btn btn-light"
+              onClick={() => downloadMany(drawNoteImages)}
+              disabled={!drawNoteImages.length}
+            >
               ⬇️ Download All Draw Notes
             </button>
           </div>
 
           {drawNoteImages.length ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12 }}>
+            <div
+              className="attachments"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+                gap: 12,
+              }}
+            >
               {drawNoteImages.map((relPath, i) => {
                 const href = urlFor(relPath);
-                const fileName = relPath.split("/").pop() || `draw-note-${i + 1}.jpg`;
+                const fileName =
+                  relPath.split("/").pop() || `draw-note-${i + 1}.jpg`;
                 return (
                   <FileTile
                     key={`${relPath}-${i}`}
                     kind="image"
                     href={href}
                     fileName={fileName}
-                    onExpand={() => openLightbox("image", href, fileName)}
+                    onExpand={() =>
+                      openLightbox("image", href, fileName)
+                    }
                     onDelete={() => handleDeleteAttachment(relPath)}
                     extraAction={
-                      <button className="btn btn-ghost" type="button" onClick={() => toggleDrawNote(relPath)} style={{ width: "100%" }}>
+                      <button
+                        className="btn btn-ghost"
+                        type="button"
+                        onClick={() => toggleDrawNote(relPath)}
+                        style={{ width: "100%" }}
+                      >
                         Move to Photos
                       </button>
                     }
@@ -1463,13 +1925,22 @@ export default function ViewWorkOrder() {
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
 
-          <button className="toggle-note-btn" onClick={() => setShowNoteInput((v) => !v)}>
+          <button
+            className="toggle-note-btn"
+            onClick={() => setShowNoteInput((v) => !v)}
+          >
             {showNoteInput ? "Cancel" : "Add Note"}
           </button>
 
           {showNoteInput && (
             <div className="add-note">
-              <textarea className="note-input" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Write your note here..." rows={3} />
+              <textarea
+                className="note-input"
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                placeholder="Write your note here..."
+                rows={3}
+              />
               <button className="toggle-note-btn" onClick={handleAddNote}>
                 Submit Note
               </button>
@@ -1482,10 +1953,17 @@ export default function ViewWorkOrder() {
                 <li key={`${n.createdAt || "na"}-${idx}`} className="note-item">
                   <div className="note-header">
                     <small className="note-timestamp">
-                      {n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "—"}
+                      {n.createdAt
+                        ? moment(n.createdAt).format("YYYY-MM-DD HH:mm")
+                        : "—"}
                       {n.by ? ` — ${n.by}` : ""}
                     </small>
-                    <button type="button" className="note-delete-btn" title="Delete note" onClick={() => handleDeleteNote(idx)}>
+                    <button
+                      type="button"
+                      className="note-delete-btn"
+                      title="Delete note"
+                      onClick={() => handleDeleteNote(idx)}
+                    >
                       ✕
                     </button>
                   </div>
