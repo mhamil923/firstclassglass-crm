@@ -1079,6 +1079,108 @@ app.put('/work-orders/:id/status', authenticate, requireNumericParam('id'), asyn
     res.status(500).json({ error: 'Failed to update status.' });
   }
 });
+// ─── WORK ORDERS: DELETE ─────────────────────────────────────────────────────
+
+// Delete a file from S3 or local disk (best-effort, does not throw)
+async function deleteStoredFileByKey(rawKey) {
+  const key = normalizeStoredKey(rawKey);
+  if (!key) return;
+
+  // Safety: only allow deletes inside uploads/
+  if (!key.toLowerCase().startsWith('uploads/')) return;
+
+  // S3 mode
+  if (S3_BUCKET) {
+    try {
+      await s3.deleteObject({ Bucket: S3_BUCKET, Key: key }).promise();
+    } catch (e) {
+      // Don't fail the whole delete if a file is already missing
+      console.warn('⚠️ S3 deleteObject failed:', key, e?.message || e);
+    }
+    return;
+  }
+
+  // Local mode
+  try {
+    const uploadsDir = path.resolve(__dirname, 'uploads');
+    const candidates = localCandidatesFromKey(key); // returns [rel1, base]
+    for (const rel of candidates) {
+      const p = path.resolve(uploadsDir, rel);
+      if (p.startsWith(uploadsDir) && fs.existsSync(p)) {
+        fs.unlinkSync(p);
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ Local file delete failed:', key, e?.message || e);
+  }
+}
+
+// DELETE /work-orders/:id
+// Optional: pass ?deleteFiles=1 to also delete stored uploads linked to the work order
+app.delete(
+  '/work-orders/:id',
+  authenticate,
+  authorize('admin', 'dispatcher'),
+  requireNumericParam('id'),
+  async (req, res) => {
+    const wid = Number(req.params.id);
+    const deleteFiles = String(req.query.deleteFiles || '').trim() === '1';
+
+    let conn;
+    try {
+      conn = await db.getConnection();
+      await conn.beginTransaction();
+
+      const [[row]] = await conn.execute('SELECT * FROM work_orders WHERE id = ? LIMIT 1', [wid]);
+      if (!row) {
+        await conn.rollback();
+        return res.status(404).json({ error: 'Work order not found.' });
+      }
+
+      // Delete the DB row
+      const [del] = await conn.execute('DELETE FROM work_orders WHERE id = ?', [wid]);
+      if (!del.affectedRows) {
+        await conn.rollback();
+        return res.status(404).json({ error: 'Work order not found.' });
+      }
+
+      await conn.commit();
+
+      // Best-effort file cleanup AFTER commit (don’t risk rolling back DB because S3 had a hiccup)
+      if (deleteFiles) {
+        const keys = [];
+
+        // Main file fields
+        if (row.pdfPath) keys.push(row.pdfPath);
+        if (row.estimatePdfPath) keys.push(row.estimatePdfPath);
+        if (row.poPdfPath) keys.push(row.poPdfPath);
+
+        // Attachments list stored in photoPath (images and sometimes extra pdfs)
+        if (row.photoPath) {
+          const parts = String(row.photoPath)
+            .split(',')
+            .map(s => s.trim())
+            .filter(Boolean);
+          keys.push(...parts);
+        }
+
+        // De-dup + delete
+        const uniqKeys = Array.from(new Set(keys.map(normalizeStoredKey).filter(Boolean)));
+        await Promise.all(uniqKeys.map(k => deleteStoredFileByKey(k)));
+      }
+
+      // Return success
+      return res.status(200).json({ ok: true, deletedId: wid, deletedFiles: deleteFiles });
+    } catch (err) {
+      try { if (conn) await conn.rollback(); } catch {}
+      console.error('Work-order delete error:', err);
+      return res.status(500).json({ error: 'Failed to delete work order.' });
+    } finally {
+      try { if (conn) conn.release(); } catch {}
+    }
+  }
+);
 
 // ─── PURCHASE ORDERS (derived from work_orders) ─────────────────────────────
 
