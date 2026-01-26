@@ -28,7 +28,7 @@
   align-items: center;
   height: 34px;
   padding: 0 10px;
-  border: 1px solid #0ea5b7;          /* teal border */
+  border: 1px solid #0ea5b7; /* teal border */
   border-radius: 999px;
   background: #fff;
   color: #0ea5b7;
@@ -102,10 +102,9 @@
    Section card + table wrap
    =========================== */
 
-/* Your JSX already uses .section-card – give it a boxed look */
 .section-card {
   background: #ffffff;
-  border: 1px solid #e2e8f0;   /* <-- restores the box/border */
+  border: 1px solid #e2e8f0;
   border-radius: 10px;
   padding: 12px;
 }
@@ -114,15 +113,14 @@
    Work Orders — table
    =========================== */
 
-/* Match your <table class="styled-table"> */
 .styled-table {
   width: 100%;
-  border-collapse: separate;   /* preserve outer radius */
+  border-collapse: separate;
   border-spacing: 0;
   background: #fff;
-  border: 1px solid #e2e8f0;   /* add a clean border around the table itself */
-  border-radius: 10px;         /* visually rounds in supporting browsers */
-  overflow: hidden;            /* ensure radius on top row */
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .styled-table thead th {
@@ -142,39 +140,54 @@
   padding: 10px 12px;
   vertical-align: top;
   color: #0f172a;
-  border-top: 1px solid #e2e8f0; /* row dividers */
+  border-top: 1px solid #e2e8f0;
   background: #fff;
 }
-
-/* Optional zebra stripes
-.styled-table tbody tr:nth-child(odd) td { background: #fafafa; }
-*/
-
-/* Compact actions column if you add the class later
-.styled-table td.actions { white-space: nowrap; }
-*/
 
 /* ===========================
    Selects (status/assignee)
    =========================== */
 
-/* Your JSX uses class="form-select" */
+/* Base select */
 .form-select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
+
   background: #ffffff;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
-  height: 36px;
-  line-height: 36px;
-  padding: 0 32px 0 10px;
+
+  /* IMPORTANT:
+     Do NOT hard-force height/line-height if we want bigger selects.
+     These were causing the "..." issue when padding/font-size increased. */
+  height: auto;
+  line-height: 1.25;
+
+  padding: 8px 34px 8px 12px;
   color: #0f172a;
   font-weight: 600;
   cursor: pointer;
+
+  /* caret */
   background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2362748B' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
+
+  /* make sure text shows nicely */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Big version used on the dashboard rows */
+.form-select--big {
+  width: 100%;
+  min-width: 160px;
+  min-height: 44px;
+  font-size: 15px;
+  padding: 10px 38px 10px 12px; /* room for arrow */
+  border-radius: 10px;
 }
 
 /* Link-looking addresses */
