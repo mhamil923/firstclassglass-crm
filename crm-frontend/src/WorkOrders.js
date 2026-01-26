@@ -325,6 +325,15 @@ export default function WorkOrders() {
     window.open(url, "_blank", "width=800,height=600");
   };
 
+  // Bigger selects to fill the cell
+  const bigSelectStyle = {
+    width: "100%",
+    minWidth: 140,
+    padding: "10px 12px",
+    fontSize: 15,
+    borderRadius: 10,
+  };
+
   // -------- Parts In modal (repurposed to move to Needs to be Scheduled) --------
   const openPartsModal = () => {
     if (normStatus(selectedFilter) !== normStatus(PARTS_WAITING)) {
@@ -498,7 +507,6 @@ export default function WorkOrders() {
               <th>Problem Description</th>
               <th>Status</th>
               {userRole !== "tech" && <th>Assigned To</th>}
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -620,6 +628,7 @@ export default function WorkOrders() {
                     <select
                       className="form-select"
                       value={toCanonicalStatus(order.status)}
+                      style={bigSelectStyle}
                       onClick={(e) => e.stopPropagation()}
                       onChange={(e) => handleStatusChange(e, order.id)}
                     >
@@ -636,6 +645,7 @@ export default function WorkOrders() {
                       <select
                         className="form-select"
                         value={order.assignedTo || ""}
+                        style={bigSelectStyle}
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) =>
                           assignToTech(order.id, e.target.value, e)
@@ -650,22 +660,12 @@ export default function WorkOrders() {
                       </select>
                     </td>
                   )}
-
-                  <td>
-                    <Link
-                      to={`/edit-work-order/${order.id}`}
-                      className="btn btn-warning btn-sm"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      Edit
-                    </Link>
-                  </td>
                 </tr>
               );
             })}
             {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={userRole !== "tech" ? 8 : 7}>
+                <td colSpan={userRole !== "tech" ? 7 : 6}>
                   <div className="empty-state">
                     No work orders for this filter.
                   </div>
