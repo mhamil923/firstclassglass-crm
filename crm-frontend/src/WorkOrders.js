@@ -1,4 +1,3 @@
-// File: src/WorkOrders.js
 import React, { useEffect, useMemo, useState } from "react";
 import api from "./api";
 import { Link, useNavigate } from "react-router-dom";
@@ -265,7 +264,9 @@ export default function WorkOrders() {
     const newStatus = toCanonicalStatus(e.target.value);
 
     const prev = workOrders;
-    const next = prev.map((o) => (o.id === id ? { ...o, status: newStatus } : o));
+    const next = prev.map((o) =>
+      o.id === id ? { ...o, status: newStatus } : o
+    );
     setWorkOrders(next);
 
     try {
@@ -293,7 +294,7 @@ export default function WorkOrders() {
     try {
       await api.put(
         `/work-orders/${orderId}/assign`,
-        { assignedTo: techId },
+        { assignedTo: techId || null },
         { headers: authHeaders() }
       );
       await fetchWorkOrders();
@@ -302,7 +303,7 @@ export default function WorkOrders() {
       try {
         await api.put(
           `/work-orders/${orderId}/edit`,
-          { assignedTo: techId },
+          { assignedTo: techId || "" },
           { headers: authHeaders() }
         );
         await fetchWorkOrders();
@@ -323,15 +324,6 @@ export default function WorkOrders() {
       query
     )}`;
     window.open(url, "_blank", "width=800,height=600");
-  };
-
-  // Bigger selects to fill the cell
-  const bigSelectStyle = {
-    width: "100%",
-    minWidth: 140,
-    padding: "10px 12px",
-    fontSize: 15,
-    borderRadius: 10,
   };
 
   // -------- Parts In modal (repurposed to move to Needs to be Scheduled) --------
@@ -361,7 +353,9 @@ export default function WorkOrders() {
   };
 
   const setAll = (checked, visibleRows) => {
-    setSelectedIds(checked ? new Set(visibleRows.map((o) => o.id)) : new Set());
+    setSelectedIds(
+      checked ? new Set(visibleRows.map((o) => o.id)) : new Set()
+    );
   };
 
   const visibleWaitingRows = useMemo(() => {
@@ -375,12 +369,7 @@ export default function WorkOrders() {
       const po = displayPO(o.workOrderNumber, o.poNumber).toLowerCase();
       const cust = norm(o.customer).toLowerCase();
       const site = norm(o.siteLocation).toLowerCase();
-      return (
-        wo.includes(q) ||
-        po.includes(q) ||
-        cust.includes(q) ||
-        site.includes(q)
-      );
+      return wo.includes(q) || po.includes(q) || cust.includes(q) || site.includes(q);
     });
   }, [filteredOrders, poSearch]);
 
@@ -455,11 +444,7 @@ export default function WorkOrders() {
 
       <div className="section-card">
         <div className="chips-toolbar">
-          <div
-            className="chips-row"
-            role="tablist"
-            aria-label="Work order filters"
-          >
+          <div className="chips-row" role="tablist" aria-label="Work order filters">
             {[
               { key: "Today", label: "Today", count: chipCounts.Today },
               ...visibleStatusList.map((s) => ({
@@ -487,11 +472,7 @@ export default function WorkOrders() {
             filteredOrders.some(
               (o) => normStatus(o.status) === normStatus(PARTS_WAITING)
             ) && (
-              <button
-                type="button"
-                className="btn btn-parts"
-                onClick={openPartsModal}
-              >
+              <button type="button" className="btn btn-parts" onClick={openPartsModal}>
                 Mark Parts In
               </button>
             )}
@@ -518,8 +499,7 @@ export default function WorkOrders() {
 
               // ---- Robust location/address logic ----
               const rawLocField = norm(order.siteLocation); // may be a name (new) OR an address (legacy)
-              const explicitName =
-                norm(order.siteName) || norm(order.siteLocationName);
+              const explicitName = norm(order.siteName) || norm(order.siteLocationName);
               let siteLocationName = explicitName; // prefer explicit name fields
 
               // Build address from explicit address-type fields
@@ -530,41 +510,22 @@ export default function WorkOrders() {
 
               if (!siteAddress && rawLocField) {
                 // Legacy: no explicit address, but siteLocation has something
-                // -> treat siteLocation as the address, leave name blank.
                 siteAddress = rawLocField;
               } else if (!siteLocationName && rawLocField) {
-                // Newer: there IS an address (or not), and siteLocation is actually the "name"
-                // -> show that name in Site Location.
+                // Newer: siteLocation is actually the "name"
                 siteLocationName = rawLocField;
               }
 
               return (
-                <tr
-                  key={order.id}
-                  onClick={() => navigate(`/view-work-order/${order.id}`)}
-                >
+                <tr key={order.id} onClick={() => navigate(`/view-work-order/${order.id}`)}>
                   <td>
-                    <div
-                      className="wo-po-cell"
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 2,
-                      }}
-                    >
-                      {order.workOrderNumber ? (
-                        <div>
-                          <strong>WO:</strong> {order.workOrderNumber}
-                        </div>
-                      ) : (
-                        <div>
-                          <strong>WO:</strong> —
-                        </div>
-                      )}
+                    <div className="wo-po-cell" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <div>
+                        <strong>WO:</strong> {order.workOrderNumber || "—"}
+                      </div>
                       {displayPO(order.workOrderNumber, order.poNumber) ? (
                         <div>
-                          <strong>PO:</strong>{" "}
-                          {displayPO(order.workOrderNumber, order.poNumber)}
+                          <strong>PO:</strong> {displayPO(order.workOrderNumber, order.poNumber)}
                         </div>
                       ) : null}
                     </div>
@@ -573,18 +534,14 @@ export default function WorkOrders() {
                   <td>{order.customer || "N/A"}</td>
 
                   {/* Site Location (name only) */}
-                  <td title={siteLocationName || "—"}>
-                    {siteLocationName || "—"}
-                  </td>
+                  <td title={siteLocationName || "—"}>{siteLocationName || "—"}</td>
 
                   {/* Site Address (clickable; includes legacy fallback) */}
                   <td title={siteAddress || "N/A"}>
                     {siteAddress ? (
                       <span
                         className="link-text"
-                        onClick={(e) =>
-                          openAddressInMaps(e, siteAddress, siteLocationName)
-                        }
+                        onClick={(e) => openAddressInMaps(e, siteAddress, siteLocationName)}
                       >
                         {siteAddress}
                       </span>
@@ -594,15 +551,12 @@ export default function WorkOrders() {
                   </td>
 
                   <td title={order.problemDescription}>
-                    {/* Clamp to 4 lines */}
                     <div style={clampStyle(4)}>{order.problemDescription}</div>
-                    {/* Latest note preview (2 lines) */}
+
                     {latest?.text && (
                       <div
                         className="latest-note"
-                        title={`${latest.text}${
-                          noteTime ? ` • ${noteTime}` : ""
-                        }`}
+                        title={`${latest.text}${noteTime ? ` • ${noteTime}` : ""}`}
                         style={{
                           marginTop: 6,
                           fontSize: 12,
@@ -615,9 +569,7 @@ export default function WorkOrders() {
                           whiteSpace: "normal",
                         }}
                       >
-                        <span role="img" aria-label="note">
-                          📝
-                        </span>{" "}
+                        <span role="img" aria-label="note">📝</span>{" "}
                         {latest.text}
                         {noteTime ? ` • ${noteTime}` : ""}
                       </div>
@@ -626,9 +578,8 @@ export default function WorkOrders() {
 
                   <td>
                     <select
-                      className="form-select"
+                      className="form-select form-select--big"
                       value={toCanonicalStatus(order.status)}
-                      style={bigSelectStyle}
                       onClick={(e) => e.stopPropagation()}
                       onChange={(e) => handleStatusChange(e, order.id)}
                     >
@@ -643,13 +594,10 @@ export default function WorkOrders() {
                   {userRole !== "tech" && (
                     <td>
                       <select
-                        className="form-select"
-                        value={order.assignedTo || ""}
-                        style={bigSelectStyle}
+                        className="form-select form-select--big"
+                        value={order.assignedTo ?? ""}
                         onClick={(e) => e.stopPropagation()}
-                        onChange={(e) =>
-                          assignToTech(order.id, e.target.value, e)
-                        }
+                        onChange={(e) => assignToTech(order.id, e.target.value, e)}
                       >
                         <option value="">-- assign tech --</option>
                         {techUsers.map((t) => (
@@ -663,12 +611,11 @@ export default function WorkOrders() {
                 </tr>
               );
             })}
+
             {filteredOrders.length === 0 && (
               <tr>
                 <td colSpan={userRole !== "tech" ? 7 : 6}>
-                  <div className="empty-state">
-                    No work orders for this filter.
-                  </div>
+                  <div className="empty-state">No work orders for this filter.</div>
                 </td>
               </tr>
             )}
@@ -678,20 +625,11 @@ export default function WorkOrders() {
 
       {/* ---------- Parts Modal (moves to Needs to be Scheduled) ---------- */}
       {isPartsModalOpen && (
-        <div
-          className="modal-overlay"
-          onClick={closePartsModal}
-          role="dialog"
-          aria-modal="true"
-        >
+        <div className="modal-overlay" onClick={closePartsModal} role="dialog" aria-modal="true">
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Mark Parts as Received</h3>
-              <button
-                className="modal-close"
-                onClick={closePartsModal}
-                aria-label="Close"
-              >
+              <button className="modal-close" onClick={closePartsModal} aria-label="Close">
                 ×
               </button>
             </div>
@@ -706,18 +644,10 @@ export default function WorkOrders() {
                   onChange={(e) => setPoSearch(e.target.value)}
                 />
                 <div className="modal-actions-inline">
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => setAll(true, visibleWaitingRows)}
-                  >
+                  <button type="button" className="btn btn-ghost" onClick={() => setAll(true, visibleWaitingRows)}>
                     Select All
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => setAll(false, visibleWaitingRows)}
-                  >
+                  <button type="button" className="btn btn-ghost" onClick={() => setAll(false, visibleWaitingRows)}>
                     Select None
                   </button>
                 </div>
@@ -725,9 +655,7 @@ export default function WorkOrders() {
 
               <div className="modal-list">
                 {visibleWaitingRows.length === 0 ? (
-                  <div className="empty-state">
-                    No POs in “{PARTS_WAITING}”.
-                  </div>
+                  <div className="empty-state">No POs in “{PARTS_WAITING}”.</div>
                 ) : (
                   <table className="mini-table">
                     <thead>
@@ -745,20 +673,12 @@ export default function WorkOrders() {
                         return (
                           <tr key={o.id}>
                             <td>
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleId(o.id)}
-                              />
+                              <input type="checkbox" checked={checked} onChange={() => toggleId(o.id)} />
                             </td>
                             <td>{o.workOrderNumber || "—"}</td>
-                            <td>
-                              {displayPO(o.workOrderNumber, o.poNumber) || "—"}
-                            </td>
+                            <td>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
                             <td>{o.customer || "—"}</td>
-                            <td title={o.siteLocation}>
-                              {o.siteLocation || "—"}
-                            </td>
+                            <td title={o.siteLocation}>{o.siteLocation || "—"}</td>
                           </tr>
                         );
                       })}
@@ -775,15 +695,9 @@ export default function WorkOrders() {
                 disabled={isUpdatingParts || selectedIds.size === 0}
                 onClick={markSelectedAsPartsIn}
               >
-                {isUpdatingParts
-                  ? "Updating…"
-                  : `Mark Parts In (${selectedIds.size})`}
+                {isUpdatingParts ? "Updating…" : `Mark Parts In (${selectedIds.size})`}
               </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={closePartsModal}
-              >
+              <button type="button" className="btn btn-ghost" onClick={closePartsModal}>
                 Cancel
               </button>
             </div>
