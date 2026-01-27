@@ -522,6 +522,12 @@ export default function ViewWorkOrder() {
     return withSortKey.sort((a, b) => b.__t - a.__t);
   }, [parsedNotes]);
 
+// ✅ Most recent notes for the top "Details" section
+const recentNotes = useMemo(() => {
+  // show the latest 3 notes (change 3 -> 5 if you want more)
+  return (displayNotes || []).slice(0, 3);
+}, [displayNotes]);
+
   if (!workOrder) {
     return (
       <div className="view-container">
@@ -1409,9 +1415,35 @@ export default function ViewWorkOrder() {
         {/* ======================= BASIC INFO (STACKED FIELDS) ======================= */}
         <div className="wo-stack">
           <div className="wo-stack-head">
-            <h3 className="section-header">Details</h3>
+
             <div className="wo-stack-meta">
-              <div className="meta-row">
+<div className="section-card">
+  <h3 className="section-header">Details</h3>
+
+  {recentNotes.length ? (
+    <ul className="notes-list" style={{ marginTop: 0 }}>
+      {recentNotes.map((n, idx) => (
+        <li key={`${n.createdAt || "na"}-${idx}`} className="note-item">
+          <div className="note-header">
+            <small className="note-timestamp">
+              {n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "—"}
+              {n.by ? ` — ${n.by}` : ""}
+            </small>
+          </div>
+          <p className="note-text" style={{ marginBottom: 0 }}>
+            {n.text}
+          </p>
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <p className="empty-text" style={{ margin: 0 }}>
+      No notes yet.
+    </p>
+  )}
+</div>
+      
+        <div className="meta-row">
                 <span className="meta-label">Status</span>
                 {editMode ? (
                   <select
