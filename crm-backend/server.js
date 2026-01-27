@@ -1,4 +1,7 @@
-// server.js (UPDATED with Purchase Orders support)
+// ===============================
+// server.js — FULL FILE (Part 1/6)
+// Copy/paste in order: Part 1 → Part 6
+// ===============================
 
 // ─── IMPORTS ─────────────────────────────────────────────────────────────────
 const express    = require('express');
@@ -106,9 +109,11 @@ const db = mysql.createPool({
 
 // ─── SMALL UTILITIES ─────────────────────────────────────────────────────────
 const pad2 = n => String(n).padStart(2, '0');
+
 function toSqlDateTimeFromParts(Y, M, D, h = 0, m = 0, s = 0) {
   return `${Y}-${pad2(M)}-${pad2(D)} ${pad2(h)}:${pad2(m)}:${pad2(s)}`;
 }
+
 function addMinutesToSql(sqlStr, minutes) {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(sqlStr);
   if (!m) return sqlStr;
@@ -121,6 +126,7 @@ function addMinutesToSql(sqlStr, minutes) {
     d.getHours(), d.getMinutes(), d.getSeconds()
   );
 }
+
 function roundUpDateToHour(d) {
   const r = new Date(d.getTime());
   if (r.getMinutes() > 0 || r.getSeconds() > 0 || r.getMilliseconds() > 0) {
@@ -129,6 +135,7 @@ function roundUpDateToHour(d) {
   r.setMinutes(0, 0, 0);
   return r;
 }
+
 function roundSqlUpToHour(sqlStr) {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(sqlStr || '');
   if (!m) return sqlStr;
@@ -138,12 +145,18 @@ function roundSqlUpToHour(sqlStr) {
   const r = roundUpDateToHour(d);
   return toSqlDateTimeFromParts(r.getFullYear(), r.getMonth()+1, r.getDate(), r.getHours(), r.getMinutes(), r.getSeconds());
 }
+
 function parseDateTimeFlexible(input) {
   if (input == null) return null;
   const s = String(input).trim();
   if (!s) return null;
+
   let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (m) { const [ , Y, Mo, D ] = m.map(Number); return toSqlDateTimeFromParts(Y, Mo, D, 8, 0, 0); }
+  if (m) {
+    const [ , Y, Mo, D ] = m.map(Number);
+    return toSqlDateTimeFromParts(Y, Mo, D, 8, 0, 0);
+  }
+
   m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2})(?::(\d{2})(?::(\d{2}))?)?$/.exec(s);
   if (m) {
     const Y  = Number(m[1]), Mo = Number(m[2]), D  = Number(m[3]);
@@ -151,24 +164,41 @@ function parseDateTimeFlexible(input) {
     const mi = Number(m[5] || 0), se = Number(m[6] || 0);
     return toSqlDateTimeFromParts(Y, Mo, D, hh, mi, se);
   }
+
   return null;
 }
+
 function parseHHmm(s) {
   if (!s) return null;
   const v = String(s).trim();
+
   let m = /^(\d{1,2})$/.exec(v);
-  if (m) { const h = Number(m[1]); if (h >= 0 && h <= 23) return { h, m: 0 }; return null; }
+  if (m) {
+    const h = Number(m[1]);
+    if (h >= 0 && h <= 23) return { h, m: 0 };
+    return null;
+  }
+
   m = /^(\d{1,2}):(\d{2})$/.exec(v);
-  if (m) { const h = Number(m[1]), mi = Number(m[2]); if (h < 0 || h > 23 || mi < 0 || mi > 59) return null; return { h, m: mi }; }
+  if (m) {
+    const h = Number(m[1]), mi = Number(m[2]);
+    if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+    return { h, m: mi };
+  }
+
   return null;
 }
+
 function windowSql({ dateSql, endTime, timeWindow }) {
   if (!dateSql) return { startSql: null, endSql: null };
+
   const datePartMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateSql);
-  const Y = datePartMatch ? Number(datePartMatch[1]) : null;
+  const Y  = datePartMatch ? Number(datePartMatch[1]) : null;
   const Mo = datePartMatch ? Number(datePartMatch[2]) : null;
-  const D = datePartMatch ? Number(datePartMatch[3]) : null;
+  const D  = datePartMatch ? Number(datePartMatch[3]) : null;
+
   let endSql = null;
+
   if (timeWindow && Y) {
     const tw = String(timeWindow).trim();
     const wm = /^(\d{1,2}(?::\d{2})?)\s*-\s*(\d{1,2}(?::\d{2})?)$/.exec(tw);
@@ -180,6 +210,7 @@ function windowSql({ dateSql, endTime, timeWindow }) {
       }
     }
   }
+
   if (!endSql && endTime && Y) {
     const hm = parseHHmm(endTime);
     if (hm) {
@@ -187,10 +218,12 @@ function windowSql({ dateSql, endTime, timeWindow }) {
       endSql = toSqlDateTimeFromParts(endD.getFullYear(), endD.getMonth()+1, endD.getDate(), endD.getHours(), 0, 0);
     }
   }
+
   if (!endSql) {
     endSql = addMinutesToSql(dateSql, DEFAULT_WINDOW);
     endSql = roundSqlUpToHour(endSql);
   }
+
   return { startSql: dateSql, endSql };
 }
 
@@ -206,6 +239,7 @@ const STATUS_CANON = [
   'Needs to be Invoiced',
   'Completed',
 ];
+
 function statusKey(s) {
   return String(s ?? '')
     .toLowerCase()
@@ -213,7 +247,9 @@ function statusKey(s) {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
 const STATUS_LOOKUP = new Map(STATUS_CANON.map(s => [statusKey(s), s]));
+
 const STATUS_SYNONYMS = new Map([
   ['part in','Needs to be Scheduled'],
   ['parts in','Needs to be Scheduled'],
@@ -254,6 +290,7 @@ const STATUS_SYNONYMS = new Map([
   ['needs to invoice','Needs to be Invoiced'],
   ['approved','Approved'],
 ]);
+
 const STATUS_SHORT = new Map([
   ['ne', 'New'],
   ['sc', 'Scheduled'],
@@ -265,13 +302,23 @@ const STATUS_SHORT = new Map([
   ['ni', 'Needs to be Invoiced'],
   ['co', 'Completed'],
 ]);
+
 function canonStatus(input) {
   const k = statusKey(input);
   return STATUS_LOOKUP.get(k) || STATUS_SYNONYMS.get(k) || STATUS_SHORT.get(k) || null;
 }
+
 function displayStatusOrDefault(s) {
   return canonStatus(s) || (String(s || '').trim() ? String(s) : 'New');
 }
+
+// ===============================
+// END Part 1/6
+// Next: Part 2/6
+// ===============================
+// ===============================
+// server.js — FULL FILE (Part 2/6)
+// ===============================
 
 // ─── SCHEMA HELPERS ─────────────────────────────────────────────────────────
 const SCHEMA = {
@@ -284,6 +331,7 @@ async function columnExists(table, col) {
   const [rows] = await db.query(`SHOW COLUMNS FROM \`${table}\` LIKE ?`, [col]);
   return rows.length > 0;
 }
+
 async function getColumnType(table, col) {
   const [rows] = await db.query(`SHOW COLUMNS FROM \`${table}\` LIKE ?`, [col]);
   return rows.length ? String(rows[0].Type || '').toLowerCase() : null;
@@ -320,38 +368,35 @@ async function ensureCols() {
     }
   } catch (e) {
     SCHEMA.columnsReady = false;
-    console.warn(`⚠️ Schema ensure failed (check DB privileges): ${e.message}`);
+    console.warn(`⚠️ Schema ensure failed: ${e.message}`);
   }
 
   try {
     const t1 = await getColumnType('work_orders', 'scheduledDate');
     if (t1 && /^date(?!time)/.test(t1)) {
       await db.query(`ALTER TABLE \`work_orders\` MODIFY COLUMN \`scheduledDate\` DATETIME NULL`);
-      console.log('ℹ️ Upgraded column scheduledDate to DATETIME');
     }
-  } catch (e) { console.warn('⚠️ Type check/upgrade failed for scheduledDate:', e.message); }
+  } catch {}
 
   try {
     const t2 = await getColumnType('work_orders', 'scheduledEnd');
     if (t2 && /^date(?!time)/.test(t2)) {
       await db.query(`ALTER TABLE \`work_orders\` MODIFY COLUMN \`scheduledEnd\` DATETIME NULL`);
-      console.log('ℹ️ Upgraded column scheduledEnd to DATETIME');
     }
-  } catch (e) { console.warn('⚠️ Type check/upgrade failed for scheduledEnd:', e.message); }
+  } catch {}
 
   try {
     const tPP = await getColumnType('work_orders', 'photoPath');
     const small = !tPP || /^varchar\(/.test(tPP) || /^tinytext$/.test(tPP) || /^text$/.test(tPP);
     if (small) {
       await db.query(`ALTER TABLE \`work_orders\` MODIFY COLUMN \`photoPath\` MEDIUMTEXT NULL`);
-      console.log('ℹ️ Upgraded column photoPath to MEDIUMTEXT');
     }
-  } catch (e) { console.warn('⚠️ Type check/upgrade failed for photoPath:', e.message); }
+  } catch {}
 
-  try { SCHEMA.hasAssignedTo = await columnExists('work_orders', 'assignedTo'); }
-  catch (e) { console.warn('⚠️ assignedTo detect:', e.message); }
+  try {
+    SCHEMA.hasAssignedTo = await columnExists('work_orders', 'assignedTo');
+  } catch {}
 
-  // Date Created detection / ensure
   try {
     const hasCreatedAt  = await columnExists('work_orders', 'createdAt');
     const hasCreated_at = await columnExists('work_orders', 'created_at');
@@ -365,21 +410,13 @@ async function ensureCols() {
         `ALTER TABLE \`work_orders\` ADD COLUMN \`createdAt\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`
       );
       SCHEMA.createdAtCol = 'createdAt';
-      console.log('ℹ️ Added column createdAt (Date Created)');
     }
-
-    if (SCHEMA.createdAtCol === 'createdAt') {
-      await db.query(`UPDATE \`work_orders\` SET \`createdAt\` = CURRENT_TIMESTAMP WHERE \`createdAt\` IS NULL`);
-    } else if (SCHEMA.createdAtCol === 'created_at') {
-      await db.query(`UPDATE \`work_orders\` SET \`created_at\` = CURRENT_TIMESTAMP WHERE \`created_at\` IS NULL`);
-    }
-  } catch (e) {
-    console.warn('⚠️ createdAt/created_at detect/ensure failed:', e.message);
-  }
+  } catch {}
 }
-ensureCols().catch(e => console.warn('⚠️ ensureCols:', e.message));
 
-// Safe query builder so we don’t crash if assignedTo column is missing
+ensureCols().catch(() => {});
+
+// ─── SAFE SELECT BUILDER ────────────────────────────────────────────────────
 function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', limitSql = '' } = {}) {
   const hasA = !!SCHEMA.hasAssignedTo;
   const join = hasA ? 'LEFT JOIN users u ON w.assignedTo = u.id' : '';
@@ -400,7 +437,7 @@ function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', l
   `;
 }
 
-// ─── AUTO STATUS TIMER JOB ───────────────────────────────────────────────────
+// ─── AUTO STATUS JOB ─────────────────────────────────────────────────────────
 function envOn(v, def = true) {
   if (v == null) return def;
   const s = String(v).trim().toLowerCase();
@@ -413,7 +450,6 @@ async function autoMoveNewToNeedsScheduled() {
 
     const hours = Math.max(1, Number(AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS) || 48);
     const createdCol = SCHEMA.createdAtCol || 'createdAt';
-
     if (!SCHEMA.createdAtCol) return;
 
     const sql = `
@@ -423,15 +459,8 @@ async function autoMoveNewToNeedsScheduled() {
          AND scheduledDate IS NULL
          AND \`${createdCol}\` <= DATE_SUB(NOW(), INTERVAL ? HOUR)
     `;
-    const [r] = await db.execute(sql, [hours]);
-
-    const changed = r?.affectedRows ?? 0;
-    if (changed > 0) {
-      console.log(`🕒 Auto-status: moved ${changed} work order(s) from New → Needs to be Scheduled (older than ${hours}h)`);
-    }
-  } catch (e) {
-    console.warn('⚠️ Auto-status job failed:', e.message);
-  }
+    await db.execute(sql, [hours]);
+  } catch {}
 }
 
 function startAutoStatusJob() {
@@ -447,17 +476,25 @@ function startAutoStatusJob() {
   }, ms);
 
   if (typeof t.unref === 'function') t.unref();
-
-  console.log(`🕒 Auto-status job enabled: checking every ${minutes} minute(s), threshold=${AUTO_NEW_TO_NEEDS_SCHEDULED_AFTER_HOURS}h`);
 }
+
 startAutoStatusJob();
 
-// ─── MULTER ─────────────────────────────────────────────────────────────────
+// ===============================
+// END Part 2/6
+// Next: Part 3/6
+// ===============================
+// ===============================
+// server.js — FULL FILE (Part 3/6)
+// ===============================
+
+// ─── MULTER / UPLOADS ───────────────────────────────────────────────────────
 const allowMime = (fOrMime) => {
   const m = typeof fOrMime === 'string' ? fOrMime : (fOrMime?.mimetype || '');
   const name = typeof fOrMime === 'string' ? '' : ((fOrMime?.originalname || fOrMime?.key || '') + '');
   return (/^image\//.test(m)) || m === 'application/pdf' || /\.pdf$/i.test(name);
 };
+
 function makeUploader() {
   const limits = {
     fileSize: MAX_FILE_SIZE_MB * 1024 * 1024,
@@ -466,10 +503,13 @@ function makeUploader() {
     parts:  MAX_PARTS,
   };
   const fileFilter = (req, file, cb) => cb(null, allowMime(file));
+
   if (S3_BUCKET) {
     return multer({
       storage: multerS3({
-        s3, bucket: S3_BUCKET, acl: 'private',
+        s3,
+        bucket: S3_BUCKET,
+        acl: 'private',
         contentType: multerS3.AUTO_CONTENT_TYPE,
         key: (req, file, cb) => {
           const base = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
@@ -477,11 +517,14 @@ function makeUploader() {
           cb(null, `uploads/${base}${ext}`);
         }
       }),
-      limits, fileFilter,
+      limits,
+      fileFilter,
     });
   }
+
   const localDir = path.resolve(__dirname, 'uploads');
   if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+
   const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, localDir),
     filename: (req, file, cb) => {
@@ -490,21 +533,35 @@ function makeUploader() {
       cb(null, `${base}${ext}`);
     }
   });
+
   return multer({ storage, limits, fileFilter });
 }
+
 const upload = makeUploader();
+
 if (!S3_BUCKET) {
   const localDir = path.resolve(__dirname, 'uploads');
   app.use('/uploads', express.static(localDir));
 }
 
-// ─── FIELDNAME NORMALIZATION (STRICT) ────────────────────────────────────────
+// ─── FIELDNAME NORMALIZATION (STRICT) ───────────────────────────────────────
 const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 const FIELD_SETS = {
   work: new Set(['workorderpdf','primarypdf','pdf']),
   est:  new Set(['estimatepdf']),
   po:   new Set(['popdf']),
 };
+
+const isPdf = (f) =>
+  f?.mimetype === 'application/pdf' ||
+  /\.pdf$/i.test(f?.originalname || '') ||
+  /\.pdf$/i.test(f?.key || '');
+
+const isImage = (f) => /^image\//.test(f?.mimetype || '');
+
+const fileKey = (f) => (S3_BUCKET ? f.key : f.filename);
+
 function pickPdfByFields(files, allowedSet) {
   for (const f of (files || [])) {
     if (!isPdf(f)) continue;
@@ -513,33 +570,32 @@ function pickPdfByFields(files, allowedSet) {
   }
   return null;
 }
+
 function withMulter(handler) {
   return (req, res, next) => {
     handler(req, res, (err) => {
       if (!err) return next();
+
       const MULTER_413 = new Set([
         'LIMIT_FILE_SIZE','LIMIT_FILE_COUNT','LIMIT_FIELD_COUNT',
         'LIMIT_PART_COUNT','LIMIT_FIELD_VALUE','LIMIT_FIELD_KEY'
       ]);
+
       const msg =
         err.code === 'LIMIT_FILE_SIZE'   ? `File too large (>${MAX_FILE_SIZE_MB}MB)` :
         err.code === 'LIMIT_FILE_COUNT'  ? `Too many files in one request (max ${MAX_FILES_PER_REQUEST})` :
         err.code === 'LIMIT_PART_COUNT'  ? `Too many parts in form-data` :
         err.code === 'LIMIT_FIELD_COUNT' ? `Too many fields (max ${MAX_FIELDS})` :
         'Request too large';
+
       if (MULTER_413.has(err.code)) return res.status(413).json({ error: msg, code: err.code });
       if (err.code === 'LIMIT_UNEXPECTED_FILE') return res.status(400).json({ error: 'Unexpected file field', code: err.code });
+
       console.error('Upload error:', err);
       return res.status(400).json({ error: 'Upload failed: ' + err.message, code: err.code });
     });
   };
 }
-const isPdf = (f) =>
-  f?.mimetype === 'application/pdf' ||
-  /\.pdf$/i.test(f?.originalname || '') ||
-  /\.pdf$/i.test(f?.key || '');
-const isImage = (f) => /^image\//.test(f?.mimetype || '');
-const fileKey = (f) => (S3_BUCKET ? f.key : f.filename);
 
 // Guard for huge photo dumps
 function enforceImageCountOr413(res, images) {
@@ -550,31 +606,60 @@ function enforceImageCountOr413(res, images) {
   return true;
 }
 
+// ===============================
+// END Part 3/6
+// Next: Part 4/6 (Auth + Users + Customers + Work-order helpers)
+// ===============================
+// ===============================
+// server.js — FULL FILE (Part 4/6)
+// ===============================
+
 // ─── AUTH ────────────────────────────────────────────────────────────────────
 app.post('/auth/register', async (req, res) => {
   const { username, password, role } = coerceBody(req);
-  if (!username || !password || !role) return res.status(400).json({ error: 'username, password & role required' });
+  if (!username || !password || !role) {
+    return res.status(400).json({ error: 'username, password & role required' });
+  }
   try {
     const hash = await bcrypt.hash(password, 10);
-    await db.execute('INSERT INTO users (username,password_hash,role) VALUES (?,?,?)', [username, hash, role]);
+    await db.execute(
+      'INSERT INTO users (username,password_hash,role) VALUES (?,?,?)',
+      [username, hash, role]
+    );
     res.sendStatus(201);
-  } catch (err) { console.error('Register error:', err); res.status(500).json({ error: 'Failed to register user.' }); }
+  } catch (err) {
+    console.error('Register error:', err);
+    res.status(500).json({ error: 'Failed to register user.' });
+  }
 });
+
 app.post('/auth/login', async (req, res) => {
   const { username, password } = coerceBody(req);
   if (!username || !password) return res.status(400).json({ error: 'username & password required' });
+
   try {
     const [[user]] = await db.execute('SELECT * FROM users WHERE username = ?', [username]);
-    if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(401).json({ error: 'Invalid credentials' });
-    const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '8h' });
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const token = jwt.sign(
+      { id: user.id, username: user.username, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '8h' }
+    );
     res.json({ token });
-  } catch (err) { console.error('Login error:', err); res.status(500).json({ error: 'Login failed.' }); }
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Login failed.' });
+  }
 });
+
 function authenticate(req, res, next) {
   const token = (req.headers.authorization || '').split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Missing token' });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
+    // keep your convenience override
     if (req.user && req.user.username && req.user.username.toLowerCase() === 'mark') {
       req.user.role = 'admin';
     }
@@ -583,11 +668,19 @@ function authenticate(req, res, next) {
     return res.status(401).json({ error: 'Invalid token' });
   }
 }
+
 function authorize(...roles) {
-  return (req, res, next) => (!req.user || !roles.includes(req.user.role)) ? res.status(403).json({ error: 'Forbidden' }) : next();
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    next();
+  };
 }
 
 app.get('/auth/me', authenticate, (req, res) => res.json(req.user));
+
+// ─── BASIC ───────────────────────────────────────────────────────────────────
 app.get('/', (_, res) => res.send('API running'));
 app.get('/ping', (_, res) => res.send('pong'));
 app.get('/health', (_, res) => res.status(200).json({ ok: true }));
@@ -596,20 +689,39 @@ app.get('/health', (_, res) => res.status(200).json({ ok: true }));
 app.get('/users', authenticate, async (req, res) => {
   try {
     const { role, assignees, include } = req.query;
+
+    // Assignee list helper: techs + optional extras
     if (assignees === '1') {
       const extras = (include && String(include).length ? include : ASSIGNEE_EXTRA_USERNAMES)
-        .split(',').map(s => s.trim()).filter(Boolean);
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+
       let sql = 'SELECT id, username, role FROM users WHERE role = ?';
       const params = ['tech'];
-      if (extras.length) { sql += ` OR username IN (${extras.map(()=>'?').join(',')})`; params.push(...extras); }
+
+      if (extras.length) {
+        sql += ` OR username IN (${extras.map(() => '?').join(',')})`;
+        params.push(...extras);
+      }
+
       const [rows] = await db.execute(sql, params);
       return res.json(rows);
     }
-    let sql = 'SELECT id, username, role FROM users'; const params = [];
-    if (role) { sql += ' WHERE role = ?'; params.push(role); }
+
+    let sql = 'SELECT id, username, role FROM users';
+    const params = [];
+    if (role) {
+      sql += ' WHERE role = ?';
+      params.push(role);
+    }
+
     const [rows] = await db.execute(sql, params);
     res.json(rows);
-  } catch (err) { console.error('Users list error:', err); res.status(500).json({ error: 'Failed to fetch users.' }); }
+  } catch (err) {
+    console.error('Users list error:', err);
+    res.status(500).json({ error: 'Failed to fetch users.' });
+  }
 });
 
 // ─── CUSTOMERS ───────────────────────────────────────────────────────────────
@@ -617,25 +729,43 @@ app.get('/customers', authenticate, async (req, res) => {
   try {
     const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers');
     res.json(rows);
-  } catch (err) { console.error('Customers list error:', err); res.status(500).json({ error: 'Failed to fetch customers.' }); }
+  } catch (err) {
+    console.error('Customers list error:', err);
+    res.status(500).json({ error: 'Failed to fetch customers.' });
+  }
 });
+
 app.get('/customers/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
-    const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers WHERE id = ?', [Number(req.params.id)]);
+    const [rows] = await db.execute(
+      'SELECT id, name, billingAddress, createdAt FROM customers WHERE id = ?',
+      [Number(req.params.id)]
+    );
     if (!rows.length) return res.status(404).json({ error: 'Customer not found.' });
     res.json(rows[0]);
-  } catch (err) { console.error('Customer get error:', err); res.status(500).json({ error: 'Failed to fetch customer.' }); }
+  } catch (err) {
+    console.error('Customer get error:', err);
+    res.status(500).json({ error: 'Failed to fetch customer.' });
+  }
 });
+
 app.post('/customers', authenticate, async (req, res) => {
   const { name, billingAddress } = coerceBody(req);
   if (!name || !billingAddress) return res.status(400).json({ error: 'name & billingAddress required' });
+
   try {
-    const [r] = await db.execute('INSERT INTO customers (name,billingAddress) VALUES (?,?)', [name, billingAddress]);
+    const [r] = await db.execute(
+      'INSERT INTO customers (name,billingAddress) VALUES (?,?)',
+      [name, billingAddress]
+    );
     res.status(201).json({ customerId: r.insertId });
-  } catch (err) { console.error('Customer create error:', err); res.status(500).json({ error: 'Failed to create customer.' }); }
+  } catch (err) {
+    console.error('Customer create error:', err);
+    res.status(500).json({ error: 'Failed to create customer.' });
+  }
 });
 
-// ─── WORK ORDERS (helpers) ───────────────────────────────────────────────────
+// ─── WORK ORDERS HELPERS ────────────────────────────────────────────────────
 function pickPdfKeyFromRow(r) {
   if (r?.pdfPath && /\.pdf$/i.test(r.pdfPath)) return r.pdfPath;
   const list = (r?.photoPath || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -644,16 +774,26 @@ function pickPdfKeyFromRow(r) {
   }
   return null;
 }
+
 const isTruthy = (v) => {
   if (v === true) return true;
   const s = String(v || '').trim().toLowerCase();
   return ['1','true','on','yes','y','checked'].includes(s);
 };
-const uniq = (arr) => Array.from(new Set(arr.filter(Boolean)));
+
+const uniq = (arr) => Array.from(new Set((arr || []).filter(Boolean)));
 
 function poStatusFromRow(r) {
   return Number(r.poPickedUp || 0) ? 'Picked Up' : 'On Order';
 }
+
+// ===============================
+// END Part 4/6
+// Next: Part 5/6 (Work Orders routes: list/search/get/create/edit/notes/status/delete + Purchase Orders)
+// ===============================
+// ===============================
+// server.js — FULL FILE (Part 5/6)
+// ===============================
 
 // ─── WORK ORDERS SEARCH/LIST/CRUD ───────────────────────────────────────────
 
@@ -694,24 +834,34 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
     workOrderNumber = '',
     status = '',
   } = req.query || {};
+
   try {
     const terms = [];
     const params = [];
+
     terms.push(`COALESCE(w.customer,'')      LIKE ?`); params.push(`%${customer}%`);
     terms.push(`COALESCE(w.siteLocation,'')  LIKE ?`); params.push(`%${siteLocation}%`);
     terms.push(`COALESCE(w.siteAddress,'')   LIKE ?`); params.push(`%${siteAddress}%`);
-    if (String(status).trim()) { terms.push(`COALESCE(w.status,'') LIKE ?`); params.push(`%${status}%`); }
+
+    if (String(status).trim()) {
+      terms.push(`COALESCE(w.status,'') LIKE ?`);
+      params.push(`%${status}%`);
+    }
+
     const combined = String(poNumber || '').trim();
     const woOnly   = String(workOrderNumber || '').trim();
+
     if (combined || woOnly) {
       const needle = combined || woOnly;
       terms.push(`(COALESCE(w.poNumber,'') LIKE ? OR COALESCE(w.workOrderNumber,'') LIKE ?)`);
       params.push(`%${needle}%`, `%${needle}%`);
     }
+
     if (combined && woOnly && combined !== woOnly) {
       terms.push(`COALESCE(w.workOrderNumber,'') LIKE ?`); params.push(`%${woOnly}%`);
       terms.push(`COALESCE(w.poNumber,'') LIKE ?`);       params.push(`%${combined}%`);
     }
+
     const where = terms.length ? `WHERE ${terms.join(' AND ')}` : '';
 
     const [rows] = await db.execute(
@@ -726,6 +876,7 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
   }
 });
 
+// Lookup by PO (list)
 app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
   try {
     const po = decodeURIComponent(String(req.params.poNumber || '').trim());
@@ -749,6 +900,7 @@ app.get('/work-orders/by-po/:poNumber', authenticate, async (req, res) => {
   }
 });
 
+// Lookup by PO -> redirect to PDF (or return JSON)
 app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
   try {
     const po = decodeURIComponent(String(req.params.poNumber || '').trim());
@@ -767,10 +919,13 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
     );
 
     if (!rows.length) return res.status(404).json({ error: 'No work order found for that PO.' });
+
     const row = rows[0];
     const key = pickPdfKeyFromRow(row);
     if (!key) return res.status(404).json({ error: 'No PDF found for that PO.' });
+
     const href = `/files?key=${encodeURIComponent(key)}`;
+
     if (format === 'json') {
       return res.json({
         workOrderId: row.id,
@@ -782,6 +937,7 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
         status: displayStatusOrDefault(row.status),
       });
     }
+
     return res.redirect(302, href);
   } catch (err) {
     console.error('PDF-by-PO error:', err);
@@ -793,8 +949,8 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
 app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const id = Number(req.params.id);
-
     const where = 'WHERE w.id = ?';
+
     const [rows] = await db.execute(
       workOrdersSelectSQL({ whereSql: where, orderSql: '', limitSql: 'LIMIT 1' }),
       [id]
@@ -802,9 +958,11 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
 
     const row = rows[0];
     if (!row) return res.status(404).json({ error: 'Not found.' });
+
     row.status = (row.status && canonStatus(row.status))
       ? canonStatus(row.status)
       : displayStatusOrDefault(row.status);
+
     res.json(row);
   } catch (err) {
     console.error('Work-order get-by-id error:', err);
@@ -815,17 +973,30 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
 // CREATE work order
 app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res) => {
   try {
-    if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
+    if (!SCHEMA.columnsReady) {
+      return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
+    }
+
     const {
       workOrderNumber = '',
       poNumber = '',
-      customer, siteLocation = '', siteAddress = null, billingAddress,
-      problemDescription, status = 'New',
+      customer,
+      siteLocation = '',
+      siteAddress = null,
+      billingAddress,
+      problemDescription,
+      status = 'New',
       assignedTo,
-      billingPhone = null, sitePhone = null, customerPhone = null, customerEmail = null,
+
+      billingPhone = null,
+      sitePhone = null,
+      customerPhone = null,
+      customerEmail = null,
       notes = null,
+
       poSupplier = null,
       poPickedUp = 0,
+
       scheduledDate: scheduledDateRaw = null,
       endTime = null,
       timeWindow = null
@@ -846,11 +1017,12 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
     const poPdf        = pickPdfByFields(files, FIELD_SETS.po);
     const otherPdfs    = files.filter(f => isPdf(f) && ![primaryPdf, estimatePdf, poPdf].includes(f));
     const images       = files.filter(isImage);
+
     if (!enforceImageCountOr413(res, images)) return;
 
-    const pdfPath         = primaryPdf ? fileKey(primaryPdf)   : null;
+    const pdfPath         = primaryPdf  ? fileKey(primaryPdf)  : null;
     const estimatePdfPath = estimatePdf ? fileKey(estimatePdf) : null;
-    const poPdfPath       = poPdf ? fileKey(poPdf)             : null;
+    const poPdfPath       = poPdf       ? fileKey(poPdf)       : null;
 
     const firstImg = images[0] ? fileKey(images[0]) : null;
     const extraPdfKeys = otherPdfs.map(fileKey);
@@ -860,32 +1032,61 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
 
     const cols = [
       'workOrderNumber','poNumber','customer','siteLocation','siteAddress','billingAddress',
-      'problemDescription','status','pdfPath','estimatePdfPath','poPdfPath','photoPath',
+      'problemDescription','status',
+      'pdfPath','estimatePdfPath','poPdfPath','photoPath',
       'billingPhone','sitePhone','customerPhone','customerEmail','notes',
       'poSupplier','poPickedUp',
       'scheduledDate','scheduledEnd'
     ];
+
     const vals = [
-      workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
-      problemDescription, cStatus, pdfPath, estimatePdfPath, poPdfPath, initialAttachments,
-      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes,
-      poSupplier || null, Number(poPickedUp) ? 1 : 0,
-      scheduledDate, scheduledEnd
+      workOrderNumber || null,
+      poNumber || null,
+      customer,
+      siteLocation,
+      siteAddress || null,
+      billingAddress,
+      problemDescription,
+      cStatus,
+      pdfPath,
+      estimatePdfPath,
+      poPdfPath,
+      initialAttachments,
+      billingPhone || null,
+      sitePhone || null,
+      customerPhone || null,
+      customerEmail || null,
+      notes,
+      poSupplier || null,
+      Number(poPickedUp) ? 1 : 0,
+      scheduledDate,
+      scheduledEnd
     ];
+
     if (SCHEMA.hasAssignedTo && assignedTo !== undefined && assignedTo !== '') {
       const assignedToVal = Number.isFinite(Number(assignedTo)) ? Number(assignedTo) : null;
-      cols.push('assignedTo'); vals.push(assignedToVal);
+      cols.push('assignedTo');
+      vals.push(assignedToVal);
     }
-    const placeholders = cols.map(() => '?').join(',');
-    const [r] = await db.execute(`INSERT INTO work_orders (${cols.join(',')}) VALUES (${placeholders})`, vals);
 
+    const placeholders = cols.map(() => '?').join(',');
+    const [r] = await db.execute(
+      `INSERT INTO work_orders (${cols.join(',')}) VALUES (${placeholders})`,
+      vals
+    );
+
+    // If more than 1 image uploaded, append remaining to photoPath
     if (images.length > 1) {
       const wid = r.insertId;
       const moreKeys = images.slice(1).map(fileKey);
       const [[existing]] = await db.execute('SELECT photoPath FROM work_orders WHERE id = ?', [wid]);
       const current = (existing?.photoPath || '').split(',').filter(Boolean);
-      await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [[...current, ...moreKeys].join(','), wid]);
+      await db.execute(
+        'UPDATE work_orders SET photoPath = ? WHERE id = ?',
+        [[...current, ...moreKeys].join(','), wid]
+      );
     }
+
     res.status(201).json({ workOrderId: r.insertId });
   } catch (err) {
     console.error('Work-order create error:', err);
@@ -896,7 +1097,10 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
 // EDIT work order
 app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMulter(upload.any()), async (req, res) => {
   try {
-    if (!SCHEMA.columnsReady) return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
+    if (!SCHEMA.columnsReady) {
+      return res.status(500).json({ error: 'Database columns missing (estimatePdfPath/poPdfPath). Check DB privileges.' });
+    }
+
     const wid = Number(req.params.id);
     const [[existing]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!existing) return res.status(404).json({ error: 'Not found.' });
@@ -907,16 +1111,32 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     const poPdf        = pickPdfByFields(files, FIELD_SETS.po);
     const otherPdfs    = files.filter(f => isPdf(f) && ![primaryPdf, estimatePdf, poPdf].includes(f));
     const images       = files.filter(isImage);
+
     if (!enforceImageCountOr413(res, images)) return;
 
     let attachments = existing.photoPath ? existing.photoPath.split(',').filter(Boolean) : [];
 
-    const moveOldPdf        = isTruthy(req.body.keepOldInAttachments) || isTruthy(req.body.keepOldPdfInAttachments) || isTruthy(req.body.moveOldPdfToAttachments) || isTruthy(req.body.moveOldPdf) || isTruthy(req.body.moveExistingPdfToAttachments);
-    const wantReplacePdf    = isTruthy(req.body.replacePdf) || isTruthy(req.body.setAsPrimaryPdf) || isTruthy(req.body.isPdfReplacement);
-    const moveOldEstimate   = isTruthy(req.body.moveOldEstimatePdfToAttachments) || isTruthy(req.body.keepOldEstimateInAttachments);
-    const wantReplaceEst    = isTruthy(req.body.replaceEstimatePdf) || isTruthy(req.body.setAsEstimatePdf);
-    const moveOldPo         = isTruthy(req.body.moveOldPoPdfToAttachments) || isTruthy(req.body.keepOldPoInAttachments);
-    const wantReplacePo     = isTruthy(req.body.replacePoPdf) || isTruthy(req.body.setAsPoPdf);
+    const moveOldPdf      = isTruthy(req.body.keepOldInAttachments) ||
+                            isTruthy(req.body.keepOldPdfInAttachments) ||
+                            isTruthy(req.body.moveOldPdfToAttachments) ||
+                            isTruthy(req.body.moveOldPdf) ||
+                            isTruthy(req.body.moveExistingPdfToAttachments);
+
+    const wantReplacePdf  = isTruthy(req.body.replacePdf) ||
+                            isTruthy(req.body.setAsPrimaryPdf) ||
+                            isTruthy(req.body.isPdfReplacement);
+
+    const moveOldEstimate = isTruthy(req.body.moveOldEstimatePdfToAttachments) ||
+                            isTruthy(req.body.keepOldEstimateInAttachments);
+
+    const wantReplaceEst  = isTruthy(req.body.replaceEstimatePdf) ||
+                            isTruthy(req.body.setAsEstimatePdf);
+
+    const moveOldPo       = isTruthy(req.body.moveOldPoPdfToAttachments) ||
+                            isTruthy(req.body.keepOldPoInAttachments);
+
+    const wantReplacePo   = isTruthy(req.body.replacePoPdf) ||
+                            isTruthy(req.body.setAsPoPdf);
 
     let pdfPath         = existing.pdfPath;
     let estimatePdfPath = existing.estimatePdfPath;
@@ -928,9 +1148,7 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       const newPath = fileKeySafe(primaryPdf);
       const oldPath = existing.pdfPath;
       if (wantReplacePdf || !oldPath) {
-        if (oldPath) {
-          if (moveOldPdf) { if (!attachments.includes(oldPath)) attachments.push(oldPath); }
-        }
+        if (oldPath && moveOldPdf && !attachments.includes(oldPath)) attachments.push(oldPath);
         pdfPath = newPath;
       } else {
         attachments.push(newPath);
@@ -941,9 +1159,7 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       const newPath = fileKeySafe(estimatePdf);
       const oldPath = existing.estimatePdfPath;
       if (wantReplaceEst || !oldPath) {
-        if (oldPath) {
-          if (moveOldEstimate) { if (!attachments.includes(oldPath)) attachments.push(oldPath); }
-        }
+        if (oldPath && moveOldEstimate && !attachments.includes(oldPath)) attachments.push(oldPath);
         estimatePdfPath = newPath;
       } else {
         attachments.push(newPath);
@@ -954,9 +1170,7 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       const newPath = fileKeySafe(poPdf);
       const oldPath = existing.poPdfPath;
       if (wantReplacePo || !oldPath) {
-        if (oldPath) {
-          if (moveOldPo) { if (!attachments.includes(oldPath)) attachments.push(oldPath); }
-        }
+        if (oldPath && moveOldPo && !attachments.includes(oldPath)) attachments.push(oldPath);
         poPdfPath = newPath;
       } else {
         attachments.push(newPath);
@@ -978,13 +1192,16 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       problemDescription = existing.problemDescription,
       status = existing.status,
       assignedTo = existing.assignedTo,
+
       billingPhone = existing.billingPhone,
       sitePhone = existing.sitePhone,
       customerPhone = existing.customerPhone,
       customerEmail = existing.customerEmail,
       notes = existing.notes,
+
       poSupplier = existing.poSupplier,
       poPickedUp = existing.poPickedUp,
+
       scheduledDate: scheduledDateRaw = undefined,
       endTime = null,
       timeWindow = null
@@ -998,7 +1215,7 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     if (scheduledDateRaw !== undefined) {
       if (scheduledDateRaw === '') {
         scheduledDate = null;
-        scheduledEnd  = null;
+        scheduledEnd = null;
       } else {
         const startSqlMaybe = parseDateTimeFlexible(scheduledDateRaw);
         const win = windowSql({ dateSql: startSqlMaybe, endTime, timeWindow });
@@ -1007,23 +1224,48 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       }
     }
 
-    let sql = `UPDATE work_orders
-                 SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
-                     problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
-                     billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?,
-                     poSupplier=?,poPickedUp=?,
-                     scheduledDate=?,scheduledEnd=?`;
+    let sql = `
+      UPDATE work_orders
+         SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
+             problemDescription=?,status=?,pdfPath=?,estimatePdfPath=?,poPdfPath=?,photoPath=?,
+             billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?,
+             poSupplier=?,poPickedUp=?,
+             scheduledDate=?,scheduledEnd=?
+    `;
     const params = [
-      workOrderNumber || null, poNumber || null, customer, siteLocation, siteAddress || null, billingAddress,
-      problemDescription, cStatus, pdfPath || null, estimatePdfPath || null, poPdfPath || null, attachments.join(','),
-      billingPhone || null, sitePhone || null, customerPhone || null, customerEmail || null, notes,
-      poSupplier || null, Number(poPickedUp) ? 1 : 0,
-      scheduledDate, scheduledEnd
+      workOrderNumber || null,
+      poNumber || null,
+      customer,
+      siteLocation,
+      siteAddress || null,
+      billingAddress,
+      problemDescription,
+      cStatus,
+      pdfPath || null,
+      estimatePdfPath || null,
+      poPdfPath || null,
+      attachments.join(','),
+      billingPhone || null,
+      sitePhone || null,
+      customerPhone || null,
+      customerEmail || null,
+      notes,
+      poSupplier || null,
+      Number(poPickedUp) ? 1 : 0,
+      scheduledDate,
+      scheduledEnd
     ];
-    if (SCHEMA.hasAssignedTo) { sql += `,assignedTo=?`; params.push((assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo)); }
-    sql += ` WHERE id=?`; params.push(wid);
+
+    if (SCHEMA.hasAssignedTo) {
+      sql += `, assignedTo=?`;
+      params.push((assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo));
+    }
+
+    sql += ` WHERE id=?`;
+    params.push(wid);
 
     await db.execute(sql, params);
+
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
   } catch (err) {
@@ -1039,11 +1281,15 @@ app.put('/work-orders/:id/notes', authenticate, requireNumericParam('id'), async
     const b = coerceBody(req);
     const notes = b.notes ?? b.note ?? b.text ?? b.message;
     const append = isTruthy(b.append) || isTruthy(b.appendNotes) || isTruthy(b.a);
-    if (notes == null || String(notes).trim() === '') return res.status(400).json({ error: 'notes is required.' });
+
+    if (notes == null || String(notes).trim() === '') {
+      return res.status(400).json({ error: 'notes is required.' });
+    }
 
     if (append) {
       const [[row]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [wid]);
       if (!row) return res.status(404).json({ error: 'Not found.' });
+
       const who = req.user?.username || 'system';
       const stamp = new Date().toISOString().replace('T',' ').replace('Z','');
       const sep = row.notes ? '\n\n' : '';
@@ -1052,6 +1298,7 @@ app.put('/work-orders/:id/notes', authenticate, requireNumericParam('id'), async
     } else {
       await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [String(notes), wid]);
     }
+
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     res.json(updated);
   } catch (err) {
@@ -1067,19 +1314,23 @@ app.put('/work-orders/:id/status', authenticate, requireNumericParam('id'), asyn
   if (incoming == null || String(incoming).trim() === '') {
     return res.status(400).json({ error: 'status is required.' });
   }
+
   try {
     const c = canonStatus(incoming);
     if (!c) return res.status(400).json({ error: 'Invalid status value' });
+
     await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [c, Number(req.params.id)]);
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [Number(req.params.id)]);
     if (!updated) return res.status(404).json({ error: 'Not found.' });
+
     res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
   } catch (err) {
     console.error('Work-order status update error:', err);
     res.status(500).json({ error: 'Failed to update status.' });
   }
 });
-// ─── WORK ORDERS: DELETE ─────────────────────────────────────────────────────
+
+// ─── WORK ORDERS: DELETE (and optional file cleanup) ─────────────────────────
 
 // Delete a file from S3 or local disk (best-effort, does not throw)
 async function deleteStoredFileByKey(rawKey) {
@@ -1094,7 +1345,6 @@ async function deleteStoredFileByKey(rawKey) {
     try {
       await s3.deleteObject({ Bucket: S3_BUCKET, Key: key }).promise();
     } catch (e) {
-      // Don't fail the whole delete if a file is already missing
       console.warn('⚠️ S3 deleteObject failed:', key, e?.message || e);
     }
     return;
@@ -1138,7 +1388,6 @@ app.delete(
         return res.status(404).json({ error: 'Work order not found.' });
       }
 
-      // Delete the DB row
       const [del] = await conn.execute('DELETE FROM work_orders WHERE id = ?', [wid]);
       if (!del.affectedRows) {
         await conn.rollback();
@@ -1147,30 +1396,23 @@ app.delete(
 
       await conn.commit();
 
-      // Best-effort file cleanup AFTER commit (don’t risk rolling back DB because S3 had a hiccup)
+      // Best-effort file cleanup AFTER commit
       if (deleteFiles) {
         const keys = [];
 
-        // Main file fields
         if (row.pdfPath) keys.push(row.pdfPath);
         if (row.estimatePdfPath) keys.push(row.estimatePdfPath);
         if (row.poPdfPath) keys.push(row.poPdfPath);
 
-        // Attachments list stored in photoPath (images and sometimes extra pdfs)
         if (row.photoPath) {
-          const parts = String(row.photoPath)
-            .split(',')
-            .map(s => s.trim())
-            .filter(Boolean);
+          const parts = String(row.photoPath).split(',').map(s => s.trim()).filter(Boolean);
           keys.push(...parts);
         }
 
-        // De-dup + delete
         const uniqKeys = Array.from(new Set(keys.map(normalizeStoredKey).filter(Boolean)));
         await Promise.all(uniqKeys.map(k => deleteStoredFileByKey(k)));
       }
 
-      // Return success
       return res.status(200).json({ ok: true, deletedId: wid, deletedFiles: deleteFiles });
     } catch (err) {
       try { if (conn) await conn.rollback(); } catch {}
@@ -1211,7 +1453,7 @@ app.get('/purchase-orders', authenticate, async (req, res) => {
     const [rows] = await db.execute(
       workOrdersSelectSQL({
         whereSql,
-        orderSql: 'ORDER BY w.poSupplier ASC, w.createdAt DESC, w.id DESC'
+        orderSql: 'ORDER BY w.poSupplier ASC, w.id DESC'
       }),
       params
     );
@@ -1279,11 +1521,19 @@ app.put('/purchase-orders/:id/mark-picked-up', authenticate, requireNumericParam
   }
 });
 
+// ===============================
+// END Part 5/6
+// Next: Part 6/6 (calendar feed + route optimizer + key fixing + /files resolver + global error + listen)
+// ===============================
+// ===============================
+// server.js — FULL FILE (Part 6/6)
+// ===============================
+
 // ─── CALENDAR FEED ──────────────────────────────────────────────────────────
 app.get('/calendar/events', authenticate, async (req, res) => {
   try {
     const startQ = String(req.query.start || '').trim();
-       const endQ   = String(req.query.end   || '').trim();
+    const endQ   = String(req.query.end   || '').trim();
 
     const asSqlDayStart = (dStr) => {
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dStr);
@@ -1586,7 +1836,7 @@ async function handleBestRoute(req, res) {
 app.get('/routes/best', authenticate, handleBestRoute);
 app.post('/routes/best', authenticate, handleBestRoute);
 
-// ─── KEY NORMALIZATION / FILES ──────────────────────────────────────────────
+// ─── KEY NORMALIZATION / FIXERS ──────────────────────────────────────────────
 function logFiles(...args){ if (FILES_VERBOSE === '1') console.log('[files]', ...args); }
 
 function normalizeStoredKey(raw) {
@@ -1607,12 +1857,14 @@ function normalizeStoredKey(raw) {
   v = v.split('\\').join('/');
   return v;
 }
+
 function localCandidatesFromKey(key) {
   const n = normalizeStoredKey(key);
   const base = path.posix.basename(n);
   const rel1 = n.replace(/^uploads\//i, '');
   return [rel1, base];
 }
+
 async function s3HeadKey(Key) {
   try {
     const meta = await s3.headObject({ Bucket: S3_BUCKET, Key }).promise();
@@ -1649,6 +1901,7 @@ app.post('/work-orders/:id/fix-keys', authenticate, authorize('admin','dispatche
     res.json({ ok: true, changed: Object.keys(upd) });
   } catch (e) { console.error('fix-keys error:', e); res.status(500).json({ error: 'Failed to fix keys' }); }
 });
+
 app.post('/work-orders/fix-keys', authenticate, authorize('admin','dispatcher'), async (req, res) => {
   try {
     const [rows] = await db.execute('SELECT id,pdfPath,estimatePdfPath,poPdfPath,photoPath FROM work_orders');
@@ -1665,7 +1918,7 @@ app.post('/work-orders/fix-keys', authenticate, authorize('admin','dispatcher'),
   } catch (e) { console.error('bulk fix-keys error:', e); res.status(500).json({ error: 'Failed to bulk fix keys' }); }
 });
 
-// FILE RESOLVER (S3 or local)
+// ─── FILE RESOLVER (S3 or local) ────────────────────────────────────────────
 app.get('/files', async (req, res) => {
   try {
     const raw = req.query.key;
@@ -1680,6 +1933,7 @@ app.get('/files', async (req, res) => {
     const fallbackCT = mimeMap[ext] || 'application/octet-stream';
     const filename = path.basename(key);
 
+    // S3 mode
     if (S3_BUCKET) {
       const range = req.headers.range;
 
@@ -1696,6 +1950,7 @@ app.get('/files', async (req, res) => {
           if (h2.ok) { key = alt1; head = h2; }
         }
       }
+
       if (!head.ok) {
         const base = path.posix.basename(primaryKey);
         const alt2 = base;
@@ -1705,6 +1960,7 @@ app.get('/files', async (req, res) => {
           if (h3.ok) { key = alt2; head = h3; }
         }
       }
+
       if (!head.ok) return res.status(404).json({ error: 'File not found' });
 
       const size = head.meta.ContentLength;
@@ -1716,6 +1972,7 @@ app.get('/files', async (req, res) => {
         const start = m[1] ? parseInt(m[1], 10) : 0;
         const end   = m[2] ? parseInt(m[2], 10) : size - 1;
         if (isNaN(start) || isNaN(end) || start > end || end >= size) return res.status(416).end();
+
         res.status(206).set({
           'Content-Range': `bytes ${start}-${end}/${size}`,
           'Accept-Ranges': 'bytes',
@@ -1724,10 +1981,11 @@ app.get('/files', async (req, res) => {
           'Content-Disposition': `inline; filename="${filename}"`,
           'Cache-Control': `private, max-age=${S3_SIGNED_TTL}`,
         });
+
         return s3.getObject({ Bucket: S3_BUCKET, Key: key, Range: `bytes=${start}-${end}` })
-                 .createReadStream()
-                 .on('error', () => { if (!res.headersSent) res.status(500).end(); })
-                 .pipe(res);
+          .createReadStream()
+          .on('error', () => { if (!res.headersSent) res.status(500).end(); })
+          .pipe(res);
       }
 
       res.status(200).set({
@@ -1737,29 +1995,34 @@ app.get('/files', async (req, res) => {
         'Content-Disposition': `inline; filename="${filename}"`,
         'Cache-Control': `private, max-age=${S3_SIGNED_TTL}`,
       });
+
       return s3.getObject({ Bucket: S3_BUCKET, Key: key })
-               .createReadStream()
-               .on('error', () => { if (!res.headersSent) res.status(500).end(); })
-               .pipe(res);
+        .createReadStream()
+        .on('error', () => { if (!res.headersSent) res.status(500).end(); })
+        .pipe(res);
     }
 
     // Local mode
     const uploadsDir = path.resolve(__dirname, 'uploads');
     const candidateRels = localCandidatesFromKey(key);
     let chosenPath = null;
+
     for (const rel of candidateRels) {
       const p = path.resolve(uploadsDir, rel);
       if (p.startsWith(uploadsDir) && fs.existsSync(p)) { chosenPath = p; break; }
     }
+
     if (!chosenPath) {
       const base = path.basename(key);
       const p = path.resolve(uploadsDir, base);
       if (p.startsWith(uploadsDir) && fs.existsSync(p)) chosenPath = p;
     }
+
     if (!chosenPath) return res.sendStatus(404);
 
     const stat = fs.statSync(chosenPath);
     res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+
     const rangeLocal = req.headers.range;
     if (rangeLocal) {
       const m = /^bytes=(\d*)-(\d*)$/.exec(rangeLocal);
@@ -1767,14 +2030,17 @@ app.get('/files', async (req, res) => {
       const start = m[1] ? parseInt(m[1], 10) : 0;
       const end   = m[2] ? parseInt(m[2], 10) : stat.size - 1;
       if (start > end || end >= stat.size) return res.status(416).end();
+
       res.status(206).set({
         'Content-Range': `bytes ${start}-${end}/${stat.size}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': end - start + 1,
         'Content-Type': fallbackCT,
       });
+
       return fs.createReadStream(chosenPath, { start, end }).pipe(res);
     }
+
     res.setHeader('Content-Type', fallbackCT);
     res.setHeader('Content-Length', stat.size);
     return fs.createReadStream(chosenPath).pipe(res);
@@ -1802,3 +2068,7 @@ app.use((err, req, res, next) => {
 // ─── START ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 80;
 app.listen(PORT, '0.0.0.0', () => console.log(`✅ Server listening on 0.0.0.0:${PORT}`));
+
+// ===============================
+// END Part 6/6
+// ===============================
