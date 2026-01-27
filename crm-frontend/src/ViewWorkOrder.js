@@ -1586,7 +1586,7 @@ const recentNotes = useMemo(() => {
             </Field>
           </div>
 
-          <Field label="Site Name" hint="Example: Woodward HQ, Starbucks #1234">
+          <Field label="Site Name">
             {editMode ? (
               <input className="control input" value={edit.siteName} onChange={(e) => patchEdit({ siteName: e.target.value })} />
             ) : (
