@@ -135,8 +135,8 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
 
   if (!editing) {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <div>{initialPo ? initialPo : <em>None</em>}</div>
+      <div className="po-inline">
+        <div className="po-value">{initialPo ? initialPo : <em>None</em>}</div>
         <button className="btn btn-primary" onClick={() => setEditing(true)}>
           {initialPo ? "Update PO #" : "Add PO #"}
         </button>
@@ -145,14 +145,13 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+    <div className="po-inline">
       <input
         type="text"
         value={po}
         onChange={(e) => setPo(e.target.value)}
-        className="form-input"
+        className="control input"
         placeholder="Enter PO # (optional)"
-        style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
       />
       <button className="btn btn-primary" disabled={saving} onClick={save}>
         {saving ? "Saving…" : "Save"}
@@ -199,58 +198,11 @@ function Lightbox({ open, onClose, kind, src, title }) {
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.6)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-        padding: 16,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "#fff",
-          borderRadius: 12,
-          maxWidth: "95vw",
-          maxHeight: "92vh",
-          width: "auto",
-          height: "auto",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            padding: "10px 14px",
-            borderBottom: "1px solid #e5e7eb",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <strong
-            style={{
-              fontSize: 14,
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {title || "Preview"}
-          </strong>
-          <div style={{ display: "flex", gap: 8 }}>
+    <div className="lightbox-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="lightbox-card" onClick={(e) => e.stopPropagation()}>
+        <div className="lightbox-topbar">
+          <strong className="lightbox-title">{title || "Preview"}</strong>
+          <div className="lightbox-actions">
             {kind === "image" && (
               <button className="btn btn-light" onClick={handleDownload} disabled={downloading}>
                 {downloading ? "Preparing…" : "Download"}
@@ -269,40 +221,11 @@ function Lightbox({ open, onClose, kind, src, title }) {
         </div>
 
         {kind === "image" ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "#f8fafc",
-              padding: 8,
-            }}
-          >
-            <img
-              src={src}
-              alt={title || "preview"}
-              style={{
-                maxWidth: "92vw",
-                maxHeight: "82vh",
-                width: "auto",
-                height: "auto",
-                objectFit: "contain",
-                display: "block",
-              }}
-            />
+          <div className="lightbox-body">
+            <img className="lightbox-img" src={src} alt={title || "preview"} />
           </div>
         ) : (
-          <iframe
-            title={title || "preview"}
-            src={src}
-            style={{
-              width: "92vw",
-              maxWidth: "1200px",
-              height: "82vh",
-              border: "none",
-              background: "#f8fafc",
-            }}
-          />
+          <iframe title={title || "preview"} src={src} className="lightbox-iframe" />
         )}
       </div>
     </div>
@@ -313,42 +236,24 @@ function Lightbox({ open, onClose, kind, src, title }) {
 function FileTile({ kind, href, fileName, onDelete, onExpand, extraAction }) {
   const isPdf = kind === "pdf";
   return (
-    <div
-      className="attachment-item"
-      style={{
-        width: 170,
-        borderRadius: 10,
-        overflow: "hidden",
-        border: "1px solid #e5e7eb",
-        background: "#fff",
-        position: "relative",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-      }}
-    >
-      <div style={{ width: "100%", height: 200, background: "#f8fafc" }}>
+    <div className="tile">
+      <div className="tile-media">
         {isPdf ? (
-          <iframe title={fileName} src={href} style={{ width: "100%", height: "100%", border: "none" }} />
+          <iframe title={fileName} src={href} className="tile-iframe" />
         ) : (
-          <img src={href} alt={fileName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <img src={href} alt={fileName} className="tile-img" />
         )}
       </div>
 
-      <div style={{ padding: "6px 8px", fontSize: 12, wordBreak: "break-all" }}>
-        <a
-          href={href}
-          target="__blank"
-          rel="noopener noreferrer"
-          title={fileName}
-          className="link"
-          style={{ textDecoration: "none" }}
-        >
+      <div className="tile-name">
+        <a href={href} target="__blank" rel="noopener noreferrer" title={fileName} className="link">
           {fileName}
         </a>
       </div>
 
-      {extraAction ? <div style={{ padding: "0 8px 8px 8px" }}>{extraAction}</div> : null}
+      {extraAction ? <div className="tile-extra">{extraAction}</div> : null}
 
-      <div style={{ display: "flex", gap: 6, padding: "0 8px 8px 8px" }}>
+      <div className="tile-actions">
         <button className="btn btn-light" onClick={onExpand} style={{ flex: 1 }}>
           Expand
         </button>
@@ -437,7 +342,18 @@ function formatNotesText(entriesInOrder) {
     .join("\n\n");
 }
 
-/* -------------------------------------------------------------------------- */
+/* ---------- Simple “stacked field” wrapper ---------- */
+function Field({ label, children, hint }) {
+  return (
+    <div className="wo-field">
+      <div className="wo-label">{label}</div>
+      <div className="wo-control">
+        {children}
+        {hint ? <div className="wo-hint">{hint}</div> : null}
+      </div>
+    </div>
+  );
+}
 
 export default function ViewWorkOrder() {
   const { id } = useParams();
@@ -472,7 +388,7 @@ export default function ViewWorkOrder() {
   const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
   const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
-  // ✅ NEW: inline edit mode (replaces EditWorkOrder page)
+  // ✅ Inline edit mode (stacked fields)
   const [editMode, setEditMode] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -539,7 +455,6 @@ export default function ViewWorkOrder() {
 
   const cancelEditMode = () => {
     setEditMode(false);
-    // also restore visible dropdown states to whatever backend currently has
     if (workOrder) {
       setLocalStatus(workOrder.status || "");
       const assignedToVal = workOrder.assignedTo ?? "";
@@ -655,7 +570,6 @@ export default function ViewWorkOrder() {
 
   // Determine draw notes using overrides first, then weak filename heuristic
   const isDrawNote = (key) => drawNoteOverrides.has(key) || isLikelyDrawNoteByName(key);
-
   const drawNoteImages = allImageAttachments.filter((k) => isDrawNote(k));
   const photoImages = allImageAttachments.filter((k) => !isDrawNote(k));
 
@@ -699,7 +613,7 @@ export default function ViewWorkOrder() {
     `;
   };
 
-  /* ---------------- PRINT: Work Order (existing) ---------------- */
+  /* ---------------- PRINT: Work Order ---------------- */
   const handlePrint = () => {
     const siteDisplayName = (siteLocation || customer || "").trim();
     const siteAddr = (siteAddress || "").trim();
@@ -992,7 +906,7 @@ export default function ViewWorkOrder() {
     w.document.close();
   };
 
-  /* ---------------- EDIT SAVE (replaces EditWorkOrder.js) ---------------- */
+  /* ---------------- EDIT SAVE ---------------- */
   const handleSaveEdits = async () => {
     if (editSaving) return;
     setEditSaving(true);
@@ -1041,7 +955,7 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /* ---------------- DELETE (robust multi-strategy, like EditWorkOrder.js) ---------------- */
+  /* ---------------- DELETE (robust multi-strategy) ---------------- */
   const handleDeleteWorkOrder = async () => {
     if (deleting) return;
     if (!window.confirm("Delete this work order? This cannot be undone.")) return;
@@ -1050,8 +964,7 @@ export default function ViewWorkOrder() {
 
     const showErr = (err, label) => {
       const status = err?.response?.status;
-      const msg =
-        err?.response?.data?.error || err?.response?.data?.message || err?.message || "Unknown error";
+      const msg = err?.response?.data?.error || err?.response?.data?.message || err?.message || "Unknown error";
       console.error(`❌ ${label} failed`, { status, msg, err });
       return { status, msg };
     };
@@ -1178,7 +1091,7 @@ export default function ViewWorkOrder() {
         form.append("poSupplier", inferredSupplier);
       }
 
-      // ✅ Auto-set PO# only if currently blank (and the legacy-hide might have made it blank)
+      // ✅ Auto-set PO# only if currently blank
       if (!cleanedPo && inferredPoNum) {
         form.append("poNumber", inferredPoNum);
       }
@@ -1386,12 +1299,7 @@ export default function ViewWorkOrder() {
       if (!target) return;
 
       const kept = byOldest.filter(
-        (e) =>
-          !(
-            e.createdAt === target.createdAt &&
-            e.text === target.text &&
-            (e.by || "") === (target.by || "")
-          )
+        (e) => !(e.createdAt === target.createdAt && e.text === target.text && (e.by || "") === (target.by || ""))
       );
 
       const newBody = kept.length ? formatNotesText(kept) : "";
@@ -1441,42 +1349,50 @@ export default function ViewWorkOrder() {
     }
   };
 
+  /* ======================= RENDER ======================= */
   return (
     <div className="view-container">
-      <Lightbox open={lightbox.open} onClose={closeLightbox} kind={lightbox.kind} src={lightbox.src} title={lightbox.title} />
+      <Lightbox
+        open={lightbox.open}
+        onClose={closeLightbox}
+        kind={lightbox.kind}
+        src={lightbox.src}
+        title={lightbox.title}
+      />
 
       <div className="view-card">
         <div className="view-header-row">
-          <h2 className="view-title">Work Order Details</h2>
+          <div className="view-header-left">
+            <h2 className="view-title">Work Order Details</h2>
+            <div className="view-subtitle">
+              <span className="pill">WO: {cleanedWo}</span>
+              {cleanedPo ? <span className="pill">PO: {cleanedPo}</span> : null}
+              <span className="pill subtle">Created: {createdDisplay}</span>
+            </div>
+          </div>
 
-          <div className="view-actions" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div className="view-actions">
             <button className="btn btn-outline" onClick={handlePrint}>
-              🖨️ Print Work Order
+              Print Work Order
             </button>
 
             <button className="btn btn-primary" onClick={handlePrintToQuote}>
-              🧾 Print to Quote
+              Print to Quote
             </button>
 
-            {/* ✅ NEW: Edit / Save / Cancel / Delete */}
             {!editMode ? (
               <>
                 <button className="btn btn-light" onClick={enterEditMode}>
-                  ✏️ Edit
+                  Edit
                 </button>
-                <button
-                  className="btn btn-danger"
-                  onClick={handleDeleteWorkOrder}
-                  disabled={deleting}
-                  title={deleting ? "Deleting…" : "Delete work order"}
-                >
-                  {deleting ? "Deleting…" : "🗑️ Delete"}
+                <button className="btn btn-danger" onClick={handleDeleteWorkOrder} disabled={deleting}>
+                  {deleting ? "Deleting…" : "Delete"}
                 </button>
               </>
             ) : (
               <>
                 <button className="btn btn-primary" onClick={handleSaveEdits} disabled={editSaving}>
-                  {editSaving ? "Saving…" : "💾 Save"}
+                  {editSaving ? "Saving…" : "Save"}
                 </button>
                 <button className="btn btn-ghost" onClick={cancelEditMode} disabled={editSaving}>
                   Cancel
@@ -1484,75 +1400,25 @@ export default function ViewWorkOrder() {
               </>
             )}
 
-            <button className="back-btn" onClick={() => navigate("/work-orders")}>
-              ← Back to List
+            <button className="btn back-btn" onClick={() => navigate("/work-orders")}>
+              Back to List
             </button>
           </div>
         </div>
 
-        {/* BASIC INFO */}
-        <ul className="detail-list">
-          <li className="detail-item">
-            <span className="detail-label">Work Order #:</span>
-            <span className="detail-value">
-              {editMode ? (
-                <input
-                  type="text"
-                  className="form-input"
-                  value={edit.workOrderNumber}
-                  onChange={(e) => patchEdit({ workOrderNumber: e.target.value })}
-                  style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
-                />
-              ) : (
-                displayWO(workOrderNumber)
-              )}
-            </span>
-          </li>
-
-          <li className="detail-item">
-            <span className="detail-label">PO #:</span>
-            <span className="detail-value">
-              {editMode ? (
-                <input
-                  type="text"
-                  className="form-input"
-                  value={edit.poNumber}
-                  onChange={(e) => patchEdit({ poNumber: e.target.value })}
-                  placeholder="(optional)"
-                  style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
-                />
-              ) : (
-                <PONumberEditor
-                  orderId={woId}
-                  initialPo={cleanedPo}
-                  onSaved={(newPo) =>
-                    setWorkOrder((prev) => ({
-                      ...prev,
-                      poNumber: newPo || null,
-                    }))
-                  }
-                />
-              )}
-            </span>
-          </li>
-
-          <li className="detail-item">
-            <span className="detail-label">Status:</span>
-            <span className="detail-value">
-              {editMode ? (
-                <select value={edit.status} onChange={(e) => patchEdit({ status: e.target.value })} style={{ padding: 6 }}>
-                  <option value="" disabled>
-                    Select status…
-                  </option>
-                  {STATUS_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <>
-                  <select value={localStatus} onChange={handleStatusChange} disabled={statusSaving} style={{ padding: 6 }}>
+        {/* ======================= BASIC INFO (STACKED FIELDS) ======================= */}
+        <div className="wo-stack">
+          <div className="wo-stack-head">
+            <h3 className="section-header">Details</h3>
+            <div className="wo-stack-meta">
+              <div className="meta-row">
+                <span className="meta-label">Status</span>
+                {editMode ? (
+                  <select
+                    className="control select"
+                    value={edit.status}
+                    onChange={(e) => patchEdit({ status: e.target.value })}
+                  >
                     <option value="" disabled>
                       Select status…
                     </option>
@@ -1562,36 +1428,30 @@ export default function ViewWorkOrder() {
                       </option>
                     ))}
                   </select>
-                  {statusSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
-                </>
-              )}
-            </span>
-          </li>
+                ) : (
+                  <div className="meta-inline">
+                    <select className="control select" value={localStatus} onChange={handleStatusChange} disabled={statusSaving}>
+                      <option value="" disabled>
+                        Select status…
+                      </option>
+                      {STATUS_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                    {statusSaving ? <span className="tiny">Saving…</span> : null}
+                  </div>
+                )}
+              </div>
 
-          {/* Assigned Tech */}
-          <li className="detail-item">
-            <span className="detail-label">Assigned Tech:</span>
-            <span className="detail-value">
-              {editMode ? (
-                <select
-                  value={edit.assignedTo}
-                  onChange={(e) => patchEdit({ assignedTo: e.target.value })}
-                  style={{ padding: 6, minWidth: 220 }}
-                >
-                  <option value="">Unassigned</option>
-                  {techUsers.map((t) => (
-                    <option key={t.id} value={String(t.id)}>
-                      {t.username}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <>
+              <div className="meta-row">
+                <span className="meta-label">Assigned Tech</span>
+                {editMode ? (
                   <select
-                    value={localAssignedTo}
-                    onChange={handleAssignedTechChange}
-                    disabled={techSaving}
-                    style={{ padding: 6, minWidth: 220 }}
+                    className="control select"
+                    value={edit.assignedTo}
+                    onChange={(e) => patchEdit({ assignedTo: e.target.value })}
                   >
                     <option value="">Unassigned</option>
                     {techUsers.map((t) => (
@@ -1600,178 +1460,180 @@ export default function ViewWorkOrder() {
                       </option>
                     ))}
                   </select>
-                  {techSaving && <small style={{ marginLeft: 8 }}>Saving…</small>}
-                </>
-              )}
-            </span>
-          </li>
+                ) : (
+                  <div className="meta-inline">
+                    <select
+                      className="control select"
+                      value={localAssignedTo}
+                      onChange={handleAssignedTechChange}
+                      disabled={techSaving}
+                    >
+                      <option value="">Unassigned</option>
+                      {techUsers.map((t) => (
+                        <option key={t.id} value={String(t.id)}>
+                          {t.username}
+                        </option>
+                      ))}
+                    </select>
+                    {techSaving ? <span className="tiny">Saving…</span> : null}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
 
-          <li className="detail-item">
-            <span className="detail-label">Customer:</span>
-            <span className="detail-value">
-              {editMode ? (
-                <input
-                  type="text"
-                  className="form-input"
-                  value={edit.customer}
-                  onChange={(e) => patchEdit({ customer: e.target.value })}
-                  style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
-                />
-              ) : (
-                customer || "—"
-              )}
-            </span>
-          </li>
+          <Field label="Work Order #">
+            {editMode ? (
+              <input
+                type="text"
+                className="control input"
+                value={edit.workOrderNumber}
+                onChange={(e) => patchEdit({ workOrderNumber: e.target.value })}
+              />
+            ) : (
+              <div className="value">{displayWO(workOrderNumber)}</div>
+            )}
+          </Field>
 
-          <li className="detail-item">
-            <span className="detail-label">Customer Phone:</span>
-            <span className="detail-value">
+          <Field label="PO #">
+            {editMode ? (
+              <input
+                type="text"
+                className="control input"
+                value={edit.poNumber}
+                onChange={(e) => patchEdit({ poNumber: e.target.value })}
+                placeholder="(optional)"
+              />
+            ) : (
+              <PONumberEditor
+                orderId={woId}
+                initialPo={cleanedPo}
+                onSaved={(newPo) =>
+                  setWorkOrder((prev) => ({
+                    ...prev,
+                    poNumber: newPo || null,
+                  }))
+                }
+              />
+            )}
+          </Field>
+
+          <Field label="Customer">
+            {editMode ? (
+              <input className="control input" value={edit.customer} onChange={(e) => patchEdit({ customer: e.target.value })} />
+            ) : (
+              <div className="value">{customer || "—"}</div>
+            )}
+          </Field>
+
+          <div className="wo-2col">
+            <Field label="Customer Phone">
               {editMode ? (
                 <input
                   type="tel"
-                  className="form-input"
+                  className="control input"
                   value={edit.customerPhone}
                   onChange={(e) => patchEdit({ customerPhone: e.target.value })}
-                  style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
                 />
               ) : (
-                customerPhone || "—"
+                <div className="value">{customerPhone || "—"}</div>
               )}
-            </span>
-          </li>
+            </Field>
 
-          <li className="detail-item">
-            <span className="detail-label">Customer Email:</span>
-            <span className="detail-value">
+            <Field label="Customer Email">
               {editMode ? (
                 <input
                   type="email"
-                  className="form-input"
+                  className="control input"
                   value={edit.customerEmail}
                   onChange={(e) => patchEdit({ customerEmail: e.target.value })}
-                  style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
                 />
               ) : (
-                customerEmail || "—"
+                <div className="value">{customerEmail || "—"}</div>
               )}
-            </span>
-          </li>
+            </Field>
+          </div>
 
-          <li className="detail-item">
-            <span className="detail-label">Site Name:</span>
-            <span className="detail-value">
-              {editMode ? (
-                <input
-                  type="text"
-                  className="form-input"
-                  value={edit.siteName}
-                  onChange={(e) => patchEdit({ siteName: e.target.value })}
-                  placeholder="e.g., Woodward HQ, Starbucks #1234"
-                  style={{ height: 36, borderRadius: 8, border: "1px solid #cbd5e1", padding: "0 10px" }}
-                />
-              ) : (
-                workOrder?.siteName || "—"
-              )}
-            </span>
-          </li>
+          <Field label="Site Name" hint="Example: Woodward HQ, Starbucks #1234">
+            {editMode ? (
+              <input className="control input" value={edit.siteName} onChange={(e) => patchEdit({ siteName: e.target.value })} />
+            ) : (
+              <div className="value">{workOrder?.siteName || "—"}</div>
+            )}
+          </Field>
 
-          <li className="detail-item">
-            <span className="detail-label">Site Address:</span>
-            <span className="detail-value pre-wrap">
-              {editMode ? (
-                <textarea
-                  className="form-textarea"
-                  rows={2}
-                  value={edit.siteAddress}
-                  onChange={(e) => patchEdit({ siteAddress: e.target.value })}
-                  style={{ borderRadius: 8, border: "1px solid #cbd5e1", padding: 10, width: "100%" }}
-                />
-              ) : (
-                siteAddress || "—"
-              )}
-            </span>
-          </li>
+          <Field label="Site Address">
+            {editMode ? (
+              <textarea
+                className="control textarea"
+                rows={3}
+                value={edit.siteAddress}
+                onChange={(e) => patchEdit({ siteAddress: e.target.value })}
+              />
+            ) : (
+              <div className="value pre-wrap">{siteAddress || "—"}</div>
+            )}
+          </Field>
 
-          <li className="detail-item">
-            <span className="detail-label">Site Location (Legacy):</span>
-            <span className="detail-value pre-wrap">
-              {editMode ? (
-                <textarea
-                  className="form-textarea"
-                  rows={2}
-                  value={edit.siteLocation}
-                  onChange={(e) => patchEdit({ siteLocation: e.target.value })}
-                  style={{ borderRadius: 8, border: "1px solid #cbd5e1", padding: 10, width: "100%" }}
-                />
-              ) : (
-                siteLocation || "—"
-              )}
-            </span>
-          </li>
+          <Field label="Site Location (Legacy)">
+            {editMode ? (
+              <textarea
+                className="control textarea"
+                rows={3}
+                value={edit.siteLocation}
+                onChange={(e) => patchEdit({ siteLocation: e.target.value })}
+              />
+            ) : (
+              <div className="value pre-wrap">{siteLocation || "—"}</div>
+            )}
+          </Field>
 
-          <li className="detail-item">
-            <span className="detail-label">Billing Address:</span>
-            <span className="detail-value pre-wrap">
-              {editMode ? (
-                <textarea
-                  className="form-textarea"
-                  rows={3}
-                  value={edit.billingAddress}
-                  onChange={(e) => patchEdit({ billingAddress: e.target.value })}
-                  style={{ borderRadius: 8, border: "1px solid #cbd5e1", padding: 10, width: "100%" }}
-                />
-              ) : (
-                billingAddress || "—"
-              )}
-            </span>
-          </li>
+          <Field label="Billing Address">
+            {editMode ? (
+              <textarea
+                className="control textarea"
+                rows={4}
+                value={edit.billingAddress}
+                onChange={(e) => patchEdit({ billingAddress: e.target.value })}
+              />
+            ) : (
+              <div className="value pre-wrap">{billingAddress || "—"}</div>
+            )}
+          </Field>
 
-          <li className="detail-item">
-            <span className="detail-label">Problem Description:</span>
-            <span className="detail-value pre-wrap">
-              {editMode ? (
-                <textarea
-                  className="form-textarea"
-                  rows={4}
-                  value={edit.problemDescription}
-                  onChange={(e) => patchEdit({ problemDescription: e.target.value })}
-                  style={{ borderRadius: 8, border: "1px solid #cbd5e1", padding: 10, width: "100%" }}
-                />
-              ) : (
-                problemDescription || "—"
-              )}
-            </span>
-          </li>
+          <Field label="Problem Description">
+            {editMode ? (
+              <textarea
+                className="control textarea"
+                rows={5}
+                value={edit.problemDescription}
+                onChange={(e) => patchEdit({ problemDescription: e.target.value })}
+              />
+            ) : (
+              <div className="value pre-wrap">{problemDescription || "—"}</div>
+            )}
+          </Field>
 
-          <li className="detail-item">
-            <span className="detail-label">Scheduled Date:</span>
-            <span className="detail-value">
-              {editMode ? (
-                <input
-                  type="datetime-local"
-                  value={scheduledDateInput || ""}
-                  onChange={(e) => patchEdit({ scheduledDate: e.target.value })}
-                  style={{ padding: 6 }}
-                />
-              ) : scheduledDate ? (
-                moment(scheduledDate).format("YYYY-MM-DD HH:mm")
-              ) : (
-                "Not Scheduled"
-              )}
-            </span>
-          </li>
+          <Field label="Scheduled Date">
+            {editMode ? (
+              <input
+                type="datetime-local"
+                className="control input"
+                value={scheduledDateInput || ""}
+                onChange={(e) => patchEdit({ scheduledDate: e.target.value })}
+              />
+            ) : (
+              <div className="value">{scheduledDate ? moment(scheduledDate).format("YYYY-MM-DD HH:mm") : "Not Scheduled"}</div>
+            )}
+          </Field>
+        </div>
 
-          <li className="detail-item">
-            <span className="detail-label">Date Created:</span>
-            <span className="detail-value">{createdDisplay}</span>
-          </li>
-        </ul>
-
-        {/* Signed Work Order PDF */}
+        {/* ======================= Signed Work Order PDF ======================= */}
         <div className="section-card">
           <h3 className="section-header">Sign-Off Sheet PDF</h3>
+
           {signedHref ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            <div className="attachments-grid">
               <FileTile
                 kind="pdf"
                 href={signedHref}
@@ -1782,7 +1644,7 @@ export default function ViewWorkOrder() {
           ) : (
             <div>
               <p className="empty-text">No PDF attached.</p>
-              <label className="btn">
+              <label className="btn btn-light">
                 {busyReplace ? "Uploading…" : "Upload Signed PDF"}
                 <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
               </label>
@@ -1790,15 +1652,15 @@ export default function ViewWorkOrder() {
           )}
 
           {signedHref && (
-            <div className="mt-2" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <a className="btn btn-light" href={signedHref} target="_blank" rel="noreferrer">
+            <div className="row-actions">
+              <a className="btn btn-outline" href={signedHref} target="_blank" rel="noreferrer">
                 Open in new tab
               </a>
-              <label className="btn">
+              <label className="btn btn-light">
                 {busyReplace ? "Replacing…" : "Replace Signed PDF"}
                 <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
               </label>
-              <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <label className="checkline">
                 <input type="checkbox" checked={keepOldInAttachments} onChange={(e) => setKeepOldInAttachments(e.target.checked)} />
                 Move existing signed PDF to attachments
               </label>
@@ -1806,11 +1668,12 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* ESTIMATE PDF */}
+        {/* ======================= ESTIMATE PDF ======================= */}
         <div className="section-card">
           <h3 className="section-header">Estimate PDF</h3>
+
           {estimateHref ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            <div className="attachments-grid">
               <FileTile
                 kind="pdf"
                 href={estimateHref}
@@ -1822,28 +1685,27 @@ export default function ViewWorkOrder() {
             <p className="empty-text">No estimate PDF attached.</p>
           )}
 
-          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <label className="btn">
+          <div className="row-actions">
+            <label className="btn btn-light">
               {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
               <input type="file" accept="application/pdf" onChange={handleUploadOrReplaceEstimatePdf} style={{ display: "none" }} disabled={busyEstimateUpload} />
             </label>
           </div>
         </div>
 
-        {/* PO PDF */}
+        {/* ======================= PO PDF ======================= */}
         <div className="section-card">
           <h3 className="section-header">PO Order PDF</h3>
 
-          {/* ✅ Supplier + Picked Up */}
-          <div style={{ marginBottom: 8, display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-            <div>
-              <label className="form-label" style={{ marginBottom: 0 }}>
-                Supplier:&nbsp;
+          <div className="po-meta">
+            <div className="po-meta-left">
+              <label className="inline-label">
+                Supplier
                 {editMode ? (
                   <select
+                    className="control select"
                     value={edit.poSupplier || ""}
                     onChange={(e) => patchEdit({ poSupplier: e.target.value })}
-                    style={{ padding: 6, minWidth: 180 }}
                   >
                     <option value="">Select supplier…</option>
                     {SUPPLIER_OPTIONS.map((s) => (
@@ -1853,7 +1715,7 @@ export default function ViewWorkOrder() {
                     ))}
                   </select>
                 ) : (
-                  <select value={poSupplier || ""} onChange={handlePoSupplierChange} style={{ padding: 6, minWidth: 180 }}>
+                  <select className="control select" value={poSupplier || ""} onChange={handlePoSupplierChange}>
                     <option value="">Select supplier…</option>
                     {SUPPLIER_OPTIONS.map((s) => (
                       <option key={s} value={s}>
@@ -1863,45 +1725,51 @@ export default function ViewWorkOrder() {
                   </select>
                 )}
               </label>
+
+              <label className="checkline">
+                <input
+                  type="checkbox"
+                  checked={editMode ? !!edit.poPickedUp : !!poPickedUp}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    if (editMode) patchEdit({ poPickedUp: checked });
+                    else handlePoPickedUpToggle(checked);
+                  }}
+                />
+                PO picked up
+              </label>
             </div>
 
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-              <input
-                type="checkbox"
-                checked={editMode ? !!edit.poPickedUp : !!poPickedUp}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  if (editMode) patchEdit({ poPickedUp: checked });
-                  else handlePoPickedUpToggle(checked);
-                }}
-              />
-              PO picked up
-            </label>
-
-            <div style={{ fontSize: 12, color: "#6b7280" }}>Supplier + picked-up are used on the Purchase Orders tab.</div>
+            <div className="po-meta-hint">Supplier + picked-up are used on the Purchase Orders tab.</div>
           </div>
 
           {poHref ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-              <FileTile kind="pdf" href={poHref} fileName={(poPdfPath || "").split("/").pop() || "po.pdf"} onExpand={() => openLightbox("pdf", poHref, "PO PDF")} />
+            <div className="attachments-grid">
+              <FileTile
+                kind="pdf"
+                href={poHref}
+                fileName={(poPdfPath || "").split("/").pop() || "po.pdf"}
+                onExpand={() => openLightbox("pdf", poHref, "PO PDF")}
+              />
             </div>
           ) : (
             <p className="empty-text">No PO PDF attached.</p>
           )}
 
-          <div className="attachment-upload" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <label className="btn">
+          <div className="row-actions">
+            <label className="btn btn-light">
               {busyPoUpload ? "Uploading…" : poHref ? "Replace PO PDF" : "Upload PO PDF"}
               <input type="file" accept="application/pdf" onChange={handleUploadOrReplacePoPdf} style={{ display: "none" }} disabled={busyPoUpload} />
             </label>
           </div>
         </div>
 
-        {/* Other PDFs */}
+        {/* ======================= Other PDFs ======================= */}
         <div className="section-card">
           <h3 className="section-header">Other PDF Attachments</h3>
+
           {otherPdfAttachments.length ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+            <div className="attachments-grid">
               {otherPdfAttachments.map((relPath, i) => {
                 const href = pdfThumbUrl(relPath);
                 const fileName = relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
@@ -1922,19 +1790,19 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* Photos */}
+        {/* ======================= Photos ======================= */}
         <div className="section-card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
-            <h3 className="section-header" style={{ marginBottom: 0 }}>
+          <div className="section-row">
+            <h3 className="section-header" style={{ margin: 0 }}>
               Image Attachments
             </h3>
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn btn-light" onClick={() => downloadMany(photoImages)} disabled={!photoImages.length}>
-                ⬇️ Download All Photos
+            <div className="section-actions">
+              <button className="btn btn-outline" onClick={() => downloadMany(photoImages)} disabled={!photoImages.length}>
+                Download All Photos
               </button>
 
-              <label className="btn">
+              <label className="btn btn-light">
                 {busyImageUpload ? "Uploading…" : "Upload Photos"}
                 <input type="file" accept="image/*" multiple onChange={handleUploadImageAttachment} style={{ display: "none" }} disabled={busyImageUpload} />
               </label>
@@ -1942,7 +1810,7 @@ export default function ViewWorkOrder() {
           </div>
 
           {photoImages.length ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12 }}>
+            <div className="attachments-grid">
               {photoImages.map((relPath, i) => {
                 const href = urlFor(relPath);
                 const fileName = relPath.split("/").pop() || `image-${i + 1}.jpg`;
@@ -1955,7 +1823,7 @@ export default function ViewWorkOrder() {
                     onExpand={() => openLightbox("image", href, fileName)}
                     onDelete={() => handleDeleteAttachment(relPath)}
                     extraAction={
-                      <button className="btn btn-ghost" type="button" onClick={() => toggleDrawNote(relPath)} style={{ width: "100%" }}>
+                      <button className="btn btn-ghost w-full" type="button" onClick={() => toggleDrawNote(relPath)}>
                         Move to Draw Notes
                       </button>
                     }
@@ -1968,20 +1836,20 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* Draw Notes */}
+        {/* ======================= Draw Notes ======================= */}
         <div className="section-card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8, flexWrap: "wrap" }}>
-            <h3 className="section-header" style={{ marginBottom: 0 }}>
+          <div className="section-row">
+            <h3 className="section-header" style={{ margin: 0 }}>
               Draw Notes
             </h3>
 
-            <button className="btn btn-light" onClick={() => downloadMany(drawNoteImages)} disabled={!drawNoteImages.length}>
-              ⬇️ Download All Draw Notes
+            <button className="btn btn-outline" onClick={() => downloadMany(drawNoteImages)} disabled={!drawNoteImages.length}>
+              Download All Draw Notes
             </button>
           </div>
 
           {drawNoteImages.length ? (
-            <div className="attachments" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 12 }}>
+            <div className="attachments-grid">
               {drawNoteImages.map((relPath, i) => {
                 const href = urlFor(relPath);
                 const fileName = relPath.split("/").pop() || `draw-note-${i + 1}.jpg`;
@@ -1994,7 +1862,7 @@ export default function ViewWorkOrder() {
                     onExpand={() => openLightbox("image", href, fileName)}
                     onDelete={() => handleDeleteAttachment(relPath)}
                     extraAction={
-                      <button className="btn btn-ghost" type="button" onClick={() => toggleDrawNote(relPath)} style={{ width: "100%" }}>
+                      <button className="btn btn-ghost w-full" type="button" onClick={() => toggleDrawNote(relPath)}>
                         Move to Photos
                       </button>
                     }
@@ -2007,24 +1875,24 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* Notes */}
+        {/* ======================= Notes ======================= */}
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
 
-          <button className="toggle-note-btn" onClick={() => setShowNoteInput((v) => !v)}>
+          <button className="btn btn-light" onClick={() => setShowNoteInput((v) => !v)}>
             {showNoteInput ? "Cancel" : "Add Note"}
           </button>
 
           {showNoteInput && (
             <div className="add-note">
               <textarea
-                className="note-input"
+                className="control textarea"
                 value={newNote}
                 onChange={(e) => setNewNote(e.target.value)}
                 placeholder="Write your note here..."
-                rows={3}
+                rows={4}
               />
-              <button className="toggle-note-btn" onClick={handleAddNote}>
+              <button className="btn btn-primary" onClick={handleAddNote}>
                 Submit Note
               </button>
             </div>
