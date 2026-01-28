@@ -21,7 +21,6 @@ function inferSupplierFromKey(keyOrUrl) {
   const s = safeLower(keyOrUrl);
 
   // Try to catch common vendor keywords in filenames/paths
-  // (adjust these if your actual keys look different)
   if (s.includes("chicago") || s.includes("tempered") || s.includes("ct")) return "Chicago Tempered";
   if (s.includes("crl")) return "CRL";
   if (s.includes("oldcastle")) return "Oldcastle";
@@ -32,11 +31,20 @@ function inferSupplierFromKey(keyOrUrl) {
 
 function normalizePoStatus(po) {
   // Prefer backend explicit fields if present
-  const picked =
-    !!(po?.poPickedUp ?? po?.po_picked_up ?? po?.pickedUp ?? po?.poPicked ?? po?.picked_up);
+  const picked = !!(
+    (po && po.poPickedUp) ??
+    (po && po.po_picked_up) ??
+    (po && po.pickedUp) ??
+    (po && po.poPicked) ??
+    (po && po.picked_up)
+  );
 
   const explicit =
-    po?.poStatus ?? po?.po_status ?? po?.status ?? po?.poStatusText ?? "";
+    (po && po.poStatus) ??
+    (po && po.po_status) ??
+    (po && po.status) ??
+    (po && po.poStatusText) ??
+    "";
 
   if (explicit) {
     const e = safeLower(explicit);
@@ -128,38 +136,64 @@ export default function PurchaseOrders() {
       if (!obj || typeof obj !== "object") return obj;
 
       const keyGuess =
-        obj.poPdfPath ?? obj.po_pdf_path ?? obj.poPdf ?? obj.po_pdf ?? "";
+        obj.poPdfPath ??
+        obj.po_pdf_path ??
+        obj.poPdf ??
+        obj.po_pdf ??
+        "";
 
-      const supplierGuess =
+      const supplierGuessRaw =
         obj.supplier ??
         obj.poSupplier ??
         obj.po_supplier ??
         obj.vendor ??
-        inferSupplierFromKey(keyGuess);
+        "";
+
+      const inferred = inferSupplierFromKey(keyGuess);
+      const supplierGuess = supplierGuessRaw || inferred || "";
+
+      const poSupplierOut = (obj.poSupplier ?? supplierGuess) || "";
+      const poPdfOut = keyGuess || "";
+
+      const workOrderIdOut =
+        obj.workOrderId ??
+        obj.work_order_id ??
+        obj.woId ??
+        obj.workOrderID ??
+        obj.workOrder_id ??
+        null;
+
+      const workOrderNumberOut =
+        obj.workOrderNumber ??
+        obj.work_order_number ??
+        obj.woNumber ??
+        obj.workOrderNo ??
+        "";
+
+      const createdAtOut =
+        obj.createdAt ??
+        obj.created_at ??
+        obj.createdOn ??
+        obj.created_date ??
+        null;
+
+      const workOrderStatusOut =
+        obj.workOrderStatus ??
+        obj.work_order_status ??
+        obj.woStatus ??
+        obj.statusText ??
+        obj.workOrder_status ??
+        "";
 
       return {
         ...obj,
         supplier: supplierGuess || "",
-        poSupplier: obj.poSupplier ?? supplierGuess || "",
-        poPdfPath: keyGuess || "",
-        workOrderId:
-          obj.workOrderId ??
-          obj.work_order_id ??
-          obj.woId ??
-          obj.workOrderID ??
-          obj.workOrder_id,
-        workOrderNumber:
-          obj.workOrderNumber ??
-          obj.work_order_number ??
-          obj.woNumber ??
-          obj.workOrderNo,
-        createdAt: obj.createdAt ?? obj.created_at ?? obj.createdOn ?? obj.created_date,
-        workOrderStatus:
-          obj.workOrderStatus ??
-          obj.work_order_status ??
-          obj.woStatus ??
-          obj.statusText ??
-          obj.workOrder_status,
+        poSupplier: poSupplierOut,
+        poPdfPath: poPdfOut,
+        workOrderId: workOrderIdOut,
+        workOrderNumber: workOrderNumberOut,
+        createdAt: createdAtOut,
+        workOrderStatus: workOrderStatusOut,
       };
     };
 
@@ -243,21 +277,18 @@ export default function PurchaseOrders() {
   // ✅ Normalize fields so the UI always displays something even if backend uses different names
   const normalizedPurchaseOrders = useMemo(() => {
     return (purchaseOrders || []).map((po) => {
-      const poPdfPath =
-        po.poPdfPath ?? po.po_pdf_path ?? po.poPdf ?? po.po_pdf ?? "";
+      const poPdfPath = (po.poPdfPath ?? po.po_pdf_path ?? po.poPdf ?? po.po_pdf ?? "") || "";
 
-      const supplierRaw =
-        po.supplier ?? po.poSupplier ?? po.po_supplier ?? po.vendor ?? "";
-
+      const supplierRaw = (po.supplier ?? po.poSupplier ?? po.po_supplier ?? po.vendor ?? "") || "";
       const supplier = supplierRaw || inferSupplierFromKey(poPdfPath) || "";
 
       const workOrderStatus =
-        po.workOrderStatus ??
-        po.work_order_status ??
-        po.woStatus ??
-        po.workOrder_status ??
-        po.workOrderStatusText ??
-        "";
+        (po.workOrderStatus ??
+          po.work_order_status ??
+          po.woStatus ??
+          po.workOrder_status ??
+          po.workOrderStatusText ??
+          "") || "";
 
       const poStatus = normalizePoStatus(po);
 
@@ -266,12 +297,12 @@ export default function PurchaseOrders() {
       return {
         ...po,
         supplier,
-        poSupplier: po.poSupplier ?? supplier,
-        poNumber: po.poNumber ?? po.po_number ?? po.poNo ?? "",
-        customer: po.customer ?? po.customerName ?? "",
-        siteLocation: po.siteLocation ?? po.site_name ?? po.siteName ?? "",
-        siteAddress: po.siteAddress ?? po.site_address ?? "",
-        workOrderNumber: po.workOrderNumber ?? po.work_order_number ?? po.woNumber ?? "",
+        poSupplier: (po.poSupplier ?? supplier) || "",
+        poNumber: (po.poNumber ?? po.po_number ?? po.poNo ?? "") || "",
+        customer: (po.customer ?? po.customerName ?? "") || "",
+        siteLocation: (po.siteLocation ?? po.site_name ?? po.siteName ?? "") || "",
+        siteAddress: (po.siteAddress ?? po.site_address ?? "") || "",
+        workOrderNumber: (po.workOrderNumber ?? po.work_order_number ?? po.woNumber ?? "") || "",
         workOrderId: po.workOrderId ?? po.work_order_id ?? po.woId ?? null,
         poPdfPath,
         createdAt: po.createdAt ?? po.created_at ?? po.createdOn ?? po.created_date ?? null,
@@ -286,7 +317,6 @@ export default function PurchaseOrders() {
   const waitingOnPartsOnly = useMemo(() => {
     return (normalizedPurchaseOrders || []).filter((po) => {
       const s = safeLower(po.workOrderStatus || "");
-      // exact match-ish; tolerate extra whitespace/case
       return s === "waiting on parts" || s.includes("waiting on parts");
     });
   }, [normalizedPurchaseOrders]);
@@ -294,13 +324,14 @@ export default function PurchaseOrders() {
   // Client-side search as a backup (even though we also support server-side searchApplied)
   const filteredPurchaseOrders = useMemo(() => {
     const q = (search || "").trim().toLowerCase();
-
     const base = waitingOnPartsOnly;
 
     // Apply supplier filter client-side too (helps when supplier is inferred from PDF key)
     const supplierFiltered =
       supplierFilter && supplierFilter !== "All Suppliers"
-        ? base.filter((po) => (po.supplier || "").toLowerCase() === supplierFilter.toLowerCase())
+        ? base.filter(
+            (po) => (po.supplier || "").toLowerCase() === supplierFilter.toLowerCase()
+          )
         : base;
 
     // Apply PO status filter client-side too (in case backend doesn't filter perfectly)
@@ -323,7 +354,9 @@ export default function PurchaseOrders() {
         po.workOrderNumber,
         po.supplier,
       ];
-      return fieldsToSearch.some((val) => (val || "").toString().toLowerCase().includes(q));
+      return fieldsToSearch.some((val) =>
+        (val || "").toString().toLowerCase().includes(q)
+      );
     });
   }, [waitingOnPartsOnly, search, supplierFilter, statusFilter]);
 
