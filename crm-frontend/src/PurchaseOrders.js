@@ -17,20 +17,34 @@ const authHeaders = () => {
 /* ---------- helpers ---------- */
 const safeLower = (v) => String(v || "").toLowerCase();
 
-function inferSupplierFromKey(keyOrUrl) {
-  const s = safeLower(keyOrUrl);
+function inferSupplierFromText(text) {
+  const s = safeLower(text);
 
-  // Try to catch common vendor keywords in filenames/paths
-  if (s.includes("chicago") || s.includes("tempered") || s.includes("ct")) return "Chicago Tempered";
+  // Strong matches first
+  if (s.includes("chicago tempered") || s.includes("chicagotempered") || s.includes("chicago_tempered")) {
+    return "Chicago Tempered";
+  }
   if (s.includes("crl")) return "CRL";
   if (s.includes("oldcastle")) return "Oldcastle";
   if (s.includes("casco")) return "Casco";
 
-  return ""; // unknown
+  // Weaker "CT" style matches (guarded to reduce false positives)
+  // Examples it should catch: "/ct/", "ct_", "ct-", " ct "
+  const hasCT =
+    s.includes("/ct/") ||
+    s.includes("\\ct\\") ||
+    s.includes(" ct ") ||
+    s.includes("ct_") ||
+    s.includes("ct-") ||
+    s.includes("_ct_") ||
+    s.includes("-ct-");
+
+  if (hasCT) return "Chicago Tempered";
+
+  return "";
 }
 
 function normalizePoStatus(po) {
-  // Prefer backend explicit fields if present
   const picked = !!(
     (po && po.poPickedUp) ??
     (po && po.po_picked_up) ??
@@ -66,7 +80,18 @@ export default function PurchaseOrders() {
   // server-side search (hit Search button) + keep client-side filtering as backup
   const [searchApplied, setSearchApplied] = useState("");
 
+  // PDF modal viewer (in-app)
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState("");
+  const [pdfTitle, setPdfTitle] = useState("");
+
   const navigate = useNavigate();
+
+  const closePdfModal = () => {
+    setPdfModalOpen(false);
+    setPdfUrl("");
+    setPdfTitle("");
+  };
 
   const loadPurchaseOrders = useCallback(async () => {
     setLoading(true);
@@ -135,27 +160,39 @@ export default function PurchaseOrders() {
     const normalizeIncoming = (obj) => {
       if (!obj || typeof obj !== "object") return obj;
 
-      const keyGuess =
+      const poPdfPath =
         obj.poPdfPath ??
         obj.po_pdf_path ??
         obj.poPdf ??
         obj.po_pdf ??
         "";
 
-      const supplierGuessRaw =
+      // extra filename fields that might exist
+      const originalName =
+        obj.poPdfOriginalName ??
+        obj.po_pdf_original_name ??
+        obj.poPdfFilename ??
+        obj.po_pdf_filename ??
+        obj.filename ??
+        "";
+
+      const supplierRaw =
         obj.supplier ??
         obj.poSupplier ??
         obj.po_supplier ??
         obj.vendor ??
+        obj.vendorName ??
+        obj.supplierName ??
+        obj.poVendor ??
+        obj.po_vendor ??
         "";
 
-      const inferred = inferSupplierFromKey(keyGuess);
-      const supplierGuess = supplierGuessRaw || inferred || "";
+      const inferText = [supplierRaw, poPdfPath, originalName].filter(Boolean).join(" ");
+      const inferred = inferSupplierFromText(inferText);
 
-      const poSupplierOut = (obj.poSupplier ?? supplierGuess) || "";
-      const poPdfOut = keyGuess || "";
+      const supplier = supplierRaw || inferred || "";
 
-      const workOrderIdOut =
+      const workOrderId =
         obj.workOrderId ??
         obj.work_order_id ??
         obj.woId ??
@@ -163,21 +200,21 @@ export default function PurchaseOrders() {
         obj.workOrder_id ??
         null;
 
-      const workOrderNumberOut =
+      const workOrderNumber =
         obj.workOrderNumber ??
         obj.work_order_number ??
         obj.woNumber ??
         obj.workOrderNo ??
         "";
 
-      const createdAtOut =
+      const createdAt =
         obj.createdAt ??
         obj.created_at ??
         obj.createdOn ??
         obj.created_date ??
         null;
 
-      const workOrderStatusOut =
+      const workOrderStatus =
         obj.workOrderStatus ??
         obj.work_order_status ??
         obj.woStatus ??
@@ -187,13 +224,14 @@ export default function PurchaseOrders() {
 
       return {
         ...obj,
-        supplier: supplierGuess || "",
-        poSupplier: poSupplierOut,
-        poPdfPath: poPdfOut,
-        workOrderId: workOrderIdOut,
-        workOrderNumber: workOrderNumberOut,
-        createdAt: createdAtOut,
-        workOrderStatus: workOrderStatusOut,
+        supplier,
+        poSupplier: (obj.poSupplier ?? supplier) || "",
+        poPdfPath: poPdfPath || "",
+        poPdfOriginalName: originalName || "",
+        workOrderId,
+        workOrderNumber,
+        createdAt,
+        workOrderStatus,
       };
     };
 
@@ -255,14 +293,20 @@ export default function PurchaseOrders() {
     }
   };
 
+  // ✅ In-app PDF viewer (modal)
   const handleOpenPdf = (po) => {
     const key = po?.poPdfPath || po?.po_pdf_path || po?.poPdf || "";
     if (!key) {
       alert("No PDF attached to this purchase order.");
       return;
     }
+
     const url = `${API_BASE_URL}/files?key=${encodeURIComponent(key)}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+    const title = `PO ${po?.poNumber || ""}`.trim();
+
+    setPdfUrl(url);
+    setPdfTitle(title || "Purchase Order PDF");
+    setPdfModalOpen(true);
   };
 
   const handleViewWorkOrder = (po) => {
@@ -279,8 +323,30 @@ export default function PurchaseOrders() {
     return (purchaseOrders || []).map((po) => {
       const poPdfPath = (po.poPdfPath ?? po.po_pdf_path ?? po.poPdf ?? po.po_pdf ?? "") || "";
 
-      const supplierRaw = (po.supplier ?? po.poSupplier ?? po.po_supplier ?? po.vendor ?? "") || "";
-      const supplier = supplierRaw || inferSupplierFromKey(poPdfPath) || "";
+      const originalName =
+        (po.poPdfOriginalName ??
+          po.po_pdf_original_name ??
+          po.poPdfFilename ??
+          po.po_pdf_filename ??
+          po.filename ??
+          "") || "";
+
+      const supplierRaw =
+        (po.supplier ??
+          po.poSupplier ??
+          po.po_supplier ??
+          po.vendor ??
+          po.vendorName ??
+          po.supplierName ??
+          po.poVendor ??
+          po.po_vendor ??
+          "") || "";
+
+      // Best-effort inference using *multiple* fields
+      const inferText = [supplierRaw, poPdfPath, originalName].filter(Boolean).join(" ");
+      const inferred = inferSupplierFromText(inferText);
+
+      const supplier = supplierRaw || inferred || "";
 
       const workOrderStatus =
         (po.workOrderStatus ??
@@ -291,7 +357,6 @@ export default function PurchaseOrders() {
           "") || "";
 
       const poStatus = normalizePoStatus(po);
-
       const poPickedUp = !!(po.poPickedUp ?? po.po_picked_up ?? po.pickedUp);
 
       return {
@@ -305,6 +370,7 @@ export default function PurchaseOrders() {
         workOrderNumber: (po.workOrderNumber ?? po.work_order_number ?? po.woNumber ?? "") || "",
         workOrderId: po.workOrderId ?? po.work_order_id ?? po.woId ?? null,
         poPdfPath,
+        poPdfOriginalName: originalName,
         createdAt: po.createdAt ?? po.created_at ?? po.createdOn ?? po.created_date ?? null,
         poPickedUp,
         poStatus,
@@ -321,26 +387,21 @@ export default function PurchaseOrders() {
     });
   }, [normalizedPurchaseOrders]);
 
-  // Client-side search as a backup (even though we also support server-side searchApplied)
+  // Client-side search as a backup
   const filteredPurchaseOrders = useMemo(() => {
     const q = (search || "").trim().toLowerCase();
     const base = waitingOnPartsOnly;
 
-    // Apply supplier filter client-side too (helps when supplier is inferred from PDF key)
+    // Supplier filter client-side too (important because supplier may be inferred)
     const supplierFiltered =
       supplierFilter && supplierFilter !== "All Suppliers"
-        ? base.filter(
-            (po) => (po.supplier || "").toLowerCase() === supplierFilter.toLowerCase()
-          )
+        ? base.filter((po) => safeLower(po.supplier) === safeLower(supplierFilter))
         : base;
 
-    // Apply PO status filter client-side too (in case backend doesn't filter perfectly)
+    // Status filter client-side too
     const statusFiltered =
       statusFilter && statusFilter !== "All Statuses"
-        ? supplierFiltered.filter((po) => {
-            const ps = normalizePoStatus(po);
-            return statusFilter === ps;
-          })
+        ? supplierFiltered.filter((po) => normalizePoStatus(po) === statusFilter)
         : supplierFiltered;
 
     if (!q) return statusFiltered;
@@ -354,16 +415,13 @@ export default function PurchaseOrders() {
         po.workOrderNumber,
         po.supplier,
       ];
-      return fieldsToSearch.some((val) =>
-        (val || "").toString().toLowerCase().includes(q)
-      );
+      return fieldsToSearch.some((val) => safeLower(val).includes(q));
     });
   }, [waitingOnPartsOnly, search, supplierFilter, statusFilter]);
 
-  // consistent button styles (match screenshot #2: evenly spaced)
-  const actionBtnStyle = {
+  // Buttons: match your screenshot (all blue, even spacing, same width, no wrap)
+  const btnStyle = {
     minWidth: 140,
-    whiteSpace: "nowrap",
   };
 
   return (
@@ -439,10 +497,11 @@ export default function PurchaseOrders() {
 
             <div className="col-md-2 text-end">
               <button
-                className="btn btn-outline-secondary mt-3 mt-md-0"
+                className="btn btn-primary mt-3 mt-md-0"
                 type="button"
                 onClick={loadPurchaseOrders}
                 disabled={loading}
+                style={{ minWidth: 120 }}
               >
                 Refresh
               </button>
@@ -510,7 +569,7 @@ export default function PurchaseOrders() {
                         <button
                           type="button"
                           className="btn btn-sm btn-primary"
-                          style={actionBtnStyle}
+                          style={btnStyle}
                           onClick={() => handleOpenPdf(po)}
                         >
                           View PDF
@@ -521,11 +580,12 @@ export default function PurchaseOrders() {
                     </td>
 
                     <td>
-                      <div className="d-flex flex-wrap gap-2">
+                      {/* keep them on ONE line like your screenshot */}
+                      <div className="d-flex align-items-center gap-2" style={{ flexWrap: "nowrap" }}>
                         <button
                           type="button"
                           className="btn btn-sm btn-primary"
-                          style={actionBtnStyle}
+                          style={btnStyle}
                           onClick={() => handleViewWorkOrder(po)}
                         >
                           View Work Order
@@ -535,7 +595,7 @@ export default function PurchaseOrders() {
                           <button
                             type="button"
                             className="btn btn-sm btn-primary"
-                            style={actionBtnStyle}
+                            style={btnStyle}
                             onClick={() => handleMarkPickedUp(po)}
                           >
                             Mark Picked Up
@@ -556,6 +616,61 @@ export default function PurchaseOrders() {
           </div>
         </div>
       </div>
+
+      {/* -------- In-app PDF Modal -------- */}
+      {pdfModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={closePdfModal}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            zIndex: 2000,
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: 1100,
+              margin: "0 auto",
+              background: "#fff",
+              borderRadius: 10,
+              overflow: "hidden",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+            }}
+          >
+            <div className="d-flex align-items-center justify-content-between p-3 border-bottom">
+              <div className="fw-bold">{pdfTitle || "Purchase Order PDF"}</div>
+              <div className="d-flex align-items-center gap-2">
+                {/* optional: open in new tab if someone wants it */}
+                {pdfUrl ? (
+                  <a className="btn btn-sm btn-outline-secondary" href={pdfUrl} target="_blank" rel="noreferrer">
+                    Open in New Tab
+                  </a>
+                ) : null}
+                <button className="btn btn-sm btn-primary" onClick={closePdfModal}>
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div style={{ height: "80vh" }}>
+              {pdfUrl ? (
+                <iframe
+                  title="PO PDF Viewer"
+                  src={pdfUrl}
+                  style={{ width: "100%", height: "100%", border: 0 }}
+                />
+              ) : (
+                <div className="p-4 text-muted">No PDF URL.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
