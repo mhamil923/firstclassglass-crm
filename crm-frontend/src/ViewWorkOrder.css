@@ -210,7 +210,7 @@
   height: 44px;
 }
 
-/* ---------- stacked detail layout ---------- */
+/* ---------- stacked detail layout (NEW GRID) ---------- */
 .wo-stack {
   margin-top: 0.5rem;
   background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
@@ -248,6 +248,7 @@
   min-width: 320px;
 }
 
+/* Details (notes) spans both columns */
 .wo-stack-meta > .section-card {
   grid-column: 1 / -1;
 }
@@ -311,7 +312,7 @@
   font-weight: 600;
 }
 
-/* ✅ WO # and PO # side-by-side */
+/* ✅ WO # and PO # side-by-side and aligned */
 .wo-stack > .wo-field:nth-of-type(1) {
   grid-column: 1 / 4;
 }
@@ -319,22 +320,29 @@
   grid-column: 4 / 7;
 }
 
-/* ✅ Hide Site Name field (it is currently the 4th Field) */
+/* ✅ Customer full width (since we want 3-across below) */
+.wo-stack > .wo-field:nth-of-type(3) {
+  grid-column: 1 / -1;
+}
+
+/*
+  ✅ Hide Site Name field
+  (if it still exists in JS, this makes it disappear)
+*/
 .wo-stack > .wo-field:nth-of-type(4) {
   display: none !important;
 }
 
 /*
   ✅ Put Site Location (Legacy) BEFORE Site Address and make them side-by-side
-  Current order after hiding Site Name:
+  Current order after Site Name:
    - Site Address = nth-of-type(5)
    - Site Location (Legacy) = nth-of-type(6)
-  We place them on the same grid row and swap columns.
 */
 .wo-stack > .wo-field:nth-of-type(5) {
   /* Site Address -> right side */
   grid-column: 4 / 7;
-  grid-row: 20; /* force it onto the same row as Site Location */
+  grid-row: 20;
 }
 .wo-stack > .wo-field:nth-of-type(6) {
   /* Site Location -> left side */
@@ -342,24 +350,30 @@
   grid-row: 20;
 }
 
-/* ✅ Scheduled Date not full width (keep it tighter) */
-.wo-stack > .wo-field:nth-of-type(9) {
-  grid-column: 1 / 4;
-}
-
-/* keep billing + problem full width (unchanged) */
+/* ✅ Billing + Problem stay full width (unchanged) */
 .wo-stack > .wo-field:nth-of-type(7),
 .wo-stack > .wo-field:nth-of-type(8) {
   grid-column: 1 / -1;
 }
 
-/* Existing two-col helper (still used for Phone/Email today) */
+/* ✅ Scheduled Date tighter (not full width) */
+.wo-stack > .wo-field:nth-of-type(9) {
+  grid-column: 1 / 4;
+}
+
+/* ---------- 2-col helper (still used elsewhere) ---------- */
 .wo-2col {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1.1rem;
+  grid-column: 1 / -1;
+}
 
-  /* make it span full width within the 6-col grid */
+/* ✅ NEW: 3-column row helper (Customer + Phone + Email) */
+.wo-3col {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.1rem;
   grid-column: 1 / -1;
 }
 
@@ -692,7 +706,8 @@
     grid-row: auto;
   }
 
-  .wo-2col {
+  .wo-2col,
+  .wo-3col {
     grid-template-columns: 1fr;
   }
 
