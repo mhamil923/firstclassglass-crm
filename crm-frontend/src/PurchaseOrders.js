@@ -1,7 +1,6 @@
 // File: src/PurchaseOrders.js
-
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import api from "./api";
 import API_BASE_URL from "./config";
 
@@ -28,19 +27,13 @@ const firstNonNullish = (...vals) => {
 function inferSupplierFromText(text) {
   const s = safeLower(text);
 
-  // Strong matches first
-  if (
-    s.includes("chicago tempered") ||
-    s.includes("chicagotempered") ||
-    s.includes("chicago_tempered")
-  ) {
+  if (s.includes("chicago tempered") || s.includes("chicagotempered") || s.includes("chicago_tempered")) {
     return "Chicago Tempered";
   }
   if (s.includes("crl")) return "CRL";
   if (s.includes("oldcastle")) return "Oldcastle";
   if (s.includes("casco")) return "Casco";
 
-  // Weaker "CT" style matches (guarded to reduce false positives)
   const hasCT =
     s.includes("/ct/") ||
     s.includes("\\ct\\") ||
@@ -79,7 +72,7 @@ function isWaitingOnPartsText(statusText) {
 }
 
 /**
- * ✅ IMPORTANT: no route “probing” (that caused the Home flash).
+ * ✅ IMPORTANT: no route probing (it caused the Home flash).
  * If your actual view route differs, change DEFAULT_WORK_ORDER_ROUTE_BASE.
  */
 const WORK_ORDER_ROUTE_STORAGE_KEY = "fcgg_work_order_route_base";
@@ -110,9 +103,15 @@ export default function PurchaseOrders() {
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const [pdfUrl, setPdfUrl] = useState("");
   const [pdfTitle, setPdfTitle] = useState("");
-  const [pdfPo, setPdfPo] = useState(null); // <-- track which PO is open in the modal
+  const [pdfPo, setPdfPo] = useState(null);
+
+  // per-row action loading
+  const [busyIds, setBusyIds] = useState(() => new Set());
 
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const currentPathWithQuery = () => `${location.pathname}${location.search || ""}`;
 
   const closePdfModal = () => {
     setPdfModalOpen(false);
@@ -137,8 +136,7 @@ export default function PurchaseOrders() {
       () => api.get("/work-orders", { headers, params: { status: "waiting-on-parts" } }),
       () => api.get("/work-orders", { headers, params: { workOrderStatus: "Waiting on Parts" } }),
       () => api.get("/work-orders", { headers, params: { status: "Waiting on Parts" } }),
-      // fallback: fetch all and filter client-side
-      () => api.get("/work-orders", { headers }),
+      () => api.get("/work-orders", { headers }), // fallback: fetch all and filter client-side
     ];
 
     for (const fn of tryCalls) {
@@ -200,7 +198,7 @@ export default function PurchaseOrders() {
         setWaitingWoIdSet(idSet);
         setWoMetaById(meta);
         return;
-      } catch (e) {
+      } catch {
         // keep trying
       }
     }
@@ -263,7 +261,8 @@ export default function PurchaseOrders() {
   }, [loadPurchaseOrders]);
 
   /**
-   * After PO is marked picked up, also set the *work order* status to "Needs to be Scheduled".
+   * Update the *work order* status to "Needs to be Scheduled".
+   * (Used for both real PO rows AND synthetic rows.)
    */
   const updateWorkOrderStatusToNeedsScheduling = async (woId) => {
     if (!woId) return false;
@@ -310,151 +309,93 @@ export default function PurchaseOrders() {
     }
   };
 
-  const handleMarkPickedUp = async (po) => {
-    const poNum = po?.poNumber || "";
-    if (!window.confirm(`Mark PO ${poNum || ""} as Picked Up?`)) return;
+  /**
+   * ✅ NEW: Mark Picked Up for ANY row:
+   * - Real PO row: mark PO picked up + update WO status
+   * - Synthetic row: update WO status only
+   */
+  const handleMarkPickedUp = async (row) => {
+    const woId = firstNonNullish(row?.workOrderId, row?.work_order_id, row?.woId, null);
+    const poNum = row?.poNumber || "";
+    const isSynthetic = typeof row?.id === "string" && String(row.id).startsWith("wo-");
 
-    setError("");
+    // Don’t allow if we can’t identify the WO
+    if (!woId) {
+      alert("No related work order linked to this row.");
+      return;
+    }
 
-    const normalizeIncoming = (obj) => {
-      if (!obj || typeof obj !== "object") return obj;
+    // Don’t show/allow if it’s not actually waiting on parts anymore
+    const stillWaiting =
+      waitingWoIdSet.has(woId) || isWaitingOnPartsText(firstNonNullish(row.workOrderStatus, row.statusText, ""));
+    if (!stillWaiting) {
+      alert("This work order is no longer in Waiting on Parts.");
+      return;
+    }
 
-      const poPdfPath =
-        firstNonNullish(obj.poPdfPath, obj.po_pdf_path, obj.poPdf, obj.po_pdf, "") || "";
-
-      const originalName =
-        firstNonNullish(
-          obj.poPdfOriginalName,
-          obj.po_pdf_original_name,
-          obj.poPdfFilename,
-          obj.po_pdf_filename,
-          obj.filename,
-          ""
-        ) || "";
-
-      const supplierRaw =
-        firstNonNullish(
-          obj.supplier,
-          obj.poSupplier,
-          obj.po_supplier,
-          obj.vendor,
-          obj.vendorName,
-          obj.supplierName,
-          obj.poVendor,
-          obj.po_vendor,
-          ""
-        ) || "";
-
-      const inferText = [supplierRaw, poPdfPath, originalName].filter(Boolean).join(" ");
-      const inferred = inferSupplierFromText(inferText);
-      const supplier = supplierRaw || inferred || "";
-
-      const workOrderId =
-        firstNonNullish(
-          obj.workOrderId,
-          obj.work_order_id,
-          obj.woId,
-          obj.workOrderID,
-          obj.workOrder_id,
-          null
-        ) ?? null;
-
-      const workOrderNumber =
-        firstNonNullish(
-          obj.workOrderNumber,
-          obj.work_order_number,
-          obj.woNumber,
-          obj.workOrderNo,
-          ""
-        ) || "";
-
-      const createdAt =
-        firstNonNullish(obj.createdAt, obj.created_at, obj.createdOn, obj.created_date, null) ??
-        null;
-
-      const workOrderStatus =
-        firstNonNullish(
-          obj.workOrderStatus,
-          obj.work_order_status,
-          obj.woStatus,
-          obj.statusText,
-          obj.workOrder_status,
-          ""
-        ) || "";
-
-      return {
-        ...obj,
-        supplier,
-        poSupplier: firstNonNullish(obj.poSupplier, supplier, "") || "",
-        poPdfPath,
-        poPdfOriginalName: originalName,
-        workOrderId,
-        workOrderNumber,
-        createdAt,
-        workOrderStatus,
-      };
-    };
+    // Busy guard
+    setBusyIds((prev) => {
+      const next = new Set(prev);
+      next.add(String(row.id));
+      return next;
+    });
 
     try {
-      // Synthetic rows (created from waiting-on-parts work orders) don't have a real PO id -> block.
-      const isSynthetic = typeof po?.id === "string" && String(po.id).startsWith("wo-");
-      if (isSynthetic) {
-        alert(
-          "This work order does not have a Purchase Order record yet (no PO #/PDF). Add the PO to the work order first, then you can mark it picked up."
-        );
+      if (!window.confirm(`Mark as Picked Up and move Work Order to "${NEEDS_TO_BE_SCHEDULED}"?`)) {
         return;
       }
 
-      let updated = null;
-
-      // 1) Mark PO picked up
-      try {
-        const r = await api.put(`/purchase-orders/${po.id}/mark-picked-up`, null, {
-          headers: authHeaders(),
-        });
-        updated = r.data;
-      } catch (e1) {
+      // If real PO row, try to mark PO picked up first
+      if (!isSynthetic) {
         try {
-          const r = await api.put(
-            `/purchase-orders/${po.id}/picked-up`,
-            { pickedUp: true },
-            { headers: authHeaders() }
-          );
-          updated = r.data;
-        } catch (e2) {
-          const woIdFallback = firstNonNullish(po.workOrderId, po.work_order_id, po.woId, null);
-          if (!woIdFallback) throw e2;
-
-          const form = new FormData();
-          form.append("poPickedUp", "1");
-
-          const r = await api.put(`/work-orders/${woIdFallback}/edit`, form, {
-            headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-          });
-
-          updated = { ...po, poPickedUp: true, poStatus: "Picked Up", ...r.data };
+          await api.put(`/purchase-orders/${row.id}/mark-picked-up`, null, { headers: authHeaders() });
+        } catch (e1) {
+          try {
+            await api.put(
+              `/purchase-orders/${row.id}/picked-up`,
+              { pickedUp: true },
+              { headers: authHeaders() }
+            );
+          } catch (e2) {
+            // fallback: mark picked up via work-order edit (if your backend derives PO from WO)
+            try {
+              const form = new FormData();
+              form.append("poPickedUp", "1");
+              await api.put(`/work-orders/${woId}/edit`, form, {
+                headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+              });
+            } catch {
+              // even if PO flag fails, we still move WO status (that’s the main goal)
+            }
+          }
         }
       }
 
-      const normalized = normalizeIncoming(updated);
+      // Always update the work order status
+      const statusOk = await updateWorkOrderStatusToNeedsScheduling(woId);
+      if (!statusOk) {
+        alert("Work order status update endpoint might differ. The UI will still be updated.");
+      }
 
-      // 2) Also move the WORK ORDER status to "Needs to be Scheduled"
-      const woId = firstNonNullish(
-        normalized?.workOrderId,
-        po?.workOrderId,
-        po?.work_order_id,
-        po?.woId,
-        null
-      );
-      await updateWorkOrderStatusToNeedsScheduling(woId);
+      // UI updates: remove from Waiting on Parts immediately
+      setWaitingWoIdSet((prev) => {
+        const next = new Set(prev);
+        next.delete(woId);
+        return next;
+      });
 
-      // 3) Update UI immediately
+      setWoMetaById((prev) => {
+        const next = { ...(prev || {}) };
+        if (next[woId]) next[woId] = { ...(next[woId] || {}), status: NEEDS_TO_BE_SCHEDULED };
+        return next;
+      });
+
+      // Update PO list row if it exists in state
       setPurchaseOrders((prev) =>
-        (prev || []).map((item) => {
-          if (item.id !== po.id) return item;
+        (prev || []).map((po) => {
+          if (po.id !== row.id) return po;
           return {
-            ...item,
-            ...normalized,
+            ...po,
             poPickedUp: true,
             poStatus: "Picked Up",
             workOrderStatus: NEEDS_TO_BE_SCHEDULED,
@@ -464,33 +405,29 @@ export default function PurchaseOrders() {
         })
       );
 
-      // Also remove from waiting set locally (so it disappears immediately)
-      if (woId) {
-        setWaitingWoIdSet((prevSet) => {
-          const next = new Set(prevSet);
-          next.delete(woId);
-          return next;
-        });
-        setWoMetaById((prev) => {
-          const next = { ...(prev || {}) };
-          if (next[woId]) next[woId] = { ...(next[woId] || {}), status: NEEDS_TO_BE_SCHEDULED };
-          return next;
-        });
-      }
+      alert(
+        `Marked Picked Up.\n` +
+          `Work Order moved to: ${NEEDS_TO_BE_SCHEDULED}` +
+          (poNum ? `\nPO: ${poNum}` : "")
+      );
 
-      alert(`PO ${normalized?.poNumber || poNum} marked as Picked Up.\nWork Order moved to: ${NEEDS_TO_BE_SCHEDULED}`);
-
-      // Refresh to keep server truth synced
+      // Refresh for server truth
       loadPurchaseOrders();
     } catch (err) {
-      console.error("❌ Error marking PO picked up:", err?.response || err);
+      console.error("❌ Error marking picked up:", err?.response || err);
       const status = err?.response?.status;
       const msg =
         err?.response?.data?.error ||
         err?.response?.data?.message ||
         err?.message ||
-        "Failed to update purchase order.";
+        "Failed to update.";
       setError(status ? `Update failed (HTTP ${status}) — ${msg}` : msg);
+    } finally {
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(String(row.id));
+        return next;
+      });
     }
   };
 
@@ -511,11 +448,13 @@ export default function PurchaseOrders() {
     setPdfModalOpen(true);
   };
 
-  // ✅ No Home flash: single known route
-  const handleViewWorkOrder = (po) => {
-    const woId = firstNonNullish(po?.workOrderId, po?.work_order_id, po?.woId, null);
+  /**
+   * ✅ View Work Order + pass “from” route so Back button can return properly later
+   */
+  const handleViewWorkOrder = (row) => {
+    const woId = firstNonNullish(row?.workOrderId, row?.work_order_id, row?.woId, null);
     if (!woId) {
-      alert("No related work order linked to this purchase order.");
+      alert("No related work order linked to this row.");
       return;
     }
 
@@ -523,7 +462,10 @@ export default function PurchaseOrders() {
       localStorage.getItem(WORK_ORDER_ROUTE_STORAGE_KEY) || DEFAULT_WORK_ORDER_ROUTE_BASE;
 
     const path = buildWorkOrderPath(savedBase, woId);
-    navigate(path);
+
+    // ✅ pass the page you came from
+    navigate(path, { state: { from: currentPathWithQuery() } });
+
     localStorage.setItem(WORK_ORDER_ROUTE_STORAGE_KEY, savedBase);
   };
 
@@ -624,9 +566,8 @@ export default function PurchaseOrders() {
   }, [purchaseOrders, woMetaById]);
 
   /**
-   * ✅ Fix: show ALL Waiting on Parts work orders.
-   * /purchase-orders may only contain a subset (only those with PO data),
-   * so we add synthetic rows for waiting WOs that are missing from PO list.
+   * ✅ Show ALL Waiting on Parts work orders
+   * Add synthetic rows for waiting WOs missing from PO list.
    */
   const combinedWaitingRows = useMemo(() => {
     const poByWoId = new Map();
@@ -640,7 +581,7 @@ export default function PurchaseOrders() {
 
       const meta = woMetaById[woId] || {};
       synthetic.push({
-        id: `wo-${woId}`, // synthetic id
+        id: `wo-${woId}`,
         supplier: "",
         poSupplier: "",
         poNumber: "",
@@ -659,9 +600,9 @@ export default function PurchaseOrders() {
       });
     }
 
-    // Only show waiting on parts in this tab (real + synthetic)
     const all = [...normalizedPurchaseOrders, ...synthetic];
 
+    // Only waiting-on-parts rows should show here
     return all.filter((row) => {
       const byLookup = row.workOrderId ? waitingWoIdSet.has(row.workOrderId) : false;
       const byText = isWaitingOnPartsText(row.workOrderStatus);
@@ -699,14 +640,17 @@ export default function PurchaseOrders() {
     });
   }, [combinedWaitingRows, search, supplierFilter, statusFilter]);
 
-  // Buttons: match your screenshot (all blue, even spacing, same width, no wrap)
+  // Buttons styling
   const btnStyle = { minWidth: 140 };
 
-  // Helpers for PDF modal button
-  const pdfCanMarkPickedUp =
-    !!pdfPo &&
-    !normalizePoStatus(pdfPo).toLowerCase().includes("picked") &&
-    !(typeof pdfPo?.id === "string" && String(pdfPo.id).startsWith("wo-"));
+  // PDF modal: allow mark picked up whenever pdfPo exists AND its WO is still waiting on parts
+  const pdfCanMarkPickedUp = useMemo(() => {
+    if (!pdfPo) return false;
+    const woId = firstNonNullish(pdfPo.workOrderId, pdfPo.work_order_id, pdfPo.woId, null);
+    if (!woId) return false;
+    const stillWaiting = waitingWoIdSet.has(woId) || isWaitingOnPartsText(pdfPo.workOrderStatus);
+    return stillWaiting;
+  }, [pdfPo, waitingWoIdSet]);
 
   const handlePdfMarkPickedUp = async () => {
     if (!pdfPo) return;
@@ -844,57 +788,68 @@ export default function PurchaseOrders() {
                   </tr>
                 )}
 
-                {filteredPurchaseOrders.map((po) => (
-                  <tr key={po.id}>
-                    <td>{po.supplier || "-"}</td>
-                    <td>{po.poNumber || "-"}</td>
-                    <td>{po.customer || "-"}</td>
-                    <td>{po.siteLocation || po.siteAddress || "-"}</td>
-                    <td>{po.workOrderNumber || "-"}</td>
-                    <td>{po.poStatus || (po.poPickedUp ? "Picked Up" : "On Order")}</td>
-                    <td>{po.createdAt ? new Date(po.createdAt).toLocaleString() : "-"}</td>
+                {filteredPurchaseOrders.map((row) => {
+                  const woId = row.workOrderId;
+                  const stillWaiting =
+                    (woId && waitingWoIdSet.has(woId)) || isWaitingOnPartsText(row.workOrderStatus);
 
-                    <td>
-                      {po.poPdfPath ? (
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-primary"
-                          style={btnStyle}
-                          onClick={() => handleOpenPdf(po)}
-                        >
-                          View PDF
-                        </button>
-                      ) : (
-                        <span className="text-muted">No PDF</span>
-                      )}
-                    </td>
+                  const isBusy = busyIds.has(String(row.id));
 
-                    <td>
-                      <div className="d-flex align-items-center gap-2" style={{ flexWrap: "nowrap" }}>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-primary"
-                          style={btnStyle}
-                          onClick={() => handleViewWorkOrder(po)}
-                        >
-                          View Work Order
-                        </button>
+                  return (
+                    <tr key={row.id}>
+                      <td>{row.supplier || "-"}</td>
+                      <td>{row.poNumber || "-"}</td>
+                      <td>{row.customer || "-"}</td>
+                      <td>{row.siteLocation || row.siteAddress || "-"}</td>
+                      <td>{row.workOrderNumber || "-"}</td>
+                      <td>{row.poStatus || (row.poPickedUp ? "Picked Up" : "On Order")}</td>
+                      <td>{row.createdAt ? new Date(row.createdAt).toLocaleString() : "-"}</td>
 
-                        {/* Only show Mark Picked Up for real PO rows (not synthetic) */}
-                        {!po.poPickedUp && !(typeof po.id === "string" && String(po.id).startsWith("wo-")) && (
+                      <td>
+                        {row.poPdfPath ? (
                           <button
                             type="button"
                             className="btn btn-sm btn-primary"
                             style={btnStyle}
-                            onClick={() => handleMarkPickedUp(po)}
+                            onClick={() => handleOpenPdf(row)}
+                            disabled={isBusy}
                           >
-                            Mark Picked Up
+                            View PDF
                           </button>
+                        ) : (
+                          <span className="text-muted">No PDF</span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+
+                      <td>
+                        <div className="d-flex align-items-center gap-2" style={{ flexWrap: "nowrap" }}>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            style={btnStyle}
+                            onClick={() => handleViewWorkOrder(row)}
+                            disabled={isBusy}
+                          >
+                            View Work Order
+                          </button>
+
+                          {/* ✅ FIX: show Mark Picked Up for ALL rows that are still Waiting on Parts */}
+                          {stillWaiting && (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-primary"
+                              style={btnStyle}
+                              onClick={() => handleMarkPickedUp(row)}
+                              disabled={isBusy}
+                            >
+                              {isBusy ? "Working..." : "Mark Picked Up"}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -934,7 +889,6 @@ export default function PurchaseOrders() {
             <div className="d-flex align-items-center justify-content-between p-3 border-bottom">
               <div className="fw-bold">{pdfTitle || "Purchase Order PDF"}</div>
               <div className="d-flex align-items-center gap-2">
-                {/* ✅ Replaced "Open in New Tab" with "Mark Picked Up" */}
                 {pdfCanMarkPickedUp ? (
                   <button className="btn btn-sm btn-primary" onClick={handlePdfMarkPickedUp}>
                     Mark Picked Up
@@ -949,11 +903,7 @@ export default function PurchaseOrders() {
 
             <div style={{ height: "80vh" }}>
               {pdfUrl ? (
-                <iframe
-                  title="PO PDF Viewer"
-                  src={pdfUrl}
-                  style={{ width: "100%", height: "100%", border: 0 }}
-                />
+                <iframe title="PO PDF Viewer" src={pdfUrl} style={{ width: "100%", height: "100%", border: 0 }} />
               ) : (
                 <div className="p-4 text-muted">No PDF URL.</div>
               )}
