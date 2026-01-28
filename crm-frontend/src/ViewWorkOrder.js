@@ -121,12 +121,10 @@ function toDatetimeLocalValue(dateLike) {
 
 function tryOpenNativePicker(inputEl) {
   if (!inputEl) return;
-  // Chromium supports showPicker() for date/time inputs
   if (typeof inputEl.showPicker === "function") {
     inputEl.showPicker();
     return;
   }
-  // Fallbacks
   inputEl.focus();
   inputEl.click?.();
 }
@@ -192,6 +190,7 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
     </div>
   );
 }
+
 /* ---------- Lightbox modal ---------- */
 function Lightbox({ open, onClose, kind, src, title }) {
   const [downloading, setDownloading] = useState(false);
@@ -296,9 +295,7 @@ function FileTile({ kind, href, fileName, onDelete, onExpand, extraAction }) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Notes parsing/formatting (supports JSON-array or server TEXT log format)    */
-/* -------------------------------------------------------------------------- */
+/* ---------- Notes parsing/formatting ---------- */
 function parseNotesArrayOrText(raw) {
   if (!raw) return { entries: [], originalOrder: [] };
   if (Array.isArray(raw)) {
@@ -383,7 +380,6 @@ function Field({ label, children, hint }) {
     </div>
   );
 }
-
 export default function ViewWorkOrder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -566,13 +562,13 @@ export default function ViewWorkOrder() {
     if (scheduleSaving) return;
 
     const val = (datetimeLocalVal || "").trim();
+
+    // Allow clearing schedule by deleting the value (NO "Clear" button needed)
     if (!val) {
-      // Allow clearing schedule
       setScheduleSaving(true);
       try {
         const form = new FormData();
         form.append("scheduledDate", "");
-        // If cleared, do NOT force status changes here
         await api.put(`/work-orders/${id}/edit`, form, {
           headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
         });
@@ -588,7 +584,6 @@ export default function ViewWorkOrder() {
 
     setScheduleSaving(true);
     try {
-      // Convert datetime-local to an ISO string (local time -> Date -> ISO)
       const dt = new Date(val);
       const iso = Number.isNaN(dt.getTime()) ? "" : dt.toISOString();
 
@@ -705,7 +700,8 @@ export default function ViewWorkOrder() {
       </div>
     `;
   };
- /* ---------------- PRINT: Work Order ---------------- */
+
+  /* ---------------- PRINT: Work Order ---------------- */
   const handlePrint = () => {
     const siteDisplayName = (siteLocation || customer || "").trim();
     const siteAddr = (siteAddress || "").trim();
@@ -997,7 +993,6 @@ export default function ViewWorkOrder() {
     w.document.write(html);
     w.document.close();
   };
-
   /* ---------------- EDIT SAVE ---------------- */
   const handleSaveEdits = async () => {
     if (editSaving) return;
@@ -1008,7 +1003,7 @@ export default function ViewWorkOrder() {
 
       // Core fields
       form.append("workOrderNumber", (edit.workOrderNumber || "").trim());
-      form.append("poNumber", (edit.poNumber || "").trim()); // backend will store it; legacy hide handled in UI
+      form.append("poNumber", (edit.poNumber || "").trim()); // backend stores it; legacy hide handled in UI
       form.append("customer", (edit.customer || "").trim());
       form.append("customerPhone", (edit.customerPhone || "").trim());
       form.append("customerEmail", (edit.customerEmail || "").trim());
@@ -1027,7 +1022,14 @@ export default function ViewWorkOrder() {
       // Status / Assign / Schedule
       form.append("status", edit.status || "Needs to be Scheduled");
       form.append("assignedTo", edit.assignedTo || "");
-      form.append("scheduledDate", edit.scheduledDate || "");
+      // IMPORTANT: edit scheduledDate in edit-mode is datetime-local right now
+      // Convert to ISO like quick schedule to keep backend consistent
+      if ((edit.scheduledDate || "").includes("T")) {
+        const dt = new Date(edit.scheduledDate);
+        form.append("scheduledDate", Number.isNaN(dt.getTime()) ? "" : dt.toISOString());
+      } else {
+        form.append("scheduledDate", edit.scheduledDate || "");
+      }
 
       // Purchase order fields
       form.append("poSupplier", edit.poSupplier || "");
@@ -1247,8 +1249,8 @@ export default function ViewWorkOrder() {
 
   const handleDeleteAttachment = async (relPath) => {
     if (!relPath) return;
-    const confirm = window.confirm("Delete this attachment permanently?");
-    if (!confirm) return;
+    const ok = window.confirm("Delete this attachment permanently?");
+    if (!ok) return;
 
     try {
       await api.delete(`/work-orders/${id}/attachments`, {
@@ -1451,10 +1453,16 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /* ======================= RENDER ======================= */
+  /* ======================= RENDER (FIXED NESTING) ======================= */
   return (
     <div className="view-container">
-      <Lightbox open={lightbox.open} onClose={closeLightbox} kind={lightbox.kind} src={lightbox.src} title={lightbox.title} />
+      <Lightbox
+        open={lightbox.open}
+        onClose={closeLightbox}
+        kind={lightbox.kind}
+        src={lightbox.src}
+        title={lightbox.title}
+      />
 
       <div className="view-card">
         <div className="view-header-row">
@@ -1496,22 +1504,22 @@ export default function ViewWorkOrder() {
               </>
             )}
 
-            {/* ✅ Back uses state.from */}
             <button className="btn back-btn" onClick={goBack}>
               Back
             </button>
           </div>
         </div>
 
-        {/* ======================= BASIC INFO (STACKED FIELDS) ======================= */}
+        {/* ======================= BASIC INFO ======================= */}
         <div className="wo-stack">
+          {/* LEFT: Details + status/tech */}
           <div className="wo-stack-head">
             <div className="wo-stack-meta">
               <div className="section-card">
                 <h3 className="section-header">Details</h3>
 
                 {recentNotes.length ? (
-                  <ul className="notes-list" style={{ marginTop: 0 }}>
+                  <ul className="notes-list notes-list--compact">
                     {recentNotes.map((n, idx) => (
                       <li key={`${n.createdAt || "na"}-${idx}`} className="note-item">
                         <div className="note-header">
@@ -1520,239 +1528,302 @@ export default function ViewWorkOrder() {
                             {n.by ? ` — ${n.by}` : ""}
                           </small>
                         </div>
-                        <p className="note-text" style={{ marginBottom: 0 }}>
-                          {n.text}
-                        </p>
+                        <p className="note-text">{n.text}</p>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="empty-text" style={{ margin: 0 }}>
-                    No notes yet.
-                  </p>
+                  <p className="empty-text">No notes yet.</p>
                 )}
               </div>
 
-              <div className="meta-row">
-                <span className="meta-label">Status</span>
-                {editMode ? (
-                  <select className="control select" value={edit.status} onChange={(e) => patchEdit({ status: e.target.value })}>
-                    <option value="" disabled>
-                      Select status…
-                    </option>
-                    {STATUS_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="meta-inline">
-                    <select className="control select" value={localStatus} onChange={handleStatusChange} disabled={statusSaving}>
-                      <option value="" disabled>
-                        Select status…
-                      </option>
-                      {STATUS_OPTIONS.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                    {statusSaving ? <span className="tiny">Saving…</span> : null}
-                  </div>
-                )}
-              </div>
+              <div className="section-card">
+                <h3 className="section-header">Status & Assignment</h3>
 
-              <div className="meta-row">
-                <span className="meta-label">Assigned Tech</span>
-                {editMode ? (
-                  <select className="control select" value={edit.assignedTo} onChange={(e) => patchEdit({ assignedTo: e.target.value })}>
-                    <option value="">Unassigned</option>
-                    {techUsers.map((t) => (
-                      <option key={t.id} value={String(t.id)}>
-                        {t.username}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="meta-inline">
-                    <select className="control select" value={localAssignedTo} onChange={handleAssignedTechChange} disabled={techSaving}>
-                      <option value="">Unassigned</option>
-                      {techUsers.map((t) => (
-                        <option key={t.id} value={String(t.id)}>
-                          {t.username}
+                <div className="meta-grid-2">
+                  <div className="meta-row">
+                    <span className="meta-label">Status</span>
+                    {editMode ? (
+                      <select
+                        className="control select"
+                        value={edit.status}
+                        onChange={(e) => patchEdit({ status: e.target.value })}
+                      >
+                        <option value="" disabled>
+                          Select status…
                         </option>
-                      ))}
-                    </select>
-                    {techSaving ? <span className="tiny">Saving…</span> : null}
+                        {STATUS_OPTIONS.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="meta-inline">
+                        <select
+                          className="control select"
+                          value={localStatus}
+                          onChange={handleStatusChange}
+                          disabled={statusSaving}
+                        >
+                          <option value="" disabled>
+                            Select status…
+                          </option>
+                          {STATUS_OPTIONS.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                        {statusSaving ? <span className="tiny">Saving…</span> : null}
+                      </div>
+                    )}
                   </div>
-                )}
+
+                  <div className="meta-row">
+                    <span className="meta-label">Assigned Tech</span>
+                    {editMode ? (
+                      <select
+                        className="control select"
+                        value={edit.assignedTo}
+                        onChange={(e) => patchEdit({ assignedTo: e.target.value })}
+                      >
+                        <option value="">Unassigned</option>
+                        {techUsers.map((t) => (
+                          <option key={t.id} value={String(t.id)}>
+                            {t.username}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="meta-inline">
+                        <select
+                          className="control select"
+                          value={localAssignedTo}
+                          onChange={handleAssignedTechChange}
+                          disabled={techSaving}
+                        >
+                          <option value="">Unassigned</option>
+                          {techUsers.map((t) => (
+                            <option key={t.id} value={String(t.id)}>
+                              {t.username}
+                            </option>
+                          ))}
+                        </select>
+                        {techSaving ? <span className="tiny">Saving…</span> : null}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
 
-          <Field label="Work Order #">
-            {editMode ? (
-              <input
-                type="text"
-                className="control input"
-                value={edit.workOrderNumber}
-                onChange={(e) => patchEdit({ workOrderNumber: e.target.value })}
-              />
-            ) : (
-              <div className="value">{displayWO(workOrderNumber)}</div>
-            )}
-          </Field>
+            {/* RIGHT: Field stack */}
+            <div className="wo-stack-fields">
+              <div className="wo-row-2">
+                <Field label="Work Order #">
+                  {editMode ? (
+                    <input
+                      type="text"
+                      className="control input"
+                      value={edit.workOrderNumber}
+                      onChange={(e) => patchEdit({ workOrderNumber: e.target.value })}
+                    />
+                  ) : (
+                    <div className="value">{displayWO(workOrderNumber)}</div>
+                  )}
+                </Field>
 
-          <Field label="PO #">
-            {editMode ? (
-              <input type="text" className="control input" value={edit.poNumber} onChange={(e) => patchEdit({ poNumber: e.target.value })} placeholder="(optional)" />
-            ) : (
-              <PONumberEditor
-                orderId={woId}
-                initialPo={cleanedPo}
-                onSaved={(newPo) =>
-                  setWorkOrder((prev) => ({
-                    ...prev,
-                    poNumber: newPo || null,
-                  }))
-                }
-              />
-            )}
-          </Field>
-
-          <Field label="Customer">{editMode ? <input className="control input" value={edit.customer} onChange={(e) => patchEdit({ customer: e.target.value })} /> : <div className="value">{customer || "—"}</div>}</Field>
-
-          <div className="wo-2col">
-            <Field label="Customer Phone">
-              {editMode ? (
-                <input type="tel" className="control input" value={edit.customerPhone} onChange={(e) => patchEdit({ customerPhone: e.target.value })} />
-              ) : (
-                <div className="value">{customerPhone || "—"}</div>
-              )}
-            </Field>
-
-            <Field label="Customer Email">
-              {editMode ? (
-                <input type="email" className="control input" value={edit.customerEmail} onChange={(e) => patchEdit({ customerEmail: e.target.value })} />
-              ) : (
-                <div className="value">{customerEmail || "—"}</div>
-              )}
-            </Field>
-          </div>
-
-          <Field label="Site Name">
-            {editMode ? <input className="control input" value={edit.siteName} onChange={(e) => patchEdit({ siteName: e.target.value })} /> : <div className="value">{workOrder?.siteName || "—"}</div>}
-          </Field>
-
-          <Field label="Site Address">
-            {editMode ? (
-              <textarea className="control textarea" rows={3} value={edit.siteAddress} onChange={(e) => patchEdit({ siteAddress: e.target.value })} />
-            ) : (
-              <div className="value pre-wrap">{siteAddress || "—"}</div>
-            )}
-          </Field>
-
-          <Field label="Site Location (Legacy)">
-            {editMode ? (
-              <textarea className="control textarea" rows={3} value={edit.siteLocation} onChange={(e) => patchEdit({ siteLocation: e.target.value })} />
-            ) : (
-              <div className="value pre-wrap">{siteLocation || "—"}</div>
-            )}
-          </Field>
-
-          <Field label="Billing Address">
-            {editMode ? (
-              <textarea className="control textarea" rows={4} value={edit.billingAddress} onChange={(e) => patchEdit({ billingAddress: e.target.value })} />
-            ) : (
-              <div className="value pre-wrap">{billingAddress || "—"}</div>
-            )}
-          </Field>
-
-          <Field label="Problem Description">
-            {editMode ? (
-              <textarea className="control textarea" rows={5} value={edit.problemDescription} onChange={(e) => patchEdit({ problemDescription: e.target.value })} />
-            ) : (
-              <div className="value pre-wrap">{problemDescription || "—"}</div>
-            )}
-          </Field>
-
-          {/* ✅ Scheduled Date: Add “mini calendar picker” in view-mode like Add Work Order */}
-          <Field
-            label="Scheduled Date"
-            hint={
-              editMode
-                ? null
-                : "Pick a date/time to schedule. Saving will set Status to Scheduled (unless already Completed)."
-            }
-          >
-            {editMode ? (
-              <input
-                type="datetime-local"
-                className="control input"
-                value={scheduledDateInput || ""}
-                onChange={(e) => patchEdit({ scheduledDate: e.target.value })}
-              />
-            ) : (
-              <div className="schedule-inline">
-                <input
-                  ref={scheduleInputRef}
-                  type="datetime-local"
-                  className="control input"
-                  value={quickScheduledDate || ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setQuickScheduledDate(v);
-                    saveQuickSchedule(v);
-                  }}
-                  disabled={scheduleSaving}
-                />
-                <button
-                  type="button"
-                  className="btn btn-light"
-                  title="Open calendar"
-                  onClick={() => {
-                    // open the native picker if supported
-                    if (scheduleInputRef.current?.showPicker) scheduleInputRef.current.showPicker();
-                    else scheduleInputRef.current?.focus();
-                  }}
-                  disabled={scheduleSaving}
-                  style={{ padding: "0 10px", minWidth: 44 }}
-                >
-                  📅
-                </button>
-                {scheduleSaving ? <span className="tiny">Saving…</span> : null}
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => {
-                    setQuickScheduledDate("");
-                    saveQuickSchedule("");
-                  }}
-                  disabled={scheduleSaving}
-                  title="Clear scheduled date"
-                >
-                  Clear
-                </button>
+                <Field label="PO #">
+                  {editMode ? (
+                    <input
+                      type="text"
+                      className="control input"
+                      value={edit.poNumber}
+                      onChange={(e) => patchEdit({ poNumber: e.target.value })}
+                      placeholder="(optional)"
+                    />
+                  ) : (
+                    <PONumberEditor
+                      orderId={woId}
+                      initialPo={cleanedPo}
+                      onSaved={(newPo) =>
+                        setWorkOrder((prev) => ({
+                          ...prev,
+                          poNumber: newPo || null,
+                        }))
+                      }
+                    />
+                  )}
+                </Field>
               </div>
-            )}
-          </Field>
-        </div>
 
+              <div className="wo-row-3">
+                <Field label="Customer">
+                  {editMode ? (
+                    <input
+                      className="control input"
+                      value={edit.customer}
+                      onChange={(e) => patchEdit({ customer: e.target.value })}
+                    />
+                  ) : (
+                    <div className="value">{customer || "—"}</div>
+                  )}
+                </Field>
+
+                <Field label="Customer Phone">
+                  {editMode ? (
+                    <input
+                      type="tel"
+                      className="control input"
+                      value={edit.customerPhone}
+                      onChange={(e) => patchEdit({ customerPhone: e.target.value })}
+                    />
+                  ) : (
+                    <div className="value">{customerPhone || "—"}</div>
+                  )}
+                </Field>
+
+                <Field label="Customer Email">
+                  {editMode ? (
+                    <input
+                      type="email"
+                      className="control input"
+                      value={edit.customerEmail}
+                      onChange={(e) => patchEdit({ customerEmail: e.target.value })}
+                    />
+                  ) : (
+                    <div className="value">{customerEmail || "—"}</div>
+                  )}
+                </Field>
+              </div>
+
+              <div className="wo-row-2">
+                <Field label="Site Location">
+                  {editMode ? (
+                    <textarea
+                      className="control textarea"
+                      rows={3}
+                      value={edit.siteLocation}
+                      onChange={(e) => patchEdit({ siteLocation: e.target.value })}
+                    />
+                  ) : (
+                    <div className="value pre-wrap">{siteLocation || "—"}</div>
+                  )}
+                </Field>
+
+                <Field label="Site Address">
+                  {editMode ? (
+                    <textarea
+                      className="control textarea"
+                      rows={3}
+                      value={edit.siteAddress}
+                      onChange={(e) => patchEdit({ siteAddress: e.target.value })}
+                    />
+                  ) : (
+                    <div className="value pre-wrap">{siteAddress || "—"}</div>
+                  )}
+                </Field>
+              </div>
+
+              <Field label="Billing Address">
+                {editMode ? (
+                  <textarea
+                    className="control textarea"
+                    rows={4}
+                    value={edit.billingAddress}
+                    onChange={(e) => patchEdit({ billingAddress: e.target.value })}
+                  />
+                ) : (
+                  <div className="value pre-wrap">{billingAddress || "—"}</div>
+                )}
+              </Field>
+
+              <Field label="Problem Description">
+                {editMode ? (
+                  <textarea
+                    className="control textarea"
+                    rows={5}
+                    value={edit.problemDescription}
+                    onChange={(e) => patchEdit({ problemDescription: e.target.value })}
+                  />
+                ) : (
+                  <div className="value pre-wrap">{problemDescription || "—"}</div>
+                )}
+              </Field>
+
+              <Field
+                label="Scheduled Date"
+                hint={
+                  editMode
+                    ? null
+                    : "Pick a date/time to schedule. Saving will set Status to Scheduled (unless already Completed)."
+                }
+              >
+                {editMode ? (
+                  <input
+                    type="datetime-local"
+                    className="control input"
+                    value={scheduledDateInput || ""}
+                    onChange={(e) => patchEdit({ scheduledDate: e.target.value })}
+                  />
+                ) : (
+                  <div className="schedule-inline">
+                    <input
+                      ref={scheduleInputRef}
+                      type="datetime-local"
+                      className="control input"
+                      value={quickScheduledDate || ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setQuickScheduledDate(v);
+                        saveQuickSchedule(v);
+                      }}
+                      disabled={scheduleSaving}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-light"
+                      title="Open calendar"
+                      onClick={() => tryOpenNativePicker(scheduleInputRef.current)}
+                      disabled={scheduleSaving}
+                    >
+                      📅
+                    </button>
+
+                    {scheduleSaving ? <span className="tiny">Saving…</span> : null}
+                  </div>
+                )}
+              </Field>
+            </div>
+          </div>
+        </div>
+        {/* BASIC INFO END */}
         {/* ======================= Signed Work Order PDF ======================= */}
         <div className="section-card">
           <h3 className="section-header">Sign-Off Sheet PDF</h3>
 
           {signedHref ? (
             <div className="attachments-grid">
-              <FileTile kind="pdf" href={signedHref} fileName={(pdfPath || "").split("/").pop() || "signed.pdf"} onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")} />
+              <FileTile
+                kind="pdf"
+                href={signedHref}
+                fileName={(pdfPath || "").split("/").pop() || "signed.pdf"}
+                onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")}
+              />
             </div>
           ) : (
             <div>
               <p className="empty-text">No PDF attached.</p>
               <label className="btn btn-light">
                 {busyReplace ? "Uploading…" : "Upload Signed PDF"}
-                <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleReplacePdfUpload}
+                  style={{ display: "none" }}
+                  disabled={busyReplace}
+                />
               </label>
             </div>
           )}
@@ -1764,10 +1835,20 @@ export default function ViewWorkOrder() {
               </a>
               <label className="btn btn-light">
                 {busyReplace ? "Replacing…" : "Replace Signed PDF"}
-                <input type="file" accept="application/pdf" onChange={handleReplacePdfUpload} style={{ display: "none" }} disabled={busyReplace} />
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleReplacePdfUpload}
+                  style={{ display: "none" }}
+                  disabled={busyReplace}
+                />
               </label>
               <label className="checkline">
-                <input type="checkbox" checked={keepOldInAttachments} onChange={(e) => setKeepOldInAttachments(e.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={keepOldInAttachments}
+                  onChange={(e) => setKeepOldInAttachments(e.target.checked)}
+                />
                 Move existing signed PDF to attachments
               </label>
             </div>
@@ -1780,7 +1861,12 @@ export default function ViewWorkOrder() {
 
           {estimateHref ? (
             <div className="attachments-grid">
-              <FileTile kind="pdf" href={estimateHref} fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"} onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")} />
+              <FileTile
+                kind="pdf"
+                href={estimateHref}
+                fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
+                onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
+              />
             </div>
           ) : (
             <p className="empty-text">No estimate PDF attached.</p>
@@ -1789,7 +1875,13 @@ export default function ViewWorkOrder() {
           <div className="row-actions">
             <label className="btn btn-light">
               {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
-              <input type="file" accept="application/pdf" onChange={handleUploadOrReplaceEstimatePdf} style={{ display: "none" }} disabled={busyEstimateUpload} />
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handleUploadOrReplaceEstimatePdf}
+                style={{ display: "none" }}
+                disabled={busyEstimateUpload}
+              />
             </label>
           </div>
         </div>
@@ -1803,7 +1895,11 @@ export default function ViewWorkOrder() {
               <label className="inline-label">
                 Supplier
                 {editMode ? (
-                  <select className="control select" value={edit.poSupplier || ""} onChange={(e) => patchEdit({ poSupplier: e.target.value })}>
+                  <select
+                    className="control select"
+                    value={edit.poSupplier || ""}
+                    onChange={(e) => patchEdit({ poSupplier: e.target.value })}
+                  >
                     <option value="">Select supplier…</option>
                     {SUPPLIER_OPTIONS.map((s) => (
                       <option key={s} value={s}>
@@ -1842,7 +1938,12 @@ export default function ViewWorkOrder() {
 
           {poHref ? (
             <div className="attachments-grid">
-              <FileTile kind="pdf" href={poHref} fileName={(poPdfPath || "").split("/").pop() || "po.pdf"} onExpand={() => openLightbox("pdf", poHref, "PO PDF")} />
+              <FileTile
+                kind="pdf"
+                href={poHref}
+                fileName={(poPdfPath || "").split("/").pop() || "po.pdf"}
+                onExpand={() => openLightbox("pdf", poHref, "PO PDF")}
+              />
             </div>
           ) : (
             <p className="empty-text">No PO PDF attached.</p>
@@ -1851,7 +1952,13 @@ export default function ViewWorkOrder() {
           <div className="row-actions">
             <label className="btn btn-light">
               {busyPoUpload ? "Uploading…" : poHref ? "Replace PO PDF" : "Upload PO PDF"}
-              <input type="file" accept="application/pdf" onChange={handleUploadOrReplacePoPdf} style={{ display: "none" }} disabled={busyPoUpload} />
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handleUploadOrReplacePoPdf}
+                style={{ display: "none" }}
+                disabled={busyPoUpload}
+              />
             </label>
           </div>
         </div>
@@ -1865,7 +1972,16 @@ export default function ViewWorkOrder() {
               {otherPdfAttachments.map((relPath, i) => {
                 const href = pdfThumbUrl(relPath);
                 const fileName = relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
-                return <FileTile key={`${relPath}-${i}`} kind="pdf" href={href} fileName={fileName} onExpand={() => openLightbox("pdf", href, fileName)} onDelete={() => handleDeleteAttachment(relPath)} />;
+                return (
+                  <FileTile
+                    key={`${relPath}-${i}`}
+                    kind="pdf"
+                    href={href}
+                    fileName={fileName}
+                    onExpand={() => openLightbox("pdf", href, fileName)}
+                    onDelete={() => handleDeleteAttachment(relPath)}
+                  />
+                );
               })}
             </div>
           ) : (
@@ -1887,7 +2003,14 @@ export default function ViewWorkOrder() {
 
               <label className="btn btn-light">
                 {busyImageUpload ? "Uploading…" : "Upload Photos"}
-                <input type="file" accept="image/*" multiple onChange={handleUploadImageAttachment} style={{ display: "none" }} disabled={busyImageUpload} />
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleUploadImageAttachment}
+                  style={{ display: "none" }}
+                  disabled={busyImageUpload}
+                />
               </label>
             </div>
           </div>
@@ -1968,7 +2091,13 @@ export default function ViewWorkOrder() {
 
           {showNoteInput && (
             <div className="add-note">
-              <textarea className="control textarea" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Write your note here..." rows={4} />
+              <textarea
+                className="control textarea"
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                placeholder="Write your note here..."
+                rows={4}
+              />
               <button className="btn btn-primary" onClick={handleAddNote}>
                 Submit Note
               </button>
@@ -1984,7 +2113,12 @@ export default function ViewWorkOrder() {
                       {n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "—"}
                       {n.by ? ` — ${n.by}` : ""}
                     </small>
-                    <button type="button" className="note-delete-btn" title="Delete note" onClick={() => handleDeleteNote(idx)}>
+                    <button
+                      type="button"
+                      className="note-delete-btn"
+                      title="Delete note"
+                      onClick={() => handleDeleteNote(idx)}
+                    >
                       ✕
                     </button>
                   </div>
