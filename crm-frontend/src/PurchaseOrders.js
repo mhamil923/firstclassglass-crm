@@ -14,6 +14,38 @@ const authHeaders = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+/* ---------- helpers ---------- */
+const safeLower = (v) => String(v || "").toLowerCase();
+
+function inferSupplierFromKey(keyOrUrl) {
+  const s = safeLower(keyOrUrl);
+
+  // Try to catch common vendor keywords in filenames/paths
+  // (adjust these if your actual keys look different)
+  if (s.includes("chicago") || s.includes("tempered") || s.includes("ct")) return "Chicago Tempered";
+  if (s.includes("crl")) return "CRL";
+  if (s.includes("oldcastle")) return "Oldcastle";
+  if (s.includes("casco")) return "Casco";
+
+  return ""; // unknown
+}
+
+function normalizePoStatus(po) {
+  // Prefer backend explicit fields if present
+  const picked =
+    !!(po?.poPickedUp ?? po?.po_picked_up ?? po?.pickedUp ?? po?.poPicked ?? po?.picked_up);
+
+  const explicit =
+    po?.poStatus ?? po?.po_status ?? po?.status ?? po?.poStatusText ?? "";
+
+  if (explicit) {
+    const e = safeLower(explicit);
+    if (e.includes("picked")) return "Picked Up";
+    if (e.includes("on") && e.includes("order")) return "On Order";
+  }
+  return picked ? "Picked Up" : "On Order";
+}
+
 export default function PurchaseOrders() {
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -33,10 +65,6 @@ export default function PurchaseOrders() {
     setError("");
 
     try {
-      // ✅ Build query params that are compatible with either backend style:
-      // - status=on-order/picked-up  OR  status=On Order/Picked Up
-      // - supplier=Chicago Tempered etc
-      // - search=...
       const params = {};
 
       if (supplierFilter && supplierFilter !== "All Suppliers") {
@@ -44,8 +72,6 @@ export default function PurchaseOrders() {
       }
 
       if (statusFilter && statusFilter !== "All Statuses") {
-        // Use hyphen values first (your current backend mapping),
-        // but also include a readable fallback field some backends expect.
         if (statusFilter === "On Order") {
           params.status = "on-order";
           params.poStatus = "On Order";
@@ -64,7 +90,6 @@ export default function PurchaseOrders() {
         params,
       });
 
-      // Backend might return array OR { rows: [...] }
       const rows = Array.isArray(res.data) ? res.data : res.data?.rows;
       setPurchaseOrders(Array.isArray(rows) ? rows : []);
     } catch (err) {
@@ -91,7 +116,6 @@ export default function PurchaseOrders() {
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     setSearchApplied(search);
-    // loadPurchaseOrders will rerun because searchApplied changes
   };
 
   const handleMarkPickedUp = async (po) => {
@@ -100,23 +124,46 @@ export default function PurchaseOrders() {
 
     setError("");
 
-    // Helper to normalize fields coming back from backend
     const normalizeIncoming = (obj) => {
       if (!obj || typeof obj !== "object") return obj;
+
+      const keyGuess =
+        obj.poPdfPath ?? obj.po_pdf_path ?? obj.poPdf ?? obj.po_pdf ?? "";
+
+      const supplierGuess =
+        obj.supplier ??
+        obj.poSupplier ??
+        obj.po_supplier ??
+        obj.vendor ??
+        inferSupplierFromKey(keyGuess);
+
       return {
         ...obj,
-        // Common field aliases:
-        supplier: obj.supplier ?? obj.poSupplier ?? obj.po_supplier ?? obj.vendor ?? "",
-        poSupplier: obj.poSupplier ?? obj.supplier ?? obj.po_supplier ?? obj.vendor ?? "",
-        poPdfPath: obj.poPdfPath ?? obj.po_pdf_path ?? obj.poPdf ?? obj.po_pdf ?? "",
-        workOrderId: obj.workOrderId ?? obj.work_order_id ?? obj.woId ?? obj.workOrderID ?? obj.workOrder_id,
-        workOrderNumber: obj.workOrderNumber ?? obj.work_order_number ?? obj.woNumber ?? obj.workOrderNo,
+        supplier: supplierGuess || "",
+        poSupplier: obj.poSupplier ?? supplierGuess || "",
+        poPdfPath: keyGuess || "",
+        workOrderId:
+          obj.workOrderId ??
+          obj.work_order_id ??
+          obj.woId ??
+          obj.workOrderID ??
+          obj.workOrder_id,
+        workOrderNumber:
+          obj.workOrderNumber ??
+          obj.work_order_number ??
+          obj.woNumber ??
+          obj.workOrderNo,
         createdAt: obj.createdAt ?? obj.created_at ?? obj.createdOn ?? obj.created_date,
+        workOrderStatus:
+          obj.workOrderStatus ??
+          obj.work_order_status ??
+          obj.woStatus ??
+          obj.statusText ??
+          obj.workOrder_status,
       };
     };
 
     try {
-      // ✅ Try multiple endpoints (since backends often differ)
       let updated = null;
 
       try {
@@ -126,11 +173,13 @@ export default function PurchaseOrders() {
         updated = r.data;
       } catch (e1) {
         try {
-          const r = await api.put(`/purchase-orders/${po.id}/picked-up`, { pickedUp: true }, { headers: authHeaders() });
+          const r = await api.put(
+            `/purchase-orders/${po.id}/picked-up`,
+            { pickedUp: true },
+            { headers: authHeaders() }
+          );
           updated = r.data;
         } catch (e2) {
-          // Fallback: update via work order edit (if backend derives PO from work order)
-          // If we have a workOrderId, toggle poPickedUp there
           const woId = po.workOrderId ?? po.work_order_id ?? po.woId;
           if (!woId) throw e2;
 
@@ -141,7 +190,6 @@ export default function PurchaseOrders() {
             headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
           });
 
-          // Some APIs return the work order; we still want to reflect PO row in UI
           updated = { ...po, poPickedUp: true, poStatus: "Picked Up", ...r.data };
         }
       }
@@ -149,7 +197,11 @@ export default function PurchaseOrders() {
       const normalized = normalizeIncoming(updated);
 
       setPurchaseOrders((prev) =>
-        prev.map((item) => (item.id === po.id ? { ...item, ...normalized, poPickedUp: true, poStatus: "Picked Up" } : item))
+        prev.map((item) =>
+          item.id === po.id
+            ? { ...item, ...normalized, poPickedUp: true, poStatus: "Picked Up" }
+            : item
+        )
       );
 
       const woNum = normalized?.workOrderNumber || po?.workOrderNumber || "";
@@ -190,28 +242,79 @@ export default function PurchaseOrders() {
 
   // ✅ Normalize fields so the UI always displays something even if backend uses different names
   const normalizedPurchaseOrders = useMemo(() => {
-    return (purchaseOrders || []).map((po) => ({
-      ...po,
-      supplier: po.supplier ?? po.poSupplier ?? po.po_supplier ?? po.vendor ?? "",
-      poNumber: po.poNumber ?? po.po_number ?? po.poNo ?? "",
-      customer: po.customer ?? po.customerName ?? "",
-      siteLocation: po.siteLocation ?? po.site_name ?? po.siteName ?? "",
-      siteAddress: po.siteAddress ?? po.site_address ?? "",
-      workOrderNumber: po.workOrderNumber ?? po.work_order_number ?? po.woNumber ?? "",
-      workOrderId: po.workOrderId ?? po.work_order_id ?? po.woId ?? null,
-      poPdfPath: po.poPdfPath ?? po.po_pdf_path ?? po.poPdf ?? po.po_pdf ?? "",
-      createdAt: po.createdAt ?? po.created_at ?? po.createdOn ?? po.created_date ?? null,
-      poPickedUp: !!(po.poPickedUp ?? po.po_picked_up ?? po.pickedUp),
-      poStatus: po.poStatus ?? po.po_status ?? "",
-    }));
+    return (purchaseOrders || []).map((po) => {
+      const poPdfPath =
+        po.poPdfPath ?? po.po_pdf_path ?? po.poPdf ?? po.po_pdf ?? "";
+
+      const supplierRaw =
+        po.supplier ?? po.poSupplier ?? po.po_supplier ?? po.vendor ?? "";
+
+      const supplier = supplierRaw || inferSupplierFromKey(poPdfPath) || "";
+
+      const workOrderStatus =
+        po.workOrderStatus ??
+        po.work_order_status ??
+        po.woStatus ??
+        po.workOrder_status ??
+        po.workOrderStatusText ??
+        "";
+
+      const poStatus = normalizePoStatus(po);
+
+      const poPickedUp = !!(po.poPickedUp ?? po.po_picked_up ?? po.pickedUp);
+
+      return {
+        ...po,
+        supplier,
+        poSupplier: po.poSupplier ?? supplier,
+        poNumber: po.poNumber ?? po.po_number ?? po.poNo ?? "",
+        customer: po.customer ?? po.customerName ?? "",
+        siteLocation: po.siteLocation ?? po.site_name ?? po.siteName ?? "",
+        siteAddress: po.siteAddress ?? po.site_address ?? "",
+        workOrderNumber: po.workOrderNumber ?? po.work_order_number ?? po.woNumber ?? "",
+        workOrderId: po.workOrderId ?? po.work_order_id ?? po.woId ?? null,
+        poPdfPath,
+        createdAt: po.createdAt ?? po.created_at ?? po.createdOn ?? po.created_date ?? null,
+        poPickedUp,
+        poStatus,
+        workOrderStatus,
+      };
+    });
   }, [purchaseOrders]);
+
+  // ✅ Only show "Waiting on Parts" work orders in Purchase Orders tab
+  const waitingOnPartsOnly = useMemo(() => {
+    return (normalizedPurchaseOrders || []).filter((po) => {
+      const s = safeLower(po.workOrderStatus || "");
+      // exact match-ish; tolerate extra whitespace/case
+      return s === "waiting on parts" || s.includes("waiting on parts");
+    });
+  }, [normalizedPurchaseOrders]);
 
   // Client-side search as a backup (even though we also support server-side searchApplied)
   const filteredPurchaseOrders = useMemo(() => {
     const q = (search || "").trim().toLowerCase();
-    if (!q) return normalizedPurchaseOrders;
 
-    return normalizedPurchaseOrders.filter((po) => {
+    const base = waitingOnPartsOnly;
+
+    // Apply supplier filter client-side too (helps when supplier is inferred from PDF key)
+    const supplierFiltered =
+      supplierFilter && supplierFilter !== "All Suppliers"
+        ? base.filter((po) => (po.supplier || "").toLowerCase() === supplierFilter.toLowerCase())
+        : base;
+
+    // Apply PO status filter client-side too (in case backend doesn't filter perfectly)
+    const statusFiltered =
+      statusFilter && statusFilter !== "All Statuses"
+        ? supplierFiltered.filter((po) => {
+            const ps = normalizePoStatus(po);
+            return statusFilter === ps;
+          })
+        : supplierFiltered;
+
+    if (!q) return statusFiltered;
+
+    return statusFiltered.filter((po) => {
       const fieldsToSearch = [
         po.poNumber,
         po.customer,
@@ -222,7 +325,13 @@ export default function PurchaseOrders() {
       ];
       return fieldsToSearch.some((val) => (val || "").toString().toLowerCase().includes(q));
     });
-  }, [normalizedPurchaseOrders, search]);
+  }, [waitingOnPartsOnly, search, supplierFilter, statusFilter]);
+
+  // consistent button styles (match screenshot #2: evenly spaced)
+  const actionBtnStyle = {
+    minWidth: 140,
+    whiteSpace: "nowrap",
+  };
 
   return (
     <div className="container mt-4">
@@ -234,7 +343,11 @@ export default function PurchaseOrders() {
           <div className="row g-3 align-items-end">
             <div className="col-md-3">
               <label className="form-label">Supplier</label>
-              <select className="form-select" value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)}>
+              <select
+                className="form-select"
+                value={supplierFilter}
+                onChange={(e) => setSupplierFilter(e.target.value)}
+              >
                 {SUPPLIERS.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -245,7 +358,11 @@ export default function PurchaseOrders() {
 
             <div className="col-md-3">
               <label className="form-label">Status</label>
-              <select className="form-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <select
+                className="form-select"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
                 {STATUSES.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -278,10 +395,7 @@ export default function PurchaseOrders() {
                     <button
                       type="button"
                       className="btn btn-link btn-sm"
-                      onClick={() => {
-                        setSearchApplied("");
-                        // also reload (searchApplied change triggers load)
-                      }}
+                      onClick={() => setSearchApplied("")}
                     >
                       Clear server filter
                     </button>
@@ -303,7 +417,9 @@ export default function PurchaseOrders() {
           </div>
 
           <div className="mt-3 text-muted" style={{ fontSize: "0.9rem" }}>
-            Purchase orders are derived from work orders (PO Number, Supplier, and PO PDF). To add or change a PO, edit the related work order.
+            Purchase orders are derived from work orders (PO Number, Supplier, and PO PDF).
+            <br />
+            <b>Showing only work orders with status: “Waiting on Parts”.</b>
           </div>
         </div>
       </div>
@@ -360,7 +476,8 @@ export default function PurchaseOrders() {
                       {po.poPdfPath ? (
                         <button
                           type="button"
-                          className="btn btn-sm btn-outline-primary"
+                          className="btn btn-sm btn-primary"
+                          style={actionBtnStyle}
                           onClick={() => handleOpenPdf(po)}
                         >
                           View PDF
@@ -371,23 +488,27 @@ export default function PurchaseOrders() {
                     </td>
 
                     <td>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-secondary me-2"
-                        onClick={() => handleViewWorkOrder(po)}
-                      >
-                        View Work Order
-                      </button>
-
-                      {!po.poPickedUp && (
+                      <div className="d-flex flex-wrap gap-2">
                         <button
                           type="button"
-                          className="btn btn-sm btn-success"
-                          onClick={() => handleMarkPickedUp(po)}
+                          className="btn btn-sm btn-primary"
+                          style={actionBtnStyle}
+                          onClick={() => handleViewWorkOrder(po)}
                         >
-                          Mark Picked Up
+                          View Work Order
                         </button>
-                      )}
+
+                        {!po.poPickedUp && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-primary"
+                            style={actionBtnStyle}
+                            onClick={() => handleMarkPickedUp(po)}
+                          >
+                            Mark Picked Up
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -397,7 +518,8 @@ export default function PurchaseOrders() {
 
           {/* small footer */}
           <div className="p-3 text-muted" style={{ fontSize: "0.85rem" }}>
-            Showing <b>{filteredPurchaseOrders.length}</b> of <b>{normalizedPurchaseOrders.length}</b> purchase orders.
+            Showing <b>{filteredPurchaseOrders.length}</b> of{" "}
+            <b>{waitingOnPartsOnly.length}</b> (Waiting on Parts) purchase orders.
           </div>
         </div>
       </div>
