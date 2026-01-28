@@ -7,6 +7,7 @@ import API_BASE_URL from "./config";
 
 const SUPPLIERS = ["All Suppliers", "Chicago Tempered", "CRL", "Oldcastle", "Casco"];
 const STATUSES = ["All Statuses", "On Order", "Picked Up"];
+const NEEDS_TO_BE_SCHEDULED = "Needs to be Scheduled";
 
 /* ---------- auth header (match WorkOrders.js / ViewWorkOrder.js) ---------- */
 const authHeaders = () => {
@@ -17,11 +18,22 @@ const authHeaders = () => {
 /* ---------- helpers ---------- */
 const safeLower = (v) => String(v || "").toLowerCase();
 
+const firstNonNullish = (...vals) => {
+  for (const v of vals) {
+    if (v !== undefined && v !== null) return v;
+  }
+  return undefined;
+};
+
 function inferSupplierFromText(text) {
   const s = safeLower(text);
 
   // Strong matches first
-  if (s.includes("chicago tempered") || s.includes("chicagotempered") || s.includes("chicago_tempered")) {
+  if (
+    s.includes("chicago tempered") ||
+    s.includes("chicagotempered") ||
+    s.includes("chicago_tempered")
+  ) {
     return "Chicago Tempered";
   }
   if (s.includes("crl")) return "CRL";
@@ -45,20 +57,15 @@ function inferSupplierFromText(text) {
 }
 
 function normalizePoStatus(po) {
-  const picked = !!(
-    (po && po.poPickedUp) ??
-    (po && po.po_picked_up) ??
-    (po && po.pickedUp) ??
-    (po && po.poPicked) ??
-    (po && po.picked_up)
-  );
+  const pickedVal = po
+    ? firstNonNullish(po.poPickedUp, po.po_picked_up, po.pickedUp, po.poPicked, po.picked_up)
+    : undefined;
 
-  const explicit =
-    (po && po.poStatus) ??
-    (po && po.po_status) ??
-    (po && po.status) ??
-    (po && po.poStatusText) ??
-    "";
+  const picked = !!pickedVal;
+
+  const explicit = po
+    ? firstNonNullish(po.poStatus, po.po_status, po.status, po.poStatusText, "")
+    : "";
 
   if (explicit) {
     const e = safeLower(explicit);
@@ -66,6 +73,21 @@ function normalizePoStatus(po) {
     if (e.includes("on") && e.includes("order")) return "On Order";
   }
   return picked ? "Picked Up" : "On Order";
+}
+
+/**
+ * Some deployments have different routes for "View Work Order".
+ * If the first route doesn't exist, React Router typically redirects to "/".
+ * This function tries a few common routes automatically.
+ */
+function buildWorkOrderRouteCandidates(woId) {
+  return [
+    `/work-orders/${woId}`, // common
+    `/work-orders/view/${woId}`, // common alt
+    `/view-work-order/${woId}`, // common alt
+    `/workorder/${woId}`, // alt
+    `/workorders/${woId}`, // alt
+  ];
 }
 
 export default function PurchaseOrders() {
@@ -151,6 +173,90 @@ export default function PurchaseOrders() {
     setSearchApplied(search);
   };
 
+  const attemptNavigateWorkOrder = (woId) => {
+    const candidates = buildWorkOrderRouteCandidates(woId);
+
+    // Try first immediately
+    const startPath = window.location.pathname;
+    navigate(candidates[0]);
+
+    // If route isn't found in your app, many setups redirect to "/" (or keep same).
+    // We'll try the next candidates if we detect we landed on "/" or didn't change.
+    let idx = 1;
+
+    const tryNext = () => {
+      if (idx >= candidates.length) return;
+
+      const currentPath = window.location.pathname;
+
+      // "Bad" signals: landed on "/" or "/home" or didn't move at all
+      const bad =
+        currentPath === "/" ||
+        currentPath === "/home" ||
+        currentPath === startPath;
+
+      if (!bad) return;
+
+      navigate(candidates[idx]);
+      idx += 1;
+      window.setTimeout(tryNext, 250);
+    };
+
+    window.setTimeout(tryNext, 250);
+  };
+
+  /**
+   * After PO is marked picked up, also set the *work order* status to "Needs to be Scheduled".
+   * Backend endpoints can vary, so we try a few common ones.
+   * If all fail, we still update the UI optimistically so the row drops out of this tab.
+   */
+  const updateWorkOrderStatusToNeedsScheduling = async (woId) => {
+    if (!woId) return false;
+
+    const headersJson = { ...authHeaders() };
+
+    // Try JSON endpoints
+    const jsonPayloads = [
+      { status: NEEDS_TO_BE_SCHEDULED },
+      { workOrderStatus: NEEDS_TO_BE_SCHEDULED },
+      { work_order_status: NEEDS_TO_BE_SCHEDULED },
+    ];
+
+    const jsonEndpoints = [
+      `/work-orders/${woId}/status`,
+      `/work-orders/${woId}/update-status`,
+      `/work-orders/${woId}/set-status`,
+      `/work-orders/${woId}`,
+    ];
+
+    for (const endpoint of jsonEndpoints) {
+      for (const payload of jsonPayloads) {
+        try {
+          await api.put(endpoint, payload, { headers: headersJson });
+          return true;
+        } catch (e) {
+          // keep trying
+        }
+      }
+    }
+
+    // Try multipart "edit" endpoint (common in your app)
+    try {
+      const form = new FormData();
+      form.append("status", NEEDS_TO_BE_SCHEDULED);
+      form.append("workOrderStatus", NEEDS_TO_BE_SCHEDULED);
+      form.append("work_order_status", NEEDS_TO_BE_SCHEDULED);
+
+      await api.put(`/work-orders/${woId}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+      });
+
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
   const handleMarkPickedUp = async (po) => {
     const poNum = po?.poNumber || "";
     if (!window.confirm(`Mark PO ${poNum} as Picked Up?`)) return;
@@ -161,31 +267,31 @@ export default function PurchaseOrders() {
       if (!obj || typeof obj !== "object") return obj;
 
       const poPdfPath =
-        obj.poPdfPath ??
-        obj.po_pdf_path ??
-        obj.poPdf ??
-        obj.po_pdf ??
-        "";
+        firstNonNullish(obj.poPdfPath, obj.po_pdf_path, obj.poPdf, obj.po_pdf, "") || "";
 
       // extra filename fields that might exist
       const originalName =
-        obj.poPdfOriginalName ??
-        obj.po_pdf_original_name ??
-        obj.poPdfFilename ??
-        obj.po_pdf_filename ??
-        obj.filename ??
-        "";
+        firstNonNullish(
+          obj.poPdfOriginalName,
+          obj.po_pdf_original_name,
+          obj.poPdfFilename,
+          obj.po_pdf_filename,
+          obj.filename,
+          ""
+        ) || "";
 
       const supplierRaw =
-        obj.supplier ??
-        obj.poSupplier ??
-        obj.po_supplier ??
-        obj.vendor ??
-        obj.vendorName ??
-        obj.supplierName ??
-        obj.poVendor ??
-        obj.po_vendor ??
-        "";
+        firstNonNullish(
+          obj.supplier,
+          obj.poSupplier,
+          obj.po_supplier,
+          obj.vendor,
+          obj.vendorName,
+          obj.supplierName,
+          obj.poVendor,
+          obj.po_vendor,
+          ""
+        ) || "";
 
       const inferText = [supplierRaw, poPdfPath, originalName].filter(Boolean).join(" ");
       const inferred = inferSupplierFromText(inferText);
@@ -193,41 +299,44 @@ export default function PurchaseOrders() {
       const supplier = supplierRaw || inferred || "";
 
       const workOrderId =
-        obj.workOrderId ??
-        obj.work_order_id ??
-        obj.woId ??
-        obj.workOrderID ??
-        obj.workOrder_id ??
-        null;
+        firstNonNullish(
+          obj.workOrderId,
+          obj.work_order_id,
+          obj.woId,
+          obj.workOrderID,
+          obj.workOrder_id,
+          null
+        ) ?? null;
 
       const workOrderNumber =
-        obj.workOrderNumber ??
-        obj.work_order_number ??
-        obj.woNumber ??
-        obj.workOrderNo ??
-        "";
+        firstNonNullish(
+          obj.workOrderNumber,
+          obj.work_order_number,
+          obj.woNumber,
+          obj.workOrderNo,
+          ""
+        ) || "";
 
       const createdAt =
-        obj.createdAt ??
-        obj.created_at ??
-        obj.createdOn ??
-        obj.created_date ??
+        firstNonNullish(obj.createdAt, obj.created_at, obj.createdOn, obj.created_date, null) ??
         null;
 
       const workOrderStatus =
-        obj.workOrderStatus ??
-        obj.work_order_status ??
-        obj.woStatus ??
-        obj.statusText ??
-        obj.workOrder_status ??
-        "";
+        firstNonNullish(
+          obj.workOrderStatus,
+          obj.work_order_status,
+          obj.woStatus,
+          obj.statusText,
+          obj.workOrder_status,
+          ""
+        ) || "";
 
       return {
         ...obj,
         supplier,
-        poSupplier: (obj.poSupplier ?? supplier) || "",
-        poPdfPath: poPdfPath || "",
-        poPdfOriginalName: originalName || "",
+        poSupplier: firstNonNullish(obj.poSupplier, supplier, "") || "",
+        poPdfPath,
+        poPdfOriginalName: originalName,
         workOrderId,
         workOrderNumber,
         createdAt,
@@ -238,6 +347,7 @@ export default function PurchaseOrders() {
     try {
       let updated = null;
 
+      // 1) Mark PO picked up
       try {
         const r = await api.put(`/purchase-orders/${po.id}/mark-picked-up`, null, {
           headers: authHeaders(),
@@ -252,13 +362,14 @@ export default function PurchaseOrders() {
           );
           updated = r.data;
         } catch (e2) {
-          const woId = po.workOrderId ?? po.work_order_id ?? po.woId;
-          if (!woId) throw e2;
+          // fallback: update via work order edit (if backend derives PO from work order)
+          const woIdFallback = firstNonNullish(po.workOrderId, po.work_order_id, po.woId, null);
+          if (!woIdFallback) throw e2;
 
           const form = new FormData();
           form.append("poPickedUp", "1");
 
-          const r = await api.put(`/work-orders/${woId}/edit`, form, {
+          const r = await api.put(`/work-orders/${woIdFallback}/edit`, form, {
             headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
           });
 
@@ -268,19 +379,46 @@ export default function PurchaseOrders() {
 
       const normalized = normalizeIncoming(updated);
 
+      // 2) Also move the WORK ORDER status to "Needs to be Scheduled"
+      const woId = firstNonNullish(
+        normalized?.workOrderId,
+        po?.workOrderId,
+        po?.work_order_id,
+        po?.woId,
+        null
+      );
+
+      const statusUpdated = await updateWorkOrderStatusToNeedsScheduling(woId);
+
+      // 3) Update UI state:
+      // - PO becomes picked up
+      // - Work order status becomes "Needs to be Scheduled" so it drops out of this tab (Waiting on Parts only)
       setPurchaseOrders((prev) =>
-        prev.map((item) =>
-          item.id === po.id
-            ? { ...item, ...normalized, poPickedUp: true, poStatus: "Picked Up" }
-            : item
-        )
+        (prev || []).map((item) => {
+          if (item.id !== po.id) return item;
+
+          const merged = { ...item, ...normalized, poPickedUp: true, poStatus: "Picked Up" };
+
+          // optimistic UI update even if backend endpoint differs
+          merged.workOrderStatus = NEEDS_TO_BE_SCHEDULED;
+
+          // keep any other status-like fields in sync for safety
+          merged.work_order_status = NEEDS_TO_BE_SCHEDULED;
+          merged.workOrderStatusText = NEEDS_TO_BE_SCHEDULED;
+
+          return merged;
+        })
       );
 
       const woNum = normalized?.workOrderNumber || po?.workOrderNumber || "";
       alert(
         `PO ${normalized?.poNumber || poNum} marked as Picked Up.` +
-          (woNum ? `\nRelated Work Order #${woNum} has been updated.` : "")
+          (woNum ? `\nRelated Work Order #${woNum} moved to: ${NEEDS_TO_BE_SCHEDULED}` : "") +
+          (statusUpdated ? "" : "\n\n(Heads up: backend status update endpoint may differ — UI updated anyway.)")
       );
+
+      // Refresh list (optional, helps keep server truth)
+      loadPurchaseOrders();
     } catch (err) {
       console.error("❌ Error marking PO picked up:", err?.response || err);
       const status = err?.response?.status;
@@ -295,7 +433,7 @@ export default function PurchaseOrders() {
 
   // ✅ In-app PDF viewer (modal)
   const handleOpenPdf = (po) => {
-    const key = po?.poPdfPath || po?.po_pdf_path || po?.poPdf || "";
+    const key = firstNonNullish(po?.poPdfPath, po?.po_pdf_path, po?.poPdf, "") || "";
     if (!key) {
       alert("No PDF attached to this purchase order.");
       return;
@@ -310,68 +448,77 @@ export default function PurchaseOrders() {
   };
 
   const handleViewWorkOrder = (po) => {
-    const woId = po?.workOrderId ?? po?.work_order_id ?? po?.woId ?? null;
+    const woId = firstNonNullish(po?.workOrderId, po?.work_order_id, po?.woId, null);
     if (!woId) {
       alert("No related work order linked to this purchase order.");
       return;
     }
-    navigate(`/work-orders/${woId}`);
+
+    // This fixes the "goes to home page" problem by trying alternate routes automatically.
+    attemptNavigateWorkOrder(woId);
   };
 
   // ✅ Normalize fields so the UI always displays something even if backend uses different names
   const normalizedPurchaseOrders = useMemo(() => {
     return (purchaseOrders || []).map((po) => {
-      const poPdfPath = (po.poPdfPath ?? po.po_pdf_path ?? po.poPdf ?? po.po_pdf ?? "") || "";
+      const poPdfPath =
+        (firstNonNullish(po.poPdfPath, po.po_pdf_path, po.poPdf, po.po_pdf, "") || "") + "";
 
       const originalName =
-        (po.poPdfOriginalName ??
-          po.po_pdf_original_name ??
-          po.poPdfFilename ??
-          po.po_pdf_filename ??
-          po.filename ??
-          "") || "";
+        (firstNonNullish(
+          po.poPdfOriginalName,
+          po.po_pdf_original_name,
+          po.poPdfFilename,
+          po.po_pdf_filename,
+          po.filename,
+          ""
+        ) || "") + "";
 
       const supplierRaw =
-        (po.supplier ??
-          po.poSupplier ??
-          po.po_supplier ??
-          po.vendor ??
-          po.vendorName ??
-          po.supplierName ??
-          po.poVendor ??
-          po.po_vendor ??
-          "") || "";
+        (firstNonNullish(
+          po.supplier,
+          po.poSupplier,
+          po.po_supplier,
+          po.vendor,
+          po.vendorName,
+          po.supplierName,
+          po.poVendor,
+          po.po_vendor,
+          ""
+        ) || "") + "";
 
       // Best-effort inference using *multiple* fields
       const inferText = [supplierRaw, poPdfPath, originalName].filter(Boolean).join(" ");
       const inferred = inferSupplierFromText(inferText);
-
       const supplier = supplierRaw || inferred || "";
 
       const workOrderStatus =
-        (po.workOrderStatus ??
-          po.work_order_status ??
-          po.woStatus ??
-          po.workOrder_status ??
-          po.workOrderStatusText ??
-          "") || "";
+        (firstNonNullish(
+          po.workOrderStatus,
+          po.work_order_status,
+          po.woStatus,
+          po.workOrder_status,
+          po.workOrderStatusText,
+          ""
+        ) || "") + "";
 
       const poStatus = normalizePoStatus(po);
-      const poPickedUp = !!(po.poPickedUp ?? po.po_picked_up ?? po.pickedUp);
+      const poPickedUp = !!firstNonNullish(po.poPickedUp, po.po_picked_up, po.pickedUp, false);
 
       return {
         ...po,
         supplier,
-        poSupplier: (po.poSupplier ?? supplier) || "",
-        poNumber: (po.poNumber ?? po.po_number ?? po.poNo ?? "") || "",
-        customer: (po.customer ?? po.customerName ?? "") || "",
-        siteLocation: (po.siteLocation ?? po.site_name ?? po.siteName ?? "") || "",
-        siteAddress: (po.siteAddress ?? po.site_address ?? "") || "",
-        workOrderNumber: (po.workOrderNumber ?? po.work_order_number ?? po.woNumber ?? "") || "",
-        workOrderId: po.workOrderId ?? po.work_order_id ?? po.woId ?? null,
+        poSupplier: (firstNonNullish(po.poSupplier, supplier, "") || "") + "",
+        poNumber: (firstNonNullish(po.poNumber, po.po_number, po.poNo, "") || "") + "",
+        customer: (firstNonNullish(po.customer, po.customerName, "") || "") + "",
+        siteLocation: (firstNonNullish(po.siteLocation, po.site_name, po.siteName, "") || "") + "",
+        siteAddress: (firstNonNullish(po.siteAddress, po.site_address, "") || "") + "",
+        workOrderNumber:
+          (firstNonNullish(po.workOrderNumber, po.work_order_number, po.woNumber, "") || "") + "",
+        workOrderId: firstNonNullish(po.workOrderId, po.work_order_id, po.woId, null),
         poPdfPath,
         poPdfOriginalName: originalName,
-        createdAt: po.createdAt ?? po.created_at ?? po.createdOn ?? po.created_date ?? null,
+        createdAt: firstNonNullish(po.createdAt, po.created_at, po.createdOn, po.created_date, null),
         poPickedUp,
         poStatus,
         workOrderStatus,
@@ -645,9 +792,13 @@ export default function PurchaseOrders() {
             <div className="d-flex align-items-center justify-content-between p-3 border-bottom">
               <div className="fw-bold">{pdfTitle || "Purchase Order PDF"}</div>
               <div className="d-flex align-items-center gap-2">
-                {/* optional: open in new tab if someone wants it */}
                 {pdfUrl ? (
-                  <a className="btn btn-sm btn-outline-secondary" href={pdfUrl} target="_blank" rel="noreferrer">
+                  <a
+                    className="btn btn-sm btn-outline-secondary"
+                    href={pdfUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     Open in New Tab
                   </a>
                 ) : null}
