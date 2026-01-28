@@ -29,7 +29,11 @@ function inferSupplierFromText(text) {
   const s = safeLower(text);
 
   // Strong matches first
-  if (s.includes("chicago tempered") || s.includes("chicagotempered") || s.includes("chicago_tempered")) {
+  if (
+    s.includes("chicago tempered") ||
+    s.includes("chicagotempered") ||
+    s.includes("chicago_tempered")
+  ) {
     return "Chicago Tempered";
   }
   if (s.includes("crl")) return "CRL";
@@ -71,25 +75,15 @@ function normalizePoStatus(po) {
 
 function isWaitingOnPartsText(statusText) {
   const s = safeLower(statusText || "");
-  // tolerate variations like "Waiting On Parts", "waiting on parts - vendor", etc.
   return (s.includes("waiting") && s.includes("parts")) || s === "waiting on parts";
 }
 
 /**
- * IMPORTANT:
- * Your app clearly has ONE correct "View Work Order" route.
- * The old "try many routes" caused a flash to Home when the first candidate was wrong.
- *
- * We fix that by:
- * 1) Prefer a "remembered" working route base (saved after first success)
- * 2) Default to the most likely route FIRST (to avoid the Home flash)
- *
- * If your app’s correct route is different, change DEFAULT_WORK_ORDER_ROUTE_BASE below
- * to match your real route base.
+ * ✅ IMPORTANT: no route “probing” (that caused the Home flash).
+ * If your actual view route differs, change DEFAULT_WORK_ORDER_ROUTE_BASE.
  */
 const WORK_ORDER_ROUTE_STORAGE_KEY = "fcgg_work_order_route_base";
-// Change this if your actual route base is different:
-const DEFAULT_WORK_ORDER_ROUTE_BASE = "/view-work-order"; // ✅ avoids Home flash in most setups
+const DEFAULT_WORK_ORDER_ROUTE_BASE = "/view-work-order";
 
 function buildWorkOrderPath(routeBase, woId) {
   const base = (routeBase || "").trim();
@@ -108,14 +102,15 @@ export default function PurchaseOrders() {
   const [search, setSearch] = useState("");
   const [searchApplied, setSearchApplied] = useState("");
 
-  // Waiting-on-parts work orders lookup (because /purchase-orders might NOT include WO status reliably)
+  // Waiting-on-parts work orders lookup (so we can show ALL Waiting on Parts WOs, even if no PO exists yet)
   const [waitingWoIdSet, setWaitingWoIdSet] = useState(() => new Set());
-  const [woMetaById, setWoMetaById] = useState(() => ({})); // optional: { [id]: { status, number } }
+  const [woMetaById, setWoMetaById] = useState(() => ({})); // { [id]: { status, number, customer, siteLocation, siteAddress } }
 
   // PDF modal viewer (in-app)
   const [pdfModalOpen, setPdfModalOpen] = useState(false);
   const [pdfUrl, setPdfUrl] = useState("");
   const [pdfTitle, setPdfTitle] = useState("");
+  const [pdfPo, setPdfPo] = useState(null); // <-- track which PO is open in the modal
 
   const navigate = useNavigate();
 
@@ -123,6 +118,7 @@ export default function PurchaseOrders() {
     setPdfModalOpen(false);
     setPdfUrl("");
     setPdfTitle("");
+    setPdfPo(null);
   };
 
   const handleSearchSubmit = (e) => {
@@ -131,18 +127,17 @@ export default function PurchaseOrders() {
   };
 
   /**
-   * Fetch Work Orders that are "Waiting on Parts" so the PO page can filter correctly
-   * even if /purchase-orders rows don't carry WO status.
+   * Fetch Work Orders that are "Waiting on Parts" so the PO tab shows ALL of them
+   * (even if /purchase-orders endpoint only returns rows that already have PO data).
    */
   const fetchWaitingOnPartsWorkOrders = useCallback(async () => {
     const headers = authHeaders();
 
     const tryCalls = [
-      // common patterns
       () => api.get("/work-orders", { headers, params: { status: "waiting-on-parts" } }),
       () => api.get("/work-orders", { headers, params: { workOrderStatus: "Waiting on Parts" } }),
       () => api.get("/work-orders", { headers, params: { status: "Waiting on Parts" } }),
-      // fallback: fetch all and filter client-side (can be heavier, but makes it work)
+      // fallback: fetch all and filter client-side
       () => api.get("/work-orders", { headers }),
     ];
 
@@ -152,7 +147,6 @@ export default function PurchaseOrders() {
         const rows = Array.isArray(r.data) ? r.data : r.data?.rows;
         const list = Array.isArray(rows) ? rows : [];
 
-        // If this was a "fetch all" response, filter locally
         const waitingOnly = list.filter((wo) => {
           const st = firstNonNullish(
             wo.workOrderStatus,
@@ -165,15 +159,10 @@ export default function PurchaseOrders() {
           return isWaitingOnPartsText(st);
         });
 
-        const useList =
-          // if endpoint already filtered, waitingOnly and list will be the same.
-          // if endpoint did not filter, waitingOnly narrows it down.
-          list.length > 0 ? waitingOnly : [];
-
         const idSet = new Set();
         const meta = {};
 
-        useList.forEach((wo) => {
+        waitingOnly.forEach((wo) => {
           const id = firstNonNullish(wo.id, wo.workOrderId, wo.work_order_id, wo.woId, null);
           if (!id) return;
 
@@ -194,8 +183,18 @@ export default function PurchaseOrders() {
             ""
           );
 
+          const customer = firstNonNullish(wo.customer, wo.customerName, wo.customer_name, "");
+          const siteLocation = firstNonNullish(wo.siteLocation, wo.site_name, wo.siteName, wo.site, "");
+          const siteAddress = firstNonNullish(wo.siteAddress, wo.site_address, wo.address, "");
+
           idSet.add(id);
-          meta[id] = { status: st || "", number: num || "" };
+          meta[id] = {
+            status: st || "",
+            number: num || "",
+            customer: customer || "",
+            siteLocation: siteLocation || "",
+            siteAddress: siteAddress || "",
+          };
         });
 
         setWaitingWoIdSet(idSet);
@@ -206,7 +205,6 @@ export default function PurchaseOrders() {
       }
     }
 
-    // if everything fails, don't block UI—just clear set
     setWaitingWoIdSet(new Set());
     setWoMetaById({});
   }, []);
@@ -236,7 +234,6 @@ export default function PurchaseOrders() {
         params.search = searchApplied.trim();
       }
 
-      // Load both in parallel
       const [poRes] = await Promise.all([
         api.get("/purchase-orders", { headers: authHeaders(), params }),
         fetchWaitingOnPartsWorkOrders(),
@@ -291,7 +288,7 @@ export default function PurchaseOrders() {
         try {
           await api.put(endpoint, payload, { headers: headersJson });
           return true;
-        } catch (e) {
+        } catch {
           // keep trying
         }
       }
@@ -308,21 +305,22 @@ export default function PurchaseOrders() {
       });
 
       return true;
-    } catch (e) {
+    } catch {
       return false;
     }
   };
 
   const handleMarkPickedUp = async (po) => {
     const poNum = po?.poNumber || "";
-    if (!window.confirm(`Mark PO ${poNum} as Picked Up?`)) return;
+    if (!window.confirm(`Mark PO ${poNum || ""} as Picked Up?`)) return;
 
     setError("");
 
     const normalizeIncoming = (obj) => {
       if (!obj || typeof obj !== "object") return obj;
 
-      const poPdfPath = firstNonNullish(obj.poPdfPath, obj.po_pdf_path, obj.poPdf, obj.po_pdf, "") || "";
+      const poPdfPath =
+        firstNonNullish(obj.poPdfPath, obj.po_pdf_path, obj.poPdf, obj.po_pdf, "") || "";
 
       const originalName =
         firstNonNullish(
@@ -352,15 +350,37 @@ export default function PurchaseOrders() {
       const supplier = supplierRaw || inferred || "";
 
       const workOrderId =
-        firstNonNullish(obj.workOrderId, obj.work_order_id, obj.woId, obj.workOrderID, obj.workOrder_id, null) ?? null;
+        firstNonNullish(
+          obj.workOrderId,
+          obj.work_order_id,
+          obj.woId,
+          obj.workOrderID,
+          obj.workOrder_id,
+          null
+        ) ?? null;
 
       const workOrderNumber =
-        firstNonNullish(obj.workOrderNumber, obj.work_order_number, obj.woNumber, obj.workOrderNo, "") || "";
+        firstNonNullish(
+          obj.workOrderNumber,
+          obj.work_order_number,
+          obj.woNumber,
+          obj.workOrderNo,
+          ""
+        ) || "";
 
-      const createdAt = firstNonNullish(obj.createdAt, obj.created_at, obj.createdOn, obj.created_date, null) ?? null;
+      const createdAt =
+        firstNonNullish(obj.createdAt, obj.created_at, obj.createdOn, obj.created_date, null) ??
+        null;
 
       const workOrderStatus =
-        firstNonNullish(obj.workOrderStatus, obj.work_order_status, obj.woStatus, obj.statusText, obj.workOrder_status, "") || "";
+        firstNonNullish(
+          obj.workOrderStatus,
+          obj.work_order_status,
+          obj.woStatus,
+          obj.statusText,
+          obj.workOrder_status,
+          ""
+        ) || "";
 
       return {
         ...obj,
@@ -376,15 +396,30 @@ export default function PurchaseOrders() {
     };
 
     try {
+      // Synthetic rows (created from waiting-on-parts work orders) don't have a real PO id -> block.
+      const isSynthetic = typeof po?.id === "string" && String(po.id).startsWith("wo-");
+      if (isSynthetic) {
+        alert(
+          "This work order does not have a Purchase Order record yet (no PO #/PDF). Add the PO to the work order first, then you can mark it picked up."
+        );
+        return;
+      }
+
       let updated = null;
 
       // 1) Mark PO picked up
       try {
-        const r = await api.put(`/purchase-orders/${po.id}/mark-picked-up`, null, { headers: authHeaders() });
+        const r = await api.put(`/purchase-orders/${po.id}/mark-picked-up`, null, {
+          headers: authHeaders(),
+        });
         updated = r.data;
       } catch (e1) {
         try {
-          const r = await api.put(`/purchase-orders/${po.id}/picked-up`, { pickedUp: true }, { headers: authHeaders() });
+          const r = await api.put(
+            `/purchase-orders/${po.id}/picked-up`,
+            { pickedUp: true },
+            { headers: authHeaders() }
+          );
           updated = r.data;
         } catch (e2) {
           const woIdFallback = firstNonNullish(po.workOrderId, po.work_order_id, po.woId, null);
@@ -404,7 +439,13 @@ export default function PurchaseOrders() {
       const normalized = normalizeIncoming(updated);
 
       // 2) Also move the WORK ORDER status to "Needs to be Scheduled"
-      const woId = firstNonNullish(normalized?.workOrderId, po?.workOrderId, po?.work_order_id, po?.woId, null);
+      const woId = firstNonNullish(
+        normalized?.workOrderId,
+        po?.workOrderId,
+        po?.work_order_id,
+        po?.woId,
+        null
+      );
       await updateWorkOrderStatusToNeedsScheduling(woId);
 
       // 3) Update UI immediately
@@ -423,7 +464,7 @@ export default function PurchaseOrders() {
         })
       );
 
-      // Also remove from waiting set locally (so it disappears from this tab immediately)
+      // Also remove from waiting set locally (so it disappears immediately)
       if (woId) {
         setWaitingWoIdSet((prevSet) => {
           const next = new Set(prevSet);
@@ -464,18 +505,13 @@ export default function PurchaseOrders() {
     const url = `${API_BASE_URL}/files?key=${encodeURIComponent(key)}`;
     const title = `PO ${po?.poNumber || ""}`.trim();
 
+    setPdfPo(po || null);
     setPdfUrl(url);
     setPdfTitle(title || "Purchase Order PDF");
     setPdfModalOpen(true);
   };
 
-  /**
-   * ✅ Fix #1: remove the Home flash
-   * We STOP trying multiple routes.
-   * We navigate directly to a single correct route base.
-   *
-   * If your actual route base is not "/view-work-order", change DEFAULT_WORK_ORDER_ROUTE_BASE above.
-   */
+  // ✅ No Home flash: single known route
   const handleViewWorkOrder = (po) => {
     const woId = firstNonNullish(po?.workOrderId, po?.work_order_id, po?.woId, null);
     if (!woId) {
@@ -483,20 +519,19 @@ export default function PurchaseOrders() {
       return;
     }
 
-    const savedBase = localStorage.getItem(WORK_ORDER_ROUTE_STORAGE_KEY) || DEFAULT_WORK_ORDER_ROUTE_BASE;
+    const savedBase =
+      localStorage.getItem(WORK_ORDER_ROUTE_STORAGE_KEY) || DEFAULT_WORK_ORDER_ROUTE_BASE;
+
     const path = buildWorkOrderPath(savedBase, woId);
-
     navigate(path);
-
-    // If you *know* the base for sure, you can leave this as-is.
-    // Saving it helps if you later decide to change DEFAULT_WORK_ORDER_ROUTE_BASE.
     localStorage.setItem(WORK_ORDER_ROUTE_STORAGE_KEY, savedBase);
   };
 
-  // ✅ Normalize fields so the UI always displays something even if backend uses different names
+  // ✅ Normalize PO rows
   const normalizedPurchaseOrders = useMemo(() => {
     return (purchaseOrders || []).map((po) => {
-      const poPdfPath = (firstNonNullish(po.poPdfPath, po.po_pdf_path, po.poPdf, po.po_pdf, "") || "") + "";
+      const poPdfPath =
+        (firstNonNullish(po.poPdfPath, po.po_pdf_path, po.poPdf, po.po_pdf, "") || "") + "";
 
       const originalName =
         (firstNonNullish(
@@ -527,8 +562,8 @@ export default function PurchaseOrders() {
 
       const workOrderId = firstNonNullish(po.workOrderId, po.work_order_id, po.woId, null);
 
-      // Prefer WO status from the fetched waiting-on-parts list when available
-      const woStatusFromLookup = workOrderId && woMetaById[workOrderId] ? woMetaById[workOrderId].status : "";
+      const woStatusFromLookup =
+        workOrderId && woMetaById[workOrderId] ? woMetaById[workOrderId].status : "";
 
       const workOrderStatus =
         (woStatusFromLookup ||
@@ -545,9 +580,27 @@ export default function PurchaseOrders() {
       const poStatus = normalizePoStatus(po);
       const poPickedUp = !!firstNonNullish(po.poPickedUp, po.po_picked_up, po.pickedUp, false);
 
+      const woNumFromLookup =
+        workOrderId && woMetaById[workOrderId] ? woMetaById[workOrderId].number : "";
+
       const workOrderNumber =
         (firstNonNullish(po.workOrderNumber, po.work_order_number, po.woNumber, "") ||
-          (workOrderId && woMetaById[workOrderId] ? woMetaById[workOrderId].number : "") ||
+          woNumFromLookup ||
+          "") + "";
+
+      const customer =
+        (firstNonNullish(po.customer, po.customerName, "") ||
+          (workOrderId && woMetaById[workOrderId] ? woMetaById[workOrderId].customer : "") ||
+          "") + "";
+
+      const siteLocation =
+        (firstNonNullish(po.siteLocation, po.site_name, po.siteName, "") ||
+          (workOrderId && woMetaById[workOrderId] ? woMetaById[workOrderId].siteLocation : "") ||
+          "") + "";
+
+      const siteAddress =
+        (firstNonNullish(po.siteAddress, po.site_address, "") ||
+          (workOrderId && woMetaById[workOrderId] ? woMetaById[workOrderId].siteAddress : "") ||
           "") + "";
 
       return {
@@ -555,9 +608,9 @@ export default function PurchaseOrders() {
         supplier,
         poSupplier: (firstNonNullish(po.poSupplier, supplier, "") || "") + "",
         poNumber: (firstNonNullish(po.poNumber, po.po_number, po.poNo, "") || "") + "",
-        customer: (firstNonNullish(po.customer, po.customerName, "") || "") + "",
-        siteLocation: (firstNonNullish(po.siteLocation, po.site_name, po.siteName, "") || "") + "",
-        siteAddress: (firstNonNullish(po.siteAddress, po.site_address, "") || "") + "",
+        customer,
+        siteLocation,
+        siteAddress,
         workOrderNumber,
         workOrderId,
         poPdfPath,
@@ -571,24 +624,55 @@ export default function PurchaseOrders() {
   }, [purchaseOrders, woMetaById]);
 
   /**
-   * ✅ Fix #2: ensure Waiting on Parts filter works even when PO rows don’t include WO status
-   * We include a PO if:
-   * - Its workOrderStatus text says waiting on parts, OR
-   * - Its workOrderId is in the waitingWoIdSet (from /work-orders lookup)
+   * ✅ Fix: show ALL Waiting on Parts work orders.
+   * /purchase-orders may only contain a subset (only those with PO data),
+   * so we add synthetic rows for waiting WOs that are missing from PO list.
    */
-  const waitingOnPartsOnly = useMemo(() => {
-    return (normalizedPurchaseOrders || []).filter((po) => {
-      const woId = po.workOrderId;
-      const byLookup = woId ? waitingWoIdSet.has(woId) : false;
-      const byText = isWaitingOnPartsText(po.workOrderStatus);
+  const combinedWaitingRows = useMemo(() => {
+    const poByWoId = new Map();
+    normalizedPurchaseOrders.forEach((po) => {
+      if (po?.workOrderId) poByWoId.set(po.workOrderId, po);
+    });
+
+    const synthetic = [];
+    for (const woId of waitingWoIdSet) {
+      if (poByWoId.has(woId)) continue;
+
+      const meta = woMetaById[woId] || {};
+      synthetic.push({
+        id: `wo-${woId}`, // synthetic id
+        supplier: "",
+        poSupplier: "",
+        poNumber: "",
+        customer: meta.customer || "",
+        siteLocation: meta.siteLocation || "",
+        siteAddress: meta.siteAddress || "",
+        workOrderNumber: meta.number || "",
+        workOrderId: woId,
+        poPdfPath: "",
+        poPdfOriginalName: "",
+        createdAt: null,
+        poPickedUp: false,
+        poStatus: "On Order",
+        workOrderStatus: meta.status || "Waiting on Parts",
+        __synthetic: true,
+      });
+    }
+
+    // Only show waiting on parts in this tab (real + synthetic)
+    const all = [...normalizedPurchaseOrders, ...synthetic];
+
+    return all.filter((row) => {
+      const byLookup = row.workOrderId ? waitingWoIdSet.has(row.workOrderId) : false;
+      const byText = isWaitingOnPartsText(row.workOrderStatus);
       return byLookup || byText;
     });
-  }, [normalizedPurchaseOrders, waitingWoIdSet]);
+  }, [normalizedPurchaseOrders, waitingWoIdSet, woMetaById]);
 
-  // Client-side search as a backup
+  // Client-side search/filters
   const filteredPurchaseOrders = useMemo(() => {
     const q = (search || "").trim().toLowerCase();
-    const base = waitingOnPartsOnly;
+    const base = combinedWaitingRows;
 
     const supplierFiltered =
       supplierFilter && supplierFilter !== "All Suppliers"
@@ -613,10 +697,22 @@ export default function PurchaseOrders() {
       ];
       return fieldsToSearch.some((val) => safeLower(val).includes(q));
     });
-  }, [waitingOnPartsOnly, search, supplierFilter, statusFilter]);
+  }, [combinedWaitingRows, search, supplierFilter, statusFilter]);
 
   // Buttons: match your screenshot (all blue, even spacing, same width, no wrap)
   const btnStyle = { minWidth: 140 };
+
+  // Helpers for PDF modal button
+  const pdfCanMarkPickedUp =
+    !!pdfPo &&
+    !normalizePoStatus(pdfPo).toLowerCase().includes("picked") &&
+    !(typeof pdfPo?.id === "string" && String(pdfPo.id).startsWith("wo-"));
+
+  const handlePdfMarkPickedUp = async () => {
+    if (!pdfPo) return;
+    await handleMarkPickedUp(pdfPo);
+    closePdfModal();
+  };
 
   return (
     <div className="container mt-4">
@@ -628,7 +724,11 @@ export default function PurchaseOrders() {
           <div className="row g-3 align-items-end">
             <div className="col-md-3">
               <label className="form-label">Supplier</label>
-              <select className="form-select" value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)}>
+              <select
+                className="form-select"
+                value={supplierFilter}
+                onChange={(e) => setSupplierFilter(e.target.value)}
+              >
                 {SUPPLIERS.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -639,7 +739,11 @@ export default function PurchaseOrders() {
 
             <div className="col-md-3">
               <label className="form-label">Status</label>
-              <select className="form-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <select
+                className="form-select"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
                 {STATUSES.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -669,7 +773,11 @@ export default function PurchaseOrders() {
                     <span className="badge text-bg-light" style={{ border: "1px solid #e5e7eb" }}>
                       Server filter: <b>{searchApplied}</b>
                     </span>
-                    <button type="button" className="btn btn-link btn-sm" onClick={() => setSearchApplied("")}>
+                    <button
+                      type="button"
+                      className="btn btn-link btn-sm"
+                      onClick={() => setSearchApplied("")}
+                    >
                       Clear server filter
                     </button>
                   </div>
@@ -693,7 +801,7 @@ export default function PurchaseOrders() {
           <div className="mt-3 text-muted" style={{ fontSize: "0.9rem" }}>
             Purchase orders are derived from work orders (PO Number, Supplier, and PO PDF).
             <br />
-            <b>Showing only work orders with status: “Waiting on Parts”.</b>
+            <b>Showing ALL work orders with status: “Waiting on Parts”.</b>
           </div>
         </div>
       </div>
@@ -748,7 +856,12 @@ export default function PurchaseOrders() {
 
                     <td>
                       {po.poPdfPath ? (
-                        <button type="button" className="btn btn-sm btn-primary" style={btnStyle} onClick={() => handleOpenPdf(po)}>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          style={btnStyle}
+                          onClick={() => handleOpenPdf(po)}
+                        >
                           View PDF
                         </button>
                       ) : (
@@ -767,7 +880,8 @@ export default function PurchaseOrders() {
                           View Work Order
                         </button>
 
-                        {!po.poPickedUp && (
+                        {/* Only show Mark Picked Up for real PO rows (not synthetic) */}
+                        {!po.poPickedUp && !(typeof po.id === "string" && String(po.id).startsWith("wo-")) && (
                           <button
                             type="button"
                             className="btn btn-sm btn-primary"
@@ -786,7 +900,8 @@ export default function PurchaseOrders() {
           </div>
 
           <div className="p-3 text-muted" style={{ fontSize: "0.85rem" }}>
-            Showing <b>{filteredPurchaseOrders.length}</b> of <b>{waitingOnPartsOnly.length}</b> (Waiting on Parts) purchase orders.
+            Showing <b>{filteredPurchaseOrders.length}</b> of <b>{combinedWaitingRows.length}</b>{" "}
+            (Waiting on Parts) rows.
           </div>
         </div>
       </div>
@@ -819,11 +934,13 @@ export default function PurchaseOrders() {
             <div className="d-flex align-items-center justify-content-between p-3 border-bottom">
               <div className="fw-bold">{pdfTitle || "Purchase Order PDF"}</div>
               <div className="d-flex align-items-center gap-2">
-                {pdfUrl ? (
-                  <a className="btn btn-sm btn-outline-secondary" href={pdfUrl} target="_blank" rel="noreferrer">
-                    Open in New Tab
-                  </a>
+                {/* ✅ Replaced "Open in New Tab" with "Mark Picked Up" */}
+                {pdfCanMarkPickedUp ? (
+                  <button className="btn btn-sm btn-primary" onClick={handlePdfMarkPickedUp}>
+                    Mark Picked Up
+                  </button>
                 ) : null}
+
                 <button className="btn btn-sm btn-primary" onClick={closePdfModal}>
                   Close
                 </button>
@@ -832,7 +949,11 @@ export default function PurchaseOrders() {
 
             <div style={{ height: "80vh" }}>
               {pdfUrl ? (
-                <iframe title="PO PDF Viewer" src={pdfUrl} style={{ width: "100%", height: "100%", border: 0 }} />
+                <iframe
+                  title="PO PDF Viewer"
+                  src={pdfUrl}
+                  style={{ width: "100%", height: "100%", border: 0 }}
+                />
               ) : (
                 <div className="p-4 text-muted">No PDF URL.</div>
               )}
