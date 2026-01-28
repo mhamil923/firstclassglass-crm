@@ -1,6 +1,6 @@
 // File: src/ViewWorkOrder.js
-import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import api from "./api";
 import moment from "moment";
 import API_BASE_URL from "./config";
@@ -101,6 +101,36 @@ function saveDrawNoteOverrides(workOrderId, set) {
   }
 }
 
+/* ---------- datetime-local helpers (for quick schedule picker) ---------- */
+function toDatetimeLocalValue(dateLike) {
+  if (!dateLike) return "";
+  try {
+    const dt = new Date(dateLike);
+    if (Number.isNaN(dt.getTime())) return "";
+    const pad = (n) => String(n).padStart(2, "0");
+    const yyyy = dt.getFullYear();
+    const mm = pad(dt.getMonth() + 1);
+    const dd = pad(dt.getDate());
+    const hh = pad(dt.getHours());
+    const mi = pad(dt.getMinutes());
+    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+  } catch {
+    return "";
+  }
+}
+
+function tryOpenNativePicker(inputEl) {
+  if (!inputEl) return;
+  // Chromium supports showPicker() for date/time inputs
+  if (typeof inputEl.showPicker === "function") {
+    inputEl.showPicker();
+    return;
+  }
+  // Fallbacks
+  inputEl.focus();
+  inputEl.click?.();
+}
+
 /* ---------- Inline PO# Editor ---------- */
 function PONumberEditor({ orderId, initialPo, onSaved }) {
   const [editing, setEditing] = useState(false);
@@ -162,7 +192,6 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
     </div>
   );
 }
-
 /* ---------- Lightbox modal ---------- */
 function Lightbox({ open, onClose, kind, src, title }) {
   const [downloading, setDownloading] = useState(false);
@@ -358,6 +387,14 @@ function Field({ label, children, hint }) {
 export default function ViewWorkOrder() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // ✅ Back routing: accept state: { from: "<path>" } from whichever page you came from
+  const from =
+    (location && location.state && typeof location.state.from === "string" && location.state.from) || "/work-orders";
+
+  // Use replace by default so you don’t stack “back” history weirdly
+  const goBack = () => navigate(from, { replace: true });
 
   const [workOrder, setWorkOrder] = useState(null);
 
@@ -393,6 +430,11 @@ export default function ViewWorkOrder() {
   const [editSaving, setEditSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // ✅ Quick schedule picker (view mode)
+  const scheduleInputRef = useRef(null);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [quickScheduledDate, setQuickScheduledDate] = useState(""); // datetime-local value string
+
   const [edit, setEdit] = useState({
     workOrderNumber: "",
     poNumber: "",
@@ -416,18 +458,7 @@ export default function ViewWorkOrder() {
   // For safer date/time control in edit mode
   const scheduledDateInput = useMemo(() => {
     if (!edit?.scheduledDate) return "";
-    try {
-      const dt = new Date(edit.scheduledDate);
-      const pad = (n) => String(n).padStart(2, "0");
-      const yyyy = dt.getFullYear();
-      const mm = pad(dt.getMonth() + 1);
-      const dd = pad(dt.getDate());
-      const hh = pad(dt.getHours());
-      const mi = pad(dt.getMinutes());
-      return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
-    } catch {
-      return "";
-    }
+    return toDatetimeLocalValue(edit.scheduledDate);
   }, [edit?.scheduledDate]);
 
   const enterEditMode = () => {
@@ -497,6 +528,9 @@ export default function ViewWorkOrder() {
 
       // Initialize PO supplier from backend value
       setPoSupplier(data?.poSupplier || "");
+
+      // ✅ Initialize quick schedule field (view-mode picker)
+      setQuickScheduledDate(toDatetimeLocalValue(data?.scheduledDate || ""));
     } catch (error) {
       console.error("⚠️ Error fetching work order:", error);
     }
@@ -522,11 +556,64 @@ export default function ViewWorkOrder() {
     return withSortKey.sort((a, b) => b.__t - a.__t);
   }, [parsedNotes]);
 
-// ✅ Most recent notes for the top "Details" section
-const recentNotes = useMemo(() => {
-  // show the latest 3 notes (change 3 -> 5 if you want more)
-  return (displayNotes || []).slice(0, 3);
-}, [displayNotes]);
+  // ✅ Most recent notes for the top "Details" section
+  const recentNotes = useMemo(() => {
+    return (displayNotes || []).slice(0, 3);
+  }, [displayNotes]);
+
+  // ✅ View-mode quick schedule save (also sets status -> Scheduled)
+  const saveQuickSchedule = async (datetimeLocalVal) => {
+    if (scheduleSaving) return;
+
+    const val = (datetimeLocalVal || "").trim();
+    if (!val) {
+      // Allow clearing schedule
+      setScheduleSaving(true);
+      try {
+        const form = new FormData();
+        form.append("scheduledDate", "");
+        // If cleared, do NOT force status changes here
+        await api.put(`/work-orders/${id}/edit`, form, {
+          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+        });
+        await fetchWorkOrder();
+      } catch (err) {
+        console.error("⚠️ Error clearing schedule:", err);
+        alert(err?.response?.data?.error || "Failed to clear scheduled date.");
+      } finally {
+        setScheduleSaving(false);
+      }
+      return;
+    }
+
+    setScheduleSaving(true);
+    try {
+      // Convert datetime-local to an ISO string (local time -> Date -> ISO)
+      const dt = new Date(val);
+      const iso = Number.isNaN(dt.getTime()) ? "" : dt.toISOString();
+
+      const form = new FormData();
+      form.append("scheduledDate", iso);
+
+      // ✅ If you set a scheduled date, force status to Scheduled (unless Completed)
+      const current = (workOrder?.status || localStatus || "").trim();
+      const shouldForceScheduled = current !== "Completed";
+      if (shouldForceScheduled) form.append("status", "Scheduled");
+
+      await api.put(`/work-orders/${id}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+      });
+
+      await fetchWorkOrder();
+    } catch (err) {
+      console.error("⚠️ Error saving scheduled date:", err);
+      alert(err?.response?.data?.error || "Failed to save scheduled date.");
+      // Revert UI to last known saved value
+      setQuickScheduledDate(toDatetimeLocalValue(workOrder?.scheduledDate || ""));
+    } finally {
+      setScheduleSaving(false);
+    }
+  };
 
   if (!workOrder) {
     return (
@@ -618,8 +705,7 @@ const recentNotes = useMemo(() => {
       </div>
     `;
   };
-
-  /* ---------------- PRINT: Work Order ---------------- */
+ /* ---------------- PRINT: Work Order ---------------- */
   const handlePrint = () => {
     const siteDisplayName = (siteLocation || customer || "").trim();
     const siteAddr = (siteAddress || "").trim();
@@ -977,7 +1063,7 @@ const recentNotes = useMemo(() => {
 
     try {
       await api.delete(`/work-orders/${id}`, { headers: authHeaders() });
-      navigate("/work-orders");
+      goBack();
       return;
     } catch (e1) {
       showErr(e1, "DELETE /work-orders/:id");
@@ -985,7 +1071,7 @@ const recentNotes = useMemo(() => {
 
     try {
       await api.post(`/work-orders/${id}?_method=DELETE`, null, { headers: authHeaders() });
-      navigate("/work-orders");
+      goBack();
       return;
     } catch (e2) {
       showErr(e2, "POST /work-orders/:id?_method=DELETE");
@@ -993,7 +1079,7 @@ const recentNotes = useMemo(() => {
 
     try {
       await api.post(`/work-orders/${id}/delete`, null, { headers: authHeaders() });
-      navigate("/work-orders");
+      goBack();
       return;
     } catch (e3) {
       showErr(e3, "POST /work-orders/:id/delete");
@@ -1004,7 +1090,7 @@ const recentNotes = useMemo(() => {
         data: { id, purgeFiles: true },
         headers: { "Content-Type": "application/json", ...authHeaders() },
       });
-      navigate("/work-orders");
+      goBack();
       return;
     } catch (e4) {
       const { status, msg } = showErr(e4, "DELETE /work-orders { id }");
@@ -1074,38 +1160,48 @@ const recentNotes = useMemo(() => {
   const handleUploadOrReplacePoPdf = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     if (!isPdfFile(file)) {
       alert("Please choose a PDF file.");
       e.target.value = "";
       return;
     }
+
     setBusyPoUpload(true);
+
     try {
       const form = new FormData();
       form.append("poPdf", file);
 
-      // ✅ ensure this becomes the canonical PO PDF (not "just another attachment")
+      // ✅ Force backend to treat this as the canonical PO PDF (not just an attachment)
       form.append("setAsPoPdf", "1");
 
+      // ✅ Infer supplier + PO# from filename
       const fileName = file.name || "";
-      const currentSupplier = poSupplier || woPoSupplier || "";
       const inferredSupplier = inferSupplierFromFilename(fileName);
       const inferredPoNum = inferPoNumberFromFilename(fileName);
 
-      // ✅ Auto-set supplier if empty
+      // Current values
+      const currentSupplier = (editMode ? edit.poSupplier : (poSupplier || woPoSupplier || "")).trim();
+      const currentPoNum = (cleanedPo || "").trim();
+
       if (!currentSupplier && inferredSupplier) {
         form.append("poSupplier", inferredSupplier);
+        setPoSupplier(inferredSupplier);
+        if (editMode) patchEdit({ poSupplier: inferredSupplier });
       }
 
-      // ✅ Auto-set PO# only if currently blank
-      if (!cleanedPo && inferredPoNum) {
+      if (!currentPoNum && inferredPoNum) {
         form.append("poNumber", inferredPoNum);
+        if (editMode) patchEdit({ poNumber: inferredPoNum });
       }
 
       await api.put(`/work-orders/${id}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
+
       await fetchWorkOrder();
+      alert("PO PDF uploaded successfully.");
     } catch (error) {
       console.error("⚠️ Error uploading/replacing PO PDF:", error);
       alert(error?.response?.data?.error || "Failed to upload PO PDF.");
@@ -1358,13 +1454,7 @@ const recentNotes = useMemo(() => {
   /* ======================= RENDER ======================= */
   return (
     <div className="view-container">
-      <Lightbox
-        open={lightbox.open}
-        onClose={closeLightbox}
-        kind={lightbox.kind}
-        src={lightbox.src}
-        title={lightbox.title}
-      />
+      <Lightbox open={lightbox.open} onClose={closeLightbox} kind={lightbox.kind} src={lightbox.src} title={lightbox.title} />
 
       <div className="view-card">
         <div className="view-header-row">
@@ -1406,8 +1496,9 @@ const recentNotes = useMemo(() => {
               </>
             )}
 
-            <button className="btn back-btn" onClick={() => navigate("/work-orders")}>
-              Back to List
+            {/* ✅ Back uses state.from */}
+            <button className="btn back-btn" onClick={goBack}>
+              Back
             </button>
           </div>
         </div>
@@ -1415,42 +1506,37 @@ const recentNotes = useMemo(() => {
         {/* ======================= BASIC INFO (STACKED FIELDS) ======================= */}
         <div className="wo-stack">
           <div className="wo-stack-head">
-
             <div className="wo-stack-meta">
-<div className="section-card">
-  <h3 className="section-header">Details</h3>
+              <div className="section-card">
+                <h3 className="section-header">Details</h3>
 
-  {recentNotes.length ? (
-    <ul className="notes-list" style={{ marginTop: 0 }}>
-      {recentNotes.map((n, idx) => (
-        <li key={`${n.createdAt || "na"}-${idx}`} className="note-item">
-          <div className="note-header">
-            <small className="note-timestamp">
-              {n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "—"}
-              {n.by ? ` — ${n.by}` : ""}
-            </small>
-          </div>
-          <p className="note-text" style={{ marginBottom: 0 }}>
-            {n.text}
-          </p>
-        </li>
-      ))}
-    </ul>
-  ) : (
-    <p className="empty-text" style={{ margin: 0 }}>
-      No notes yet.
-    </p>
-  )}
-</div>
-      
-        <div className="meta-row">
+                {recentNotes.length ? (
+                  <ul className="notes-list" style={{ marginTop: 0 }}>
+                    {recentNotes.map((n, idx) => (
+                      <li key={`${n.createdAt || "na"}-${idx}`} className="note-item">
+                        <div className="note-header">
+                          <small className="note-timestamp">
+                            {n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "—"}
+                            {n.by ? ` — ${n.by}` : ""}
+                          </small>
+                        </div>
+                        <p className="note-text" style={{ marginBottom: 0 }}>
+                          {n.text}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="empty-text" style={{ margin: 0 }}>
+                    No notes yet.
+                  </p>
+                )}
+              </div>
+
+              <div className="meta-row">
                 <span className="meta-label">Status</span>
                 {editMode ? (
-                  <select
-                    className="control select"
-                    value={edit.status}
-                    onChange={(e) => patchEdit({ status: e.target.value })}
-                  >
+                  <select className="control select" value={edit.status} onChange={(e) => patchEdit({ status: e.target.value })}>
                     <option value="" disabled>
                       Select status…
                     </option>
@@ -1480,11 +1566,7 @@ const recentNotes = useMemo(() => {
               <div className="meta-row">
                 <span className="meta-label">Assigned Tech</span>
                 {editMode ? (
-                  <select
-                    className="control select"
-                    value={edit.assignedTo}
-                    onChange={(e) => patchEdit({ assignedTo: e.target.value })}
-                  >
+                  <select className="control select" value={edit.assignedTo} onChange={(e) => patchEdit({ assignedTo: e.target.value })}>
                     <option value="">Unassigned</option>
                     {techUsers.map((t) => (
                       <option key={t.id} value={String(t.id)}>
@@ -1494,12 +1576,7 @@ const recentNotes = useMemo(() => {
                   </select>
                 ) : (
                   <div className="meta-inline">
-                    <select
-                      className="control select"
-                      value={localAssignedTo}
-                      onChange={handleAssignedTechChange}
-                      disabled={techSaving}
-                    >
+                    <select className="control select" value={localAssignedTo} onChange={handleAssignedTechChange} disabled={techSaving}>
                       <option value="">Unassigned</option>
                       {techUsers.map((t) => (
                         <option key={t.id} value={String(t.id)}>
@@ -1529,13 +1606,7 @@ const recentNotes = useMemo(() => {
 
           <Field label="PO #">
             {editMode ? (
-              <input
-                type="text"
-                className="control input"
-                value={edit.poNumber}
-                onChange={(e) => patchEdit({ poNumber: e.target.value })}
-                placeholder="(optional)"
-              />
+              <input type="text" className="control input" value={edit.poNumber} onChange={(e) => patchEdit({ poNumber: e.target.value })} placeholder="(optional)" />
             ) : (
               <PONumberEditor
                 orderId={woId}
@@ -1550,23 +1621,12 @@ const recentNotes = useMemo(() => {
             )}
           </Field>
 
-          <Field label="Customer">
-            {editMode ? (
-              <input className="control input" value={edit.customer} onChange={(e) => patchEdit({ customer: e.target.value })} />
-            ) : (
-              <div className="value">{customer || "—"}</div>
-            )}
-          </Field>
+          <Field label="Customer">{editMode ? <input className="control input" value={edit.customer} onChange={(e) => patchEdit({ customer: e.target.value })} /> : <div className="value">{customer || "—"}</div>}</Field>
 
           <div className="wo-2col">
             <Field label="Customer Phone">
               {editMode ? (
-                <input
-                  type="tel"
-                  className="control input"
-                  value={edit.customerPhone}
-                  onChange={(e) => patchEdit({ customerPhone: e.target.value })}
-                />
+                <input type="tel" className="control input" value={edit.customerPhone} onChange={(e) => patchEdit({ customerPhone: e.target.value })} />
               ) : (
                 <div className="value">{customerPhone || "—"}</div>
               )}
@@ -1574,12 +1634,7 @@ const recentNotes = useMemo(() => {
 
             <Field label="Customer Email">
               {editMode ? (
-                <input
-                  type="email"
-                  className="control input"
-                  value={edit.customerEmail}
-                  onChange={(e) => patchEdit({ customerEmail: e.target.value })}
-                />
+                <input type="email" className="control input" value={edit.customerEmail} onChange={(e) => patchEdit({ customerEmail: e.target.value })} />
               ) : (
                 <div className="value">{customerEmail || "—"}</div>
               )}
@@ -1587,21 +1642,12 @@ const recentNotes = useMemo(() => {
           </div>
 
           <Field label="Site Name">
-            {editMode ? (
-              <input className="control input" value={edit.siteName} onChange={(e) => patchEdit({ siteName: e.target.value })} />
-            ) : (
-              <div className="value">{workOrder?.siteName || "—"}</div>
-            )}
+            {editMode ? <input className="control input" value={edit.siteName} onChange={(e) => patchEdit({ siteName: e.target.value })} /> : <div className="value">{workOrder?.siteName || "—"}</div>}
           </Field>
 
           <Field label="Site Address">
             {editMode ? (
-              <textarea
-                className="control textarea"
-                rows={3}
-                value={edit.siteAddress}
-                onChange={(e) => patchEdit({ siteAddress: e.target.value })}
-              />
+              <textarea className="control textarea" rows={3} value={edit.siteAddress} onChange={(e) => patchEdit({ siteAddress: e.target.value })} />
             ) : (
               <div className="value pre-wrap">{siteAddress || "—"}</div>
             )}
@@ -1609,12 +1655,7 @@ const recentNotes = useMemo(() => {
 
           <Field label="Site Location (Legacy)">
             {editMode ? (
-              <textarea
-                className="control textarea"
-                rows={3}
-                value={edit.siteLocation}
-                onChange={(e) => patchEdit({ siteLocation: e.target.value })}
-              />
+              <textarea className="control textarea" rows={3} value={edit.siteLocation} onChange={(e) => patchEdit({ siteLocation: e.target.value })} />
             ) : (
               <div className="value pre-wrap">{siteLocation || "—"}</div>
             )}
@@ -1622,12 +1663,7 @@ const recentNotes = useMemo(() => {
 
           <Field label="Billing Address">
             {editMode ? (
-              <textarea
-                className="control textarea"
-                rows={4}
-                value={edit.billingAddress}
-                onChange={(e) => patchEdit({ billingAddress: e.target.value })}
-              />
+              <textarea className="control textarea" rows={4} value={edit.billingAddress} onChange={(e) => patchEdit({ billingAddress: e.target.value })} />
             ) : (
               <div className="value pre-wrap">{billingAddress || "—"}</div>
             )}
@@ -1635,18 +1671,21 @@ const recentNotes = useMemo(() => {
 
           <Field label="Problem Description">
             {editMode ? (
-              <textarea
-                className="control textarea"
-                rows={5}
-                value={edit.problemDescription}
-                onChange={(e) => patchEdit({ problemDescription: e.target.value })}
-              />
+              <textarea className="control textarea" rows={5} value={edit.problemDescription} onChange={(e) => patchEdit({ problemDescription: e.target.value })} />
             ) : (
               <div className="value pre-wrap">{problemDescription || "—"}</div>
             )}
           </Field>
 
-          <Field label="Scheduled Date">
+          {/* ✅ Scheduled Date: Add “mini calendar picker” in view-mode like Add Work Order */}
+          <Field
+            label="Scheduled Date"
+            hint={
+              editMode
+                ? null
+                : "Pick a date/time to schedule. Saving will set Status to Scheduled (unless already Completed)."
+            }
+          >
             {editMode ? (
               <input
                 type="datetime-local"
@@ -1655,7 +1694,47 @@ const recentNotes = useMemo(() => {
                 onChange={(e) => patchEdit({ scheduledDate: e.target.value })}
               />
             ) : (
-              <div className="value">{scheduledDate ? moment(scheduledDate).format("YYYY-MM-DD HH:mm") : "Not Scheduled"}</div>
+              <div className="schedule-inline">
+                <input
+                  ref={scheduleInputRef}
+                  type="datetime-local"
+                  className="control input"
+                  value={quickScheduledDate || ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setQuickScheduledDate(v);
+                    saveQuickSchedule(v);
+                  }}
+                  disabled={scheduleSaving}
+                />
+                <button
+                  type="button"
+                  className="btn btn-light"
+                  title="Open calendar"
+                  onClick={() => {
+                    // open the native picker if supported
+                    if (scheduleInputRef.current?.showPicker) scheduleInputRef.current.showPicker();
+                    else scheduleInputRef.current?.focus();
+                  }}
+                  disabled={scheduleSaving}
+                  style={{ padding: "0 10px", minWidth: 44 }}
+                >
+                  📅
+                </button>
+                {scheduleSaving ? <span className="tiny">Saving…</span> : null}
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setQuickScheduledDate("");
+                    saveQuickSchedule("");
+                  }}
+                  disabled={scheduleSaving}
+                  title="Clear scheduled date"
+                >
+                  Clear
+                </button>
+              </div>
             )}
           </Field>
         </div>
@@ -1666,12 +1745,7 @@ const recentNotes = useMemo(() => {
 
           {signedHref ? (
             <div className="attachments-grid">
-              <FileTile
-                kind="pdf"
-                href={signedHref}
-                fileName={(pdfPath || "").split("/").pop() || "signed.pdf"}
-                onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")}
-              />
+              <FileTile kind="pdf" href={signedHref} fileName={(pdfPath || "").split("/").pop() || "signed.pdf"} onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")} />
             </div>
           ) : (
             <div>
@@ -1706,12 +1780,7 @@ const recentNotes = useMemo(() => {
 
           {estimateHref ? (
             <div className="attachments-grid">
-              <FileTile
-                kind="pdf"
-                href={estimateHref}
-                fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
-                onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
-              />
+              <FileTile kind="pdf" href={estimateHref} fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"} onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")} />
             </div>
           ) : (
             <p className="empty-text">No estimate PDF attached.</p>
@@ -1734,11 +1803,7 @@ const recentNotes = useMemo(() => {
               <label className="inline-label">
                 Supplier
                 {editMode ? (
-                  <select
-                    className="control select"
-                    value={edit.poSupplier || ""}
-                    onChange={(e) => patchEdit({ poSupplier: e.target.value })}
-                  >
+                  <select className="control select" value={edit.poSupplier || ""} onChange={(e) => patchEdit({ poSupplier: e.target.value })}>
                     <option value="">Select supplier…</option>
                     {SUPPLIER_OPTIONS.map((s) => (
                       <option key={s} value={s}>
@@ -1777,12 +1842,7 @@ const recentNotes = useMemo(() => {
 
           {poHref ? (
             <div className="attachments-grid">
-              <FileTile
-                kind="pdf"
-                href={poHref}
-                fileName={(poPdfPath || "").split("/").pop() || "po.pdf"}
-                onExpand={() => openLightbox("pdf", poHref, "PO PDF")}
-              />
+              <FileTile kind="pdf" href={poHref} fileName={(poPdfPath || "").split("/").pop() || "po.pdf"} onExpand={() => openLightbox("pdf", poHref, "PO PDF")} />
             </div>
           ) : (
             <p className="empty-text">No PO PDF attached.</p>
@@ -1805,16 +1865,7 @@ const recentNotes = useMemo(() => {
               {otherPdfAttachments.map((relPath, i) => {
                 const href = pdfThumbUrl(relPath);
                 const fileName = relPath.split("/").pop() || `attachment-${i + 1}.pdf`;
-                return (
-                  <FileTile
-                    key={`${relPath}-${i}`}
-                    kind="pdf"
-                    href={href}
-                    fileName={fileName}
-                    onExpand={() => openLightbox("pdf", href, fileName)}
-                    onDelete={() => handleDeleteAttachment(relPath)}
-                  />
-                );
+                return <FileTile key={`${relPath}-${i}`} kind="pdf" href={href} fileName={fileName} onExpand={() => openLightbox("pdf", href, fileName)} onDelete={() => handleDeleteAttachment(relPath)} />;
               })}
             </div>
           ) : (
@@ -1917,13 +1968,7 @@ const recentNotes = useMemo(() => {
 
           {showNoteInput && (
             <div className="add-note">
-              <textarea
-                className="control textarea"
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                placeholder="Write your note here..."
-                rows={4}
-              />
+              <textarea className="control textarea" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Write your note here..." rows={4} />
               <button className="btn btn-primary" onClick={handleAddNote}>
                 Submit Note
               </button>
