@@ -1,3 +1,4 @@
+// File: src/WorkOrders.js
 import React, { useEffect, useMemo, useState } from "react";
 import api from "./api";
 import { Link, useNavigate } from "react-router-dom";
@@ -8,7 +9,6 @@ import "./WorkOrders.css";
 /**
  * STATUS LIST (display & dropdown order; "Parts In" removed)
  * Chip bar normally renders: Today + STATUS_LIST in this exact order.
- * Added "Approved" between "Waiting for Approval" and "Waiting on Parts".
  */
 const STATUS_LIST = [
   "New",
@@ -21,9 +21,6 @@ const STATUS_LIST = [
   "Needs to be Invoiced",
   "Completed",
 ];
-
-const PARTS_WAITING = "Waiting on Parts";
-const PARTS_NEXT = "Needs to be Scheduled";
 
 // ---------- helpers ----------
 const norm = (v) => (v ?? "").toString().trim();
@@ -44,16 +41,13 @@ const STATUS_SYNONYMS = new Map([
   ["need to be scheduled", "Needs to be Scheduled"],
   ["needs to be schedule", "Needs to be Scheduled"],
 
-  // Waiting for/ on Approval variants -> keep UI wording "Waiting for Approval"
   ["waiting for approval", "Waiting for Approval"],
   ["waiting-on-approval", "Waiting for Approval"],
   ["waiting_on_approval", "Waiting for Approval"],
   ["waiting on approval", "Waiting for Approval"],
 
-  // Approved
   ["approved", "Approved"],
 
-  // Waiting on Parts
   ["waiting on parts", "Waiting on Parts"],
   ["waiting-on-parts", "Waiting on Parts"],
   ["waiting_on_parts", "Waiting on Parts"],
@@ -62,14 +56,14 @@ const STATUS_SYNONYMS = new Map([
   ["needs to be invoiced", "Needs to be Invoiced"],
   ["needs invoiced", "Needs to be Invoiced"],
 
-  // Legacy: map any "Parts In" variants to our new target to avoid orphans
-  ["part in", PARTS_NEXT],
-  ["parts in", PARTS_NEXT],
-  ["parts  in", PARTS_NEXT],
-  ["parts-in", PARTS_NEXT],
-  ["parts_in", PARTS_NEXT],
-  ["partsin", PARTS_NEXT],
-  ["part s in", PARTS_NEXT],
+  // Legacy: map any "Parts In" variants to "Needs to be Scheduled"
+  ["part in", "Needs to be Scheduled"],
+  ["parts in", "Needs to be Scheduled"],
+  ["parts  in", "Needs to be Scheduled"],
+  ["parts-in", "Needs to be Scheduled"],
+  ["parts_in", "Needs to be Scheduled"],
+  ["partsin", "Needs to be Scheduled"],
+  ["part s in", "Needs to be Scheduled"],
 ]);
 
 const toCanonicalStatus = (s) =>
@@ -128,19 +122,20 @@ function parseLatestNote(notes) {
   }
 
   // Plain text (server appends new lines). Find the last bracketed entry.
-  const lines = s.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = s
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
   if (!lines.length) return null;
 
   const lastBracket =
     [...lines].reverse().find((l) => /^\[[^\]]+\]\s*/.test(l)) ||
     lines[lines.length - 1];
 
-  // Try to parse "[timestamp] author: text"
   const m = lastBracket.match(/^\[([^\]]+)\]\s*([^:]+):\s*(.*)$/);
   if (m) {
     return { createdAt: m[1], author: m[2], text: m[3] };
   }
-  // Otherwise just show the tail line as text
   return { text: lastBracket, createdAt: null, author: null };
 }
 
@@ -175,33 +170,14 @@ export default function WorkOrders() {
   const [selectedFilter, setSelectedFilter] = useState("Today"); // default to Today
   const [techUsers, setTechUsers] = useState([]);
 
-  // parts modal
-  const [isPartsModalOpen, setIsPartsModalOpen] = useState(false);
-  const [poSearch, setPoSearch] = useState("");
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [isUpdatingParts, setIsUpdatingParts] = useState(false);
-
   // UX
   const [flashMsg, setFlashMsg] = useState("");
-
-  // load data
-  useEffect(() => {
-    fetchWorkOrders();
-    if (userRole !== "tech") {
-      api
-        .get("/users", { params: { assignees: 1 }, headers: authHeaders() })
-        .then((r) => setTechUsers(r.data || []))
-        .catch((err) => console.error("Error fetching assignable users:", err));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // NOTE: return the promise so `await fetchWorkOrders()` actually waits.
   const fetchWorkOrders = async () => {
     try {
       const res = await api.get("/work-orders", { headers: authHeaders() });
       const data = Array.isArray(res.data) ? res.data : [];
-      // normalize status for rendering & filtering
       const canon = data.map((o) => ({
         ...o,
         status: toCanonicalStatus(o.status),
@@ -213,6 +189,18 @@ export default function WorkOrders() {
       return [];
     }
   };
+
+  // load data
+  useEffect(() => {
+    fetchWorkOrders();
+    if (userRole !== "tech") {
+      api
+        .get("/users", { params: { assignees: 1 }, headers: authHeaders() })
+        .then((r) => setTechUsers(Array.isArray(r.data) ? r.data : []))
+        .catch((err) => console.error("Error fetching assignable users:", err));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // filtering
   useEffect(() => {
@@ -233,7 +221,7 @@ export default function WorkOrders() {
     setFilteredOrders(rows);
   }, [workOrders, selectedFilter]);
 
-  // counts (no “All” anymore)
+  // counts
   const chipCounts = useMemo(() => {
     const buckets = Object.fromEntries(STATUS_LIST.map((s) => [s, 0]));
     let today = 0;
@@ -257,16 +245,14 @@ export default function WorkOrders() {
   const setFilter = (value) => setSelectedFilter(value);
 
   /* ------------------------------------------------------------------------ */
-  /* SINGLE-ROW STATUS CHANGE  (FIXED ROUTE -> PUT /work-orders/:id/status)    */
+  /* SINGLE-ROW STATUS CHANGE  (PUT /work-orders/:id/status)                  */
   /* ------------------------------------------------------------------------ */
   const handleStatusChange = async (e, id) => {
     e.stopPropagation();
     const newStatus = toCanonicalStatus(e.target.value);
 
     const prev = workOrders;
-    const next = prev.map((o) =>
-      o.id === id ? { ...o, status: newStatus } : o
-    );
+    const next = prev.map((o) => (o.id === id ? { ...o, status: newStatus } : o));
     setWorkOrders(next);
 
     try {
@@ -288,24 +274,23 @@ export default function WorkOrders() {
     }
   };
 
-  // assign — try `/assign`, fallback to `/edit` if backend lacks /assign endpoint
+  // assign — try `/assign`, fallback to `/edit` (multipart) if needed
   const assignToTech = async (orderId, techId, e) => {
     e.stopPropagation();
     try {
       await api.put(
         `/work-orders/${orderId}/assign`,
         { assignedTo: techId || null },
-        { headers: authHeaders() }
+        { headers: { "Content-Type": "application/json", ...authHeaders() } }
       );
       await fetchWorkOrders();
     } catch (err) {
-      // fallback path using existing /edit route
       try {
-        await api.put(
-          `/work-orders/${orderId}/edit`,
-          { assignedTo: techId || "" },
-          { headers: authHeaders() }
-        );
+        const form = new FormData();
+        form.append("assignedTo", techId || "");
+        await api.put(`/work-orders/${orderId}/edit`, form, {
+          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+        });
         await fetchWorkOrders();
       } catch (err2) {
         console.error("Error assigning tech:", err2);
@@ -323,123 +308,30 @@ export default function WorkOrders() {
     const url = `https://www.google.com/maps/embed/v1/place?key=${googleMapsApiKey}&q=${encodeURIComponent(
       query
     )}`;
-    window.open(url, "_blank", "width=800,height=600");
-  };
-
-  // -------- Parts In modal (repurposed to move to Needs to be Scheduled) --------
-  const openPartsModal = () => {
-    if (normStatus(selectedFilter) !== normStatus(PARTS_WAITING)) {
-      setSelectedFilter(PARTS_WAITING);
-    }
-    const source = workOrders.filter(
-      (o) => normStatus(o.status) === normStatus(PARTS_WAITING)
-    );
-    setSelectedIds(new Set(source.map((o) => o.id)));
-    setPoSearch("");
-    setIsPartsModalOpen(true);
-  };
-
-  const closePartsModal = () => {
-    setIsPartsModalOpen(false);
-    setSelectedIds(new Set());
-    setPoSearch("");
-  };
-
-  const toggleId = (id) => {
-    const copy = new Set(selectedIds);
-    if (copy.has(id)) copy.delete(id);
-    else copy.add(id);
-    setSelectedIds(copy);
-  };
-
-  const setAll = (checked, visibleRows) => {
-    setSelectedIds(
-      checked ? new Set(visibleRows.map((o) => o.id)) : new Set()
-    );
-  };
-
-  const visibleWaitingRows = useMemo(() => {
-    const base = filteredOrders.filter(
-      (o) => normStatus(o.status) === normStatus(PARTS_WAITING)
-    );
-    const q = poSearch.trim().toLowerCase();
-    if (!q) return base;
-    return base.filter((o) => {
-      const wo = norm(o.workOrderNumber).toLowerCase();
-      const po = displayPO(o.workOrderNumber, o.poNumber).toLowerCase();
-      const cust = norm(o.customer).toLowerCase();
-      const site = norm(o.siteLocation).toLowerCase();
-      return wo.includes(q) || po.includes(q) || cust.includes(q) || site.includes(q);
-    });
-  }, [filteredOrders, poSearch]);
-
-  /* ------------------------------------------------------------------------ */
-  /* BULK -> Needs to be Scheduled  (no /bulk-status: fan out to per-row)     */
-  /* ------------------------------------------------------------------------ */
-  const markSelectedAsPartsIn = async () => {
-    if (!selectedIds.size) return;
-    setIsUpdatingParts(true);
-
-    const ids = Array.from(selectedIds);
-    const prev = workOrders;
-
-    // Local optimistic update
-    const next = prev.map((o) =>
-      ids.includes(o.id) ? { ...o, status: PARTS_NEXT } : o
-    );
-    setWorkOrders(next);
-
-    try {
-      // Fan-out to the correct endpoint for each id
-      await Promise.all(
-        ids.map((id) =>
-          api.put(
-            `/work-orders/${id}/status`,
-            { status: PARTS_NEXT },
-            { headers: authHeaders() }
-          )
-        )
-      );
-
-      setSelectedFilter(PARTS_NEXT);
-      await fetchWorkOrders();
-      closePartsModal();
-
-      const count = ids.length;
-      setFlashMsg(
-        `Moved ${count} work order${count === 1 ? "" : "s"} to “${PARTS_NEXT}”.`
-      );
-      window.setTimeout(() => setFlashMsg(""), 3000);
-    } catch (err) {
-      console.error("Bulk update failed:", err);
-      setWorkOrders(prev);
-      const status = err?.response?.status;
-      const msg =
-        err?.response?.data?.error ||
-        (status === 401
-          ? "Missing or invalid token. Please sign in again."
-          : status === 403
-          ? "Forbidden: one or more selected items aren’t assigned to you."
-          : `Failed to move selected to “${PARTS_NEXT}”.`);
-      alert(msg);
-    } finally {
-      setIsUpdatingParts(false);
-    }
+    window.open(url, "_blank", "width=900,height=650");
   };
 
   return (
-    <div className="home-container">
+    <div className="wo-page">
       {flashMsg ? <div className="flash-banner">{flashMsg}</div> : null}
 
-      <div className="header-row">
-        <h2 className="text-primary">Work Orders Dashboard</h2>
-        <Link
-          to="/add-work-order"
-          className="btn btn-primary"
-          onClick={(e) => e.stopPropagation()}
-        >
-          + Add New Work Order
-        </Link>
+      <div className="wo-page-header">
+        <div className="wo-page-titleblock">
+          <h2 className="wo-page-title">Work Orders</h2>
+          <div className="wo-page-subtitle">
+            Filter by <span className="pill subtle">Today</span> or by status tabs.
+          </div>
+        </div>
+
+        <div className="wo-page-actions">
+          <Link
+            to="/add-work-order"
+            className="btn btn-primary"
+            onClick={(e) => e.stopPropagation()}
+          >
+            + Add New Work Order
+          </Link>
+        </div>
       </div>
 
       <div className="section-card">
@@ -468,242 +360,153 @@ export default function WorkOrders() {
             })}
           </div>
 
-          {normStatus(selectedFilter) === normStatus(PARTS_WAITING) &&
-            filteredOrders.some(
-              (o) => normStatus(o.status) === normStatus(PARTS_WAITING)
-            ) && (
-              <button type="button" className="btn btn-parts" onClick={openPartsModal}>
-                Mark Parts In
-              </button>
-            )}
+          {/* ✅ Removed: “Mark Parts In” button + modal feature */}
         </div>
 
-        <table className="styled-table">
-          <thead>
-            <tr>
-              <th>WO / PO</th>
-              <th>Customer</th>
-              <th>Site Location</th>
-              <th>Site Address</th>
-              <th>Problem Description</th>
-              <th>Status</th>
-              {userRole !== "tech" && <th>Assigned To</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredOrders.map((order) => {
-              const latest = parseLatestNote(order?.notes);
-              const noteTime = latest?.createdAt
-                ? moment(latest.createdAt).fromNow()
-                : null;
+        <div className="table-wrap">
+          <table className="wo-table">
+            <thead>
+              <tr>
+                <th style={{ width: 130 }}>WO / PO</th>
+                <th style={{ width: 170 }}>Customer</th>
+                <th style={{ width: 220 }}>Site Location</th>
+                <th>Site Address</th>
+                <th style={{ width: 360 }}>Problem Description</th>
+                <th style={{ width: 190 }}>Status</th>
+                {userRole !== "tech" && <th style={{ width: 190 }}>Assigned To</th>}
+              </tr>
+            </thead>
 
-              // ---- Robust location/address logic ----
-              const rawLocField = norm(order.siteLocation); // may be a name (new) OR an address (legacy)
-              const explicitName = norm(order.siteName) || norm(order.siteLocationName);
-              let siteLocationName = explicitName; // prefer explicit name fields
+            <tbody>
+              {filteredOrders.map((order) => {
+                const latest = parseLatestNote(order?.notes);
+                const noteTime = latest?.createdAt
+                  ? moment(latest.createdAt).fromNow()
+                  : null;
 
-              // Build address from explicit address-type fields
-              let siteAddress =
-                norm(order.siteAddress) ||
-                norm(order.serviceAddress) ||
-                norm(order.address);
+                // ---- Robust location/address logic ----
+                const rawLocField = norm(order.siteLocation); // may be a name (new) OR an address (legacy)
+                const explicitName = norm(order.siteName) || norm(order.siteLocationName);
+                let siteLocationName = explicitName;
 
-              if (!siteAddress && rawLocField) {
-                // Legacy: no explicit address, but siteLocation has something
-                siteAddress = rawLocField;
-              } else if (!siteLocationName && rawLocField) {
-                // Newer: siteLocation is actually the "name"
-                siteLocationName = rawLocField;
-              }
+                let siteAddress =
+                  norm(order.siteAddress) ||
+                  norm(order.serviceAddress) ||
+                  norm(order.address);
 
-              return (
-                <tr key={order.id} onClick={() => navigate(`/view-work-order/${order.id}`)}>
-                  <td>
-                    <div className="wo-po-cell" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <div>
-                        <strong>WO:</strong> {order.workOrderNumber || "—"}
+                if (!siteAddress && rawLocField) {
+                  siteAddress = rawLocField;
+                } else if (!siteLocationName && rawLocField) {
+                  siteLocationName = rawLocField;
+                }
+
+                const cleanedPO = displayPO(order.workOrderNumber, order.poNumber);
+
+                return (
+                  <tr
+                    key={order.id}
+                    className="wo-row"
+                    onClick={() =>
+                      navigate(`/view-work-order/${order.id}`, {
+                        state: { from: "/work-orders" },
+                      })
+                    }
+                  >
+                    <td>
+                      <div className="wo-idcell">
+                        <div className="wo-idline">
+                          <span className="badge">WO</span>
+                          <span className="mono">{order.workOrderNumber || "—"}</span>
+                        </div>
+                        {cleanedPO ? (
+                          <div className="wo-idline subtle">
+                            <span className="badge badge-subtle">PO</span>
+                            <span className="mono">{cleanedPO}</span>
+                          </div>
+                        ) : null}
                       </div>
-                      {displayPO(order.workOrderNumber, order.poNumber) ? (
-                        <div>
-                          <strong>PO:</strong> {displayPO(order.workOrderNumber, order.poNumber)}
+                    </td>
+
+                    <td className="cell-strong">{order.customer || "N/A"}</td>
+
+                    <td title={siteLocationName || "—"}>
+                      <div style={clampStyle(2)}>{siteLocationName || "—"}</div>
+                    </td>
+
+                    <td title={siteAddress || "N/A"}>
+                      {siteAddress ? (
+                        <button
+                          type="button"
+                          className="linklike"
+                          onClick={(e) => openAddressInMaps(e, siteAddress, siteLocationName)}
+                        >
+                          {siteAddress}
+                        </button>
+                      ) : (
+                        "N/A"
+                      )}
+                    </td>
+
+                    <td title={order.problemDescription || ""}>
+                      <div style={clampStyle(4)}>{order.problemDescription || "—"}</div>
+
+                      {latest?.text ? (
+                        <div
+                          className="latest-note"
+                          title={`${latest.text}${noteTime ? ` • ${noteTime}` : ""}`}
+                        >
+                          <span aria-hidden="true">📝</span>{" "}
+                          {latest.text}
+                          {noteTime ? ` • ${noteTime}` : ""}
                         </div>
                       ) : null}
-                    </div>
-                  </td>
+                    </td>
 
-                  <td>{order.customer || "N/A"}</td>
-
-                  {/* Site Location (name only) */}
-                  <td title={siteLocationName || "—"}>{siteLocationName || "—"}</td>
-
-                  {/* Site Address (clickable; includes legacy fallback) */}
-                  <td title={siteAddress || "N/A"}>
-                    {siteAddress ? (
-                      <span
-                        className="link-text"
-                        onClick={(e) => openAddressInMaps(e, siteAddress, siteLocationName)}
-                      >
-                        {siteAddress}
-                      </span>
-                    ) : (
-                      "N/A"
-                    )}
-                  </td>
-
-                  <td title={order.problemDescription}>
-                    <div style={clampStyle(4)}>{order.problemDescription}</div>
-
-                    {latest?.text && (
-                      <div
-                        className="latest-note"
-                        title={`${latest.text}${noteTime ? ` • ${noteTime}` : ""}`}
-                        style={{
-                          marginTop: 6,
-                          fontSize: 12,
-                          color: "#6b7280",
-                          display: "-webkit-box",
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: "vertical",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "normal",
-                        }}
-                      >
-                        <span role="img" aria-label="note">📝</span>{" "}
-                        {latest.text}
-                        {noteTime ? ` • ${noteTime}` : ""}
-                      </div>
-                    )}
-                  </td>
-
-                  <td>
-                    <select
-                      className="form-select form-select--big"
-                      value={toCanonicalStatus(order.status)}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => handleStatusChange(e, order.id)}
-                    >
-                      {STATUS_LIST.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-
-                  {userRole !== "tech" && (
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <select
-                        className="form-select form-select--big"
-                        value={order.assignedTo ?? ""}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => assignToTech(order.id, e.target.value, e)}
+                        className="control select"
+                        value={toCanonicalStatus(order.status)}
+                        onChange={(e) => handleStatusChange(e, order.id)}
                       >
-                        <option value="">-- assign tech --</option>
-                        {techUsers.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.username}
+                        {STATUS_LIST.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
                           </option>
                         ))}
                       </select>
                     </td>
-                  )}
+
+                    {userRole !== "tech" && (
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <select
+                          className="control select"
+                          value={order.assignedTo ?? ""}
+                          onChange={(e) => assignToTech(order.id, e.target.value, e)}
+                        >
+                          <option value="">Unassigned</option>
+                          {techUsers.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.username}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+
+              {filteredOrders.length === 0 && (
+                <tr>
+                  <td colSpan={userRole !== "tech" ? 7 : 6}>
+                    <div className="empty-state">No work orders for this filter.</div>
+                  </td>
                 </tr>
-              );
-            })}
-
-            {filteredOrders.length === 0 && (
-              <tr>
-                <td colSpan={userRole !== "tech" ? 7 : 6}>
-                  <div className="empty-state">No work orders for this filter.</div>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ---------- Parts Modal (moves to Needs to be Scheduled) ---------- */}
-      {isPartsModalOpen && (
-        <div className="modal-overlay" onClick={closePartsModal} role="dialog" aria-modal="true">
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Mark Parts as Received</h3>
-              <button className="modal-close" onClick={closePartsModal} aria-label="Close">
-                ×
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <div className="modal-controls">
-                <input
-                  className="modal-input"
-                  type="text"
-                  placeholder="Search WO #, PO #, customer, or site…"
-                  value={poSearch}
-                  onChange={(e) => setPoSearch(e.target.value)}
-                />
-                <div className="modal-actions-inline">
-                  <button type="button" className="btn btn-ghost" onClick={() => setAll(true, visibleWaitingRows)}>
-                    Select All
-                  </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => setAll(false, visibleWaitingRows)}>
-                    Select None
-                  </button>
-                </div>
-              </div>
-
-              <div className="modal-list">
-                {visibleWaitingRows.length === 0 ? (
-                  <div className="empty-state">No POs in “{PARTS_WAITING}”.</div>
-                ) : (
-                  <table className="mini-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: 42 }}></th>
-                        <th>WO #</th>
-                        <th>PO #</th>
-                        <th>Customer</th>
-                        <th>Site</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleWaitingRows.map((o) => {
-                        const checked = selectedIds.has(o.id);
-                        return (
-                          <tr key={o.id}>
-                            <td>
-                              <input type="checkbox" checked={checked} onChange={() => toggleId(o.id)} />
-                            </td>
-                            <td>{o.workOrderNumber || "—"}</td>
-                            <td>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
-                            <td>{o.customer || "—"}</td>
-                            <td title={o.siteLocation}>{o.siteLocation || "—"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="btn btn-parts"
-                disabled={isUpdatingParts || selectedIds.size === 0}
-                onClick={markSelectedAsPartsIn}
-              >
-                {isUpdatingParts ? "Updating…" : `Mark Parts In (${selectedIds.size})`}
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={closePartsModal}>
-                Cancel
-              </button>
-            </div>
-          </div>
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
     </div>
   );
 }

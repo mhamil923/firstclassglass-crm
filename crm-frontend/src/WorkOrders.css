@@ -1,5 +1,94 @@
+/* File: src/WorkOrders.css */
+
 /* ===========================
-   Toolbar (chips + actions)
+   Page shell
+   =========================== */
+
+.wo-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 18px 16px 28px;
+}
+
+.wo-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.wo-page-titleblock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wo-page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+.wo-page-subtitle {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.wo-page-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Small pill used in subtitle */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  font-weight: 700;
+  font-size: 12px;
+  color: #0f172a;
+  background: #fff;
+}
+.pill.subtle {
+  background: #f8fafc;
+  color: #334155;
+}
+
+/* Flash banner */
+.flash-banner {
+  background: #ecfeff;
+  border: 1px solid #99f6e4;
+  color: #0f172a;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+
+/* ===========================
+   Cards
+   =========================== */
+
+.section-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.06);
+}
+
+/* ===========================
+   Toolbar (chips)
    =========================== */
 
 .chips-toolbar {
@@ -7,8 +96,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 1rem;
-  flex-wrap: wrap; /* keep pills from squishing */
+  margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 /* Ensure the inner row lays chips nicely */
@@ -18,12 +107,10 @@
   gap: 8px;
 }
 
-/* Pill-style status chips (use descendant selector, not direct child) */
+/* Pill-style status chips */
 .chips-toolbar .chip,
-.chips-toolbar .status-chip,
 .chips-toolbar a.chip,
-.chips-toolbar button.chip,
-.chips-toolbar .wo-chip {
+.chips-toolbar button.chip {
   display: inline-flex;
   align-items: center;
   height: 34px;
@@ -32,31 +119,28 @@
   border-radius: 999px;
   background: #fff;
   color: #0ea5b7;
-  font-weight: 600;
+  font-weight: 800;
   gap: 8px;
   cursor: pointer;
   text-decoration: none;
   line-height: 1;
   user-select: none;
+  transition: background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
 }
 
-.chips-toolbar .chip:hover,
-.chips-toolbar .status-chip:hover,
-.chips-toolbar .wo-chip:hover {
+.chips-toolbar .chip:hover {
   background: #f0fdff;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.06);
 }
 
-.chips-toolbar .chip:focus-visible,
-.chips-toolbar .status-chip:focus-visible,
-.chips-toolbar .wo-chip:focus-visible {
+.chips-toolbar .chip:focus-visible {
   outline: 3px solid #99f6e4;
   outline-offset: 2px;
 }
 
-/* Count bubble inside pill — match your JSX's .chip-count */
-.chips-toolbar .chip .chip-count,
-.chips-toolbar .status-chip .chip-count,
-.chips-toolbar .wo-chip .chip-count {
+/* Count bubble inside pill */
+.chips-toolbar .chip .chip-count {
   min-width: 20px;
   height: 20px;
   padding: 0 6px;
@@ -66,142 +150,26 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
+  font-weight: 900;
   font-size: 12px;
   line-height: 1;
 }
 
 /* Active pill */
-.chips-toolbar .chip.active,
-.chips-toolbar .status-chip.active,
-.chips-toolbar .wo-chip.active {
+.chips-toolbar .chip.active {
   background: #0ea5b7;
   color: #fff;
   border-color: #0ea5b7;
+  box-shadow: 0 10px 22px rgba(14, 165, 183, 0.25);
 }
-.chips-toolbar .chip.active .chip-count,
-.chips-toolbar .status-chip.active .chip-count,
-.chips-toolbar .wo-chip.active .chip-count {
+.chips-toolbar .chip.active .chip-count {
   background: #0b7682;
   border-color: #0b7682;
   color: #fff;
 }
 
-/* Keep the green “Mark Parts In” looking like a primary button */
-.chips-toolbar .btn-parts {
-  background: #22c55e;
-  color: #fff;
-  border: 1px solid #16a34a;
-  padding: 0.5rem 0.9rem;
-  border-radius: 8px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
 /* ===========================
-   Section card + table wrap
-   =========================== */
-
-.section-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 12px;
-}
-
-/* ===========================
-   Work Orders — table
-   =========================== */
-
-.styled-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.styled-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: #f8fafc;
-  color: #0f172a;
-  text-align: left;
-  padding: 10px 12px;
-  border-bottom: 1px solid #e2e8f0;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.styled-table tbody td {
-  padding: 10px 12px;
-  vertical-align: top;
-  color: #0f172a;
-  border-top: 1px solid #e2e8f0;
-  background: #fff;
-}
-
-/* ===========================
-   Selects (status/assignee)
-   =========================== */
-
-/* Base select */
-.form-select {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-
-  background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-
-  /* IMPORTANT:
-     Do NOT hard-force height/line-height if we want bigger selects.
-     These were causing the "..." issue when padding/font-size increased. */
-  height: auto;
-  line-height: 1.25;
-
-  padding: 8px 34px 8px 12px;
-  color: #0f172a;
-  font-weight: 600;
-  cursor: pointer;
-
-  /* caret */
-  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2362748B' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-
-  /* make sure text shows nicely */
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Big version used on the dashboard rows */
-.form-select--big {
-  width: 100%;
-  min-width: 160px;
-  min-height: 44px;
-  font-size: 15px;
-  padding: 10px 38px 10px 12px; /* room for arrow */
-  border-radius: 10px;
-}
-
-/* Link-looking addresses */
-.link-text {
-  color: #0ea5b7;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.link-text:hover {
-  opacity: 0.85;
-}
-
-/* ===========================
-   Buttons (general)
+   Buttons (shared)
    =========================== */
 
 .btn {
@@ -209,25 +177,214 @@
   align-items: center;
   gap: 8px;
   border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 0.5rem 0.9rem;
-  font-weight: 700;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 800;
   cursor: pointer;
   text-decoration: none;
+  line-height: 1;
+  transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
 }
+
+.btn:active {
+  transform: translateY(1px);
+}
+
 .btn-primary {
   background: #0ea5b7;
   color: #fff;
   border-color: #0ea5b7;
+  box-shadow: 0 10px 22px rgba(14, 165, 183, 0.24);
 }
-.btn-warning {
-  background: #f59e0b;
-  color: #fff;
-  border-color: #d97706;
+
+.btn-primary:hover {
+  opacity: 0.95;
+  box-shadow: 0 14px 28px rgba(14, 165, 183, 0.28);
 }
-.btn-sm {
-  padding: 0.35rem 0.6rem;
-  font-size: 0.9rem;
+
+.btn-outline {
+  background: #ffffff;
+  color: #0ea5b7;
+  border-color: #0ea5b7;
+}
+
+.btn-outline:hover {
+  background: #f0fdff;
+}
+
+.btn-light {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #e2e8f0;
+}
+
+.btn-light:hover {
+  background: #f1f5f9;
+}
+
+/* ===========================
+   Controls (select)
+   =========================== */
+
+.control {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #0f172a;
+  font-weight: 700;
+  outline: none;
+}
+
+.control:focus {
+  border-color: #0ea5b7;
+  box-shadow: 0 0 0 4px rgba(14, 165, 183, 0.18);
+}
+
+/* nice select arrow */
+select.control.select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 38px;
+
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2362748B' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+/* ===========================
+   Table wrap
+   =========================== */
+
+.table-wrap {
+  width: 100%;
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+}
+
+/* ===========================
+   Work Orders Table
+   =========================== */
+
+.wo-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: #fff;
+}
+
+.wo-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8fafc;
+  color: #0f172a;
+  text-align: left;
+  padding: 12px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.wo-table tbody td {
+  padding: 12px 12px;
+  vertical-align: top;
+  color: #0f172a;
+  border-top: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+/* Hover row */
+.wo-row {
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+.wo-row:hover td {
+  background: #f0fdff;
+}
+
+/* Strong customer cell */
+.cell-strong {
+  font-weight: 900;
+  color: #0f172a;
+}
+
+/* ID cell */
+.wo-idcell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wo-idline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+}
+
+.wo-idline.subtle {
+  opacity: 0.85;
+  font-weight: 800;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+/* little badges for WO / PO */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid #0ea5b7;
+  background: #ecfeff;
+  color: #0ea5b7;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+.badge.badge-subtle {
+  border-color: #94a3b8;
+  background: #f8fafc;
+  color: #475569;
+}
+
+/* Latest note under problem description */
+.latest-note {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Link-like address button */
+.linklike {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: #0ea5b7;
+  font-weight: 800;
+  text-decoration: underline;
+  cursor: pointer;
+  text-align: left;
+}
+.linklike:hover {
+  opacity: 0.85;
 }
 
 /* ===========================
@@ -235,142 +392,60 @@
    =========================== */
 
 .empty-state {
-  padding: 1rem;
+  padding: 18px 14px;
   text-align: center;
   color: #64748b;
+  font-weight: 800;
 }
 
 /* ===========================
-   Modal (scoped to avoid leaks)
+   Responsive tweaks
    =========================== */
 
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(2, 6, 23, 0.45);
-  display: grid;
-  place-items: center;
-  z-index: 50;
+@media (max-width: 900px) {
+  .wo-page {
+    padding: 14px 12px 24px;
+  }
+
+  .section-card {
+    padding: 10px;
+  }
+
+  .wo-page-title {
+    font-size: 20px;
+  }
+
+  .btn {
+    padding: 10px 12px;
+    border-radius: 12px;
+  }
 }
 
-.modal-card {
-  width: min(900px, 92vw);
-  background: #ffffff;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 16px 40px rgba(2, 6, 23, 0.25);
-  display: flex;
-  flex-direction: column;
-  max-height: 85vh;
-}
+@media (max-width: 640px) {
+  .wo-page-header {
+    gap: 10px;
+  }
 
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.9rem 1.1rem;
-  border-bottom: 1px solid #e2e8f0;
-}
+  .wo-page-actions {
+    width: 100%;
+  }
 
-.modal-header h3 {
-  margin: 0;
-  font-size: 1.15rem;
-  color: #0f172a;
-}
+  .wo-page-actions .btn,
+  .wo-page-actions a.btn {
+    width: 100%;
+    justify-content: center;
+  }
 
-.modal-close {
-  border: none;
-  background: transparent;
-  font-size: 1.5rem;
-  line-height: 1;
-  cursor: pointer;
-  color: #334155;
-}
+  .chips-toolbar {
+    margin-bottom: 10px;
+  }
 
-.modal-body {
-  padding: 0.9rem 1.1rem;
-  overflow: auto;
-}
+  .chips-row {
+    gap: 6px;
+  }
 
-.modal-controls {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  margin-bottom: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.modal-input {
-  flex: 1 1 320px;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  outline: none;
-}
-
-.modal-actions-inline {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.modal-list {
-  max-height: 56vh;
-  overflow: auto;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-}
-
-.mini-table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-}
-
-.mini-table thead th {
-  position: sticky;
-  top: 0;
-  background: #f8fafc;
-  color: #0f172a;
-  text-align: left;
-  padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid #e2e8f0;
-  z-index: 1;
-}
-
-.mini-table tbody td {
-  padding: 0.55rem 0.75rem;
-  border-bottom: 1px solid #f1f5f9;
-}
-
-.modal-footer {
-  display: flex;
-  gap: 0.75rem;
-  justify-content: flex-end;
-  padding: 0.9rem 1.1rem;
-  border-top: 1px solid #e2e8f0;
-}
-
-/* Buttons for modal */
-.btn-parts {
-  background: #22c55e;
-  color: #fff;
-  border: 1px solid #16a34a;
-  padding: 0.5rem 0.9rem;
-  border-radius: 8px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.btn-parts:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-ghost {
-  background: #ffffff;
-  color: #0f172a;
-  border: 1px solid #cbd5e1;
-  padding: 0.5rem 0.9rem;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
+  .chips-toolbar .chip {
+    height: 32px;
+    padding: 0 10px;
+  }
 }
