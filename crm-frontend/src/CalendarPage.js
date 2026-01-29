@@ -1,6 +1,3 @@
-// =========================
-// PART 1 / 3  (top of file)
-// =========================
 // File: src/CalendarPage.js
 
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
@@ -221,9 +218,6 @@ function CustomEvent({ event }) {
 
 /* ============================================================
    ✅ Week View (custom view for RBC)
-   - Styled to look clean + readable (no ugly grid)
-   - Each day has its own scroll area so long lists stay usable
-   - Supports drop from Unscheduled into a day column
 ============================================================ */
 function StackedWeekView(props) {
   const {
@@ -475,12 +469,6 @@ StackedWeekView.title = (date, { localizer: loc }) => {
   const end = moment(date).endOf("week").toDate();
   return loc.format({ start, end }, "dayRangeHeaderFormat");
 };
-// =========================
-// PART 2 / 3  (component logic)
-// =========================
-// File: src/CalendarPage.js
-// Paste this starting at: `export default function WorkOrderCalendar() {`
-// and ending right before the `return (` render block.
 
 export default function WorkOrderCalendar() {
   // Full work order list (for search in the Unscheduled bar)
@@ -518,24 +506,37 @@ export default function WorkOrderCalendar() {
   const [statusSaving, setStatusSaving] = useState(false);
 
   /* ============================================================
-     ✅ DRAG-SCROLL (auto-scroll while dragging, EVEN over calendar)
-     Fix: when pointer is over RBC, the page wasn't scrolling.
-     Approach:
-     - Track last pointer {x,y} during drag (capture on document + window)
-     - Each frame: if pointer near viewport edge, scroll the BEST scroll container:
-         1) scrollable element UNDER the pointer (RBC internal scrollers)
-         2) otherwise the page scroller (document.scrollingElement)
+     ✅ DRAG-SCROLL (THIS VERSION IS “PAGE FIRST”)
+     Your exact requirement: while dragging an Unscheduled item,
+     when you get near the bottom of the viewport, the PAGE must
+     scroll down (not just some internal calendar scroller).
+
+     Why prior attempts fail:
+     - react-big-calendar (and the browser) can swallow/limit drag events.
+     - sometimes you were scrolling the wrong element (RBC internals),
+       so the page stayed still.
+     - sometimes the “page” isn’t window scrolling; it’s a parent div
+       with overflow: auto (common in app shells).
+
+     What we do now:
+     1) Detect the *actual* primary scroll container for this page.
+     2) During drag, continuously scroll that container near edges.
+     3) Track pointer via capture listeners (document + window).
   ============================================================ */
+  const pageRootRef = useRef(null);
+
   const isDraggingRef = useRef(false);
   const dragRafRef = useRef(null);
-
   const pointerRef = useRef({ x: null, y: null });
 
-  const DRAG_SCROLL_EDGE_PX = 150; // hot zone size near edges
-  const DRAG_SCROLL_MAX_PX_PER_FRAME = 28;
+  const primaryScrollerRef = useRef(null);
+
+  const DRAG_SCROLL_EDGE_PX = 170; // bigger edge zone so it “catches” sooner
+  const DRAG_SCROLL_MAX_PX_PER_FRAME = 34; // stronger scroll
+  const DRAG_SCROLL_MIN_PX_PER_FRAME = 6;
 
   const isScrollableY = (el) => {
-    if (!el || el === document.documentElement) return false;
+    if (!el) return false;
     const style = window.getComputedStyle(el);
     const oy = style.overflowY;
     const scrollable =
@@ -543,21 +544,27 @@ export default function WorkOrderCalendar() {
     return scrollable;
   };
 
-  const findScrollableAtPoint = (x, y) => {
-    if (typeof x !== "number" || typeof y !== "number") return null;
+  // Find the *real* scroll container for this page.
+  const resolvePrimaryScroller = useCallback(() => {
+    // If body/window is scrollable, use that
+    const docEl = document.scrollingElement || document.documentElement;
+    const body = document.body;
 
-    let el = document.elementFromPoint(x, y);
-    // Sometimes elementFromPoint can return null during drag on some browsers
-    if (!el) return null;
+    // If document actually scrolls, prefer it
+    if (docEl && docEl.scrollHeight > docEl.clientHeight && !isScrollableY(pageRootRef.current)) {
+      return docEl;
+    }
 
-    // Walk up to find a scrollable ancestor
-    while (el && el !== document.body && el !== document.documentElement) {
+    // Otherwise, find nearest scroll parent above our page root
+    let el = pageRootRef.current;
+    while (el && el !== body && el !== docEl) {
       if (isScrollableY(el)) return el;
       el = el.parentElement;
     }
 
-    return null;
-  };
+    // Fallback: document scroller
+    return docEl;
+  }, []);
 
   const stopDragScroll = useCallback(() => {
     isDraggingRef.current = false;
@@ -569,7 +576,7 @@ export default function WorkOrderCalendar() {
   const dragScrollStep = useCallback(() => {
     if (!isDraggingRef.current) return;
 
-    const { x, y } = pointerRef.current;
+    const { y } = pointerRef.current;
     if (typeof y === "number") {
       const vh = window.innerHeight || 800;
 
@@ -580,19 +587,21 @@ export default function WorkOrderCalendar() {
 
       if (topDist > 0) {
         const t = Math.min(1, topDist / DRAG_SCROLL_EDGE_PX);
-        delta = -Math.ceil(t * DRAG_SCROLL_MAX_PX_PER_FRAME);
+        delta = -Math.max(DRAG_SCROLL_MIN_PX_PER_FRAME, Math.ceil(t * DRAG_SCROLL_MAX_PX_PER_FRAME));
       } else if (bottomDist > 0) {
         const t = Math.min(1, bottomDist / DRAG_SCROLL_EDGE_PX);
-        delta = Math.ceil(t * DRAG_SCROLL_MAX_PX_PER_FRAME);
+        delta = Math.max(DRAG_SCROLL_MIN_PX_PER_FRAME, Math.ceil(t * DRAG_SCROLL_MAX_PX_PER_FRAME));
       }
 
       if (delta !== 0) {
-        // ✅ prefer scroll container UNDER pointer (RBC internal)
-        const under = findScrollableAtPoint(x, y);
-        const scroller = under || document.scrollingElement || document.documentElement;
+        const scroller = primaryScrollerRef.current || resolvePrimaryScroller();
 
-        // Use scrollBy when available (smoother + respects nested scroll areas)
-        if (typeof scroller.scrollBy === "function") {
+        // Store it once we’ve found it (so we’re consistent while dragging)
+        if (!primaryScrollerRef.current) primaryScrollerRef.current = scroller;
+
+        if (scroller === document.documentElement || scroller === document.body) {
+          window.scrollBy(0, delta);
+        } else if (typeof scroller.scrollBy === "function") {
           scroller.scrollBy({ top: delta, left: 0, behavior: "auto" });
         } else {
           scroller.scrollTop = (scroller.scrollTop || 0) + delta;
@@ -601,15 +610,19 @@ export default function WorkOrderCalendar() {
     }
 
     dragRafRef.current = requestAnimationFrame(dragScrollStep);
-  }, []);
+  }, [resolvePrimaryScroller]);
 
   const startDragScroll = useCallback(() => {
     if (isDraggingRef.current) return;
+
+    // Recompute scroller at drag start (important if layout changes)
+    primaryScrollerRef.current = resolvePrimaryScroller();
+
     isDraggingRef.current = true;
     dragRafRef.current = requestAnimationFrame(dragScrollStep);
-  }, [dragScrollStep]);
+  }, [dragScrollStep, resolvePrimaryScroller]);
 
-  // Track pointer position during HTML5 drag (use BOTH document + window capture)
+  // Track pointer during HTML5 drag (capture phase so RBC can’t block it)
   useEffect(() => {
     const updatePointer = (e) => {
       if (!isDraggingRef.current) return;
@@ -624,13 +637,14 @@ export default function WorkOrderCalendar() {
     };
     const onBlur = () => stopDragScroll();
 
-    // Capture phase so we still get events even when RBC stops propagation
+    // Capture events (document + window)
     document.addEventListener("dragover", updatePointer, true);
     document.addEventListener("dragenter", updatePointer, true);
     document.addEventListener("drag", updatePointer, true);
 
     window.addEventListener("dragover", updatePointer, true);
     window.addEventListener("dragenter", updatePointer, true);
+
     window.addEventListener("drop", onDrop);
     window.addEventListener("dragend", onDragEnd);
     window.addEventListener("keydown", onKeyDown);
@@ -643,6 +657,7 @@ export default function WorkOrderCalendar() {
 
       window.removeEventListener("dragover", updatePointer, true);
       window.removeEventListener("dragenter", updatePointer, true);
+
       window.removeEventListener("drop", onDrop);
       window.removeEventListener("dragend", onDragEnd);
       window.removeEventListener("keydown", onKeyDown);
@@ -650,7 +665,6 @@ export default function WorkOrderCalendar() {
     };
   }, [stopDragScroll]);
 
-  // Also stop on unmount just in case
   useEffect(() => {
     return () => stopDragScroll();
   }, [stopDragScroll]);
@@ -719,17 +733,12 @@ export default function WorkOrderCalendar() {
 
         return {
           ...ev,
-          // normalize times
           start: startD,
           end: endD,
-
-          // normalize common fields
           customer: ev.meta?.customer ?? ev.customer,
           siteLocation: ev.meta?.siteLocation ?? ev.siteLocation ?? getSiteLocation(ev),
           siteAddress: ev.meta?.siteAddress ?? ev.siteAddress ?? getSiteAddress(ev),
           problemDescription: ev.meta?.problemDescription ?? ev.problemDescription,
-
-          // normalize identifiers so WO # stops showing N/A
           workOrderNumber: getWorkOrderNumber(ev),
           poNumber: getPoNumber(ev),
         };
@@ -834,7 +843,6 @@ export default function WorkOrderCalendar() {
     const endExact = `${dateStr} 23:59:59`;
 
     try {
-      // 1) Prefer dedicated endpoint if available
       let list = [];
       try {
         const dayRes = await api.get("/calendar/day", { params: { date: dateStr } });
@@ -843,7 +851,6 @@ export default function WorkOrderCalendar() {
         // ignore -> fallback
       }
 
-      // 2) Fallback to bounded range
       if (!list.length) {
         const { data } = await api.get("/calendar/events", {
           params: { start: startExact, end: endExact },
@@ -851,7 +858,6 @@ export default function WorkOrderCalendar() {
         list = Array.isArray(data) ? data : [];
       }
 
-      // 3) SAFEGUARD: filter to exact day client-side + normalize identifiers
       const normalized = list
         .map((ev) => {
           const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
@@ -1050,32 +1056,26 @@ export default function WorkOrderCalendar() {
     setStatusChoice("");
   }
 
-  // ✅ expose for Part 3 handlers
   function beginGlobalDrag(order, e) {
     setDragItem(order);
 
-    // Prime pointer immediately
+    // Prime pointer immediately (helps prevent “no scroll until I move a lot”)
     if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
     if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
 
     startDragScroll();
   }
-// =========================
-// PART 3 / 3  (render block)
-// =========================
-// File: src/CalendarPage.js
-// Paste this starting at: `return (`
-// and replace your entire current return JSX through the end of the component.
 
   return (
     <div
+      ref={pageRootRef}
       className="calendar-page"
       onDragEnd={endGlobalDrag}
       onDrop={endGlobalDrag}
       onDragLeave={(e) => {
         if (e?.relatedTarget == null) endGlobalDrag();
       }}
-      // ✅ Keep pointer tracking even if drag events are weird over RBC
+      // ✅ keep pointer coords updated even if browser is being weird
       onDragOver={(e) => {
         if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
         if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
@@ -1133,12 +1133,12 @@ export default function WorkOrderCalendar() {
               let currentWhen = "";
               if (isScheduled) {
                 const s = fromDbString(order.scheduledDate);
-                const e =
+                const e2 =
                   fromDbString(order.scheduledEnd) ||
                   (s ? moment(s).add(DEFAULT_WINDOW_MIN, "minutes").toDate() : null);
                 if (s) {
                   currentWhen = `${moment(s).format("MMM D, YYYY h:mm A")}${
-                    e ? ` – ${moment(e).format("h:mm A")}` : ""
+                    e2 ? ` – ${moment(e2).format("h:mm A")}` : ""
                   }`;
                 }
               }
@@ -1190,10 +1190,7 @@ export default function WorkOrderCalendar() {
                       {isScheduled ? "Edit/Reschedule…" : "Schedule…"}
                     </button>
 
-                    <button
-                      className="btn btn-xs btn-light me-1"
-                      onClick={() => openStatusPicker(order)}
-                    >
+                    <button className="btn btn-xs btn-light me-1" onClick={() => openStatusPicker(order)}>
                       Status…
                     </button>
 
@@ -1270,11 +1267,7 @@ export default function WorkOrderCalendar() {
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{dayModalTitle}</h3>
-              <button
-                className="modal-close"
-                onClick={() => setDayModalOpen(false)}
-                aria-label="Close"
-              >
+              <button className="modal-close" onClick={() => setDayModalOpen(false)} aria-label="Close">
                 ×
               </button>
             </div>
@@ -1293,10 +1286,10 @@ export default function WorkOrderCalendar() {
                     <tbody>
                       {dayOrders.map((o) => {
                         const s = fromDbString(o.scheduledDate);
-                        const e = fromDbString(o.scheduledEnd);
+                        const e2 = fromDbString(o.scheduledEnd);
                         const label =
-                          s && e
-                            ? `${moment(s).format("hh:mm A")} – ${moment(e).format("hh:mm A")}`
+                          s && e2
+                            ? `${moment(s).format("hh:mm A")} – ${moment(e2).format("hh:mm A")}`
                             : s
                             ? `${moment(s).format("hh:mm A")} – ${moment(s)
                                 .add(DEFAULT_WINDOW_MIN, "minutes")
@@ -1327,28 +1320,16 @@ export default function WorkOrderCalendar() {
                             </td>
                             <td>
                               <div className="d-flex align-items-center flex-wrap" style={{ gap: 8 }}>
-                                <button
-                                  className="btn btn-sm btn-primary"
-                                  onClick={() => openEditModal(o, dayForModal)}
-                                >
+                                <button className="btn btn-sm btn-primary" onClick={() => openEditModal(o, dayForModal)}>
                                   Edit Time…
                                 </button>
-                                <button
-                                  className="btn btn-sm btn-outline-secondary"
-                                  onClick={() => navigateToView(o.id)}
-                                >
+                                <button className="btn btn-sm btn-outline-secondary" onClick={() => navigateToView(o.id)}>
                                   Open
                                 </button>
-                                <button
-                                  className="btn btn-sm btn-outline-dark"
-                                  onClick={() => openStatusPicker(o)}
-                                >
+                                <button className="btn btn-sm btn-outline-dark" onClick={() => openStatusPicker(o)}>
                                   Status…
                                 </button>
-                                <button
-                                  className="btn btn-sm btn-outline-danger"
-                                  onClick={() => unschedule(o.id)}
-                                >
+                                <button className="btn btn-sm btn-outline-danger" onClick={() => unschedule(o.id)}>
                                   Unschedule
                                 </button>
                               </div>
@@ -1379,11 +1360,7 @@ export default function WorkOrderCalendar() {
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Edit Schedule</h3>
-              <button
-                className="modal-close"
-                onClick={() => setEditModalOpen(false)}
-                aria-label="Close"
-              >
+              <button className="modal-close" onClick={() => setEditModalOpen(false)} aria-label="Close">
                 ×
               </button>
             </div>
@@ -1393,8 +1370,7 @@ export default function WorkOrderCalendar() {
                 <>
                   <div className="mb-2" style={{ minWidth: 0 }}>
                     <div className="fw-bold" style={clamp1}>
-                      {editOrder.customer ? `${editOrder.customer}` : `Work Order`} —{" "}
-                      {displayWOThenPO(editOrder)}
+                      {editOrder.customer ? `${editOrder.customer}` : `Work Order`} — {displayWOThenPO(editOrder)}
                     </div>
                     {editOrder.problemDescription ? (
                       <div className="text-muted" style={clamp2}>
@@ -1406,38 +1382,20 @@ export default function WorkOrderCalendar() {
                   <div className="row g-2">
                     <div className="col-5">
                       <label className="form-label small">Date</label>
-                      <input
-                        className="form-control"
-                        type="date"
-                        value={editDate}
-                        onChange={(e) => setEditDate(e.target.value)}
-                      />
+                      <input className="form-control" type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
                     </div>
                     <div className="col-3">
                       <label className="form-label small">Start</label>
-                      <input
-                        className="form-control"
-                        type="time"
-                        value={editTime}
-                        onChange={(e) => setEditTime(e.target.value)}
-                      />
+                      <input className="form-control" type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} />
                     </div>
                     <div className="col-4">
                       <label className="form-label small">End</label>
-                      <input
-                        className="form-control"
-                        type="time"
-                        value={editEndTime}
-                        onChange={(e) => setEditEndTime(e.target.value)}
-                      />
+                      <input className="form-control" type="time" value={editEndTime} onChange={(e) => setEditEndTime(e.target.value)} />
                     </div>
                   </div>
 
                   <div className="d-flex justify-content-end mt-3">
-                    <button
-                      className="btn btn-outline-danger me-2"
-                      onClick={() => unschedule(editOrder.id)}
-                    >
+                    <button className="btn btn-outline-danger me-2" onClick={() => unschedule(editOrder.id)}>
                       Unschedule
                     </button>
                     <button className="btn btn-primary" onClick={saveEditModal}>
@@ -1467,8 +1425,7 @@ export default function WorkOrderCalendar() {
                 <>
                   <div className="mb-2" style={{ minWidth: 0 }}>
                     <div className="fw-bold" style={clamp1}>
-                      {statusTarget.customer ? statusTarget.customer : "Work Order"} —{" "}
-                      {displayWOThenPO(statusTarget)}
+                      {statusTarget.customer ? statusTarget.customer : "Work Order"} — {displayWOThenPO(statusTarget)}
                     </div>
                     <div className="text-muted">
                       Current: <strong>{statusTarget.status || "—"}</strong>
@@ -1480,9 +1437,7 @@ export default function WorkOrderCalendar() {
                       <button
                         key={s}
                         type="button"
-                        className={`list-group-item list-group-item-action ${
-                          statusChoice === s ? "active" : ""
-                        }`}
+                        className={`list-group-item list-group-item-action ${statusChoice === s ? "active" : ""}`}
                         onClick={() => setStatusChoice(s)}
                       >
                         {s}
@@ -1491,18 +1446,10 @@ export default function WorkOrderCalendar() {
                   </div>
 
                   <div className="d-flex justify-content-end">
-                    <button
-                      className="btn btn-ghost btn-outline-secondary me-2"
-                      onClick={cancelStatusChange}
-                      disabled={statusSaving}
-                    >
+                    <button className="btn btn-ghost btn-outline-secondary me-2" onClick={cancelStatusChange} disabled={statusSaving}>
                       Cancel
                     </button>
-                    <button
-                      className="btn btn-primary"
-                      onClick={confirmStatusChange}
-                      disabled={statusSaving || !statusChoice}
-                    >
+                    <button className="btn btn-primary" onClick={confirmStatusChange} disabled={statusSaving || !statusChoice}>
                       {statusSaving ? "Saving…" : "Confirm"}
                     </button>
                   </div>
