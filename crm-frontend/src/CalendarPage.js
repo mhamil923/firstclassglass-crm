@@ -518,23 +518,50 @@ export default function WorkOrderCalendar() {
   const [statusSaving, setStatusSaving] = useState(false);
 
   /* ============================================================
-     ✅ DRAG-SCROLL (auto-scroll page while dragging near edges)
-     Fixes: page not scrolling while you hold a dragged item.
-     Key changes:
-     - capture pointerY on dragstart + keep updating via document dragover (CAPTURE)
-     - also listen to "drag" (some browsers fire this more reliably than window dragover)
-     - scroll the actual scrolling element (document.scrollingElement) instead of only window
+     ✅ DRAG-SCROLL (auto-scroll while dragging, EVEN over calendar)
+     Fix: when pointer is over RBC, the page wasn't scrolling.
+     Approach:
+     - Track last pointer {x,y} during drag (capture on document + window)
+     - Each frame: if pointer near viewport edge, scroll the BEST scroll container:
+         1) scrollable element UNDER the pointer (RBC internal scrollers)
+         2) otherwise the page scroller (document.scrollingElement)
   ============================================================ */
   const isDraggingRef = useRef(false);
   const dragRafRef = useRef(null);
-  const pointerYRef = useRef(null);
 
-  const DRAG_SCROLL_EDGE_PX = 140; // slightly larger hot zone
-  const DRAG_SCROLL_MAX_PX_PER_FRAME = 26;
+  const pointerRef = useRef({ x: null, y: null });
+
+  const DRAG_SCROLL_EDGE_PX = 150; // hot zone size near edges
+  const DRAG_SCROLL_MAX_PX_PER_FRAME = 28;
+
+  const isScrollableY = (el) => {
+    if (!el || el === document.documentElement) return false;
+    const style = window.getComputedStyle(el);
+    const oy = style.overflowY;
+    const scrollable =
+      (oy === "auto" || oy === "scroll" || oy === "overlay") && el.scrollHeight > el.clientHeight;
+    return scrollable;
+  };
+
+  const findScrollableAtPoint = (x, y) => {
+    if (typeof x !== "number" || typeof y !== "number") return null;
+
+    let el = document.elementFromPoint(x, y);
+    // Sometimes elementFromPoint can return null during drag on some browsers
+    if (!el) return null;
+
+    // Walk up to find a scrollable ancestor
+    while (el && el !== document.body && el !== document.documentElement) {
+      if (isScrollableY(el)) return el;
+      el = el.parentElement;
+    }
+
+    return null;
+  };
 
   const stopDragScroll = useCallback(() => {
     isDraggingRef.current = false;
-    pointerYRef.current = null;
+    pointerRef.current = { x: null, y: null };
     if (dragRafRef.current) cancelAnimationFrame(dragRafRef.current);
     dragRafRef.current = null;
   }, []);
@@ -542,7 +569,7 @@ export default function WorkOrderCalendar() {
   const dragScrollStep = useCallback(() => {
     if (!isDraggingRef.current) return;
 
-    const y = pointerYRef.current;
+    const { x, y } = pointerRef.current;
     if (typeof y === "number") {
       const vh = window.innerHeight || 800;
 
@@ -560,8 +587,16 @@ export default function WorkOrderCalendar() {
       }
 
       if (delta !== 0) {
-        const scroller = document.scrollingElement || document.documentElement;
-        scroller.scrollTop = scroller.scrollTop + delta;
+        // ✅ prefer scroll container UNDER pointer (RBC internal)
+        const under = findScrollableAtPoint(x, y);
+        const scroller = under || document.scrollingElement || document.documentElement;
+
+        // Use scrollBy when available (smoother + respects nested scroll areas)
+        if (typeof scroller.scrollBy === "function") {
+          scroller.scrollBy({ top: delta, left: 0, behavior: "auto" });
+        } else {
+          scroller.scrollTop = (scroller.scrollTop || 0) + delta;
+        }
       }
     }
 
@@ -574,17 +609,12 @@ export default function WorkOrderCalendar() {
     dragRafRef.current = requestAnimationFrame(dragScrollStep);
   }, [dragScrollStep]);
 
-  // Track pointer position during HTML5 drag (CAPTURE helps a lot)
+  // Track pointer position during HTML5 drag (use BOTH document + window capture)
   useEffect(() => {
-    const onDragOverCapture = (e) => {
+    const updatePointer = (e) => {
       if (!isDraggingRef.current) return;
-      if (typeof e?.clientY === "number") pointerYRef.current = e.clientY;
-    };
-
-    const onDrag = (e) => {
-      // Some browsers fire 'drag' more reliably than window-level dragover
-      if (!isDraggingRef.current) return;
-      if (typeof e?.clientY === "number") pointerYRef.current = e.clientY;
+      if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
+      if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
     };
 
     const onDrop = () => stopDragScroll();
@@ -592,21 +622,27 @@ export default function WorkOrderCalendar() {
     const onKeyDown = (e) => {
       if (e.key === "Escape") stopDragScroll();
     };
-    const onBlur = () => stopDragScroll(); // if user alt-tabs mid-drag
+    const onBlur = () => stopDragScroll();
 
-    // Capture phase so we still get events while dragging over children
-    document.addEventListener("dragover", onDragOverCapture, true);
-    document.addEventListener("drag", onDrag, true);
+    // Capture phase so we still get events even when RBC stops propagation
+    document.addEventListener("dragover", updatePointer, true);
+    document.addEventListener("dragenter", updatePointer, true);
+    document.addEventListener("drag", updatePointer, true);
 
+    window.addEventListener("dragover", updatePointer, true);
+    window.addEventListener("dragenter", updatePointer, true);
     window.addEventListener("drop", onDrop);
     window.addEventListener("dragend", onDragEnd);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("blur", onBlur);
 
     return () => {
-      document.removeEventListener("dragover", onDragOverCapture, true);
-      document.removeEventListener("drag", onDrag, true);
+      document.removeEventListener("dragover", updatePointer, true);
+      document.removeEventListener("dragenter", updatePointer, true);
+      document.removeEventListener("drag", updatePointer, true);
 
+      window.removeEventListener("dragover", updatePointer, true);
+      window.removeEventListener("dragenter", updatePointer, true);
       window.removeEventListener("drop", onDrop);
       window.removeEventListener("dragend", onDragEnd);
       window.removeEventListener("keydown", onKeyDown);
@@ -1018,10 +1054,11 @@ export default function WorkOrderCalendar() {
   function beginGlobalDrag(order, e) {
     setDragItem(order);
 
-    // Prime the pointer position immediately (fixes "won't start scrolling" cases)
-    if (typeof e?.clientY === "number") pointerYRef.current = e.clientY;
+    // Prime pointer immediately
+    if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
+    if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
 
-    startDragScroll(); // enables scrolling while dragging
+    startDragScroll();
   }
 // =========================
 // PART 3 / 3  (render block)
@@ -1036,12 +1073,12 @@ export default function WorkOrderCalendar() {
       onDragEnd={endGlobalDrag}
       onDrop={endGlobalDrag}
       onDragLeave={(e) => {
-        // Safety: if user drags out of window and releases, sometimes dragend won't fire
         if (e?.relatedTarget == null) endGlobalDrag();
       }}
-      // ✅ extra safety: keep pointer tracking even if user drags over blank areas of the page
+      // ✅ Keep pointer tracking even if drag events are weird over RBC
       onDragOver={(e) => {
-        if (typeof e?.clientY === "number") pointerYRef.current = e.clientY;
+        if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
+        if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
       }}
     >
       <div className="container-fluid p-0">
@@ -1111,7 +1148,6 @@ export default function WorkOrderCalendar() {
                   key={order.id}
                   className="unscheduled-item"
                   draggable
-                  // ✅ IMPORTANT: pass the event so we can prime pointerYRef immediately
                   onDragStart={(e) => beginGlobalDrag(order, e)}
                   onDragEnd={endGlobalDrag}
                   title={`${customerLabel} — ${idLabel}`}
@@ -1175,9 +1211,9 @@ export default function WorkOrderCalendar() {
         {/* Calendar */}
         <div
           className="calendar-container"
-          // ✅ Helps drag-scroll too: when cursor is over the calendar area, keep tracking y
           onDragOver={(e) => {
-            if (typeof e?.clientY === "number") pointerYRef.current = e.clientY;
+            if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
+            if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
           }}
         >
           <DnDCalendar
