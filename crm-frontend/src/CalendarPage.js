@@ -3,7 +3,7 @@
 // =========================
 // File: src/CalendarPage.js
 
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import api from "./api";
 import { Calendar, momentLocalizer } from "react-big-calendar";
 import moment from "moment";
@@ -220,67 +220,10 @@ function CustomEvent({ event }) {
 }
 
 /* ============================================================
-   ✅ Custom Toolbar
-   - Fixes Week button position/order (Month, Week, Day, Agenda)
-============================================================ */
-function WeekToolbar(props) {
-  const { label, onNavigate, onView, view } = props;
-
-  return (
-    <div className="rbc-toolbar">
-      <span className="rbc-btn-group">
-        <button type="button" onClick={() => onNavigate("TODAY")}>
-          Today
-        </button>
-        <button type="button" onClick={() => onNavigate("PREV")}>
-          Back
-        </button>
-        <button type="button" onClick={() => onNavigate("NEXT")}>
-          Next
-        </button>
-      </span>
-
-      <span className="rbc-toolbar-label">{label}</span>
-
-      <span className="rbc-btn-group">
-        <button
-          type="button"
-          className={view === "month" ? "rbc-active" : ""}
-          onClick={() => onView("month")}
-        >
-          Month
-        </button>
-        <button
-          type="button"
-          className={view === "week" ? "rbc-active" : ""}
-          onClick={() => onView("week")}
-        >
-          Week
-        </button>
-        <button
-          type="button"
-          className={view === "day" ? "rbc-active" : ""}
-          onClick={() => onView("day")}
-        >
-          Day
-        </button>
-        <button
-          type="button"
-          className={view === "agenda" ? "rbc-active" : ""}
-          onClick={() => onView("agenda")}
-        >
-          Agenda
-        </button>
-      </span>
-    </div>
-  );
-}
-
-/* ============================================================
    ✅ Week View (custom view for RBC)
-   - Fixes the crash/blank page by implementing required view statics:
-     range(), navigate(), title()
-   - Each day has its own scroll area to see ALL work orders
+   - Styled to look clean + readable (no ugly grid)
+   - Each day has its own scroll area so long lists stay usable
+   - Supports drop from Unscheduled into a day column
 ============================================================ */
 function StackedWeekView(props) {
   const {
@@ -330,29 +273,122 @@ function StackedWeekView(props) {
     onDropFromOutside({ start: startTime });
   };
 
+  // ✅ inline styling (no CSS edits required)
+  const wrapStyle = {
+    padding: 10,
+    borderRadius: 12,
+    background: "#f7f8fa",
+    border: "1px solid rgba(0,0,0,0.06)",
+  };
+
+  const gridStyle = {
+    display: "grid",
+    gridTemplateColumns: "repeat(7, minmax(220px, 1fr))",
+    gap: 10,
+    overflowX: "auto",
+    paddingBottom: 6,
+  };
+
+  const colStyle = {
+    minHeight: "72vh",
+    background: "white",
+    borderRadius: 12,
+    border: "1px solid rgba(0,0,0,0.08)",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  };
+
+  const headerStyle = {
+    position: "sticky",
+    top: 0,
+    zIndex: 2,
+    background: "linear-gradient(180deg, #ffffff 0%, #fbfbfc 100%)",
+    borderBottom: "1px solid rgba(0,0,0,0.08)",
+    padding: "10px 10px 8px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  };
+
+  const countStyle = {
+    minWidth: 28,
+    height: 24,
+    padding: "0 8px",
+    borderRadius: 999,
+    background: "rgba(13,110,253,0.08)",
+    border: "1px solid rgba(13,110,253,0.25)",
+    color: "#0d6efd",
+    fontWeight: 700,
+    fontSize: 12,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+
+  const bodyStyle = {
+    padding: 10,
+    overflowY: "auto",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  };
+
+  const cardStyle = {
+    textAlign: "left",
+    width: "100%",
+    borderRadius: 12,
+    border: "1px solid rgba(0,0,0,0.12)",
+    background: "white",
+    padding: 10,
+    cursor: "pointer",
+    boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+  };
+
+  const emptyStyle = {
+    border: "1px dashed rgba(0,0,0,0.18)",
+    borderRadius: 12,
+    padding: 12,
+    textAlign: "center",
+    color: "rgba(0,0,0,0.55)",
+    background: "rgba(0,0,0,0.02)",
+  };
+
   return (
-    <div className="stacked-week">
-      <div className="stacked-week-grid">
+    <div style={wrapStyle}>
+      <div style={gridStyle}>
         {days.map((d) => {
           const key = fmtDate(d);
           const list = eventsByDay.get(key) || [];
+          const isToday = moment(d).isSame(moment(), "day");
 
           return (
             <div
               key={key}
-              className="stacked-day"
+              style={{
+                ...colStyle,
+                outline: isToday ? "2px solid rgba(13,110,253,0.35)" : "none",
+              }}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => handleDropOnDay(d, e)}
             >
-              <div className="stacked-day-header" title="Click day in Month view for full list modal">
-                <div>
-                  <div className="dow">{moment(d).format("ddd")}</div>
-                  <div className="date">{moment(d).format("MMM D")}</div>
+              <div style={headerStyle}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 13, lineHeight: 1.1 }}>
+                    {moment(d).format("ddd")}
+                  </div>
+                  <div style={{ fontSize: 12, color: "rgba(0,0,0,0.60)" }}>
+                    {moment(d).format("MMM D")}
+                  </div>
                 </div>
-                <div className="cw-day-count">{list.length}</div>
+                <div style={countStyle} title={`${list.length} work order(s)`}>
+                  {list.length}
+                </div>
               </div>
 
-              <div className="stacked-day-body">
+              <div style={bodyStyle}>
                 {list.length ? (
                   list.map((ev) => {
                     const idLabel = displayWOThenPO(ev);
@@ -375,26 +411,26 @@ function StackedWeekView(props) {
                       <button
                         key={ev.id}
                         type="button"
-                        className="week-event-card"
+                        style={cardStyle}
                         onClick={() => onSelectEvent && onSelectEvent(ev)}
                         onDoubleClick={() => onDoubleClickEvent && onDoubleClickEvent(ev)}
                         title={title}
                       >
-                        <div className="title" style={clamp1}>
+                        <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4, ...clamp2 }}>
                           {title}
                         </div>
                         {timeLabel ? (
-                          <div className="meta" style={clamp1}>
+                          <div style={{ fontSize: 12, color: "rgba(0,0,0,0.62)", ...clamp1 }}>
                             {timeLabel}
                           </div>
                         ) : null}
                         {siteLoc ? (
-                          <div className="meta" style={clamp1}>
+                          <div style={{ fontSize: 12, color: "rgba(0,0,0,0.62)", ...clamp1 }}>
                             {siteLoc}
                           </div>
                         ) : null}
                         {siteAddr ? (
-                          <div className="meta" style={clamp1}>
+                          <div style={{ fontSize: 12, color: "rgba(0,0,0,0.55)", ...clamp2 }}>
                             {siteAddr}
                           </div>
                         ) : null}
@@ -402,7 +438,7 @@ function StackedWeekView(props) {
                     );
                   })
                 ) : (
-                  <div className="empty-text">No work orders</div>
+                  <div style={emptyStyle}>No work orders</div>
                 )}
               </div>
             </div>
@@ -480,6 +516,93 @@ export default function WorkOrderCalendar() {
   const [statusTarget, setStatusTarget] = useState(null);
   const [statusChoice, setStatusChoice] = useState("");
   const [statusSaving, setStatusSaving] = useState(false);
+
+  /* ============================================================
+     ✅ DRAG-SCROLL (auto-scroll page while dragging near edges)
+     Fixes: can't drop into bottom rows of month/week because page
+     doesn't scroll while you hold the dragged item.
+  ============================================================ */
+  const isDraggingRef = useRef(false);
+  const dragRafRef = useRef(null);
+  const pointerYRef = useRef(null);
+
+  const DRAG_SCROLL_EDGE_PX = 120; // "hot zone" from top/bottom
+  const DRAG_SCROLL_MAX_PX_PER_FRAME = 22; // speed cap per animation frame
+
+  const stopDragScroll = useCallback(() => {
+    isDraggingRef.current = false;
+    pointerYRef.current = null;
+    if (dragRafRef.current) cancelAnimationFrame(dragRafRef.current);
+    dragRafRef.current = null;
+  }, []);
+
+  const dragScrollStep = useCallback(() => {
+    if (!isDraggingRef.current) return;
+
+    const y = pointerYRef.current;
+    if (typeof y === "number") {
+      const vh = window.innerHeight || 800;
+
+      // distance into top/bottom zones
+      const topDist = DRAG_SCROLL_EDGE_PX - y;
+      const bottomDist = y - (vh - DRAG_SCROLL_EDGE_PX);
+
+      let delta = 0;
+
+      if (topDist > 0) {
+        // near top -> scroll up
+        const t = Math.min(1, topDist / DRAG_SCROLL_EDGE_PX);
+        delta = -Math.ceil(t * DRAG_SCROLL_MAX_PX_PER_FRAME);
+      } else if (bottomDist > 0) {
+        // near bottom -> scroll down
+        const t = Math.min(1, bottomDist / DRAG_SCROLL_EDGE_PX);
+        delta = Math.ceil(t * DRAG_SCROLL_MAX_PX_PER_FRAME);
+      }
+
+      if (delta !== 0) {
+        window.scrollBy({ top: delta, left: 0, behavior: "auto" });
+      }
+    }
+
+    dragRafRef.current = requestAnimationFrame(dragScrollStep);
+  }, []);
+
+  const startDragScroll = useCallback(() => {
+    if (isDraggingRef.current) return;
+    isDraggingRef.current = true;
+    dragRafRef.current = requestAnimationFrame(dragScrollStep);
+  }, [dragScrollStep]);
+
+  // Track pointer position during HTML5 drag
+  useEffect(() => {
+    const onDragOver = (e) => {
+      if (!isDraggingRef.current) return;
+      pointerYRef.current = e.clientY;
+    };
+
+    const onDrop = () => stopDragScroll();
+    const onDragEnd = () => stopDragScroll();
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") stopDragScroll();
+    };
+
+    window.addEventListener("dragover", onDragOver, { passive: true });
+    window.addEventListener("drop", onDrop);
+    window.addEventListener("dragend", onDragEnd);
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+      window.removeEventListener("dragend", onDragEnd);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [stopDragScroll]);
+
+  // Also stop on unmount just in case
+  useEffect(() => {
+    return () => stopDragScroll();
+  }, [stopDragScroll]);
 
   /* ========= initial fetches ========= */
   useEffect(() => {
@@ -721,6 +844,7 @@ export default function WorkOrderCalendar() {
 
   function endGlobalDrag() {
     setDragItem(null);
+    stopDragScroll();
   }
 
   /* ===== react-big-calendar interactions ===== */
@@ -874,6 +998,12 @@ export default function WorkOrderCalendar() {
     setStatusTarget(null);
     setStatusChoice("");
   }
+
+  // ✅ expose for Part 3 handlers
+  function beginGlobalDrag(order) {
+    setDragItem(order);
+    startDragScroll(); // <-- enables scrolling while dragging
+  }
 // =========================
 // PART 3 / 3  (render block)
 // =========================
@@ -882,7 +1012,15 @@ export default function WorkOrderCalendar() {
 // and replace your entire current return JSX through the end of the component.
 
   return (
-    <div className="calendar-page" onDragEnd={endGlobalDrag}>
+    <div
+      className="calendar-page"
+      onDragEnd={endGlobalDrag}
+      onDrop={endGlobalDrag}
+      onDragLeave={(e) => {
+        // Safety: if user drags out of window and releases, sometimes dragend won't fire
+        if (e?.relatedTarget == null) endGlobalDrag();
+      }}
+    >
       <div className="container-fluid p-0">
         <h2 className="calendar-title">Work Order Calendar</h2>
 
@@ -893,9 +1031,7 @@ export default function WorkOrderCalendar() {
             style={{ gap: 12 }}
           >
             <h4 className="mb-0">
-              {unscheduledSearch
-                ? "Search Results (All Work Orders)"
-                : "Unscheduled Work Orders"}
+              {unscheduledSearch ? "Search Results (All Work Orders)" : "Unscheduled Work Orders"}
             </h4>
 
             <div className="input-group" style={{ maxWidth: 620 }}>
@@ -907,10 +1043,7 @@ export default function WorkOrderCalendar() {
                 onChange={(e) => setUnscheduledSearch(e.target.value)}
               />
               {unscheduledSearch ? (
-                <button
-                  className="btn btn-outline-secondary"
-                  onClick={clearUnscheduledSearch}
-                >
+                <button className="btn btn-outline-secondary" onClick={clearUnscheduledSearch}>
                   Clear
                 </button>
               ) : null}
@@ -920,10 +1053,9 @@ export default function WorkOrderCalendar() {
           <div className="text-muted mt-2" style={{ fontSize: 12 }}>
             {unscheduledSearch ? (
               <>
-                Showing {listForStrip.length} match
-                {listForStrip.length === 1 ? "" : "es"} across {allOrders.length} total
-                work order{allOrders.length === 1 ? "" : "s"} (drag any item to
-                schedule/reschedule).
+                Showing {listForStrip.length} match{listForStrip.length === 1 ? "" : "es"} across{" "}
+                {allOrders.length} total work order{allOrders.length === 1 ? "" : "s"} (drag any item
+                to schedule/reschedule).
               </>
             ) : (
               <>Showing {listForStrip.length} item(s) (from /work-orders/unscheduled)</>
@@ -956,19 +1088,16 @@ export default function WorkOrderCalendar() {
                   key={order.id}
                   className="unscheduled-item"
                   draggable
-                  onDragStart={() => setDragItem(order)}
+                  // ✅ IMPORTANT: start drag-scroll + set drag item
+                  onDragStart={() => beginGlobalDrag(order)}
+                  onDragEnd={endGlobalDrag}
                   title={`${customerLabel} — ${idLabel}`}
                 >
-                  <div
-                    className="d-flex align-items-center justify-content-between"
-                    style={{ gap: 8 }}
-                  >
+                  <div className="d-flex align-items-center justify-content-between" style={{ gap: 8 }}>
                     <div className="fw-bold" style={clamp1}>
                       {customerLabel} — {idLabel}
                     </div>
-                    {isScheduled && (
-                      <span className="badge text-bg-secondary">Scheduled</span>
-                    )}
+                    {isScheduled && <span className="badge text-bg-secondary">Scheduled</span>}
                   </div>
 
                   {siteLoc ? (
@@ -999,17 +1128,11 @@ export default function WorkOrderCalendar() {
                       {isScheduled ? "Edit/Reschedule…" : "Schedule…"}
                     </button>
 
-                    <button
-                      className="btn btn-xs btn-light me-1"
-                      onClick={() => openStatusPicker(order)}
-                    >
+                    <button className="btn btn-xs btn-light me-1" onClick={() => openStatusPicker(order)}>
                       Status…
                     </button>
 
-                    <button
-                      className="btn btn-xs btn-light"
-                      onClick={() => navigateToView(order.id)}
-                    >
+                    <button className="btn btn-xs btn-light" onClick={() => navigateToView(order.id)}>
                       Open
                     </button>
                   </div>
@@ -1021,7 +1144,19 @@ export default function WorkOrderCalendar() {
         </div>
 
         {/* Calendar */}
-        <div className="calendar-container">
+        <div
+          className="calendar-container"
+          // ✅ Helps drag-scroll too: when cursor is over the calendar area, keep tracking y
+          onDragOver={(e) => {
+            // pointerYRef is in Part 2 (ref)
+            if (typeof e?.clientY === "number") {
+              try {
+                // eslint-disable-next-line no-undef
+                pointerYRef.current = e.clientY;
+              } catch {}
+            }
+          }}
+        >
           <DnDCalendar
             localizer={localizer}
             events={rbcEvents}
@@ -1032,57 +1167,40 @@ export default function WorkOrderCalendar() {
             min={moment().startOf("day").add(6, "hours").toDate()}
             max={moment().startOf("day").add(21, "hours").toDate()}
             selectable
-
             draggableAccessor={() => true}
             dragFromOutsideItem={() => dragItem}
             onDropFromOutside={handleDropFromOutside}
-
             onEventDrop={handleEventDrop}
             onEventResize={handleEventResize}
-
             onSelectEvent={onSelectEvent}
             onDoubleClickEvent={(e) => navigateToView(e.id)}
             onSelectSlot={onSelectSlot}
             onShowMore={onShowMore}
-
-            /* ✅ FIX: keep Week from crashing + keep toolbar placement correct
-               - Use RBC view system (views prop) so toolbar renders all view buttons correctly
-               - Use our custom stacked week view for "week"
-               - DO NOT replace the toolbar with a custom one (that’s what was moving buttons around)
-            */
             views={{
               month: true,
               week: StackedWeekView,
               day: true,
               agenda: true,
             }}
-
-            /* ✅ FIX: onView MUST accept and set the view string, nothing else */
             view={view}
             onView={(v) => setView(v)}
-
-            /* ✅ FIX: onNavigate should accept date */
             date={currentDate}
             onNavigate={(d) => setCurrentDate(d)}
-
-            /* event rendering */
             components={{
               event: CustomEvent,
             }}
-
-            /* ✅ Month should show the full month again:
-               - remove the forced short height that made it look like a partial month
-               - let RBC size itself, but still keep a comfortable minimum height
-            */
-            style={{ height: "auto", minHeight: "78vh" }}
-
-            /* ✅ keep multi-events visible */
+            // ✅ Give Week view a nice framed container and better spacing by default
+            className={`rbc-enhanced ${view === "week" ? "rbc-week-pretty" : ""}`}
+            style={{
+              height: "auto",
+              minHeight: view === "week" ? "86vh" : "78vh",
+              borderRadius: 12,
+              overflow: "hidden",
+              background: "#fff",
+              border: "1px solid rgba(0,0,0,0.08)",
+            }}
             showAllEvents
-
-            /* only meaningful in timed Day view */
             resizable={view === "day"}
-
-            /* keep it simple */
             popup={false}
           />
         </div>
@@ -1150,10 +1268,7 @@ export default function WorkOrderCalendar() {
                               ) : null}
                             </td>
                             <td>
-                              <div
-                                className="d-flex align-items-center flex-wrap"
-                                style={{ gap: 8 }}
-                              >
+                              <div className="d-flex align-items-center flex-wrap" style={{ gap: 8 }}>
                                 <button
                                   className="btn btn-sm btn-primary"
                                   onClick={() => openEditModal(o, dayForModal)}
@@ -1261,10 +1376,7 @@ export default function WorkOrderCalendar() {
                   </div>
 
                   <div className="d-flex justify-content-end mt-3">
-                    <button
-                      className="btn btn-outline-danger me-2"
-                      onClick={() => unschedule(editOrder.id)}
-                    >
+                    <button className="btn btn-outline-danger me-2" onClick={() => unschedule(editOrder.id)}>
                       Unschedule
                     </button>
                     <button className="btn btn-primary" onClick={saveEditModal}>
@@ -1284,11 +1396,7 @@ export default function WorkOrderCalendar() {
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Change Status</h3>
-              <button
-                className="modal-close"
-                onClick={cancelStatusChange}
-                aria-label="Close"
-              >
+              <button className="modal-close" onClick={cancelStatusChange} aria-label="Close">
                 ×
               </button>
             </div>
@@ -1306,10 +1414,7 @@ export default function WorkOrderCalendar() {
                     </div>
                   </div>
 
-                  <div
-                    className="list-group mb-3"
-                    style={{ maxHeight: 260, overflowY: "auto" }}
-                  >
+                  <div className="list-group mb-3" style={{ maxHeight: 260, overflowY: "auto" }}>
                     {STATUS_OPTIONS.map((s) => (
                       <button
                         key={s}
