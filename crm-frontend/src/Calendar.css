@@ -1,6 +1,8 @@
 /* File: src/Calendar.css
-   Updated to match the ViewWorkOrder / WorkOrders styling you shared
-   (teal chips/buttons, clean cards, modal-card system, better RBC defaults)
+   Fixes:
+   1) Week (StackedWeekView) styling using the actual classnames from CalendarPage.js (cw-*)
+   2) Month view shows more items (with showAllEvents) + improves readability
+   3) Keeps your ViewWorkOrder / WorkOrders look (teal buttons, clean cards, modal-card system)
 */
 
 /* ===========================
@@ -8,7 +10,7 @@
    =========================== */
 
 .calendar-page {
-  background: #f1f5f9; /* same light slate vibe */
+  background: #f1f5f9;
   min-height: calc(100vh - 56px);
   padding: 1rem 0;
 }
@@ -21,7 +23,6 @@
   padding: 0 1rem;
 }
 
-/* Keep outer spacing consistent with other pages */
 .calendar-page .container-fluid {
   padding: 0 1rem !important;
 }
@@ -38,7 +39,6 @@
   margin: 0 1rem 1rem 1rem;
 }
 
-/* horizontal scrolling row */
 .unscheduled-list {
   display: flex;
   gap: 0.75rem;
@@ -47,7 +47,7 @@
 }
 
 .unscheduled-item {
-  background: #9fbf7f; /* keep your green card look from screenshot */
+  background: #9fbf7f;
   color: #0f172a;
   border: 1px solid rgba(15, 23, 42, 0.15);
   border-radius: 12px;
@@ -75,7 +75,6 @@
   flex-wrap: wrap;
 }
 
-/* Tiny buttons used inside strip */
 .btn.btn-xs {
   padding: 0.25rem 0.55rem;
   font-size: 0.8rem;
@@ -84,7 +83,7 @@
   font-weight: 700;
 }
 
-/* Make “Schedule…” look like the teal system */
+/* Make “Schedule…” match your system */
 .btn-outline-light {
   color: #0f172a;
   border-color: rgba(15, 23, 42, 0.35);
@@ -108,7 +107,6 @@
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.08);
 }
 
-/* BigCalendar full width */
 .rbc-calendar {
   width: 100% !important;
   max-width: none !important;
@@ -129,7 +127,6 @@
   color: #0f172a;
 }
 
-/* Match ViewWorkOrder teal button system */
 .rbc-toolbar button {
   background: #0ea5b7;
   color: #fff;
@@ -151,7 +148,6 @@
   outline-offset: 2px;
 }
 
-/* Active view button */
 .rbc-toolbar button.rbc-active {
   background: #0b7682;
   border-color: #0b7682;
@@ -168,7 +164,6 @@
   background: #fff;
 }
 
-/* header row */
 .rbc-header {
   padding: 8px 10px;
   font-weight: 800;
@@ -177,20 +172,37 @@
   border-bottom: 1px solid #e2e8f0;
 }
 
-/* day cells */
 .rbc-day-bg {
   border-left: 1px solid #e2e8f0;
 }
+
 .rbc-month-row + .rbc-month-row {
   border-top: 1px solid #e2e8f0;
 }
 
-/* Today highlight */
 .rbc-today {
   background: #ecfeff;
 }
 
-/* time grid lines */
+/* Month row height: more room for multiple events */
+.rbc-month-view .rbc-month-row {
+  min-height: 170px;
+}
+
+/* Make the date number a little clearer */
+.rbc-date-cell {
+  padding: 6px 8px 0 8px;
+}
+.rbc-date-cell > a {
+  color: #0f172a;
+  font-weight: 800;
+  text-decoration: none;
+}
+.rbc-date-cell > a:hover {
+  text-decoration: underline;
+}
+
+/* Time grid lines */
 .rbc-time-view .rbc-time-content {
   border-top: 1px solid #e2e8f0;
 }
@@ -225,23 +237,29 @@
   border-color: #0b7682 !important;
 }
 
-/* Make the event title wrap nicer */
 .rbc-event-label {
   font-weight: 800;
 }
+
 .rbc-event-content,
 .rbc-event-title {
   white-space: normal !important;
   line-height: 1.15;
 }
 
-/* Month “+X more” */
+/* If the month view gets tight, let events be slightly smaller */
+.rbc-month-view .rbc-event {
+  font-size: 0.85rem;
+  padding: 5px 7px !important;
+}
+
+/* Month "+X more" (we’re aiming to show all, but keep this readable) */
 .rbc-show-more {
   color: #0ea5b7;
   font-weight: 800;
 }
 
-/* Month popup list */
+/* Popup list */
 .rbc-overlay {
   z-index: 1500;
   max-height: 70vh;
@@ -258,118 +276,122 @@
 }
 
 /* ===========================
-   Stacked Week View (custom)
+   ✅ Stacked Week View (CUSTOM) — matches CalendarPage.js classes
    =========================== */
 
-.stacked-week {
+.cw-week {
   padding: 12px;
-}
-
-.stacked-week-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px 12px;
-  border-bottom: 1px solid #e2e8f0;
-  background: #ffffff;
-}
-
-.stacked-week-topbar .title {
-  font-weight: 900;
-  color: #0f172a;
-}
-
-.stacked-week-topbar .actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* week columns */
-.stacked-week-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(220px, 1fr));
   gap: 12px;
-  padding: 12px;
-  overflow-x: auto; /* allow horizontal scroll on small screens */
+  overflow-x: auto; /* small screens */
+  background: #ffffff;
 }
 
-.stacked-day {
+/* Each day column */
+.cw-day {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   overflow: hidden;
   background: #ffffff;
   min-width: 220px;
+  display: flex;
+  flex-direction: column;
 }
 
-.stacked-day-header {
+.cw-day-header {
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
   padding: 10px 12px;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 2px 10px;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
 }
 
-.stacked-day-header .dow {
+.cw-day-title {
   font-weight: 900;
   color: #0f172a;
+  grid-column: 1 / 2;
+  grid-row: 1 / 2;
 }
 
-.stacked-day-header .date {
+.cw-day-sub {
   color: #64748b;
   font-weight: 700;
   font-size: 0.9rem;
+  grid-column: 1 / 2;
+  grid-row: 2 / 3;
 }
 
-.stacked-day-body {
+.cw-day-count {
+  grid-column: 2 / 3;
+  grid-row: 1 / 3;
+  align-self: center;
+  justify-self: end;
+  min-width: 34px;
+  height: 26px;
+  border-radius: 999px;
+  background: #ecfeff;
+  border: 1px solid #99f6e4;
+  color: #0b7682;
+  font-weight: 900;
+  display: grid;
+  place-items: center;
+  font-size: 0.85rem;
+}
+
+/* Scroll inside each day column (this fixes “can’t see everything” in week view) */
+.cw-day-list {
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  overflow-y: auto;
+  max-height: calc(100vh - 320px); /* keeps each day scrollable instead of blowing layout */
 }
 
-.week-event-card {
+/* Card buttons */
+.cw-card {
   border: 1px solid rgba(14, 165, 183, 0.35);
   background: #ffffff;
   border-radius: 12px;
   padding: 10px 10px 8px 10px;
   box-shadow: 0 8px 16px rgba(2, 6, 23, 0.08);
+  text-align: left;
+  cursor: pointer;
 }
 
-.week-event-card .title {
+.cw-card:hover {
+  border-color: rgba(14, 165, 183, 0.6);
+  box-shadow: 0 12px 22px rgba(2, 6, 23, 0.12);
+}
+
+.cw-card-title {
   font-weight: 900;
   color: #0f172a;
 }
 
-.week-event-card .meta {
+.cw-card-time {
   margin-top: 4px;
+  color: #0b7682;
+  font-weight: 900;
+  font-size: 0.85rem;
+}
+
+.cw-card-sub {
+  margin-top: 3px;
   color: #64748b;
   font-weight: 700;
   font-size: 0.85rem;
 }
 
-.week-event-card .card-actions {
-  margin-top: 8px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* Reuse your app button system */
-.week-event-card .btn {
-  border-radius: 10px;
-}
-
-/* Empty label */
-.empty-text {
+.cw-empty {
   text-align: center;
   color: #64748b;
-  margin: 0.75rem 0;
-  font-weight: 700;
+  font-weight: 800;
+  padding: 14px 0;
 }
 
 /* ===========================
@@ -385,7 +407,6 @@
   z-index: 2000;
 }
 
-/* These classes now match your WorkOrders.css modal system */
 .modal-card {
   width: min(900px, 92vw);
   background: #ffffff;
@@ -466,8 +487,15 @@
   vertical-align: top;
 }
 
+.empty-text {
+  text-align: center;
+  color: #64748b;
+  margin: 0.75rem 0;
+  font-weight: 700;
+}
+
 /* ===========================
-   Small responsive tweaks
+   Responsive tweaks
    =========================== */
 
 @media (max-width: 900px) {
