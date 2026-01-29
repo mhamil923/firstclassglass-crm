@@ -10,6 +10,7 @@ const REFRESH_MS = 60_000; // auto-refresh orders every 60s
 
 export default function Home() {
   const [orders, setOrders] = useState([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const navigate = useNavigate();
 
   /* =========================
@@ -26,33 +27,34 @@ export default function Home() {
   };
 
   // Cache-busted fetch so recent changes always appear
-  const fetchOrders = useCallback(() => {
-    api
-      .get("/work-orders", { params: { t: Date.now() } })
-      .then((response) => {
-        const data = Array.isArray(response.data) ? response.data : [];
-        setOrders(data);
-      })
-      .catch((error) => {
-        console.error("Error fetching work orders:", error);
-        setOrders([]);
-      });
+  const fetchOrders = useCallback(async (opts = { silent: false }) => {
+    if (!opts?.silent) setIsRefreshing(true);
+    try {
+      const response = await api.get("/work-orders", { params: { t: Date.now() } });
+      const data = Array.isArray(response.data) ? response.data : [];
+      setOrders(data);
+    } catch (error) {
+      console.error("Error fetching work orders:", error);
+      setOrders([]);
+    } finally {
+      if (!opts?.silent) setIsRefreshing(false);
+    }
   }, []);
 
   useEffect(() => {
     fetchOrders();
 
     // refresh when tab regains focus OR becomes visible
-    const onFocus = () => fetchOrders();
+    const onFocus = () => fetchOrders({ silent: true });
     const onVisibility = () => {
-      if (document.visibilityState === "visible") fetchOrders();
+      if (document.visibilityState === "visible") fetchOrders({ silent: true });
     };
 
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
 
     // gentle polling to keep notes fresh while user idles on dashboard
-    const interval = setInterval(fetchOrders, REFRESH_MS);
+    const interval = setInterval(() => fetchOrders({ silent: true }), REFRESH_MS);
 
     return () => {
       window.removeEventListener("focus", onFocus);
@@ -66,28 +68,31 @@ export default function Home() {
   ========================= */
   const todayStr = moment().format("YYYY-MM-DD");
 
-  const agendaOrders = orders.filter((o) => {
-    if (!o.scheduledDate) return false;
-    const m = parseAsLocal(o.scheduledDate);
-    if (!m?.isValid()) return false;
-    return m.format("YYYY-MM-DD") === todayStr;
-  });
+  const agendaOrders = useMemo(() => {
+    return orders.filter((o) => {
+      if (!o.scheduledDate) return false;
+      const m = parseAsLocal(o.scheduledDate);
+      if (!m?.isValid()) return false;
+      return m.format("YYYY-MM-DD") === todayStr;
+    });
+  }, [orders, todayStr]);
 
-  const upcomingOrders = orders.filter((o) => {
-    if (!o.scheduledDate) return false;
-    const m = parseAsLocal(o.scheduledDate);
-    if (!m?.isValid()) return false;
-    return m.isAfter(moment(), "day");
-  });
+  const upcomingOrders = useMemo(() => {
+    return orders.filter((o) => {
+      if (!o.scheduledDate) return false;
+      const m = parseAsLocal(o.scheduledDate);
+      if (!m?.isValid()) return false;
+      return m.isAfter(moment(), "day");
+    });
+  }, [orders]);
 
-  const waitingForApprovalOrders = orders.filter(
-    (o) => o.status === "Waiting for Approval"
-  );
+  const waitingForApprovalOrders = useMemo(() => {
+    return orders.filter((o) => o.status === "Waiting for Approval");
+  }, [orders]);
 
   const fmtDateTime = (dt) => {
     const m = parseAsLocal(dt);
     return m && m.isValid() ? m.format("YYYY-MM-DD HH:mm") : "";
-    // You can change to m.format("MMM D, YYYY h:mm A") if you prefer
   };
 
   const woCell = (o) => o?.workOrderNumber || "—";
@@ -96,31 +101,25 @@ export default function Home() {
      Notes (robust extraction)
   ========================= */
 
-  // 1) Accept arrays, JSON strings, and line-based blobs.
   const parseNotesField = (notesLike) => {
     if (!notesLike) return [];
     if (Array.isArray(notesLike)) return notesLike;
 
     if (typeof notesLike === "string") {
-      // Try JSON first
       try {
         const arr = JSON.parse(notesLike);
         if (Array.isArray(arr)) return arr;
       } catch {
-        // Not JSON; treat as plain text blob. Split by blank lines, then lines.
         const lines = notesLike
           .split(/\r?\n\r?\n|\r?\n/g)
           .map((s) => s.trim())
           .filter(Boolean);
-        // Convert each line into a note object with best-guess fields
         return lines.map((line) => ({ text: line }));
       }
       return [];
     }
 
-    // Unknown object; try to coerce common shapes to an array
     if (typeof notesLike === "object") {
-      // Some backends store as {items:[...]} or {list:[...]}
       if (Array.isArray(notesLike.items)) return notesLike.items;
       if (Array.isArray(notesLike.list)) return notesLike.list;
       if (Array.isArray(notesLike.notes)) return notesLike.notes;
@@ -129,9 +128,7 @@ export default function Home() {
     return [];
   };
 
-  // 2) Try to get a moment() for the note creation time from many shapes
   const extractNoteMoment = (note, order) => {
-    // Priority order of fields that might exist
     let raw =
       note?.createdAt ??
       note?.created_at ??
@@ -140,10 +137,6 @@ export default function Home() {
       note?.time ??
       null;
 
-    // If not provided, try to pull a date-like token from the note text:
-    // - ISO-like 2025-11-12 14:03 (with optional seconds)
-    // - ISO 2025-11-12T14:03:22Z
-    // - US 11/12/2025 2:03 PM (time optional)
     if (raw == null && typeof note?.text === "string") {
       const t = note.text;
       const isoMatch =
@@ -154,30 +147,30 @@ export default function Home() {
       raw = (isoMatch && isoMatch[0]) || (usMatch && usMatch[0]) || null;
     }
 
-    // Fallbacks to order-level timestamps if the note lacks one
     if (raw == null) {
       raw = order?.lastNoteAt || order?.updatedAt || order?.createdAt || null;
     }
 
     if (raw == null) return null;
 
-    // Numbers: assume ms (if too small, it's seconds)
     if (typeof raw === "number") {
-      if (raw < 10_000_000_000) raw = raw * 1000; // seconds -> ms
+      if (raw < 10_000_000_000) raw = raw * 1000;
       return moment(raw);
     }
 
     if (typeof raw === "string") {
       if (moment(raw, moment.ISO_8601, true).isValid()) return moment(raw);
-      // Try common formats, then best-effort parse
-      const tryFmt = moment(raw, ["YYYY-MM-DD HH:mm:ss", "YYYY-MM-DD", "M/D/YYYY h:mm A", "M/D/YYYY"], true);
+      const tryFmt = moment(
+        raw,
+        ["YYYY-MM-DD HH:mm:ss", "YYYY-MM-DD", "M/D/YYYY h:mm A", "M/D/YYYY"],
+        true
+      );
       return tryFmt.isValid() ? tryFmt : moment(raw);
     }
 
     return null;
   };
 
-  // 3) Merge from multiple potential fields on each order
   const getAllNotesForOrder = (order) => {
     const candidates = [
       order?.notes,
@@ -195,7 +188,6 @@ export default function Home() {
     return all;
   };
 
-  // Local “read/dismissed” tracking
   const DISMISSED_KEY = "dismissedNotes:v1";
   const readDismissedSet = () => {
     try {
@@ -212,11 +204,9 @@ export default function Home() {
     } catch {}
   };
 
-  // Use a more stable key (prevents duplicates when createdAt missing)
   const makeNoteKey = (orderId, createdISO, text) =>
     `${orderId}:${createdISO}:${(text || "").slice(0, 64)}`;
 
-  // 4) Build "This Week" list robustly
   const weeklyNotes = useMemo(() => {
     const dismissed = readDismissedSet();
     const cutoff = moment().subtract(7, "days");
@@ -229,14 +219,11 @@ export default function Home() {
       for (const n of rawNotes) {
         const created = extractNoteMoment(n, o);
         if (!created || !created.isValid()) continue;
-
-        // Include notes on/after cutoff (inclusive)
         if (!created.isSameOrAfter(cutoff)) continue;
 
         const createdISO = created.toISOString();
         const text = n?.text || n?.note || n?.message || String(n || "");
         const by = n?.by || n?.user || n?.author || "";
-
         const key = makeNoteKey(o.id, createdISO, text);
         if (dismissed.has(key)) continue;
 
@@ -257,7 +244,6 @@ export default function Home() {
       }
     }
 
-    // newest first
     out.sort((a, b) => moment(b.createdAt).valueOf() - moment(a.createdAt).valueOf());
     return out;
   }, [orders]);
@@ -276,194 +262,226 @@ export default function Home() {
     const dismissed = readDismissedSet();
     for (const n of weeklyNotes) dismissed.add(n.key);
     writeDismissedSet(dismissed);
-    // Force a rerender by touching state; simplest is refetch
-    fetchOrders();
+    fetchOrders({ silent: true });
   };
+
+  /* =========================
+     UI helpers
+  ========================= */
+  const CardHeader = ({ title, right, subtitle }) => (
+    <div className="home-card-header">
+      <div style={{ minWidth: 0 }}>
+        <div className="home-card-title">{title}</div>
+        {subtitle ? <div className="home-card-subtitle">{subtitle}</div> : null}
+      </div>
+      {right ? <div className="home-card-right">{right}</div> : null}
+    </div>
+  );
 
   /* =========================
      Render
   ========================= */
   return (
-    <div className="home-container">
-      <h2 className="home-title">Welcome to the CRM Dashboard</h2>
+    <div className="home-page">
+      <div className="home-shell">
+        <div className="home-topbar">
+          <div style={{ minWidth: 0 }}>
+            <h2 className="home-title">Dashboard</h2>
+            <div className="home-subtitle">
+              Quick overview of notes + today’s work orders.
+            </div>
+          </div>
 
-      {/* ===== Notes (This Week) Notification Area ===== */}
-      <div className="section-card" style={{ marginBottom: 16 }}>
-        <div
-          className="section-title"
-          style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
-        >
-          <span>Notes (This Week)</span>
-          {weeklyNotes.length > 0 ? (
+          <div className="home-topbar-actions">
             <button
-              className="btn btn-ghost"
-              onClick={clearAllWeeklyNotes}
-              style={{ fontSize: 12 }}
-              title="Hide all notes from this list"
+              className="btn btn-outline-secondary"
+              onClick={() => navigate("/calendar")}
+              title="Open Calendar"
             >
-              Mark All Read
+              Calendar
             </button>
-          ) : null}
+
+            <button
+              className="btn btn-primary"
+              onClick={() => fetchOrders()}
+              disabled={isRefreshing}
+              title="Refresh"
+            >
+              {isRefreshing ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
         </div>
 
-        {weeklyNotes.length > 0 ? (
-          <div className="notes-list">
-            {weeklyNotes.map((n) => (
-              <div
-                key={n.key}
-                className="note-item"
-                onClick={() => onClickNote(n)}
-                title="Open work order"
-                style={{
-                  padding: "10px 12px",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 8,
-                  marginBottom: 8,
-                  cursor: "pointer",
-                  background: "#f8fafc",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "baseline",
-                    gap: 8,
-                    marginBottom: 4,
-                  }}
-                >
-                  <strong style={{ color: "#0f172a" }}>
-                    WO: {n.workOrderNumber || n.orderId}
-                  </strong>
-                  <span style={{ color: "#64748b" }}>• {n.customer}</span>
-                  <span style={{ color: "#94a3b8" }}>• {n.siteLocation}</span>
-                  <span style={{ marginLeft: "auto", color: "#64748b", fontSize: 12 }}>
-                    {moment(n.createdAt).fromNow()} {n.by ? `• ${n.by}` : ""}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    color: "#334155",
-                    display: "-webkit-box",
-                    WebkitLineClamp: 3,
-                    WebkitBoxOrient: "vertical",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "normal",
-                  }}
-                >
-                  {n.text}
-                </div>
-              </div>
-            ))}
+        {/* ===== KPI tiles ===== */}
+        <div className="home-kpis">
+          <div className="kpi-tile" onClick={() => navigate("/calendar")} role="button" tabIndex={0}>
+            <div className="kpi-label">Today</div>
+            <div className="kpi-value">{agendaOrders.length}</div>
+            <div className="kpi-hint">scheduled</div>
           </div>
-        ) : (
-          <p className="empty-text">No new notes from the past 7 days.</p>
-        )}
-      </div>
 
-      {/* ===== Agenda for Today ===== */}
-      <div className="section-card">
-        <h3 className="section-title">Agenda for Today&nbsp;({todayStr})</h3>
-        {agendaOrders.length > 0 ? (
-          <Table striped bordered={false} hover responsive className="styled-table">
-            <thead>
-              <tr>
-                <th>Work Order #</th>
-                <th>Customer</th>
-                <th>Site Location</th>
-                <th>Problem Description</th>
-                <th>Scheduled Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {agendaOrders.map((o) => (
-                <tr
-                  key={o.id}
-                  onClick={() => navigate(`/view-work-order/${o.id}`)}
-                  style={{ cursor: "pointer" }}
-                >
-                  <td>{woCell(o)}</td>
-                  <td>{o.customer}</td>
-                  <td>{o.siteLocation}</td>
-                  <td>{o.problemDescription}</td>
-                  <td>{fmtDateTime(o.scheduledDate)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <p className="empty-text">No work orders scheduled for today.</p>
-        )}
-      </div>
+          <div className="kpi-tile">
+            <div className="kpi-label">Upcoming</div>
+            <div className="kpi-value">{upcomingOrders.length}</div>
+            <div className="kpi-hint">future dates</div>
+          </div>
 
-      {/* ===== Upcoming Work Orders ===== */}
-      <div className="section-card">
-        <h3 className="section-title">Upcoming Work Orders</h3>
-        {upcomingOrders.length > 0 ? (
-          <Table striped bordered={false} hover responsive className="styled-table">
-            <thead>
-              <tr>
-                <th>Work Order #</th>
-                <th>Customer</th>
-                <th>Site Location</th>
-                <th>Problem Description</th>
-                <th>Scheduled Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {upcomingOrders.map((o) => (
-                <tr
-                  key={o.id}
-                  onClick={() => navigate(`/view-work-order/${o.id}`)}
-                  style={{ cursor: "pointer" }}
-                >
-                  <td>{woCell(o)}</td>
-                  <td>{o.customer}</td>
-                  <td>{o.siteLocation}</td>
-                  <td>{o.problemDescription}</td>
-                  <td>{fmtDateTime(o.scheduledDate)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <p className="empty-text">No upcoming work orders.</p>
-        )}
-      </div>
+          <div className="kpi-tile">
+            <div className="kpi-label">Waiting Approval</div>
+            <div className="kpi-value">{waitingForApprovalOrders.length}</div>
+            <div className="kpi-hint">needs action</div>
+          </div>
 
-      {/* ===== Work Orders Waiting for Approval ===== */}
-      <div className="section-card">
-        <h3 className="section-title">Work Orders Waiting for Approval</h3>
-        {waitingForApprovalOrders.length > 0 ? (
-          <Table striped bordered={false} hover responsive className="styled-table">
-            <thead>
-              <tr>
-                <th>Work Order #</th>
-                <th>Customer</th>
-                <th>Site Location</th>
-                <th>Problem Description</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {waitingForApprovalOrders.map((o) => (
-                <tr
-                  key={o.id}
-                  onClick={() => navigate(`/view-work-order/${o.id}`)}
-                  style={{ cursor: "pointer" }}
-                >
-                  <td>{woCell(o)}</td>
-                  <td>{o.customer}</td>
-                  <td>{o.siteLocation}</td>
-                  <td>{o.problemDescription}</td>
-                  <td>{o.status}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <p className="empty-text">No work orders waiting for approval.</p>
-        )}
+          <div className="kpi-tile">
+            <div className="kpi-label">New Notes</div>
+            <div className="kpi-value">{weeklyNotes.length}</div>
+            <div className="kpi-hint">last 7 days</div>
+          </div>
+        </div>
+
+        {/* ===== Two-column layout on desktop ===== */}
+        <div className="home-grid">
+          {/* LEFT: Notes */}
+          <div className="home-card">
+            <CardHeader
+              title="Notes (This Week)"
+              subtitle="Click a note to open the work order (it will be marked read)."
+              right={
+                weeklyNotes.length > 0 ? (
+                  <button className="btn btn-ghost" onClick={clearAllWeeklyNotes} style={{ fontSize: 12 }}>
+                    Mark All Read
+                  </button>
+                ) : null
+              }
+            />
+
+            {weeklyNotes.length > 0 ? (
+              <div className="notes-list">
+                {weeklyNotes.map((n) => (
+                  <div
+                    key={n.key}
+                    className="note-row"
+                    onClick={() => onClickNote(n)}
+                    title="Open work order"
+                  >
+                    <div className="note-row-top">
+                      <div className="note-row-left">
+                        <span className="note-pill">WO: {n.workOrderNumber || n.orderId}</span>
+                        <span className="note-dot">•</span>
+                        <span className="note-muted">{n.customer}</span>
+                        <span className="note-dot">•</span>
+                        <span className="note-muted">{n.siteLocation}</span>
+                      </div>
+                      <div className="note-row-right">
+                        {moment(n.createdAt).fromNow()}
+                        {n.by ? ` • ${n.by}` : ""}
+                      </div>
+                    </div>
+                    <div className="note-row-text">{n.text}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="home-empty">No new notes from the past 7 days.</div>
+            )}
+          </div>
+
+          {/* RIGHT: Today Agenda */}
+          <div className="home-card">
+            <CardHeader title={`Agenda for Today`} subtitle={todayStr} />
+
+            {agendaOrders.length > 0 ? (
+              <Table bordered={false} hover responsive className="home-table mb-0">
+                <thead>
+                  <tr>
+                    <th>WO #</th>
+                    <th>Customer</th>
+                    <th>Site</th>
+                    <th className="hide-md">Problem</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {agendaOrders.map((o) => (
+                    <tr key={o.id} onClick={() => navigate(`/view-work-order/${o.id}`)} title="Click to view">
+                      <td className="mono">{woCell(o)}</td>
+                      <td>{o.customer || "—"}</td>
+                      <td>{o.siteLocation || "—"}</td>
+                      <td className="hide-md">{o.problemDescription || "—"}</td>
+                      <td className="mono">{fmtDateTime(o.scheduledDate) || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            ) : (
+              <div className="home-empty">No work orders scheduled for today.</div>
+            )}
+          </div>
+
+          {/* FULL WIDTH: Upcoming */}
+          <div className="home-card home-card-span">
+            <CardHeader title="Upcoming Work Orders" subtitle="Scheduled after today" />
+
+            {upcomingOrders.length > 0 ? (
+              <Table bordered={false} hover responsive className="home-table mb-0">
+                <thead>
+                  <tr>
+                    <th>WO #</th>
+                    <th>Customer</th>
+                    <th>Site</th>
+                    <th className="hide-sm">Problem</th>
+                    <th>Scheduled</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {upcomingOrders.map((o) => (
+                    <tr key={o.id} onClick={() => navigate(`/view-work-order/${o.id}`)} title="Click to view">
+                      <td className="mono">{woCell(o)}</td>
+                      <td>{o.customer || "—"}</td>
+                      <td>{o.siteLocation || "—"}</td>
+                      <td className="hide-sm">{o.problemDescription || "—"}</td>
+                      <td className="mono">{fmtDateTime(o.scheduledDate) || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            ) : (
+              <div className="home-empty">No upcoming work orders.</div>
+            )}
+          </div>
+
+          {/* FULL WIDTH: Waiting Approval */}
+          <div className="home-card home-card-span">
+            <CardHeader title="Work Orders Waiting for Approval" subtitle="Status = Waiting for Approval" />
+
+            {waitingForApprovalOrders.length > 0 ? (
+              <Table bordered={false} hover responsive className="home-table mb-0">
+                <thead>
+                  <tr>
+                    <th>WO #</th>
+                    <th>Customer</th>
+                    <th>Site</th>
+                    <th className="hide-sm">Problem</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {waitingForApprovalOrders.map((o) => (
+                    <tr key={o.id} onClick={() => navigate(`/view-work-order/${o.id}`)} title="Click to view">
+                      <td className="mono">{woCell(o)}</td>
+                      <td>{o.customer || "—"}</td>
+                      <td>{o.siteLocation || "—"}</td>
+                      <td className="hide-sm">{o.problemDescription || "—"}</td>
+                      <td>{o.status || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            ) : (
+              <div className="home-empty">No work orders waiting for approval.</div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
