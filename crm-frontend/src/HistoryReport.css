@@ -1,83 +1,169 @@
 /* File: src/HistoryReport.css */
 
-/* page background & container */
+/* =========================
+   Page shell (match ViewWorkOrder vibe)
+========================= */
 .history-report {
   min-height: 100vh;
-  background-color: #F1F5F9;
-  padding: 2rem;
+  background: #f1f5f9; /* slate-100 */
+  padding: 28px 18px;
   box-sizing: border-box;
 }
 
-/* page title */
+@media (min-width: 768px) {
+  .history-report {
+    padding: 34px 28px;
+  }
+}
+
+/* Page title */
 .history-title {
   text-align: center;
-  color: #2B2D42;
-  margin-bottom: 1.5rem;
-  font-size: 2rem;
-  font-weight: 600;
+  color: #0f172a; /* slate-900 */
+  margin: 0 0 18px;
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
-/* search form */
+/* =========================
+   Search form/card
+   (JS already adds nice inline card styling; this keeps it consistent)
+========================= */
 .filter-form {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr auto;
-  gap: 1rem;
-  margin-bottom: 2rem;
-}
-.filter-form .form-control {
-  padding: 0.5rem 1rem;
-  border: 1px solid #CBD5E1;
-  border-radius: 6px;
-  font-size: 1rem;
-}
-.search-btn {
-  background-color: #3D5A80;
-  color: #ffffff;
-  border: none;
-  padding: 0 1.5rem;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 1rem;
-}
-.search-btn:hover {
-  background-color: #2B2D42;
+  max-width: 1100px;
+  margin: 0 auto;
 }
 
-/* results card */
+.filter-form .form-control {
+  border: 1px solid #e2e8f0; /* slate-200 */
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 15px;
+  box-shadow: none;
+}
+
+.filter-form .form-control:focus {
+  border-color: rgba(13, 110, 253, 0.45); /* bootstrap primary-ish */
+  box-shadow: 0 0 0 4px rgba(13, 110, 253, 0.12);
+  outline: none;
+}
+
+/* Ensure the bootstrap primary button looks like the rest of your UI */
+.filter-form .btn {
+  border-radius: 12px;
+  font-weight: 700;
+}
+
+/* =========================
+   Recent Searches card
+========================= */
+.recent-searches {
+  max-width: 1100px;
+  margin: 12px auto 0;
+}
+
+.recent-chip {
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.recent-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
+/* =========================
+   Results meta + card
+========================= */
+.results-meta {
+  max-width: 1100px;
+  margin: 14px auto 8px;
+}
+
 .results-table {
+  max-width: 1100px;
+  margin: 0 auto;
   background: #ffffff;
-  border-radius: 8px;
-  padding: 1rem;
-  box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+  border-radius: 12px;
+  border: 1px solid #eef2f7;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
   overflow-x: auto;
 }
 
-/* force full-width table */
+/* Force full-width table */
 .results-table table {
   width: 100% !important;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   table-layout: auto;
 }
+
+/* Header styling (dark band like your screenshot) */
 .results-table thead th {
-  background: #2B2D42;
+  background: #2b2d42;
   color: #ffffff;
-  padding: 0.75rem;
-  text-align: left;
+  padding: 14px 12px;
   border: none;
-}
-.results-table tbody td {
-  padding: 0.75rem;
-  border-bottom: 1px solid #E2E8F0;
-}
-.results-table tbody tr:hover {
-  background-color: #98C379;
-  color: #ffffff;
+  font-weight: 800;
+  font-size: 14px;
+  text-align: center; /* center headers */
+  vertical-align: middle;
+  white-space: nowrap;
 }
 
-/* empty state */
+/* Rounded header corners */
+.results-table thead th:first-child {
+  border-top-left-radius: 12px;
+}
+.results-table thead th:last-child {
+  border-top-right-radius: 12px;
+}
+
+/* Body cells */
+.results-table tbody td {
+  padding: 14px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 14px;
+  color: #0f172a;
+  text-align: center; /* center everything in box */
+  vertical-align: middle;
+}
+
+/* Row hover (cleaner than neon green; closer to ViewWorkOrder feel) */
+.results-table tbody tr {
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.results-table tbody tr:hover {
+  background: rgba(13, 110, 253, 0.06);
+}
+
+/* Make the row feel clickable */
+.results-table tbody tr:hover td {
+  color: #0f172a;
+}
+
+/* =========================
+   Empty state
+========================= */
 .empty-text {
   text-align: center;
-  color: #8D99AE;
+  color: rgba(15, 23, 42, 0.55);
   font-style: italic;
-  margin-top: 1rem;
+  margin-top: 18px;
+}
+
+/* =========================
+   Small-screen adjustments
+========================= */
+@media (max-width: 640px) {
+  .history-title {
+    font-size: 26px;
+  }
+
+  .results-table thead th,
+  .results-table tbody td {
+    padding: 12px 10px;
+    font-size: 13px;
+  }
 }

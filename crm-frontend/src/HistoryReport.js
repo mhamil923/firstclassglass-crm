@@ -1,6 +1,6 @@
 // File: src/HistoryReport.js
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import api from "./api";
 import "./HistoryReport.css"; // keep existing styles
 
@@ -8,6 +8,19 @@ import "./HistoryReport.css"; // keep existing styles
 const norm = (v) => (v ?? "").toString().trim();
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
 const displayPO = (wo, po) => (isLegacyWoInPo(wo, po) ? "" : norm(po));
+
+const toLower = (v) => (v ?? "").toString().toLowerCase();
+
+// Prefer siteAddress fields if present; fallback to common alternates
+const getSiteAddress = (o) =>
+  norm(
+    o?.siteAddress ||
+      o?.serviceAddress ||
+      o?.address ||
+      o?.meta?.siteAddress ||
+      o?.meta?.serviceAddress ||
+      o?.meta?.address
+  );
 
 // ---- Search history (today-only) ----------
 const MAX_HISTORY = 8;
@@ -54,6 +67,7 @@ function addToHistory(query) {
 // ----------------- component -----------------
 export default function HistoryReport() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -76,15 +90,22 @@ export default function HistoryReport() {
 
       const filtered = q
         ? all.filter((o) => {
-            const customer = (o.customer || "").toString().toLowerCase();
-            const wo = (o.workOrderNumber || "").toString().toLowerCase();
-            const po = (o.poNumber || "").toString().toLowerCase();
-            const site = (o.siteLocation || "").toString().toLowerCase();
+            const customer = toLower(o.customer);
+            const wo = toLower(o.workOrderNumber);
+            const po = toLower(o.poNumber);
+            const site = toLower(o.siteLocation);
+            const siteAddr = toLower(getSiteAddress(o));
+            const status = toLower(o.status);
+            const assigned = toLower(o.assignedToName);
+
             return (
               customer.includes(q) ||
               wo.includes(q) ||
               po.includes(q) ||
-              site.includes(q)
+              site.includes(q) ||
+              siteAddr.includes(q) ||
+              status.includes(q) ||
+              assigned.includes(q)
             );
           })
         : all;
@@ -145,6 +166,52 @@ export default function HistoryReport() {
     lineHeight: 1.25,
   };
 
+  // ✅ Center everything in the table (headers + cells)
+  const thCenter = { textAlign: "center", verticalAlign: "middle" };
+  const tdCenter = { textAlign: "center", verticalAlign: "middle" };
+
+  // ✅ Site cell stack (Site then Site Address)
+  const siteCellWrap = {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center", // center within the cell
+    justifyContent: "center",
+    gap: 2,
+    minWidth: 0,
+  };
+
+  const sitePrimary = {
+    fontWeight: 600,
+    lineHeight: 1.2,
+    textAlign: "center",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    maxWidth: 520,
+  };
+
+  const siteSecondary = {
+    fontSize: 12,
+    color: "rgba(0,0,0,0.65)",
+    lineHeight: 1.2,
+    textAlign: "center",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    maxWidth: 520,
+  };
+
+  // ✅ When opening a WO, send "from" so ViewWorkOrder Back button can return here
+  const openWorkOrder = (id) => {
+    const from = location.pathname + (location.search || "");
+    navigate(`/view-work-order/${id}`, {
+      state: {
+        from,
+        fromLabel: "History",
+      },
+    });
+  };
+
   return (
     <div className="history-report">
       <h2 className="history-title">Work Order History</h2>
@@ -171,17 +238,12 @@ export default function HistoryReport() {
         >
           <input
             className="form-control"
-            placeholder="Search by Customer, WO #, PO #, or Site Location"
+            placeholder="Search by Customer, WO #, PO #, Site Location, or Site Address"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
 
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={loading}
-            style={{ width: "100%" }}
-          >
+          <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: "100%" }}>
             {loading ? "Searching…" : "Search"}
           </button>
         </div>
@@ -207,6 +269,7 @@ export default function HistoryReport() {
               onClick={clearHistory}
               title="Clear all"
               style={{ fontSize: 13, textDecoration: "none" }}
+              type="button"
             >
               Clear all
             </button>
@@ -225,6 +288,7 @@ export default function HistoryReport() {
                       textOverflow: "ellipsis",
                     }}
                     onClick={() => runFromHistory(h)}
+                    type="button"
                   >
                     {label}
                   </button>
@@ -234,6 +298,7 @@ export default function HistoryReport() {
                     title="Remove"
                     onClick={() => removeHistoryItem(h.key)}
                     style={{ filter: "grayscale(1)" }}
+                    type="button"
                   />
                 </div>
               );
@@ -248,6 +313,7 @@ export default function HistoryReport() {
           <div className="results-meta mt-3 text-muted" style={{ fontSize: 13 }}>
             {prettyResultsCount}
           </div>
+
           <div
             className="results-table"
             style={{
@@ -260,34 +326,54 @@ export default function HistoryReport() {
             <table className="table mb-0">
               <thead className="table-light">
                 <tr>
-                  <th>WO #</th>
-                  <th>PO #</th>
-                  <th>Customer</th>
-                  <th>Site</th>
-                  <th>Status</th>
-                  <th>Assigned To</th>
-                  <th>Scheduled</th>
+                  <th style={thCenter}>WO #</th>
+                  <th style={thCenter}>PO #</th>
+                  <th style={thCenter}>Customer</th>
+                  <th style={thCenter}>Site</th>
+                  <th style={thCenter}>Status</th>
+                  <th style={thCenter}>Assigned To</th>
+                  <th style={thCenter}>Scheduled</th>
                 </tr>
               </thead>
+
               <tbody>
-                {results.map((o) => (
-                  <tr
-                    key={o.id}
-                    onClick={() => navigate(`/view-work-order/${o.id}`)}
-                    title="Click to view"
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td>{o.workOrderNumber || "—"}</td>
-                    <td>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
-                    <td>{o.customer || "—"}</td>
-                    <td>{o.siteLocation || "—"}</td>
-                    <td>{o.status || "—"}</td>
-                    <td>{o.assignedToName || "—"}</td>
-                    <td>
-                      {o.scheduledDate ? o.scheduledDate.substring(0, 16) : "—"}
-                    </td>
-                  </tr>
-                ))}
+                {results.map((o) => {
+                  const siteLoc = norm(o.siteLocation) || "—";
+                  const siteAddr = getSiteAddress(o);
+
+                  return (
+                    <tr
+                      key={o.id}
+                      onClick={() => openWorkOrder(o.id)}
+                      title="Click to view"
+                      style={{ cursor: "pointer" }}
+                    >
+                      <td style={tdCenter}>{o.workOrderNumber || "—"}</td>
+                      <td style={tdCenter}>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
+                      <td style={tdCenter}>{o.customer || "—"}</td>
+
+                      {/* ✅ Site + Site Address stacked */}
+                      <td style={tdCenter}>
+                        <div style={siteCellWrap}>
+                          <div style={sitePrimary} title={siteLoc}>
+                            {siteLoc}
+                          </div>
+                          {siteAddr ? (
+                            <div style={siteSecondary} title={siteAddr}>
+                              {siteAddr}
+                            </div>
+                          ) : null}
+                        </div>
+                      </td>
+
+                      <td style={tdCenter}>{o.status || "—"}</td>
+                      <td style={tdCenter}>{o.assignedToName || "—"}</td>
+                      <td style={tdCenter}>
+                        {o.scheduledDate ? o.scheduledDate.substring(0, 16) : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
