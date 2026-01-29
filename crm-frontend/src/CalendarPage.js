@@ -1,4 +1,8 @@
+// =========================
+// PART 1 / 3  (top of file)
+// =========================
 // File: src/CalendarPage.js
+
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import api from "./api";
 import { Calendar, momentLocalizer } from "react-big-calendar";
@@ -119,6 +123,20 @@ const getSiteLocation = (obj) =>
     "meta.location",
   ]);
 
+// ✅ NEW: site address resolver so search can include site address too
+const getSiteAddress = (obj) =>
+  pickFirst(obj, [
+    "siteAddress",
+    "site_address",
+    "serviceAddress",
+    "service_address",
+    "address",
+    "meta.siteAddress",
+    "meta.site_address",
+    "meta.serviceAddress",
+    "meta.address",
+  ]);
+
 /** Prefer Work Order #, else PO #, else N/A — and return a labeled string */
 const displayWOThenPO = (obj) => {
   const wo = getWorkOrderNumber(obj);
@@ -212,9 +230,167 @@ function CustomEvent({ event }) {
   );
 }
 
-/* =========================
-   Main component
-========================= */
+/* ============================================================
+   ✅ NEW: Week View (stacked cards, NOT broken down by time)
+   - Month: normal
+   - Week: stacked list per day (no time grid)
+   - Day: time grid (the only timed breakdown)
+============================================================ */
+function StackedWeekView(props) {
+  const {
+    date,
+    localizer,
+    events = [],
+    onSelectEvent,
+    onDoubleClickEvent,
+    dragFromOutsideItem,
+    onDropFromOutside,
+  } = props;
+
+  const start = moment(date).startOf("week");
+  const days = Array.from({ length: 7 }).map((_, i) => start.clone().add(i, "day").toDate());
+
+  const eventsByDay = useMemo(() => {
+    const map = new Map();
+    for (const d of days) map.set(fmtDate(d), []);
+    for (const ev of events) {
+      const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate) || null;
+      if (!s) continue;
+      const key = fmtDate(s);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(ev);
+    }
+    for (const [k, arr] of map.entries()) {
+      arr.sort((a, b) => {
+        const sa = fromDbString(a.start) || fromDbString(a.scheduledDate) || new Date(0);
+        const sb = fromDbString(b.start) || fromDbString(b.scheduledDate) || new Date(0);
+        return +sa - +sb;
+      });
+      map.set(k, arr);
+    }
+    return map;
+  }, [events, date]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDropOnDay = (dayDate, e) => {
+    e.preventDefault();
+    const item = typeof dragFromOutsideItem === "function" ? dragFromOutsideItem() : null;
+    if (!item || typeof onDropFromOutside !== "function") return;
+
+    // Use 8:00 AM as a sane default start time when dropping onto Week stacked view
+    const startTime = moment(dayDate).startOf("day").add(8, "hours").toDate();
+    onDropFromOutside({ start: startTime });
+  };
+
+  return (
+    <div className="cw-week">
+      {days.map((d) => {
+        const key = fmtDate(d);
+        const list = eventsByDay.get(key) || [];
+        return (
+          <div
+            key={key}
+            className="cw-day"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => handleDropOnDay(d, e)}
+          >
+            <div className="cw-day-header">
+              <div className="cw-day-title">{moment(d).format("ddd")}</div>
+              <div className="cw-day-sub">{moment(d).format("MMM D")}</div>
+              <div className="cw-day-count">{list.length}</div>
+            </div>
+
+            <div className="cw-day-list">
+              {list.length ? (
+                list.map((ev) => {
+                  const idLabel = displayWOThenPO(ev);
+                  const title = ev.customer ? `${ev.customer} — ${idLabel}` : idLabel;
+                  const siteLoc = ev.siteLocation ?? ev.meta?.siteLocation ?? getSiteLocation(ev);
+                  const siteAddr =
+                    ev.siteAddress ??
+                    ev.meta?.siteAddress ??
+                    ev.serviceAddress ??
+                    ev.address ??
+                    "";
+
+                  // show time label (but NOT in a time-grid layout)
+                  const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
+                  const e2 = fromDbString(ev.end) || fromDbString(ev.scheduledEnd);
+                  const timeLabel =
+                    s && e2
+                      ? `${moment(s).format("h:mm A")} – ${moment(e2).format("h:mm A")}`
+                      : s
+                      ? moment(s).format("h:mm A")
+                      : "";
+
+                  return (
+                    <button
+                      key={ev.id}
+                      type="button"
+                      className="cw-card"
+                      onClick={() => onSelectEvent && onSelectEvent(ev)}
+                      onDoubleClick={() => onDoubleClickEvent && onDoubleClickEvent(ev)}
+                      title={title}
+                    >
+                      <div className="cw-card-title" style={clamp1}>
+                        {title}
+                      </div>
+                      {timeLabel ? (
+                        <div className="cw-card-time" style={clamp1}>
+                          {timeLabel}
+                        </div>
+                      ) : null}
+                      {siteLoc ? (
+                        <div className="cw-card-sub" style={clamp1}>
+                          {siteLoc}
+                        </div>
+                      ) : null}
+                      {siteAddr ? (
+                        <div className="cw-card-sub" style={clamp1}>
+                          {siteAddr}
+                        </div>
+                      ) : null}
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="cw-empty">No work orders</div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// react-big-calendar custom view API bits
+StackedWeekView.range = (date) => {
+  const start = moment(date).startOf("week").toDate();
+  const end = moment(date).endOf("week").toDate();
+  return { start, end };
+};
+StackedWeekView.navigate = (date, action) => {
+  switch (action) {
+    case "PREV":
+      return moment(date).subtract(1, "week").toDate();
+    case "NEXT":
+      return moment(date).add(1, "week").toDate();
+    default:
+      return date;
+  }
+};
+StackedWeekView.title = (date, { localizer }) => {
+  const start = moment(date).startOf("week").toDate();
+  const end = moment(date).endOf("week").toDate();
+  return localizer.format({ start, end }, "dayRangeHeaderFormat");
+};
+// =========================
+// PART 2 / 3  (component logic)
+// =========================
+// File: src/CalendarPage.js
+// Paste this starting at: `export default function WorkOrderCalendar() {`
+// and ending right before the `return (` render block.
+
 export default function WorkOrderCalendar() {
   // Full work order list (for search in the Unscheduled bar)
   const [allOrders, setAllOrders] = useState([]);
@@ -253,12 +429,12 @@ export default function WorkOrderCalendar() {
   /* ========= initial fetches ========= */
   useEffect(() => {
     refreshLists();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // refresh calendar events whenever the visible range changes
   useEffect(() => {
     fetchCalendarForVisibleRange();
-  }, [view, currentDate]);
+  }, [view, currentDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshLists = useCallback(async () => {
     try {
@@ -302,6 +478,7 @@ export default function WorkOrderCalendar() {
       const { start, end } = visibleRangeFor(view, currentDate);
       const { data } = await api.get("/calendar/events", { params: { start, end } });
       const list = Array.isArray(data) ? data : [];
+
       const mapped = list.map((ev) => {
         const startD = fromDbString(ev.start) || fromDbString(ev.scheduledDate) || new Date();
         const endD =
@@ -318,7 +495,7 @@ export default function WorkOrderCalendar() {
           // normalize common fields
           customer: ev.meta?.customer ?? ev.customer,
           siteLocation: ev.meta?.siteLocation ?? ev.siteLocation ?? getSiteLocation(ev),
-          siteAddress: ev.meta?.siteAddress ?? ev.siteAddress,
+          siteAddress: ev.meta?.siteAddress ?? ev.siteAddress ?? getSiteAddress(ev),
           problemDescription: ev.meta?.problemDescription ?? ev.problemDescription,
 
           // normalize identifiers so WO # stops showing N/A
@@ -326,6 +503,7 @@ export default function WorkOrderCalendar() {
           poNumber: getPoNumber(ev),
         };
       });
+
       setEvents(mapped);
     } catch (e) {
       console.error("⚠️ Error fetching calendar:", e);
@@ -354,10 +532,7 @@ export default function WorkOrderCalendar() {
 
   /* ===== edit modal wiring ===== */
   function openEditModal(order, fallbackDate) {
-    const start =
-      fromDbString(order?.scheduledDate || order?.start) ||
-      fallbackDate ||
-      new Date();
+    const start = fromDbString(order?.scheduledDate || order?.start) || fallbackDate || new Date();
     const end =
       fromDbString(order?.scheduledEnd || order?.end) ||
       moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
@@ -374,6 +549,7 @@ export default function WorkOrderCalendar() {
 
     const start = moment(`${editDate} ${editTime}`, "YYYY-MM-DD HH:mm");
     const end = moment(`${editDate} ${editEndTime}`, "YYYY-MM-DD HH:mm");
+
     if (!start.isValid() || !end.isValid()) {
       alert("Please enter a valid start and end time.");
       return;
@@ -419,7 +595,7 @@ export default function WorkOrderCalendar() {
     }
   }
 
-  /* ===== Day modal helpers — now STRICT to the clicked day ===== */
+  /* ===== Day modal helpers — STRICT to the clicked day ===== */
   async function openDayModal(dateLike) {
     const day = moment(dateLike).startOf("day");
     const dateStr = day.format("YYYY-MM-DD");
@@ -457,7 +633,7 @@ export default function WorkOrderCalendar() {
             id: ev.id,
             customer: ev.meta?.customer ?? ev.customer,
             siteLocation: ev.meta?.siteLocation ?? ev.siteLocation ?? getSiteLocation(ev),
-            siteAddress: ev.meta?.siteAddress ?? ev.siteAddress,
+            siteAddress: ev.meta?.siteAddress ?? ev.siteAddress ?? getSiteAddress(ev),
             workOrderNumber: getWorkOrderNumber(ev),
             poNumber: getPoNumber(ev),
             problemDescription: ev.meta?.problemDescription ?? ev.problemDescription,
@@ -526,6 +702,7 @@ export default function WorkOrderCalendar() {
   function handleDropFromOutside({ start }) {
     if (!dragItem) return;
     const minutes = minutesWindowForOrder(dragItem);
+
     setSchedulePayload(dragItem.id, {
       date: fmtDate(start),
       time: fmtTime(start),
@@ -546,6 +723,7 @@ export default function WorkOrderCalendar() {
   }
 
   function onSelectSlot(slotInfo) {
+    // Only Day view is “time-grid scheduling”. For week/month, click opens day modal.
     openDayModal(slotInfo.start);
   }
 
@@ -576,7 +754,7 @@ export default function WorkOrderCalendar() {
     });
   }, [events]);
 
-  /* ===== Unscheduled bar search (NOW includes Site Location) ===== */
+  /* ===== Unscheduled bar search (NOW includes Site Address too) ===== */
   const listForStrip = useMemo(() => {
     const q = norm(unscheduledSearch);
     if (!q) return unscheduledOrders;
@@ -589,12 +767,15 @@ export default function WorkOrderCalendar() {
       const hayPO = norm(getPoNumber(o));
       const hayWO = norm(getWorkOrderNumber(o));
       const haySiteLoc = norm(getSiteLocation(o));
+      const haySiteAddr = norm(getSiteAddress(o)); // ✅ NEW
+
       return tokens.every(
         (t) =>
           hayCustomer.includes(t) ||
           hayPO.includes(t) ||
           hayWO.includes(t) ||
-          haySiteLoc.includes(t)
+          haySiteLoc.includes(t) ||
+          haySiteAddr.includes(t)
       );
     });
   }, [unscheduledOrders, allOrders, unscheduledSearch]);
@@ -637,10 +818,13 @@ export default function WorkOrderCalendar() {
     setStatusTarget(null);
     setStatusChoice("");
   }
+// =========================
+// PART 3 / 3  (render block)
+// =========================
+// File: src/CalendarPage.js
+// Paste this starting at: `return (`
+// and replace your entire current return JSX through the end of the component.
 
-  /* =========================
-     Render
-  ========================= */
   return (
     <div className="calendar-page" onDragEnd={endGlobalDrag}>
       <div className="container-fluid p-0">
@@ -648,16 +832,16 @@ export default function WorkOrderCalendar() {
 
         {/* Search & Unscheduled strip */}
         <div className="unscheduled-container">
-          <div className="d-flex align-items-center justify-content-between">
-            <h4 className="mb-2">
+          <div className="d-flex align-items-center justify-content-between flex-wrap" style={{ gap: 12 }}>
+            <h4 className="mb-0">
               {unscheduledSearch ? "Search Results (All Work Orders)" : "Unscheduled Work Orders"}
             </h4>
 
-            <div className="input-group" style={{ maxWidth: 520 }}>
+            <div className="input-group" style={{ maxWidth: 620 }}>
               <input
                 type="text"
                 className="form-control"
-                placeholder="Search customer, site location, WO #, or PO # (includes scheduled)"
+                placeholder="Search customer, site location, site address, WO #, or PO # (includes scheduled)"
                 value={unscheduledSearch}
                 onChange={(e) => setUnscheduledSearch(e.target.value)}
               />
@@ -669,12 +853,12 @@ export default function WorkOrderCalendar() {
             </div>
           </div>
 
-          <div className="text-muted mb-2" style={{ fontSize: 12 }}>
+          <div className="text-muted mt-2" style={{ fontSize: 12 }}>
             {unscheduledSearch ? (
               <>
                 Showing {listForStrip.length} match{listForStrip.length === 1 ? "" : "es"} across{" "}
-                {allOrders.length} total work order{allOrders.length === 1 ? "" : "s"} (drag any item
-                to schedule/reschedule).
+                {allOrders.length} total work order{allOrders.length === 1 ? "" : "s"} (drag any item to
+                schedule/reschedule).
               </>
             ) : (
               <>Showing {listForStrip.length} item(s) (from /work-orders/unscheduled)</>
@@ -686,7 +870,7 @@ export default function WorkOrderCalendar() {
               const idLabel = displayWOThenPO(order);
               const customerLabel = order.customer ? order.customer : "Work Order";
               const siteLoc = getSiteLocation(order) || "";
-              const siteAddr = order.siteAddress || order.serviceAddress || order.address || "";
+              const siteAddr = getSiteAddress(order) || "";
               const isScheduled = !!order.scheduledDate;
 
               // Friendly current-time label if scheduled
@@ -697,9 +881,7 @@ export default function WorkOrderCalendar() {
                   fromDbString(order.scheduledEnd) ||
                   (s ? moment(s).add(DEFAULT_WINDOW_MIN, "minutes").toDate() : null);
                 if (s) {
-                  currentWhen = `${moment(s).format("MMM D, YYYY h:mm A")}${
-                    e ? ` – ${moment(e).format("h:mm A")}` : ""
-                  }`;
+                  currentWhen = `${moment(s).format("MMM D, YYYY h:mm A")}${e ? ` – ${moment(e).format("h:mm A")}` : ""}`;
                 }
               }
 
@@ -723,6 +905,7 @@ export default function WorkOrderCalendar() {
                       Site Location: {siteLoc}
                     </small>
                   ) : null}
+
                   {siteAddr ? (
                     <div>
                       <small className="text-muted" style={clamp2}>
@@ -731,11 +914,11 @@ export default function WorkOrderCalendar() {
                     </div>
                   ) : null}
 
-                  {isScheduled && currentWhen && (
+                  {isScheduled && currentWhen ? (
                     <div className="mt-1">
                       <small className="text-muted">Current: {currentWhen}</small>
                     </div>
-                  )}
+                  ) : null}
 
                   <div className="unscheduled-actions">
                     <button
@@ -744,9 +927,11 @@ export default function WorkOrderCalendar() {
                     >
                       {isScheduled ? "Edit/Reschedule…" : "Schedule…"}
                     </button>
+
                     <button className="btn btn-xs btn-light me-1" onClick={() => openStatusPicker(order)}>
                       Status…
                     </button>
+
                     <button className="btn btn-xs btn-light" onClick={() => navigateToView(order.id)}>
                       Open
                     </button>
@@ -760,129 +945,139 @@ export default function WorkOrderCalendar() {
 
         {/* Calendar */}
         <div className="calendar-container">
-          <DnDCalendar
-            localizer={localizer}
-            events={rbcEvents}
-            startAccessor="start"
-            endAccessor="end"
-            step={15}
-            timeslots={4}
-            min={moment().startOf("day").add(6, "hours").toDate()} // 6 AM
-            max={moment().startOf("day").add(21, "hours").toDate()} // 9 PM
-            popup={false}
-            resizable
-            selectable
-            components={{ event: CustomEvent }}
-            draggableAccessor={() => true}
-            onEventDrop={handleEventDrop}
-            onEventResize={handleEventResize}
-            dragFromOutsideItem={() => dragItem}
-            onDropFromOutside={handleDropFromOutside}
-            onSelectEvent={onSelectEvent}
-            onDoubleClickEvent={(e) => navigateToView(e.id)}
-            onSelectSlot={onSelectSlot}
-            onShowMore={onShowMore}
-            view={view}
-            onView={(v) => setView(v)}
-            date={currentDate}
-            onNavigate={(d) => setCurrentDate(d)}
-            style={{ height: "calc(100vh - 220px)" }}
-          />
+          {view === "week" ? (
+            // ✅ Week view = stacked cards (no time grid)
+            <StackedWeekView
+              date={currentDate}
+              events={rbcEvents}
+              onNavigate={(d) => setCurrentDate(d)}
+              onView={(v) => setView(v)}
+              onOpenDay={(d) => openDayModal(d)}
+              onOpenOrder={(id) => navigateToView(id)}
+              onEditOrder={(order) => openEditModal(order, currentDate)}
+            />
+          ) : (
+            // ✅ Month/Agenda/Day remain react-big-calendar
+            <DnDCalendar
+              localizer={localizer}
+              events={rbcEvents}
+              startAccessor="start"
+              endAccessor="end"
+              step={15}
+              timeslots={4}
+              min={moment().startOf("day").add(6, "hours").toDate()} // 6 AM
+              max={moment().startOf("day").add(21, "hours").toDate()} // 9 PM
+              popup={false}
+              resizable={view === "day"} // only meaningful in day time-grid
+              selectable
+              components={{ event: CustomEvent }}
+              draggableAccessor={() => true}
+              onEventDrop={handleEventDrop}
+              onEventResize={handleEventResize}
+              dragFromOutsideItem={() => dragItem}
+              onDropFromOutside={handleDropFromOutside}
+              onSelectEvent={onSelectEvent}
+              onDoubleClickEvent={(e) => navigateToView(e.id)}
+              onSelectSlot={onSelectSlot}
+              onShowMore={onShowMore}
+              view={view}
+              onView={(v) => setView(v)}
+              date={currentDate}
+              onNavigate={(d) => setCurrentDate(d)}
+              // ✅ hide time columns unless Day view
+              toolbar
+              style={{ height: "calc(100vh - 220px)" }}
+            />
+          )}
         </div>
       </div>
 
       {/* ---------- Day list modal ---------- */}
       {dayModalOpen && (
         <div className="modal-overlay" onClick={() => setDayModalOpen(false)}>
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: "#fff",
-              borderRadius: 12,
-              boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
-              padding: 20,
-              width: "min(1400px, 98vw)",
-              maxHeight: "90vh",
-              overflow: "hidden",
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
-            <h4 className="mb-3">{dayModalTitle}</h4>
-            {dayOrders.length ? (
-              <ul className="list-group" style={{ overflowY: "auto" }}>
-                {dayOrders.map((o) => {
-                  const s = fromDbString(o.scheduledDate);
-                  const e = fromDbString(o.scheduledEnd);
-                  const label =
-                    s && e
-                      ? `${moment(s).format("hh:mm A")} – ${moment(e).format("hh:mm A")}`
-                      : s
-                      ? `${moment(s).format("hh:mm A")} – ${moment(s)
-                          .add(DEFAULT_WINDOW_MIN, "minutes")
-                          .format("hh:mm A")}`
-                      : "";
-                  const idLabel = displayWOThenPO(o);
-                  const siteLoc = getSiteLocation(o) || o.siteLocation || "";
-                  const siteAddr = o.siteAddress || o.serviceAddress || o.address || "";
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{dayModalTitle}</h3>
+              <button className="modal-close" onClick={() => setDayModalOpen(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
 
-                  return (
-                    <li
-                      key={o.id}
-                      className="list-group-item"
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr auto",
-                        alignItems: "center",
-                        gap: 16,
-                      }}
-                    >
-                      {/* LEFT: details */}
-                      <div style={{ minWidth: 0 }}>
-                        <div className="fw-bold" style={clamp1}>
-                          {o.customer ? `${o.customer}` : `Work Order`} — {idLabel}
-                        </div>
-                        {siteLoc ? (
-                          <small className="text-muted" style={clamp1}>
-                            Site Location: {siteLoc}
-                          </small>
-                        ) : null}
-                        {siteAddr ? (
-                          <div>
-                            <small className="text-muted" style={clamp2}>
-                              Site Address: {siteAddr}
-                            </small>
-                          </div>
-                        ) : null}
-                        <div>
-                          <small>{label}</small>
-                        </div>
-                      </div>
+            <div className="modal-body">
+              {dayOrders.length ? (
+                <div className="modal-list">
+                  <table className="mini-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 120 }}>Time</th>
+                        <th>Work Order</th>
+                        <th style={{ width: 380 }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dayOrders.map((o) => {
+                        const s = fromDbString(o.scheduledDate);
+                        const e = fromDbString(o.scheduledEnd);
+                        const label =
+                          s && e
+                            ? `${moment(s).format("hh:mm A")} – ${moment(e).format("hh:mm A")}`
+                            : s
+                            ? `${moment(s).format("hh:mm A")} – ${moment(s)
+                                .add(DEFAULT_WINDOW_MIN, "minutes")
+                                .format("hh:mm A")}`
+                            : "—";
 
-                      {/* RIGHT: actions */}
-                      <div className="d-flex align-items-center flex-wrap" style={{ gap: 8, justifySelf: "end" }}>
-                        <button className="btn btn-sm btn-primary" onClick={() => openEditModal(o, dayForModal)}>
-                          Edit Time…
-                        </button>
-                        <button className="btn btn-sm btn-outline-secondary" onClick={() => navigateToView(o.id)}>
-                          Open
-                        </button>
-                        <button className="btn btn-sm btn-outline-dark" onClick={() => openStatusPicker(o)}>
-                          Status…
-                        </button>
-                        <button className="btn btn-sm btn-outline-danger" onClick={() => unschedule(o.id)}>
-                          Unschedule
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : (
-              <p className="empty-text mb-0">No work orders scheduled on this day.</p>
-            )}
-            <div className="text-end mt-3">
-              <button className="btn btn-secondary" onClick={() => setDayModalOpen(false)}>
+                        const idLabel = displayWOThenPO(o);
+                        const siteLoc = getSiteLocation(o) || o.siteLocation || "";
+                        const siteAddr = getSiteAddress(o) || "";
+
+                        return (
+                          <tr key={o.id}>
+                            <td>{label}</td>
+                            <td style={{ minWidth: 0 }}>
+                              <div className="fw-bold" style={clamp1}>
+                                {o.customer ? `${o.customer}` : `Work Order`} — {idLabel}
+                              </div>
+                              {siteLoc ? (
+                                <div className="text-muted" style={clamp1}>
+                                  Site Location: {siteLoc}
+                                </div>
+                              ) : null}
+                              {siteAddr ? (
+                                <div className="text-muted" style={clamp2}>
+                                  Site Address: {siteAddr}
+                                </div>
+                              ) : null}
+                            </td>
+                            <td>
+                              <div className="d-flex align-items-center flex-wrap" style={{ gap: 8 }}>
+                                <button className="btn btn-sm btn-primary" onClick={() => openEditModal(o, dayForModal)}>
+                                  Edit Time…
+                                </button>
+                                <button className="btn btn-sm btn-outline-secondary" onClick={() => navigateToView(o.id)}>
+                                  Open
+                                </button>
+                                <button className="btn btn-sm btn-outline-dark" onClick={() => openStatusPicker(o)}>
+                                  Status…
+                                </button>
+                                <button className="btn btn-sm btn-outline-danger" onClick={() => unschedule(o.id)}>
+                                  Unschedule
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="empty-text mb-0">No work orders scheduled on this day.</p>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setDayModalOpen(false)}>
                 Close
               </button>
             </div>
@@ -893,46 +1088,69 @@ export default function WorkOrderCalendar() {
       {/* ---------- Quick Edit modal ---------- */}
       {editModalOpen && (
         <div className="modal-overlay" onClick={() => setEditModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h4 className="mb-3">Edit Schedule</h4>
-            {editOrder && (
-              <>
-                <div className="mb-2" style={{ minWidth: 0 }}>
-                  <div className="fw-bold" style={clamp1}>
-                    {editOrder.customer ? `${editOrder.customer}` : `Work Order`} — {displayWOThenPO(editOrder)}
-                  </div>
-                  {editOrder.problemDescription ? (
-                    <small className="text-muted" style={clamp2}>
-                      {editOrder.problemDescription}
-                    </small>
-                  ) : null}
-                </div>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Edit Schedule</h3>
+              <button className="modal-close" onClick={() => setEditModalOpen(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
 
-                <div className="row g-2">
-                  <div className="col-5">
-                    <label className="form-label small">Date</label>
-                    <input className="form-control" type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
+            <div className="modal-body">
+              {editOrder && (
+                <>
+                  <div className="mb-2" style={{ minWidth: 0 }}>
+                    <div className="fw-bold" style={clamp1}>
+                      {editOrder.customer ? `${editOrder.customer}` : `Work Order`} — {displayWOThenPO(editOrder)}
+                    </div>
+                    {editOrder.problemDescription ? (
+                      <div className="text-muted" style={clamp2}>
+                        {editOrder.problemDescription}
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="col-3">
-                    <label className="form-label small">Start</label>
-                    <input className="form-control" type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} />
-                  </div>
-                  <div className="col-4">
-                    <label className="form-label small">End</label>
-                    <input className="form-control" type="time" value={editEndTime} onChange={(e) => setEditEndTime(e.target.value)} />
-                  </div>
-                </div>
 
-                <div className="d-flex justify-content-end mt-3">
-                  <button className="btn btn-outline-danger me-2" onClick={() => unschedule(editOrder.id)}>
-                    Unschedule
-                  </button>
-                  <button className="btn btn-primary" onClick={saveEditModal}>
-                    Save
-                  </button>
-                </div>
-              </>
-            )}
+                  <div className="row g-2">
+                    <div className="col-5">
+                      <label className="form-label small">Date</label>
+                      <input
+                        className="form-control"
+                        type="date"
+                        value={editDate}
+                        onChange={(e) => setEditDate(e.target.value)}
+                      />
+                    </div>
+                    <div className="col-3">
+                      <label className="form-label small">Start</label>
+                      <input
+                        className="form-control"
+                        type="time"
+                        value={editTime}
+                        onChange={(e) => setEditTime(e.target.value)}
+                      />
+                    </div>
+                    <div className="col-4">
+                      <label className="form-label small">End</label>
+                      <input
+                        className="form-control"
+                        type="time"
+                        value={editEndTime}
+                        onChange={(e) => setEditEndTime(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="d-flex justify-content-end mt-3">
+                    <button className="btn btn-outline-danger me-2" onClick={() => unschedule(editOrder.id)}>
+                      Unschedule
+                    </button>
+                    <button className="btn btn-primary" onClick={saveEditModal}>
+                      Save
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -940,42 +1158,58 @@ export default function WorkOrderCalendar() {
       {/* ---------- Status Picker modal ---------- */}
       {statusModalOpen && (
         <div className="modal-overlay" onClick={cancelStatusChange}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h4 className="mb-3">Change Status</h4>
-            {statusTarget ? (
-              <>
-                <div className="mb-2" style={{ minWidth: 0 }}>
-                  <div className="fw-bold" style={clamp1}>
-                    {statusTarget.customer ? statusTarget.customer : "Work Order"} — {displayWOThenPO(statusTarget)}
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Change Status</h3>
+              <button className="modal-close" onClick={cancelStatusChange} aria-label="Close">
+                ×
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {statusTarget ? (
+                <>
+                  <div className="mb-2" style={{ minWidth: 0 }}>
+                    <div className="fw-bold" style={clamp1}>
+                      {statusTarget.customer ? statusTarget.customer : "Work Order"} — {displayWOThenPO(statusTarget)}
+                    </div>
+                    <div className="text-muted">
+                      Current: <strong>{statusTarget.status || "—"}</strong>
+                    </div>
                   </div>
-                  <small className="text-muted">
-                    Current: <strong>{statusTarget.status || "—"}</strong>
-                  </small>
-                </div>
 
-                <div className="list-group mb-3" style={{ maxHeight: 260, overflowY: "auto" }}>
-                  {STATUS_OPTIONS.map((s) => (
+                  <div className="list-group mb-3" style={{ maxHeight: 260, overflowY: "auto" }}>
+                    {STATUS_OPTIONS.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        className={`list-group-item list-group-item-action ${statusChoice === s ? "active" : ""}`}
+                        onClick={() => setStatusChoice(s)}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="d-flex justify-content-end">
                     <button
-                      key={s}
-                      type="button"
-                      className={`list-group-item list-group-item-action ${statusChoice === s ? "active" : ""}`}
-                      onClick={() => setStatusChoice(s)}
+                      className="btn btn-ghost btn-outline-secondary me-2"
+                      onClick={cancelStatusChange}
+                      disabled={statusSaving}
                     >
-                      {s}
+                      Cancel
                     </button>
-                  ))}
-                </div>
-
-                <div className="d-flex justify-content-end">
-                  <button className="btn btn-ghost btn-outline-secondary me-2" onClick={cancelStatusChange} disabled={statusSaving}>
-                    Cancel
-                  </button>
-                  <button className="btn btn-primary" onClick={confirmStatusChange} disabled={statusSaving || !statusChoice}>
-                    {statusSaving ? "Saving…" : "Confirm"}
-                  </button>
-                </div>
-              </>
-            ) : null}
+                    <button
+                      className="btn btn-primary"
+                      onClick={confirmStatusChange}
+                      disabled={statusSaving || !statusChoice}
+                    >
+                      {statusSaving ? "Saving…" : "Confirm"}
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
       )}
