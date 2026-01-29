@@ -26,7 +26,6 @@ export default function Home() {
     return hasZone ? moment(s).local() : moment(s);
   };
 
-  // Cache-busted fetch so recent changes always appear
   const fetchOrders = useCallback(async (opts = { silent: false }) => {
     if (!opts?.silent) setIsRefreshing(true);
     try {
@@ -44,7 +43,6 @@ export default function Home() {
   useEffect(() => {
     fetchOrders();
 
-    // refresh when tab regains focus OR becomes visible
     const onFocus = () => fetchOrders({ silent: true });
     const onVisibility = () => {
       if (document.visibilityState === "visible") fetchOrders({ silent: true });
@@ -53,7 +51,6 @@ export default function Home() {
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
 
-    // gentle polling to keep notes fresh while user idles on dashboard
     const interval = setInterval(() => fetchOrders({ silent: true }), REFRESH_MS);
 
     return () => {
@@ -100,7 +97,6 @@ export default function Home() {
   /* =========================
      Notes (robust extraction)
   ========================= */
-
   const parseNotesField = (notesLike) => {
     if (!notesLike) return [];
     if (Array.isArray(notesLike)) return notesLike;
@@ -278,41 +274,27 @@ export default function Home() {
     </div>
   );
 
-  /* =========================
-     Render
-  ========================= */
   return (
     <div className="home-page">
       <div className="home-shell">
         <div className="home-topbar">
           <div style={{ minWidth: 0 }}>
             <h2 className="home-title">Dashboard</h2>
-            <div className="home-subtitle">
-              Quick overview of notes + today’s work orders.
-            </div>
+            <div className="home-subtitle">Quick overview of notes + today’s work orders.</div>
           </div>
 
           <div className="home-topbar-actions">
-            <button
-              className="btn btn-outline-secondary"
-              onClick={() => navigate("/calendar")}
-              title="Open Calendar"
-            >
+            <button className="btn btn-outline-secondary" onClick={() => navigate("/calendar")}>
               Calendar
             </button>
 
-            <button
-              className="btn btn-primary"
-              onClick={() => fetchOrders()}
-              disabled={isRefreshing}
-              title="Refresh"
-            >
+            <button className="btn btn-primary" onClick={() => fetchOrders()} disabled={isRefreshing}>
               {isRefreshing ? "Refreshing…" : "Refresh"}
             </button>
           </div>
         </div>
 
-        {/* ===== KPI tiles ===== */}
+        {/* KPI tiles */}
         <div className="home-kpis">
           <div className="kpi-tile" onClick={() => navigate("/calendar")} role="button" tabIndex={0}>
             <div className="kpi-label">Today</div>
@@ -339,7 +321,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ===== Two-column layout on desktop ===== */}
+        {/* Main grid */}
         <div className="home-grid">
           {/* LEFT: Notes */}
           <div className="home-card">
@@ -358,12 +340,7 @@ export default function Home() {
             {weeklyNotes.length > 0 ? (
               <div className="notes-list">
                 {weeklyNotes.map((n) => (
-                  <div
-                    key={n.key}
-                    className="note-row"
-                    onClick={() => onClickNote(n)}
-                    title="Open work order"
-                  >
+                  <div key={n.key} className="note-row" onClick={() => onClickNote(n)} title="Open work order">
                     <div className="note-row-top">
                       <div className="note-row-left">
                         <span className="note-pill">WO: {n.workOrderNumber || n.orderId}</span>
@@ -388,10 +365,10 @@ export default function Home() {
 
           {/* RIGHT: Today Agenda */}
           <div className="home-card">
-            <CardHeader title={`Agenda for Today`} subtitle={todayStr} />
+            <CardHeader title="Agenda for Today" subtitle={todayStr} />
 
             {agendaOrders.length > 0 ? (
-              <Table bordered={false} hover responsive className="home-table mb-0">
+              <Table bordered={false} hover responsive className="home-table home-table-agenda mb-0">
                 <thead>
                   <tr>
                     <th>WO #</th>
@@ -407,7 +384,14 @@ export default function Home() {
                       <td className="mono">{woCell(o)}</td>
                       <td>{o.customer || "—"}</td>
                       <td>{o.siteLocation || "—"}</td>
-                      <td className="hide-md">{o.problemDescription || "—"}</td>
+
+                      {/* ✅ Problem gets its own scroll box if too long */}
+                      <td className="hide-md">
+                        <div className="problem-scroll" title={o.problemDescription || ""}>
+                          {o.problemDescription || "—"}
+                        </div>
+                      </td>
+
                       <td className="mono">{fmtDateTime(o.scheduledDate) || "—"}</td>
                     </tr>
                   ))}

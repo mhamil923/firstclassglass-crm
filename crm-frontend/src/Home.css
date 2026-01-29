@@ -176,7 +176,7 @@ body,
   grid-column: 1 / -1;
 }
 
-/* Card header */
+/* ✅ Card header now uses the BLUE instead of navy */
 .home-card-header {
   padding: 14px 14px 12px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
@@ -184,7 +184,12 @@ body,
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfbfc 100%);
+
+  background: linear-gradient(
+    180deg,
+    rgba(13, 110, 253, 0.16) 0%,
+    rgba(13, 110, 253, 0.06) 100%
+  );
 }
 
 .home-card-title {
@@ -196,7 +201,7 @@ body,
 
 .home-card-subtitle {
   margin-top: 2px;
-  color: rgba(15, 23, 42, 0.55);
+  color: rgba(15, 23, 42, 0.60);
   font-size: 12px;
 }
 
@@ -300,14 +305,14 @@ body,
 }
 
 /* =========================
-   Tables (match ViewWorkOrder styling)
+   Tables (updated header color)
 ========================= */
 .home-table {
   margin: 0;
 }
 
 .home-table thead th {
-  background: #2b2d42 !important;
+  background: #0d6efd !important; /* ✅ blue */
   color: #ffffff !important;
   border: none !important;
   padding: 12px 12px !important;
@@ -337,6 +342,32 @@ body,
 
 .mono {
   font-variant-numeric: tabular-nums;
+}
+
+/* ✅ Problem cell scroll box (Agenda only) */
+.problem-scroll {
+  max-height: 110px;              /* controls how tall a row can get */
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  text-align: left;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+/* nicer scrollbar (webkit) */
+.problem-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+.problem-scroll::-webkit-scrollbar-thumb {
+  background: rgba(13, 110, 253, 0.28);
+  border-radius: 999px;
+}
+.problem-scroll::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 999px;
 }
 
 /* Responsive hide helpers */
