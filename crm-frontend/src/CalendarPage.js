@@ -220,113 +220,85 @@ function CustomEvent({ event }) {
 }
 
 /* ============================================================
-   ✅ Week View Toolbar (so Week doesn't look "unstyled" anymore)
+   ✅ Custom Toolbar
+   - Fixes Week button position/order (Month, Week, Day, Agenda)
 ============================================================ */
-function WeekToolbar({ date, view, onNavigate, onView }) {
-  const title = useMemo(() => {
-    if (view === "week") {
-      const start = moment(date).startOf("week").toDate();
-      const end = moment(date).endOf("week").toDate();
-      return localizer.format({ start, end }, "dayRangeHeaderFormat");
-    }
-    return moment(date).format("MMMM YYYY");
-  }, [date, view]);
-
-  const btn = (active) => ({
-    padding: "8px 12px",
-    borderRadius: 8,
-    border: "1px solid rgba(0,0,0,.08)",
-    background: active ? "#0ea5b7" : "#0b7285",
-    color: "#fff",
-    fontWeight: 700,
-    lineHeight: 1,
-  });
-
-  const btnGhost = {
-    padding: "8px 12px",
-    borderRadius: 8,
-    border: "1px solid rgba(0,0,0,.08)",
-    background: "#0b7285",
-    color: "#fff",
-    fontWeight: 700,
-    lineHeight: 1,
-  };
-
-  const viewBtn = (active) => ({
-    padding: "8px 12px",
-    borderRadius: 8,
-    border: "1px solid rgba(0,0,0,.10)",
-    background: active ? "#0ea5b7" : "#0b7285",
-    color: "#fff",
-    fontWeight: 800,
-    lineHeight: 1,
-  });
+function WeekToolbar(props) {
+  const { label, onNavigate, onView, view } = props;
 
   return (
-    <div
-      className="cw-toolbar"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 12,
-        padding: 12,
-        background: "#fff",
-        borderBottom: "1px solid rgba(0,0,0,.06)",
-      }}
-    >
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <button type="button" style={btnGhost} onClick={() => onNavigate("TODAY")}>
+    <div className="rbc-toolbar">
+      <span className="rbc-btn-group">
+        <button type="button" onClick={() => onNavigate("TODAY")}>
           Today
         </button>
-        <button type="button" style={btnGhost} onClick={() => onNavigate("PREV")}>
+        <button type="button" onClick={() => onNavigate("PREV")}>
           Back
         </button>
-        <button type="button" style={btnGhost} onClick={() => onNavigate("NEXT")}>
+        <button type="button" onClick={() => onNavigate("NEXT")}>
           Next
         </button>
-      </div>
+      </span>
 
-      <div style={{ fontWeight: 900, color: "#0f172a" }}>{title}</div>
+      <span className="rbc-toolbar-label">{label}</span>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <button type="button" style={viewBtn(view === "month")} onClick={() => onView("month")}>
+      <span className="rbc-btn-group">
+        <button
+          type="button"
+          className={view === "month" ? "rbc-active" : ""}
+          onClick={() => onView("month")}
+        >
           Month
         </button>
-        <button type="button" style={viewBtn(view === "week")} onClick={() => onView("week")}>
+        <button
+          type="button"
+          className={view === "week" ? "rbc-active" : ""}
+          onClick={() => onView("week")}
+        >
           Week
         </button>
-        <button type="button" style={viewBtn(view === "day")} onClick={() => onView("day")}>
+        <button
+          type="button"
+          className={view === "day" ? "rbc-active" : ""}
+          onClick={() => onView("day")}
+        >
           Day
         </button>
-        <button type="button" style={viewBtn(view === "agenda")} onClick={() => onView("agenda")}>
+        <button
+          type="button"
+          className={view === "agenda" ? "rbc-active" : ""}
+          onClick={() => onView("agenda")}
+        >
           Agenda
         </button>
-      </div>
+      </span>
     </div>
   );
 }
 
 /* ============================================================
-   ✅ Week View (stacked cards per day, scrollable list)
-   - Fixes the "horrible" unstyled week grid
-   - Each day has its own scroll area to see all work orders
+   ✅ Week View (custom view for RBC)
+   - Fixes the crash/blank page by implementing required view statics:
+     range(), navigate(), title()
+   - Each day has its own scroll area to see ALL work orders
 ============================================================ */
-function StackedWeekView({
-  date,
-  events = [],
-  onSelectEvent,
-  onDoubleClickEvent,
-  dragFromOutsideItem,
-  onDropFromOutside,
-  onOpenDay,
-}) {
+function StackedWeekView(props) {
+  const {
+    date,
+    events = [],
+    onSelectEvent,
+    onDoubleClickEvent,
+    dragFromOutsideItem,
+    onDropFromOutside,
+  } = props;
+
   const start = moment(date).startOf("week");
   const days = Array.from({ length: 7 }).map((_, i) => start.clone().add(i, "day").toDate());
 
   const eventsByDay = useMemo(() => {
     const map = new Map();
     for (const d of days) map.set(fmtDate(d), []);
+
     for (const ev of events) {
       const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate) || null;
       if (!s) continue;
@@ -334,6 +306,7 @@ function StackedWeekView({
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(ev);
     }
+
     for (const [k, arr] of map.entries()) {
       arr.sort((a, b) => {
         const sa = fromDbString(a.start) || fromDbString(a.scheduledDate) || new Date(0);
@@ -342,6 +315,7 @@ function StackedWeekView({
       });
       map.set(k, arr);
     }
+
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events, fmtDate(date)]);
@@ -356,104 +330,29 @@ function StackedWeekView({
     onDropFromOutside({ start: startTime });
   };
 
-  const shell = {
-    padding: 12,
-    background: "#fff",
-    borderRadius: 14,
-    boxShadow: "0 10px 22px rgba(0,0,0,.06)",
-  };
-
-  const grid = {
-    display: "grid",
-    gridTemplateColumns: "repeat(7, minmax(160px, 1fr))",
-    gap: 10,
-  };
-
-  const dayCard = {
-    border: "1px solid rgba(15, 23, 42, .10)",
-    borderRadius: 12,
-    overflow: "hidden",
-    background: "#f8fafc",
-    minHeight: 520,
-    display: "flex",
-    flexDirection: "column",
-  };
-
-  const dayHeader = {
-    padding: "10px 10px 8px",
-    background: "#ffffff",
-    borderBottom: "1px solid rgba(0,0,0,.06)",
-    display: "flex",
-    alignItems: "baseline",
-    justifyContent: "space-between",
-    gap: 8,
-    cursor: "pointer",
-  };
-
-  const listBox = {
-    padding: 10,
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-    overflowY: "auto",
-    flex: 1,
-  };
-
-  const cardBtn = {
-    border: "1px solid rgba(0,0,0,.10)",
-    background: "#0ea5b7",
-    color: "#fff",
-    borderRadius: 12,
-    textAlign: "left",
-    padding: 10,
-    boxShadow: "0 6px 14px rgba(0,0,0,.08)",
-    cursor: "pointer",
-  };
-
-  const cardMuted = { opacity: 0.92, fontWeight: 700, fontSize: 12 };
-
   return (
-    <div style={shell} className="cw-week">
-      <div style={grid}>
+    <div className="stacked-week">
+      <div className="stacked-week-grid">
         {days.map((d) => {
           const key = fmtDate(d);
           const list = eventsByDay.get(key) || [];
+
           return (
             <div
               key={key}
-              className="cw-day"
-              style={dayCard}
+              className="stacked-day"
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => handleDropOnDay(d, e)}
             >
-              <div
-                className="cw-day-header"
-                style={dayHeader}
-                onClick={() => onOpenDay && onOpenDay(d)}
-                title="Click to open day list"
-              >
-                <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.05 }}>
-                  <div style={{ fontWeight: 900, color: "#0f172a" }}>{moment(d).format("ddd")}</div>
-                  <div style={{ fontWeight: 800, color: "#334155", fontSize: 12 }}>
-                    {moment(d).format("MMM D")}
-                  </div>
+              <div className="stacked-day-header" title="Click day in Month view for full list modal">
+                <div>
+                  <div className="dow">{moment(d).format("ddd")}</div>
+                  <div className="date">{moment(d).format("MMM D")}</div>
                 </div>
-                <div
-                  style={{
-                    fontWeight: 900,
-                    fontSize: 12,
-                    padding: "4px 8px",
-                    borderRadius: 999,
-                    background: "rgba(14,165,183,.12)",
-                    color: "#0b7285",
-                    border: "1px solid rgba(14,165,183,.25)",
-                  }}
-                >
-                  {list.length}
-                </div>
+                <div className="cw-day-count">{list.length}</div>
               </div>
 
-              <div className="cw-day-list" style={listBox}>
+              <div className="stacked-day-body">
                 {list.length ? (
                   list.map((ev) => {
                     const idLabel = displayWOThenPO(ev);
@@ -476,30 +375,26 @@ function StackedWeekView({
                       <button
                         key={ev.id}
                         type="button"
-                        className="cw-card"
-                        style={cardBtn}
+                        className="week-event-card"
                         onClick={() => onSelectEvent && onSelectEvent(ev)}
                         onDoubleClick={() => onDoubleClickEvent && onDoubleClickEvent(ev)}
                         title={title}
                       >
-                        <div className="cw-card-title" style={{ ...clamp1, fontWeight: 900 }}>
+                        <div className="title" style={clamp1}>
                           {title}
                         </div>
-
                         {timeLabel ? (
-                          <div className="cw-card-time" style={{ ...cardMuted, ...clamp1 }}>
+                          <div className="meta" style={clamp1}>
                             {timeLabel}
                           </div>
                         ) : null}
-
                         {siteLoc ? (
-                          <div className="cw-card-sub" style={{ ...clamp1, fontSize: 12, opacity: 0.92 }}>
+                          <div className="meta" style={clamp1}>
                             {siteLoc}
                           </div>
                         ) : null}
-
                         {siteAddr ? (
-                          <div className="cw-card-sub" style={{ ...clamp1, fontSize: 12, opacity: 0.92 }}>
+                          <div className="meta" style={clamp1}>
                             {siteAddr}
                           </div>
                         ) : null}
@@ -507,9 +402,7 @@ function StackedWeekView({
                     );
                   })
                 ) : (
-                  <div className="cw-empty" style={{ color: "#64748b", fontWeight: 700 }}>
-                    No work orders
-                  </div>
+                  <div className="empty-text">No work orders</div>
                 )}
               </div>
             </div>
@@ -519,6 +412,33 @@ function StackedWeekView({
     </div>
   );
 }
+
+/**
+ * ✅ REQUIRED by react-big-calendar for custom views
+ * Without these, clicking "Week" can crash/blank-screen.
+ */
+StackedWeekView.range = (date) => {
+  const start = moment(date).startOf("week").toDate();
+  const end = moment(date).endOf("week").toDate();
+  return { start, end };
+};
+
+StackedWeekView.navigate = (date, action) => {
+  switch (action) {
+    case "PREV":
+      return moment(date).subtract(1, "week").toDate();
+    case "NEXT":
+      return moment(date).add(1, "week").toDate();
+    default:
+      return date;
+  }
+};
+
+StackedWeekView.title = (date, { localizer: loc }) => {
+  const start = moment(date).startOf("week").toDate();
+  const end = moment(date).endOf("week").toDate();
+  return loc.format({ start, end }, "dayRangeHeaderFormat");
+};
 // =========================
 // PART 2 / 3  (component logic)
 // =========================
@@ -860,8 +780,6 @@ export default function WorkOrderCalendar() {
   }
 
   function onSelectSlot(slotInfo) {
-    // Month/week clicks should open the day modal (your “stacked list” behavior)
-    // Day view uses the time grid for selecting times (still opens day modal for now)
     openDayModal(slotInfo.start);
   }
 
@@ -1020,7 +938,6 @@ export default function WorkOrderCalendar() {
               const siteAddr = getSiteAddress(order) || "";
               const isScheduled = !!order.scheduledDate;
 
-              // Friendly current-time label if scheduled
               let currentWhen = "";
               if (isScheduled) {
                 const s = fromDbString(order.scheduledDate);
@@ -1112,37 +1029,61 @@ export default function WorkOrderCalendar() {
             endAccessor="end"
             step={15}
             timeslots={4}
-            min={moment().startOf("day").add(6, "hours").toDate()} // 6 AM
-            max={moment().startOf("day").add(21, "hours").toDate()} // 9 PM
+            min={moment().startOf("day").add(6, "hours").toDate()}
+            max={moment().startOf("day").add(21, "hours").toDate()}
             selectable
+
             draggableAccessor={() => true}
             dragFromOutsideItem={() => dragItem}
             onDropFromOutside={handleDropFromOutside}
+
             onEventDrop={handleEventDrop}
             onEventResize={handleEventResize}
+
             onSelectEvent={onSelectEvent}
             onDoubleClickEvent={(e) => navigateToView(e.id)}
             onSelectSlot={onSelectSlot}
             onShowMore={onShowMore}
-            view={view}
-            onView={(v) => setView(v)}
-            date={currentDate}
-            onNavigate={(d) => setCurrentDate(d)}
-            components={{ event: CustomEvent }}
-            // ✅ FIX #1: Week view uses our custom "stacked" view BUT keeps the normal RBC toolbar + styling
+
+            /* ✅ FIX: keep Week from crashing + keep toolbar placement correct
+               - Use RBC view system (views prop) so toolbar renders all view buttons correctly
+               - Use our custom stacked week view for "week"
+               - DO NOT replace the toolbar with a custom one (that’s what was moving buttons around)
+            */
             views={{
               month: true,
+              week: StackedWeekView,
               day: true,
               agenda: true,
-              week: StackedWeekView,
             }}
-            // ✅ FIX #2: Month view shows ALL events in the day cell (we’ll add per-day scrolling via Calendar.css next)
+
+            /* ✅ FIX: onView MUST accept and set the view string, nothing else */
+            view={view}
+            onView={(v) => setView(v)}
+
+            /* ✅ FIX: onNavigate should accept date */
+            date={currentDate}
+            onNavigate={(d) => setCurrentDate(d)}
+
+            /* event rendering */
+            components={{
+              event: CustomEvent,
+            }}
+
+            /* ✅ Month should show the full month again:
+               - remove the forced short height that made it look like a partial month
+               - let RBC size itself, but still keep a comfortable minimum height
+            */
+            style={{ height: "auto", minHeight: "78vh" }}
+
+            /* ✅ keep multi-events visible */
             showAllEvents
-            // Only meaningful in time-grid day view
+
+            /* only meaningful in timed Day view */
             resizable={view === "day"}
-            // No popup “+x more” overlay; we want visible + scrollable
+
+            /* keep it simple */
             popup={false}
-            style={{ height: "calc(100vh - 220px)" }}
           />
         </div>
       </div>
@@ -1179,9 +1120,7 @@ export default function WorkOrderCalendar() {
                         const e = fromDbString(o.scheduledEnd);
                         const label =
                           s && e
-                            ? `${moment(s).format("hh:mm A")} – ${moment(e).format(
-                                "hh:mm A"
-                              )}`
+                            ? `${moment(s).format("hh:mm A")} – ${moment(e).format("hh:mm A")}`
                             : s
                             ? `${moment(s).format("hh:mm A")} – ${moment(s)
                                 .add(DEFAULT_WINDOW_MIN, "minutes")
@@ -1197,8 +1136,7 @@ export default function WorkOrderCalendar() {
                             <td>{label}</td>
                             <td style={{ minWidth: 0 }}>
                               <div className="fw-bold" style={clamp1}>
-                                {o.customer ? `${o.customer}` : `Work Order`} —{" "}
-                                {idLabel}
+                                {o.customer ? `${o.customer}` : `Work Order`} — {idLabel}
                               </div>
                               {siteLoc ? (
                                 <div className="text-muted" style={clamp1}>
