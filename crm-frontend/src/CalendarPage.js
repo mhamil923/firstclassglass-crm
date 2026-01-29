@@ -519,15 +519,18 @@ export default function WorkOrderCalendar() {
 
   /* ============================================================
      ✅ DRAG-SCROLL (auto-scroll page while dragging near edges)
-     Fixes: can't drop into bottom rows of month/week because page
-     doesn't scroll while you hold the dragged item.
+     Fixes: page not scrolling while you hold a dragged item.
+     Key changes:
+     - capture pointerY on dragstart + keep updating via document dragover (CAPTURE)
+     - also listen to "drag" (some browsers fire this more reliably than window dragover)
+     - scroll the actual scrolling element (document.scrollingElement) instead of only window
   ============================================================ */
   const isDraggingRef = useRef(false);
   const dragRafRef = useRef(null);
   const pointerYRef = useRef(null);
 
-  const DRAG_SCROLL_EDGE_PX = 120; // "hot zone" from top/bottom
-  const DRAG_SCROLL_MAX_PX_PER_FRAME = 22; // speed cap per animation frame
+  const DRAG_SCROLL_EDGE_PX = 140; // slightly larger hot zone
+  const DRAG_SCROLL_MAX_PX_PER_FRAME = 26;
 
   const stopDragScroll = useCallback(() => {
     isDraggingRef.current = false;
@@ -543,24 +546,22 @@ export default function WorkOrderCalendar() {
     if (typeof y === "number") {
       const vh = window.innerHeight || 800;
 
-      // distance into top/bottom zones
       const topDist = DRAG_SCROLL_EDGE_PX - y;
       const bottomDist = y - (vh - DRAG_SCROLL_EDGE_PX);
 
       let delta = 0;
 
       if (topDist > 0) {
-        // near top -> scroll up
         const t = Math.min(1, topDist / DRAG_SCROLL_EDGE_PX);
         delta = -Math.ceil(t * DRAG_SCROLL_MAX_PX_PER_FRAME);
       } else if (bottomDist > 0) {
-        // near bottom -> scroll down
         const t = Math.min(1, bottomDist / DRAG_SCROLL_EDGE_PX);
         delta = Math.ceil(t * DRAG_SCROLL_MAX_PX_PER_FRAME);
       }
 
       if (delta !== 0) {
-        window.scrollBy({ top: delta, left: 0, behavior: "auto" });
+        const scroller = document.scrollingElement || document.documentElement;
+        scroller.scrollTop = scroller.scrollTop + delta;
       }
     }
 
@@ -573,11 +574,17 @@ export default function WorkOrderCalendar() {
     dragRafRef.current = requestAnimationFrame(dragScrollStep);
   }, [dragScrollStep]);
 
-  // Track pointer position during HTML5 drag
+  // Track pointer position during HTML5 drag (CAPTURE helps a lot)
   useEffect(() => {
-    const onDragOver = (e) => {
+    const onDragOverCapture = (e) => {
       if (!isDraggingRef.current) return;
-      pointerYRef.current = e.clientY;
+      if (typeof e?.clientY === "number") pointerYRef.current = e.clientY;
+    };
+
+    const onDrag = (e) => {
+      // Some browsers fire 'drag' more reliably than window-level dragover
+      if (!isDraggingRef.current) return;
+      if (typeof e?.clientY === "number") pointerYRef.current = e.clientY;
     };
 
     const onDrop = () => stopDragScroll();
@@ -585,17 +592,25 @@ export default function WorkOrderCalendar() {
     const onKeyDown = (e) => {
       if (e.key === "Escape") stopDragScroll();
     };
+    const onBlur = () => stopDragScroll(); // if user alt-tabs mid-drag
 
-    window.addEventListener("dragover", onDragOver, { passive: true });
+    // Capture phase so we still get events while dragging over children
+    document.addEventListener("dragover", onDragOverCapture, true);
+    document.addEventListener("drag", onDrag, true);
+
     window.addEventListener("drop", onDrop);
     window.addEventListener("dragend", onDragEnd);
     window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("blur", onBlur);
 
     return () => {
-      window.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("dragover", onDragOverCapture, true);
+      document.removeEventListener("drag", onDrag, true);
+
       window.removeEventListener("drop", onDrop);
       window.removeEventListener("dragend", onDragEnd);
       window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("blur", onBlur);
     };
   }, [stopDragScroll]);
 
@@ -1000,9 +1015,13 @@ export default function WorkOrderCalendar() {
   }
 
   // ✅ expose for Part 3 handlers
-  function beginGlobalDrag(order) {
+  function beginGlobalDrag(order, e) {
     setDragItem(order);
-    startDragScroll(); // <-- enables scrolling while dragging
+
+    // Prime the pointer position immediately (fixes "won't start scrolling" cases)
+    if (typeof e?.clientY === "number") pointerYRef.current = e.clientY;
+
+    startDragScroll(); // enables scrolling while dragging
   }
 // =========================
 // PART 3 / 3  (render block)
@@ -1019,6 +1038,10 @@ export default function WorkOrderCalendar() {
       onDragLeave={(e) => {
         // Safety: if user drags out of window and releases, sometimes dragend won't fire
         if (e?.relatedTarget == null) endGlobalDrag();
+      }}
+      // ✅ extra safety: keep pointer tracking even if user drags over blank areas of the page
+      onDragOver={(e) => {
+        if (typeof e?.clientY === "number") pointerYRef.current = e.clientY;
       }}
     >
       <div className="container-fluid p-0">
@@ -1088,12 +1111,15 @@ export default function WorkOrderCalendar() {
                   key={order.id}
                   className="unscheduled-item"
                   draggable
-                  // ✅ IMPORTANT: start drag-scroll + set drag item
-                  onDragStart={() => beginGlobalDrag(order)}
+                  // ✅ IMPORTANT: pass the event so we can prime pointerYRef immediately
+                  onDragStart={(e) => beginGlobalDrag(order, e)}
                   onDragEnd={endGlobalDrag}
                   title={`${customerLabel} — ${idLabel}`}
                 >
-                  <div className="d-flex align-items-center justify-content-between" style={{ gap: 8 }}>
+                  <div
+                    className="d-flex align-items-center justify-content-between"
+                    style={{ gap: 8 }}
+                  >
                     <div className="fw-bold" style={clamp1}>
                       {customerLabel} — {idLabel}
                     </div>
@@ -1128,7 +1154,10 @@ export default function WorkOrderCalendar() {
                       {isScheduled ? "Edit/Reschedule…" : "Schedule…"}
                     </button>
 
-                    <button className="btn btn-xs btn-light me-1" onClick={() => openStatusPicker(order)}>
+                    <button
+                      className="btn btn-xs btn-light me-1"
+                      onClick={() => openStatusPicker(order)}
+                    >
                       Status…
                     </button>
 
@@ -1148,13 +1177,7 @@ export default function WorkOrderCalendar() {
           className="calendar-container"
           // ✅ Helps drag-scroll too: when cursor is over the calendar area, keep tracking y
           onDragOver={(e) => {
-            // pointerYRef is in Part 2 (ref)
-            if (typeof e?.clientY === "number") {
-              try {
-                // eslint-disable-next-line no-undef
-                pointerYRef.current = e.clientY;
-              } catch {}
-            }
+            if (typeof e?.clientY === "number") pointerYRef.current = e.clientY;
           }}
         >
           <DnDCalendar
@@ -1189,7 +1212,6 @@ export default function WorkOrderCalendar() {
             components={{
               event: CustomEvent,
             }}
-            // ✅ Give Week view a nice framed container and better spacing by default
             className={`rbc-enhanced ${view === "week" ? "rbc-week-pretty" : ""}`}
             style={{
               height: "auto",
@@ -1376,7 +1398,10 @@ export default function WorkOrderCalendar() {
                   </div>
 
                   <div className="d-flex justify-content-end mt-3">
-                    <button className="btn btn-outline-danger me-2" onClick={() => unschedule(editOrder.id)}>
+                    <button
+                      className="btn btn-outline-danger me-2"
+                      onClick={() => unschedule(editOrder.id)}
+                    >
                       Unschedule
                     </button>
                     <button className="btn btn-primary" onClick={saveEditModal}>
