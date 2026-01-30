@@ -260,10 +260,6 @@ export default function PurchaseOrders() {
     loadPurchaseOrders();
   }, [loadPurchaseOrders]);
 
-  /**
-   * Update the *work order* status to "Needs to be Scheduled".
-   * (Used for both real PO rows AND synthetic rows.)
-   */
   const updateWorkOrderStatusToNeedsScheduling = async (woId) => {
     if (!woId) return false;
 
@@ -309,23 +305,16 @@ export default function PurchaseOrders() {
     }
   };
 
-  /**
-   * ✅ NEW: Mark Picked Up for ANY row:
-   * - Real PO row: mark PO picked up + update WO status
-   * - Synthetic row: update WO status only
-   */
   const handleMarkPickedUp = async (row) => {
     const woId = firstNonNullish(row?.workOrderId, row?.work_order_id, row?.woId, null);
     const poNum = row?.poNumber || "";
     const isSynthetic = typeof row?.id === "string" && String(row.id).startsWith("wo-");
 
-    // Don’t allow if we can’t identify the WO
     if (!woId) {
       alert("No related work order linked to this row.");
       return;
     }
 
-    // Don’t show/allow if it’s not actually waiting on parts anymore
     const stillWaiting =
       waitingWoIdSet.has(woId) || isWaitingOnPartsText(firstNonNullish(row.workOrderStatus, row.statusText, ""));
     if (!stillWaiting) {
@@ -333,7 +322,6 @@ export default function PurchaseOrders() {
       return;
     }
 
-    // Busy guard
     setBusyIds((prev) => {
       const next = new Set(prev);
       next.add(String(row.id));
@@ -345,7 +333,6 @@ export default function PurchaseOrders() {
         return;
       }
 
-      // If real PO row, try to mark PO picked up first
       if (!isSynthetic) {
         try {
           await api.put(`/purchase-orders/${row.id}/mark-picked-up`, null, { headers: authHeaders() });
@@ -357,7 +344,6 @@ export default function PurchaseOrders() {
               { headers: authHeaders() }
             );
           } catch (e2) {
-            // fallback: mark picked up via work-order edit (if your backend derives PO from WO)
             try {
               const form = new FormData();
               form.append("poPickedUp", "1");
@@ -365,19 +351,17 @@ export default function PurchaseOrders() {
                 headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
               });
             } catch {
-              // even if PO flag fails, we still move WO status (that’s the main goal)
+              // ignore; still moving WO status
             }
           }
         }
       }
 
-      // Always update the work order status
       const statusOk = await updateWorkOrderStatusToNeedsScheduling(woId);
       if (!statusOk) {
         alert("Work order status update endpoint might differ. The UI will still be updated.");
       }
 
-      // UI updates: remove from Waiting on Parts immediately
       setWaitingWoIdSet((prev) => {
         const next = new Set(prev);
         next.delete(woId);
@@ -390,7 +374,6 @@ export default function PurchaseOrders() {
         return next;
       });
 
-      // Update PO list row if it exists in state
       setPurchaseOrders((prev) =>
         (prev || []).map((po) => {
           if (po.id !== row.id) return po;
@@ -411,7 +394,6 @@ export default function PurchaseOrders() {
           (poNum ? `\nPO: ${poNum}` : "")
       );
 
-      // Refresh for server truth
       loadPurchaseOrders();
     } catch (err) {
       console.error("❌ Error marking picked up:", err?.response || err);
@@ -431,7 +413,6 @@ export default function PurchaseOrders() {
     }
   };
 
-  // ✅ In-app PDF viewer (modal)
   const handleOpenPdf = (po) => {
     const key = firstNonNullish(po?.poPdfPath, po?.po_pdf_path, po?.poPdf, "") || "";
     if (!key) {
@@ -448,9 +429,6 @@ export default function PurchaseOrders() {
     setPdfModalOpen(true);
   };
 
-  /**
-   * ✅ View Work Order + pass “from” route so Back button can return properly later
-   */
   const handleViewWorkOrder = (row) => {
     const woId = firstNonNullish(row?.workOrderId, row?.work_order_id, row?.woId, null);
     if (!woId) {
@@ -463,13 +441,11 @@ export default function PurchaseOrders() {
 
     const path = buildWorkOrderPath(savedBase, woId);
 
-    // ✅ pass the page you came from
     navigate(path, { state: { from: currentPathWithQuery() } });
 
     localStorage.setItem(WORK_ORDER_ROUTE_STORAGE_KEY, savedBase);
   };
 
-  // ✅ Normalize PO rows
   const normalizedPurchaseOrders = useMemo(() => {
     return (purchaseOrders || []).map((po) => {
       const poPdfPath =
@@ -565,10 +541,6 @@ export default function PurchaseOrders() {
     });
   }, [purchaseOrders, woMetaById]);
 
-  /**
-   * ✅ Show ALL Waiting on Parts work orders
-   * Add synthetic rows for waiting WOs missing from PO list.
-   */
   const combinedWaitingRows = useMemo(() => {
     const poByWoId = new Map();
     normalizedPurchaseOrders.forEach((po) => {
@@ -602,7 +574,6 @@ export default function PurchaseOrders() {
 
     const all = [...normalizedPurchaseOrders, ...synthetic];
 
-    // Only waiting-on-parts rows should show here
     return all.filter((row) => {
       const byLookup = row.workOrderId ? waitingWoIdSet.has(row.workOrderId) : false;
       const byText = isWaitingOnPartsText(row.workOrderStatus);
@@ -610,7 +581,6 @@ export default function PurchaseOrders() {
     });
   }, [normalizedPurchaseOrders, waitingWoIdSet, woMetaById]);
 
-  // Client-side search/filters
   const filteredPurchaseOrders = useMemo(() => {
     const q = (search || "").trim().toLowerCase();
     const base = combinedWaitingRows;
@@ -640,10 +610,8 @@ export default function PurchaseOrders() {
     });
   }, [combinedWaitingRows, search, supplierFilter, statusFilter]);
 
-  // Buttons styling
   const btnStyle = { minWidth: 140 };
 
-  // PDF modal: allow mark picked up whenever pdfPo exists AND its WO is still waiting on parts
   const pdfCanMarkPickedUp = useMemo(() => {
     if (!pdfPo) return false;
     const woId = firstNonNullish(pdfPo.workOrderId, pdfPo.work_order_id, pdfPo.woId, null);
@@ -660,7 +628,26 @@ export default function PurchaseOrders() {
 
   return (
     <div className="container mt-4">
-      <h2>Purchase Orders</h2>
+      {/* ✅ Blue gradient header box */}
+      <div
+        style={{
+          padding: "14px 14px 12px",
+          border: "1px solid #eef2f7",
+          borderRadius: 14,
+          background:
+            "linear-gradient(180deg, rgba(13, 110, 253, 0.16) 0%, rgba(13, 110, 253, 0.06) 100%)",
+          boxShadow: "0 6px 18px rgba(0, 0, 0, 0.06)",
+          marginBottom: 14,
+        }}
+      >
+        <div style={{ fontWeight: 900, fontSize: 22, color: "#0f172a", letterSpacing: "-0.02em" }}>
+          Purchase Orders
+        </div>
+        <div style={{ marginTop: 2, color: "rgba(15, 23, 42, 0.6)", fontSize: 13, fontWeight: 700 }}>
+          Showing all work orders in <b>Waiting on Parts</b> — mark “Picked Up” to move to{" "}
+          <b>{NEEDS_TO_BE_SCHEDULED}</b>.
+        </div>
+      </div>
 
       {/* Filters */}
       <div className="card mb-4">
@@ -717,11 +704,7 @@ export default function PurchaseOrders() {
                     <span className="badge text-bg-light" style={{ border: "1px solid #e5e7eb" }}>
                       Server filter: <b>{searchApplied}</b>
                     </span>
-                    <button
-                      type="button"
-                      className="btn btn-link btn-sm"
-                      onClick={() => setSearchApplied("")}
-                    >
+                    <button type="button" className="btn btn-link btn-sm" onClick={() => setSearchApplied("")}>
                       Clear server filter
                     </button>
                   </div>
@@ -757,9 +740,25 @@ export default function PurchaseOrders() {
       )}
 
       <div className="card">
-        <div className="card-header d-flex justify-content-between align-items-center">
-          <span>Purchase Orders List</span>
-          {loading && <span className="text-muted">Loading...</span>}
+        {/* ✅ Updated to match blue gradient header */}
+        <div
+          style={{
+            padding: "14px 14px 12px",
+            borderBottom: "1px solid rgba(15, 23, 42, 0.08)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            background:
+              "linear-gradient(180deg, rgba(13, 110, 253, 0.16) 0%, rgba(13, 110, 253, 0.06) 100%)",
+          }}
+        >
+          <div style={{ fontWeight: 900, color: "#0f172a", fontSize: 15, letterSpacing: "-0.01em" }}>
+            Purchase Orders List
+          </div>
+          {loading ? (
+            <div style={{ fontWeight: 800, color: "rgba(15, 23, 42, 0.6)", fontSize: 12 }}>Loading…</div>
+          ) : null}
         </div>
 
         <div className="card-body p-0">
@@ -833,7 +832,6 @@ export default function PurchaseOrders() {
                             View Work Order
                           </button>
 
-                          {/* ✅ FIX: show Mark Picked Up for ALL rows that are still Waiting on Parts */}
                           {stillWaiting && (
                             <button
                               type="button"
