@@ -1,270 +1,164 @@
 /* File: src/AddWorkOrder.css */
 
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-}
-
-/* =========================
-   Page shell
-========================= */
-.awo-page {
+.add-workorder-container {
   min-height: 100vh;
-  background: #f1f5f9;
-  padding: 22px 16px;
+  background-color: #F1F5F9;
+  padding: 2rem;
   box-sizing: border-box;
 }
 
-@media (min-width: 768px) {
-  .awo-page {
-    padding: 30px 24px;
-  }
-}
-
-.awo-shell {
-  max-width: 1100px;
-  margin: 0 auto;
-}
-
-/* =========================
-   Top bar
-========================= */
-.awo-topbar {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 14px;
-}
-
-@media (max-width: 640px) {
-  .awo-topbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-
-.awo-title {
-  margin: 0;
-  color: #0f172a;
-  font-size: 32px;
-  font-weight: 900;
-  letter-spacing: -0.02em;
-}
-
-.awo-subtitle {
-  margin-top: 4px;
-  color: rgba(15, 23, 42, 0.6);
-  font-size: 14px;
-}
-
-.awo-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.awo-actions .btn {
-  border-radius: 12px;
-  font-weight: 700;
-}
-
-/* =========================
-   Card
-========================= */
-.awo-card {
+.add-workorder-card {
   background: #ffffff;
-  border: 1px solid #eef2f7;
   border-radius: 14px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
-  overflow: hidden;
+  padding: 2rem;
+  max-width: 760px;
+  margin: 0 auto;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.25);
 }
 
-/* Blue header like ViewWorkOrder/Home */
-.awo-card-header {
-  padding: 14px 14px 12px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  background: linear-gradient(
-    180deg,
-    rgba(13, 110, 253, 0.16) 0%,
-    rgba(13, 110, 253, 0.06) 100%
-  );
+.add-workorder-title {
+  text-align: center;
+  color: #2563eb;
+  font-size: 1.85rem;
+  font-weight: 800;
+  margin-bottom: 1.25rem;
 }
 
-.awo-card-title {
-  font-weight: 900;
+.form-group {
+  margin-bottom: 1.1rem;
+}
+
+.form-label {
+  display: block;
+  font-weight: 700;
   color: #0f172a;
-  font-size: 15px;
-  letter-spacing: -0.01em;
+  margin-bottom: 0.45rem;
+  font-size: 0.95rem;
 }
 
-.awo-card-subtitle {
-  margin-top: 2px;
-  color: rgba(15, 23, 42, 0.6);
+.help-text {
+  display: block;
+  margin-top: 0.35rem;
+  color: #64748b;
+  font-size: 0.85rem;
+  line-height: 1.25;
+}
+
+.form-control-custom,
+.form-textarea-custom,
+.form-select-custom,
+.form-file-custom {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.55);
+  border-radius: 12px;
+  padding: 0.65rem 0.85rem;
+  box-sizing: border-box;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.05s ease;
+  background: #fff;
+  color: #0f172a;
+}
+
+.form-textarea-custom {
+  resize: vertical;
+}
+
+.form-control-custom:focus,
+.form-textarea-custom:focus,
+.form-select-custom:focus {
+  outline: none;
+  border-color: rgba(37, 99, 235, 0.9);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
+}
+
+.submit-btn {
+  background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+  color: #ffffff;
+  font-weight: 800;
+  width: 100%;
+  padding: 0.9rem;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.06s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  box-shadow: 0 10px 18px rgba(37, 99, 235, 0.22);
+  margin-top: 0.35rem;
+}
+
+.submit-btn:hover {
+  filter: brightness(1.02);
+  box-shadow: 0 12px 22px rgba(37, 99, 235, 0.28);
+}
+
+.submit-btn:active {
+  transform: translateY(1px);
+}
+
+.submit-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* =========================
+   ✅ File Chips
+========================= */
+.file-chip {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+}
+
+.file-chip-left {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.file-chip-name {
+  font-weight: 800;
+  font-size: 13px;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 520px;
+}
+
+.file-chip-meta {
   font-size: 12px;
+  color: #64748b;
 }
 
-.awo-pill {
+.file-chip-remove {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-weight: 900;
-  font-size: 12px;
-  color: #0d6efd;
-  background: rgba(13, 110, 253, 0.08);
-  border: 1px solid rgba(13, 110, 253, 0.22);
-  white-space: nowrap;
+  justify-content: center;
+  transition: transform 0.06s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
 
-/* =========================
-   Form sections
-========================= */
-.awo-form {
-  padding: 14px;
+.file-chip-remove:hover {
+  background: #f1f5f9;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.10);
 }
 
-.awo-section {
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 14px;
-  padding: 12px;
-  margin-bottom: 12px;
-  background: #ffffff;
-}
-
-.awo-section-title {
-  font-weight: 900;
-  color: rgba(15, 23, 42, 0.78);
-  font-size: 13px;
-  margin-bottom: 10px;
-  letter-spacing: -0.01em;
-}
-
-/* Grid helpers */
-.awo-grid {
-  display: grid;
-  gap: 12px;
-}
-
-.awo-grid-2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.awo-grid-3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-@media (max-width: 980px) {
-  .awo-grid-3 {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 820px) {
-  .awo-grid-2 {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Fields */
-.awo-field {
-  min-width: 0;
-}
-
-.awo-label {
-  display: block;
-  font-weight: 800;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.78);
-  margin-bottom: 6px;
-}
-
-.awo-req {
-  color: #dc2626;
-  font-weight: 900;
-}
-
-/* Inputs */
-.awo-input,
-.awo-select,
-.awo-textarea,
-.awo-file {
-  width: 100%;
-  border-radius: 12px;
-  border: 1px solid rgba(15, 23, 42, 0.14);
-  background: #ffffff;
-  padding: 10px 12px;
-  font-size: 14px;
-  color: #0f172a;
-  box-sizing: border-box;
-  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
-}
-
-.awo-textarea {
-  resize: vertical;
-  min-height: 110px;
-}
-
-.awo-file {
-  padding: 9px 10px;
-}
-
-.awo-input:focus,
-.awo-select:focus,
-.awo-textarea:focus {
-  outline: none;
-  border-color: rgba(13, 110, 253, 0.85);
-  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.18);
-}
-
-/* Static placeholder for hidden assign */
-.awo-static {
-  padding: 10px 12px;
-  border-radius: 12px;
-  border: 1px dashed rgba(15, 23, 42, 0.18);
-  color: rgba(15, 23, 42, 0.6);
-  background: rgba(15, 23, 42, 0.02);
-}
-
-/* Help text */
-.awo-help {
-  margin-top: 6px;
-  font-size: 12px;
-  color: rgba(15, 23, 42, 0.55);
-}
-
-/* Footer */
-.awo-footer {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  align-items: center;
-  padding: 4px 2px 2px;
-}
-
-.awo-footer .btn {
-  border-radius: 12px;
-  font-weight: 800;
-}
-
-.awo-submit {
-  min-width: 170px;
-}
-
-/* Small screens: stack buttons */
-@media (max-width: 640px) {
-  .awo-footer {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .awo-submit {
-    width: 100%;
-  }
+.file-chip-remove:active {
+  transform: translateY(1px);
 }

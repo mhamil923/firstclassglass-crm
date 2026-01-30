@@ -1,6 +1,5 @@
-// File: src/AddWorkOrder.js
-import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "./api";
 import "./AddWorkOrder.css";
 
@@ -33,6 +32,7 @@ function decodeRoleFromJWT() {
 }
 
 function toEndTimeFromStartISO(localDateTimeStr) {
+  // localDateTimeStr is from <input type="datetime-local"> e.g. "2025-11-02T08:00"
   if (!localDateTimeStr) return "";
   const [d, t] = localDateTimeStr.split("T");
   if (!d || !t) return "";
@@ -43,44 +43,79 @@ function toEndTimeFromStartISO(localDateTimeStr) {
   const end = new Date(start.getTime() + DEFAULT_WINDOW_MIN * 60000);
   const eh = String(end.getHours()).padStart(2, "0");
   const em = String(end.getMinutes()).padStart(2, "0");
-  return `${eh}:${em}`;
+  return `${eh}:${em}`; // "HH:mm"
+}
+
+function formatBytes(bytes) {
+  const n = Number(bytes || 0);
+  if (!n) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  const digits = i === 0 ? 0 : i === 1 ? 0 : 1;
+  return `${v.toFixed(digits)} ${units[i]}`;
+}
+
+function FileChip({ file, onRemove }) {
+  if (!file) return null;
+
+  return (
+    <div className="file-chip" title={file.name}>
+      <div className="file-chip-left">
+        <div className="file-chip-name">{file.name}</div>
+        <div className="file-chip-meta">
+          {file.type ? file.type : "file"} {file.size ? `• ${formatBytes(file.size)}` : ""}
+        </div>
+      </div>
+      <button
+        type="button"
+        className="file-chip-remove"
+        onClick={onRemove}
+        aria-label="Remove file"
+        title="Remove"
+      >
+        ×
+      </button>
+    </div>
+  );
 }
 
 export default function AddWorkOrder() {
   const navigate = useNavigate();
-  const location = useLocation();
   const role = decodeRoleFromJWT();
-
-  const fromPath = useMemo(() => {
-    // supports coming from anywhere (Work Orders, Calendar, History, etc.)
-    return location.state?.from || "/work-orders";
-  }, [location.state]);
 
   // ---- form state
   const [workOrder, setWorkOrder] = useState({
     customer: "",
     workOrderNumber: "",
     poNumber: "",
-    siteLocation: "",
-    siteAddress: "",
+    siteLocation: "", // name of the place (e.g., "Panda Express")
+    siteAddress: "", // street address (autocomplete)
     billingAddress: "",
     problemDescription: "",
     status: "Needs to be Scheduled",
     assignedTo: "",
     customerPhone: "",
     customerEmail: "",
-    scheduledDate: "",
+    scheduledDate: "", // "YYYY-MM-DDTHH:mm" (local time)
   });
 
-  const [pdfFile, setPdfFile] = useState(null);
-  const [estimatePdfFile, setEstimatePdfFile] = useState(null);
+  const [pdfFile, setPdfFile] = useState(null); // Work Order sign-off PDF
+  const [estimatePdfFile, setEstimatePdfFile] = useState(null); // Estimate PDF
   const [photoFile, setPhotoFile] = useState(null);
+
+  // ✅ for clearing native file inputs when removing chips
+  const pdfInputRef = useRef(null);
+  const estimateInputRef = useRef(null);
+  const photoInputRef = useRef(null);
 
   const [customers, setCustomers] = useState([]);
   const [techs, setTechs] = useState([]);
-
   const [submitting, setSubmitting] = useState(false);
-  const [loadingRefs, setLoadingRefs] = useState(false);
 
   // Autocomplete for Site Address
   const siteAddressInputRef = useRef(null);
@@ -89,33 +124,18 @@ export default function AddWorkOrder() {
 
   // ---------- load reference data
   useEffect(() => {
-    let mounted = true;
-    setLoadingRefs(true);
+    api
+      .get("/customers")
+      .then((r) => setCustomers(r.data || []))
+      .catch((e) => console.error("Error loading customers:", e));
 
-    Promise.allSettled([
-      api.get("/customers"),
-      api.get("/users", { params: { assignees: 1 } }),
-    ])
-      .then(([cRes, uRes]) => {
-        if (!mounted) return;
-
-        if (cRes.status === "fulfilled") setCustomers(cRes.value.data || []);
-        else console.error("Error loading customers:", cRes.reason);
-
-        if (uRes.status === "fulfilled") {
-          const list = (uRes.value.data || []).filter((u) => u.username !== "Mark");
-          setTechs(list);
-        } else {
-          console.error("Error loading assignees:", uRes.reason);
-        }
+    api
+      .get("/users", { params: { assignees: 1 } })
+      .then((r) => {
+        const list = (r.data || []).filter((u) => u.username !== "Mark");
+        setTechs(list);
       })
-      .finally(() => {
-        if (mounted) setLoadingRefs(false);
-      });
-
-    return () => {
-      mounted = false;
-    };
+      .catch((e) => console.error("Error loading assignees:", e));
   }, []);
 
   // ---------- auto-toggle status when picking a schedule
@@ -125,7 +145,7 @@ export default function AddWorkOrder() {
     }
   }, [workOrder.scheduledDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---------- Google Maps Autocomplete (Site Address only)
+  // ---------- Google Maps Autocomplete (for Site Address only)
   useEffect(() => {
     const key = (process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "").trim();
     if (!key) {
@@ -159,7 +179,6 @@ export default function AddWorkOrder() {
         initAutocomplete();
       })
       .catch((err) => console.error(err));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function initAutocomplete() {
@@ -174,7 +193,7 @@ export default function AddWorkOrder() {
       ac.addListener("place_changed", () => {
         const place = ac.getPlace();
         const addr = place?.formatted_address || place?.name || siteAddressInputRef.current.value;
-        setWorkOrder((prev) => ({ ...prev, siteAddress: addr }));
+        setWorkOrder((prev) => ({ ...prev, siteAddress: addr })); // fill address
       });
       autocompleteRef.current = ac;
     } catch (e) {
@@ -183,7 +202,9 @@ export default function AddWorkOrder() {
   }
 
   const handleSiteAddressFocus = () => {
-    if (!autocompleteRef.current) initAutocomplete();
+    if (!autocompleteRef.current) {
+      initAutocomplete();
+    }
   };
 
   const extractCustomerFromBilling = (addr) => {
@@ -206,6 +227,7 @@ export default function AddWorkOrder() {
       }
 
       if (name === "billingAddress") {
+        // Optional auto-fill of customer from the first line of billing address
         const first = extractCustomerFromBilling(value);
         const prevAuto = extractCustomerFromBilling(prev.billingAddress || "");
         if (!prev.customer || prev.customer === prevAuto) {
@@ -221,6 +243,20 @@ export default function AddWorkOrder() {
   const handleEstimateChange = (e) => setEstimatePdfFile(e.target.files?.[0] || null);
   const handlePhotoChange = (e) => setPhotoFile(e.target.files?.[0] || null);
 
+  // ✅ chip remove handlers (also clears the input so re-selecting same file works)
+  const removePdf = () => {
+    setPdfFile(null);
+    if (pdfInputRef.current) pdfInputRef.current.value = "";
+  };
+  const removeEstimatePdf = () => {
+    setEstimatePdfFile(null);
+    if (estimateInputRef.current) estimateInputRef.current.value = "";
+  };
+  const removePhoto = () => {
+    setPhotoFile(null);
+    if (photoInputRef.current) photoInputRef.current.value = "";
+  };
+
   const validate = () => {
     const missing = [];
     if (!workOrder.customer) missing.push("Customer");
@@ -233,6 +269,7 @@ export default function AddWorkOrder() {
     return true;
   };
 
+  // ---------- submit
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
@@ -241,25 +278,33 @@ export default function AddWorkOrder() {
     form.append("customer", workOrder.customer);
     form.append("workOrderNumber", workOrder.workOrderNumber || "");
     form.append("poNumber", workOrder.poNumber || "");
-    form.append("siteLocation", workOrder.siteLocation || "");
-    form.append("siteAddress", workOrder.siteAddress || "");
+    form.append("siteLocation", workOrder.siteLocation || ""); // name
+    form.append("siteAddress", workOrder.siteAddress || ""); // address
     form.append("billingAddress", workOrder.billingAddress);
     form.append("problemDescription", workOrder.problemDescription);
 
+    // If scheduled, force status = Scheduled so it appears on the calendar feed
     const willBeScheduled = !!workOrder.scheduledDate;
-    const statusToSend = willBeScheduled ? "Scheduled" : (workOrder.status || "Needs to be Scheduled");
+    const statusToSend = willBeScheduled
+      ? "Scheduled"
+      : workOrder.status || "Needs to be Scheduled";
     form.append("status", statusToSend);
 
     form.append("customerPhone", workOrder.customerPhone || "");
     form.append("customerEmail", workOrder.customerEmail || "");
     if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
 
+    // Send schedule fields
     if (workOrder.scheduledDate) {
+      // Server accepts "YYYY-MM-DDTHH:mm" or "YYYY-MM-DD HH:mm"
       form.append("scheduledDate", workOrder.scheduledDate);
-      const computedEnd = toEndTimeFromStartISO(workOrder.scheduledDate);
+
+      // Also provide an endTime (start + DEFAULT_WINDOW_MIN) so scheduledEnd is explicit
+      const computedEnd = toEndTimeFromStartISO(workOrder.scheduledDate); // "HH:mm"
       if (computedEnd) form.append("endTime", computedEnd);
     }
 
+    // Files — field names normalized by server (workorderpdf / estimatepdf)
     if (pdfFile) form.append("workOrderPdf", pdfFile);
     if (estimatePdfFile) form.append("estimatePdf", estimatePdfFile);
     if (photoFile) form.append("photoFile", photoFile);
@@ -270,13 +315,12 @@ export default function AddWorkOrder() {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
+      // If we scheduled it here, go straight to the calendar so it's visible immediately
       if (willBeScheduled) navigate("/calendar");
       else navigate("/work-orders");
     } catch (err) {
       const msg =
-        err?.response?.data?.error ||
-        err?.message ||
-        "Failed to save — check server logs";
+        err?.response?.data?.error || err?.message || "Failed to save — check server logs";
       console.error("⚠️ Error adding work order:", err);
       alert(msg);
     } finally {
@@ -285,288 +329,233 @@ export default function AddWorkOrder() {
   };
 
   return (
-    <div className="awo-page">
-      <div className="awo-shell">
-        <div className="awo-topbar">
-          <div style={{ minWidth: 0 }}>
-            <h2 className="awo-title">Add Work Order</h2>
-            <div className="awo-subtitle">Create a new work order (PDFs/photos optional).</div>
-          </div>
+    <div className="add-workorder-container">
+      <form className="add-workorder-card" onSubmit={handleSubmit}>
+        <h2 className="add-workorder-title">Add Work Order</h2>
 
-          <div className="awo-actions">
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => navigate(fromPath)}
-            >
-              Back
-            </button>
-
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => navigate("/work-orders")}
-            >
-              Work Orders
-            </button>
-          </div>
+        {/* Customer */}
+        <div className="form-group">
+          <label className="form-label">Customer Name</label>
+          <input
+            name="customer"
+            list="customers-list"
+            value={workOrder.customer}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="Customer name"
+            autoComplete="off"
+          />
+          <datalist id="customers-list">
+            {customers.map((c) => (
+              <option key={c.id} value={c.name} />
+            ))}
+          </datalist>
         </div>
 
-        <div className="awo-card">
-          <div className="awo-card-header">
-            <div>
-              <div className="awo-card-title">Work Order Details</div>
-              <div className="awo-card-subtitle">
-                Required: Customer, Billing Address, Problem Description.
-              </div>
-            </div>
-            {loadingRefs ? <span className="awo-pill">Loading lists…</span> : null}
-          </div>
-
-          <form className="awo-form" onSubmit={handleSubmit}>
-            {/* ===== Identity / Contact ===== */}
-            <div className="awo-section">
-              <div className="awo-section-title">Customer</div>
-
-              <div className="awo-grid awo-grid-2">
-                <div className="awo-field">
-                  <label className="awo-label">Customer Name <span className="awo-req">*</span></label>
-                  <input
-                    name="customer"
-                    list="customers-list"
-                    value={workOrder.customer}
-                    onChange={handleChange}
-                    className="awo-input"
-                    placeholder="Customer name"
-                    autoComplete="off"
-                  />
-                  <datalist id="customers-list">
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.name} />
-                    ))}
-                  </datalist>
-                </div>
-
-                {role !== "tech" ? (
-                  <div className="awo-field">
-                    <label className="awo-label">Assign To</label>
-                    <select
-                      name="assignedTo"
-                      value={workOrder.assignedTo}
-                      onChange={handleChange}
-                      className="awo-select"
-                    >
-                      <option value="">— Unassigned —</option>
-                      {techs.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.username}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : (
-                  <div className="awo-field">
-                    <label className="awo-label">Assign To</label>
-                    <div className="awo-static">Tech login — assignment hidden</div>
-                  </div>
-                )}
-              </div>
-
-              <div className="awo-grid awo-grid-2">
-                <div className="awo-field">
-                  <label className="awo-label">Customer Phone (optional)</label>
-                  <input
-                    name="customerPhone"
-                    value={workOrder.customerPhone}
-                    onChange={handleChange}
-                    className="awo-input"
-                    placeholder="(###) ###-####"
-                  />
-                </div>
-
-                <div className="awo-field">
-                  <label className="awo-label">Customer Email (optional)</label>
-                  <input
-                    name="customerEmail"
-                    type="email"
-                    value={workOrder.customerEmail}
-                    onChange={handleChange}
-                    className="awo-input"
-                    placeholder="name@example.com"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* ===== Identifiers ===== */}
-            <div className="awo-section">
-              <div className="awo-section-title">Identifiers</div>
-
-              <div className="awo-grid awo-grid-2">
-                <div className="awo-field">
-                  <label className="awo-label">Work Order #</label>
-                  <input
-                    name="workOrderNumber"
-                    value={workOrder.workOrderNumber}
-                    onChange={handleChange}
-                    className="awo-input"
-                    placeholder="Optional at creation"
-                  />
-                </div>
-
-                <div className="awo-field">
-                  <label className="awo-label">PO # (optional)</label>
-                  <input
-                    name="poNumber"
-                    value={workOrder.poNumber}
-                    onChange={handleChange}
-                    className="awo-input"
-                    placeholder="Enter PO number if available"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* ===== Site ===== */}
-            <div className="awo-section">
-              <div className="awo-section-title">Site</div>
-
-              <div className="awo-grid awo-grid-2">
-                <div className="awo-field">
-                  <label className="awo-label">Site Location (Name)</label>
-                  <input
-                    name="siteLocation"
-                    value={workOrder.siteLocation}
-                    onChange={handleChange}
-                    className="awo-input"
-                    placeholder="Business / Building / Suite name"
-                    autoComplete="off"
-                  />
-                </div>
-
-                <div className="awo-field">
-                  <label className="awo-label">Site Address</label>
-                  <input
-                    name="siteAddress"
-                    ref={siteAddressInputRef}
-                    value={workOrder.siteAddress}
-                    onChange={handleChange}
-                    onFocus={handleSiteAddressFocus}
-                    placeholder="Start typing address…"
-                    className="awo-input"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* ===== Billing + Problem ===== */}
-            <div className="awo-section">
-              <div className="awo-section-title">Details</div>
-
-              <div className="awo-grid awo-grid-2">
-                <div className="awo-field">
-                  <label className="awo-label">Billing Address <span className="awo-req">*</span></label>
-                  <textarea
-                    name="billingAddress"
-                    rows={4}
-                    value={workOrder.billingAddress}
-                    onChange={handleChange}
-                    className="awo-textarea"
-                    placeholder={"Company / Name\nStreet\nCity, ST ZIP"}
-                  />
-                </div>
-
-                <div className="awo-field">
-                  <label className="awo-label">Problem Description <span className="awo-req">*</span></label>
-                  <textarea
-                    name="problemDescription"
-                    rows={4}
-                    value={workOrder.problemDescription}
-                    onChange={handleChange}
-                    className="awo-textarea"
-                    placeholder="Describe the issue…"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* ===== Scheduling ===== */}
-            <div className="awo-section">
-              <div className="awo-section-title">Scheduling</div>
-
-              <div className="awo-grid awo-grid-2">
-                <div className="awo-field">
-                  <label className="awo-label">Status</label>
-                  <select
-                    name="status"
-                    value={workOrder.status}
-                    onChange={handleChange}
-                    className="awo-select"
-                  >
-                    {STATUS_LIST.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="awo-help">
-                    If you set a Scheduled Date &amp; Time, status will be saved as <strong>Scheduled</strong>.
-                  </div>
-                </div>
-
-                <div className="awo-field">
-                  <label className="awo-label">Scheduled Date &amp; Time</label>
-                  <input
-                    type="datetime-local"
-                    name="scheduledDate"
-                    value={workOrder.scheduledDate}
-                    onChange={handleChange}
-                    className="awo-input"
-                  />
-                  <div className="awo-help">
-                    Default window: <strong>{DEFAULT_WINDOW_MIN} minutes</strong> (adjust later in Calendar).
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* ===== Uploads ===== */}
-            <div className="awo-section">
-              <div className="awo-section-title">Attachments</div>
-
-              <div className="awo-grid awo-grid-3">
-                <div className="awo-field">
-                  <label className="awo-label">Work Order PDF</label>
-                  <input type="file" accept="application/pdf" onChange={handlePdfChange} className="awo-file" />
-                  <div className="awo-help">Sign-off sheet / work order packet.</div>
-                </div>
-
-                <div className="awo-field">
-                  <label className="awo-label">Estimate PDF</label>
-                  <input type="file" accept="application/pdf" onChange={handleEstimateChange} className="awo-file" />
-                  <div className="awo-help">Shows under <strong>Estimates</strong> on the Work Order.</div>
-                </div>
-
-                <div className="awo-field">
-                  <label className="awo-label">Photo</label>
-                  <input type="file" accept="image/*" onChange={handlePhotoChange} className="awo-file" />
-                  <div className="awo-help">Optional site photo / reference.</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="awo-footer">
-              <button type="button" className="btn btn-outline-secondary" onClick={() => navigate(fromPath)}>
-                Cancel
-              </button>
-
-              <button type="submit" className="btn btn-primary awo-submit" disabled={submitting}>
-                {submitting ? "Saving…" : "Add Work Order"}
-              </button>
-            </div>
-          </form>
+        {/* Optional contact info */}
+        <div className="form-group">
+          <label className="form-label">Customer Phone (optional)</label>
+          <input
+            name="customerPhone"
+            value={workOrder.customerPhone}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="(###) ###-####"
+          />
         </div>
-      </div>
+
+        <div className="form-group">
+          <label className="form-label">Customer Email (optional)</label>
+          <input
+            name="customerEmail"
+            type="email"
+            value={workOrder.customerEmail}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="name@example.com"
+          />
+        </div>
+
+        {/* Assign tech (hidden for tech role) */}
+        {role !== "tech" && (
+          <div className="form-group">
+            <label className="form-label">Assign To</label>
+            <select
+              name="assignedTo"
+              value={workOrder.assignedTo}
+              onChange={handleChange}
+              className="form-select-custom"
+            >
+              <option value="">— Unassigned —</option>
+              {techs.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.username}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Work Order Number */}
+        <div className="form-group">
+          <label className="form-label">Work Order #</label>
+          <input
+            name="workOrderNumber"
+            value={workOrder.workOrderNumber}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="Optional at creation"
+          />
+        </div>
+
+        {/* PO Number */}
+        <div className="form-group">
+          <label className="form-label">PO # (optional)</label>
+          <input
+            name="poNumber"
+            value={workOrder.poNumber}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="Enter PO number if available"
+          />
+        </div>
+
+        {/* Site Location (Name) */}
+        <div className="form-group">
+          <label className="form-label">Site Location (Name)</label>
+          <input
+            name="siteLocation"
+            value={workOrder.siteLocation}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="Business / Building / Suite name (e.g., Panda Express)"
+            autoComplete="off"
+          />
+        </div>
+
+        {/* Site Address (Autocomplete) */}
+        <div className="form-group">
+          <label className="form-label">Site Address</label>
+          <input
+            name="siteAddress"
+            ref={siteAddressInputRef}
+            value={workOrder.siteAddress}
+            onChange={handleChange}
+            onFocus={handleSiteAddressFocus}
+            placeholder="Start typing address…"
+            className="form-control-custom"
+          />
+        </div>
+
+        {/* Billing Address */}
+        <div className="form-group">
+          <label className="form-label">Billing Address</label>
+          <textarea
+            name="billingAddress"
+            rows={3}
+            value={workOrder.billingAddress}
+            onChange={handleChange}
+            className="form-textarea-custom"
+            placeholder={"Company / Name\nStreet\nCity, ST ZIP"}
+          />
+        </div>
+
+        {/* Problem Description */}
+        <div className="form-group">
+          <label className="form-label">Problem Description</label>
+          <textarea
+            name="problemDescription"
+            rows={4}
+            value={workOrder.problemDescription}
+            onChange={handleChange}
+            className="form-textarea-custom"
+            placeholder="Describe the issue…"
+          />
+        </div>
+
+        {/* Status */}
+        <div className="form-group">
+          <label className="form-label">Status</label>
+          <select
+            name="status"
+            value={workOrder.status}
+            onChange={handleChange}
+            className="form-select-custom"
+          >
+            {STATUS_LIST.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <small className="help-text">
+            If you set a Scheduled Date &amp; Time below, status will be saved as{" "}
+            <strong>Scheduled</strong> so it appears on the Calendar.
+          </small>
+        </div>
+
+        {/* Scheduled Date & Time */}
+        <div className="form-group">
+          <label className="form-label">Scheduled Date & Time</label>
+          <input
+            type="datetime-local"
+            name="scheduledDate"
+            value={workOrder.scheduledDate}
+            onChange={handleChange}
+            className="form-control-custom"
+            placeholder="mm/dd/yyyy, --:-- --"
+          />
+          <small className="help-text">
+            Calendar window defaults to {DEFAULT_WINDOW_MIN} minutes. You can adjust later from the
+            Calendar.
+          </small>
+        </div>
+
+        {/* Uploads */}
+        <div className="form-group">
+          <label className="form-label">Upload Work Order PDF</label>
+          <input
+            ref={pdfInputRef}
+            type="file"
+            accept="application/pdf"
+            onChange={handlePdfChange}
+            className="form-file-custom"
+          />
+          <FileChip file={pdfFile} onRemove={removePdf} />
+        </div>
+
+        {/* Upload Estimate PDF */}
+        <div className="form-group">
+          <label className="form-label">Upload Estimate PDF</label>
+          <input
+            ref={estimateInputRef}
+            type="file"
+            accept="application/pdf"
+            onChange={handleEstimateChange}
+            className="form-file-custom"
+          />
+          <small className="help-text">
+            This will appear under <strong>Estimates</strong> on the Work Order.
+          </small>
+          <FileChip file={estimatePdfFile} onRemove={removeEstimatePdf} />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Upload Photo</label>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handlePhotoChange}
+            className="form-file-custom"
+          />
+          <FileChip file={photoFile} onRemove={removePhoto} />
+        </div>
+
+        <button type="submit" className="submit-btn" disabled={submitting}>
+          {submitting ? "Saving..." : "Add Work Order"}
+        </button>
+      </form>
     </div>
   );
 }
