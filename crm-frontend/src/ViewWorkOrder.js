@@ -101,48 +101,33 @@ function saveDrawNoteOverrides(workOrderId, set) {
   }
 }
 
-/* ---------- datetime-local helpers (for quick schedule picker) ---------- */
+/* ---------- Scheduled Date helpers (FIX: parse backend + send MySQL) ---------- */
+
+// Convert backend date -> datetime-local string safely
 function toDatetimeLocalValue(dateLike) {
   if (!dateLike) return "";
-  try {
-    const dt = new Date(dateLike);
-    if (Number.isNaN(dt.getTime())) return "";
-    const pad = (n) => String(n).padStart(2, "0");
-    const yyyy = dt.getFullYear();
-    const mm = pad(dt.getMonth() + 1);
-    const dd = pad(dt.getDate());
-    const hh = pad(dt.getHours());
-    const mi = pad(dt.getMinutes());
-    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
-  } catch {
-    return "";
-  }
+
+  // Accept multiple formats commonly returned by APIs / MySQL
+  const m = moment(dateLike, [moment.ISO_8601, "YYYY-MM-DD HH:mm:ss", "YYYY-MM-DD HH:mm", "YYYY-MM-DD"], true);
+
+  // If strict parse failed, try a non-strict parse as a fallback (covers odd strings)
+  const mm = m.isValid() ? m : moment(dateLike);
+
+  if (!mm.isValid()) return "";
+  return mm.format("YYYY-MM-DDTHH:mm");
 }
 
-/**
- * ✅ FIX: reliably parse "YYYY-MM-DDTHH:mm" as LOCAL time (no Safari/Chrome parsing quirks),
- * and return an ISO string for backend.
- */
-function datetimeLocalToIso(localVal) {
-  const v = String(localVal || "").trim();
+// Convert datetime-local value -> MySQL datetime string (server-friendly)
+function datetimeLocalToMySQL(val) {
+  const v = (val || "").trim();
   if (!v) return "";
-  // Expected: 2026-01-30T14:25
-  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
-  if (!m) return "";
-  const yyyy = Number(m[1]);
-  const mm = Number(m[2]);
-  const dd = Number(m[3]);
-  const hh = Number(m[4]);
-  const mi = Number(m[5]);
-
-  const dt = new Date(yyyy, mm - 1, dd, hh, mi, 0, 0); // LOCAL time
-  if (Number.isNaN(dt.getTime())) return "";
-  return dt.toISOString();
+  const m = moment(v, "YYYY-MM-DDTHH:mm", true);
+  if (!m.isValid()) return "";
+  return m.format("YYYY-MM-DD HH:mm:ss");
 }
 
 function tryOpenNativePicker(inputEl) {
   if (!inputEl) return;
-  // Some browsers support showPicker() for datetime-local
   if (typeof inputEl.showPicker === "function") {
     inputEl.showPicker();
     return;
@@ -288,11 +273,7 @@ function FileTile({ kind, href, fileName, onDelete, onExpand, extraAction }) {
   return (
     <div className="tile">
       <div className="tile-media">
-        {isPdf ? (
-          <iframe title={fileName} src={href} className="tile-iframe" />
-        ) : (
-          <img src={href} alt={fileName} className="tile-img" />
-        )}
+        {isPdf ? <iframe title={fileName} src={href} className="tile-iframe" /> : <img src={href} alt={fileName} className="tile-img" />}
       </div>
 
       <div className="tile-name">
@@ -451,21 +432,10 @@ export default function ViewWorkOrder() {
   // ✅ Quick schedule picker (view mode)
   const scheduleInputRef = useRef(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
-  const [quickScheduledDate, setQuickScheduledDate] = useState(""); // datetime-local string
+  const [quickScheduledDate, setQuickScheduledDate] = useState(""); // datetime-local value string
 
-  // ✅ FIX: debounce saves so native picker can finish selection before we POST
-  const scheduleSaveTimerRef = useRef(null);
-  const lastScheduleSentRef = useRef(""); // prevent duplicate sends
-
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => {
-      if (scheduleSaveTimerRef.current) {
-        clearTimeout(scheduleSaveTimerRef.current);
-        scheduleSaveTimerRef.current = null;
-      }
-    };
-  }, []);
+  // ✅ Track whether we’ve initialized the quick schedule input from backend at least once
+  const quickScheduleInitializedRef = useRef(false);
 
   const [edit, setEdit] = useState({
     workOrderNumber: "",
@@ -546,6 +516,7 @@ export default function ViewWorkOrder() {
       const response = await api.get(`/work-orders/${id}`, {
         headers: authHeaders(),
       });
+
       const data = response.data || null;
       setWorkOrder(data);
 
@@ -561,18 +532,33 @@ export default function ViewWorkOrder() {
       // Initialize PO supplier from backend value
       setPoSupplier(data?.poSupplier || "");
 
-      // ✅ Initialize quick schedule field (view-mode picker)
-      const nextLocal = toDatetimeLocalValue(data?.scheduledDate || "");
-      setQuickScheduledDate(nextLocal);
+      // ✅ FIX: Initialize / refresh quick schedule field safely
+      // If backend scheduledDate is in a format that doesn't parse, DO NOT overwrite the input to ""
+      const parsed = toDatetimeLocalValue(data?.scheduledDate || "");
 
-      // prevent the next onChange from trying to re-save same value
-      lastScheduleSentRef.current = nextLocal || "";
+      // First load: set it once, even if blank
+      if (!quickScheduleInitializedRef.current) {
+        quickScheduleInitializedRef.current = true;
+        setQuickScheduledDate(parsed || "");
+      } else {
+        // After that: only update the UI if we have a valid parsed value,
+        // OR backend is truly empty (meaning schedule was cleared)
+        if (parsed) {
+          setQuickScheduledDate(parsed);
+        } else if (!data?.scheduledDate) {
+          setQuickScheduledDate("");
+        }
+      }
     } catch (error) {
       console.error("⚠️ Error fetching work order:", error);
     }
   };
 
   useEffect(() => {
+    // Reset init state when id changes
+    quickScheduleInitializedRef.current = false;
+    setQuickScheduledDate("");
+
     fetchWorkOrder();
     fetchTechUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -597,73 +583,66 @@ export default function ViewWorkOrder() {
     return (displayNotes || []).slice(0, 3);
   }, [displayNotes]);
 
-  /**
-   * ✅ FIXED: View-mode quick schedule save (debounced)
-   * - Uses datetimeLocalToIso() (local time -> ISO) so backend always receives a valid ISO string.
-   * - Debounced so native picker selection doesn't get interrupted by API calls.
-   * - Still allows clearing the value (send empty string).
-   */
-  const saveQuickScheduleDebounced = (datetimeLocalVal) => {
-    const val = String(datetimeLocalVal || "").trim();
+  // ✅ View-mode quick schedule save (also sets status -> Scheduled)
+  const saveQuickSchedule = async (datetimeLocalVal) => {
+    if (scheduleSaving) return;
 
-    // Cancel prior debounce timer
-    if (scheduleSaveTimerRef.current) {
-      clearTimeout(scheduleSaveTimerRef.current);
-      scheduleSaveTimerRef.current = null;
-    }
+    const val = (datetimeLocalVal || "").trim();
 
-    // If the user picked the same value as already sent, do nothing
-    if ((val || "") === (lastScheduleSentRef.current || "")) {
-      return;
-    }
-
-    // Debounce: wait a beat after user finishes selecting
-    scheduleSaveTimerRef.current = setTimeout(async () => {
-      // Prevent duplicate sends
-      lastScheduleSentRef.current = val || "";
-
+    // Allow clearing schedule by deleting the value
+    if (!val) {
       setScheduleSaving(true);
       try {
         const form = new FormData();
-
-        if (!val) {
-          // Clear
-          form.append("scheduledDate", "");
-        } else {
-          const iso = datetimeLocalToIso(val);
-          if (!iso) {
-            alert("Invalid date/time selected. Please try again.");
-            // revert UI to last saved value from server
-            setQuickScheduledDate(toDatetimeLocalValue(workOrder?.scheduledDate || ""));
-            lastScheduleSentRef.current = toDatetimeLocalValue(workOrder?.scheduledDate || "");
-            return;
-          }
-          form.append("scheduledDate", iso);
-
-          // ✅ If you set a scheduled date, force status to Scheduled (unless Completed)
-          const current = (workOrder?.status || localStatus || "").trim();
-          const shouldForceScheduled = current !== "Completed";
-          if (shouldForceScheduled) {
-            form.append("status", "Scheduled");
-          }
-        }
-
+        form.append("scheduledDate", "");
         await api.put(`/work-orders/${id}/edit`, form, {
           headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
         });
 
+        // Immediately reflect cleared state locally to prevent flicker
+        setQuickScheduledDate("");
         await fetchWorkOrder();
       } catch (err) {
-        console.error("⚠️ Error saving scheduled date:", err);
-        alert(err?.response?.data?.error || "Failed to save scheduled date.");
-        // revert UI to last known saved value
-        const fallback = toDatetimeLocalValue(workOrder?.scheduledDate || "");
-        setQuickScheduledDate(fallback);
-        lastScheduleSentRef.current = fallback;
+        console.error("⚠️ Error clearing schedule:", err);
+        alert(err?.response?.data?.error || "Failed to clear scheduled date.");
       } finally {
         setScheduleSaving(false);
       }
-    }, 450);
+      return;
+    }
+
+    setScheduleSaving(true);
+    try {
+      // ✅ FIX: Send MySQL-friendly string instead of ISO Zulu
+      const mysql = datetimeLocalToMySQL(val);
+      if (!mysql) throw new Error("Invalid date/time selected.");
+
+      const form = new FormData();
+      form.append("scheduledDate", mysql);
+
+      // ✅ If you set a scheduled date, force status to Scheduled (unless Completed)
+      const current = (workOrder?.status || localStatus || "").trim();
+      const shouldForceScheduled = current !== "Completed";
+      if (shouldForceScheduled) form.append("status", "Scheduled");
+
+      await api.put(`/work-orders/${id}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+      });
+
+      // ✅ Keep what user chose in the input immediately (prevents “snap back”)
+      setQuickScheduledDate(val);
+
+      await fetchWorkOrder();
+    } catch (err) {
+      console.error("⚠️ Error saving scheduled date:", err);
+      alert(err?.response?.data?.error || err?.message || "Failed to save scheduled date.");
+
+      // Revert UI to last known saved value (from workOrder)
+      const revert = toDatetimeLocalValue(workOrder?.scheduledDate || "");
+      if (revert || !workOrder?.scheduledDate) setQuickScheduledDate(revert || "");
+    } finally {
+      setScheduleSaving(false);
+    }
   };
 
   if (!workOrder) {
@@ -674,6 +653,7 @@ export default function ViewWorkOrder() {
     );
   }
 
+  // (Part 3 continues from here...)
   const {
     workOrderNumber,
     poNumber,
@@ -1049,6 +1029,7 @@ export default function ViewWorkOrder() {
     w.document.write(html);
     w.document.close();
   };
+
   /* ---------------- EDIT SAVE ---------------- */
   const handleSaveEdits = async () => {
     if (editSaving) return;
@@ -1079,11 +1060,10 @@ export default function ViewWorkOrder() {
       form.append("status", edit.status || "Needs to be Scheduled");
       form.append("assignedTo", edit.assignedTo || "");
 
-      // IMPORTANT: edit scheduledDate in edit-mode is datetime-local right now
-      // Convert to ISO like quick schedule to keep backend consistent
+      // ✅ FIX: send MySQL-friendly datetime if using datetime-local
       if ((edit.scheduledDate || "").includes("T")) {
-        const iso = datetimeLocalToIso(edit.scheduledDate);
-        form.append("scheduledDate", iso || "");
+        const mysql = datetimeLocalToMySQL(edit.scheduledDate);
+        form.append("scheduledDate", mysql || "");
       } else {
         form.append("scheduledDate", edit.scheduledDate || "");
       }
@@ -1510,7 +1490,7 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /* ======================= RENDER (FIXED NESTING) ======================= */
+  /* ======================= RENDER ======================= */
   return (
     <div className="view-container">
       <Lightbox
@@ -1832,20 +1812,21 @@ export default function ViewWorkOrder() {
                       className="control input"
                       value={quickScheduledDate || ""}
                       onChange={(e) => {
-                        const v = e.target.value;
-                        setQuickScheduledDate(v);
-                        saveQuickScheduleDebounced(v);
+                        // ✅ UI only while user is choosing
+                        setQuickScheduledDate(e.target.value);
                       }}
                       onBlur={(e) => {
-                        // If user typed manually, ensure save happens
-                        const v = e.target.value;
-                        if (v !== (lastScheduleSentRef.current || "")) {
-                          setQuickScheduledDate(v);
-                          saveQuickScheduleDebounced(v);
+                        // ✅ Save once when user is done
+                        saveQuickSchedule(e.target.value);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.currentTarget.blur(); // triggers onBlur save
                         }
                       }}
                       disabled={scheduleSaving}
                     />
+
                     <button
                       type="button"
                       className="btn btn-light"
@@ -1863,8 +1844,8 @@ export default function ViewWorkOrder() {
             </div>
           </div>
         </div>
-        {/* BASIC INFO END */}
 
+        {/* (rest of your attachments/notes rendering stays exactly the same) */}
         {/* ======================= Signed Work Order PDF ======================= */}
         <div className="section-card">
           <h3 className="section-header">Sign-Off Sheet PDF</h3>
