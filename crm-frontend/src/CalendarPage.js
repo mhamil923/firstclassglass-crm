@@ -468,6 +468,7 @@ StackedWeekView.title = (date, { localizer: loc }) => {
   const end = moment(date).endOf("week").toDate();
   return loc.format({ start, end }, "dayRangeHeaderFormat");
 };
+
 export default function WorkOrderCalendar() {
   // Full work order list (for search in the Unscheduled bar)
   const [allOrders, setAllOrders] = useState([]);
@@ -507,9 +508,6 @@ export default function WorkOrderCalendar() {
 
   /* ============================================================
      ✅ DRAG-SCROLL (FAST + PAGE FIRST)
-     Fix 1: scroll speed increased ~2x+ and feels much faster.
-     Fix 2: do NOT clear dragItem on page-level drop/dragend
-            before RBC receives the drop. That broke scheduling.
   ============================================================ */
   const pageRootRef = useRef(null);
 
@@ -1077,10 +1075,6 @@ export default function WorkOrderCalendar() {
     <div
       ref={pageRootRef}
       className="calendar-page"
-      // ✅ DO NOT clear dragItem here — it can fire before RBC gets the drop.
-      // We only clear in:
-      //  - handleDropFromOutside (success)
-      //  - unscheduled item onDragEnd (actual drag end)
       onDragOver={(e) => {
         if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
         if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
@@ -1153,9 +1147,7 @@ export default function WorkOrderCalendar() {
                   key={order.id}
                   className="unscheduled-item"
                   draggable
-                  // ✅ Drag start sets BOTH state + ref, and sets dataTransfer for browser compatibility
                   onDragStart={(e) => beginGlobalDrag(order, e)}
-                  // ✅ Only clear drag item when drag actually ends
                   onDragEnd={endGlobalDrag}
                   title={`${customerLabel} — ${idLabel}`}
                 >
@@ -1186,7 +1178,6 @@ export default function WorkOrderCalendar() {
                     </div>
                   ) : null}
 
-                  {/* ✅ prevent buttons from messing with drag start */}
                   <div
                     className="unscheduled-actions"
                     onMouseDown={(e) => e.stopPropagation()}
@@ -1228,14 +1219,11 @@ export default function WorkOrderCalendar() {
         <div
           className="calendar-container"
           onDragOver={(e) => {
-            // ✅ Required for external drops in many browsers
             e.preventDefault();
             if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
             if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
           }}
           onDrop={(e) => {
-            // ✅ Don't clear drag item here; RBC will handle drop.
-            // Prevent browser from opening dragged "text/plain"
             e.preventDefault();
           }}
         >
@@ -1250,7 +1238,6 @@ export default function WorkOrderCalendar() {
             max={moment().startOf("day").add(21, "hours").toDate()}
             selectable
             draggableAccessor={() => true}
-            // ✅ CRITICAL: return the ref value so RBC always gets the item
             dragFromOutsideItem={() => dragItemRef.current}
             onDropFromOutside={handleDropFromOutside}
             onEventDrop={handleEventDrop}
@@ -1463,17 +1450,33 @@ export default function WorkOrderCalendar() {
                     </div>
                   </div>
 
-                  <div className="d-flex justify-content-end mt-3">
+                  {/* ✅ UPDATED: added "View Work Order" button */}
+                  <div className="d-flex justify-content-between align-items-center mt-3">
                     <button
-                      className="btn btn-outline-danger me-2"
-                      onClick={() => unschedule(editOrder.id)}
+                      className="btn btn-outline-secondary"
+                      onClick={() => {
+                        const id = editOrder?.id;
+                        if (!id) return;
+                        setEditModalOpen(false);
+                        navigateToView(id);
+                      }}
                       type="button"
                     >
-                      Unschedule
+                      View Work Order
                     </button>
-                    <button className="btn btn-primary" onClick={saveEditModal} type="button">
-                      Save
-                    </button>
+
+                    <div className="d-flex justify-content-end">
+                      <button
+                        className="btn btn-outline-danger me-2"
+                        onClick={() => unschedule(editOrder.id)}
+                        type="button"
+                      >
+                        Unschedule
+                      </button>
+                      <button className="btn btn-primary" onClick={saveEditModal} type="button">
+                        Save
+                      </button>
+                    </div>
                   </div>
                 </>
               )}
