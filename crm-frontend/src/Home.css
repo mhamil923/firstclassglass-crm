@@ -1,6 +1,5 @@
 /* File: src/Home.css */
 
-/* Let the app fill the viewport */
 html,
 body,
 #root {
@@ -13,7 +12,7 @@ body,
 ========================= */
 .home-page {
   min-height: 100vh;
-  background: #f1f5f9; /* slate-100 */
+  background: #f1f5f9;
   padding: 22px 16px;
   box-sizing: border-box;
 }
@@ -49,7 +48,7 @@ body,
 
 .home-title {
   margin: 0;
-  color: #0f172a; /* slate-900 */
+  color: #0f172a;
   font-size: 32px;
   font-weight: 800;
   letter-spacing: -0.02em;
@@ -73,7 +72,7 @@ body,
   font-weight: 700;
 }
 
-/* “ghost” button (used on notes card) */
+/* Ghost button */
 .btn.btn-ghost {
   background: transparent;
   border: 1px solid rgba(15, 23, 42, 0.14);
@@ -176,7 +175,7 @@ body,
   grid-column: 1 / -1;
 }
 
-/* ✅ Card header now uses the BLUE instead of navy */
+/* Blue header */
 .home-card-header {
   padding: 14px 14px 12px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
@@ -201,7 +200,7 @@ body,
 
 .home-card-subtitle {
   margin-top: 2px;
-  color: rgba(15, 23, 42, 0.60);
+  color: rgba(15, 23, 42, 0.6);
   font-size: 12px;
 }
 
@@ -209,9 +208,18 @@ body,
   flex: 0 0 auto;
 }
 
-/* Card body areas */
+/* =========================
+   Notes inner frame (YOUR REQUEST)
+   - Adds a thin white "border/frame" around the notes content
+   - Leaves the header area untouched
+========================= */
+.notes-body {
+  padding: 12px;            /* creates the white gutter so notes never touch edges */
+  background: #ffffff;      /* the “white frame” */
+}
+
 .notes-list {
-  padding: 12px 14px 14px;
+  /* keep list spacing inside the frame */
 }
 
 .home-empty {
@@ -305,14 +313,14 @@ body,
 }
 
 /* =========================
-   Tables (updated header color)
+   Tables
 ========================= */
 .home-table {
   margin: 0;
 }
 
 .home-table thead th {
-  background: #0d6efd !important; /* ✅ blue */
+  background: #0d6efd !important;
   color: #ffffff !important;
   border: none !important;
   padding: 12px 12px !important;
@@ -344,9 +352,9 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
-/* ✅ Problem cell scroll box (Agenda only) */
+/* Problem cell scroll box (Agenda only) */
 .problem-scroll {
-  max-height: 110px;              /* controls how tall a row can get */
+  max-height: 110px;
   overflow: auto;
   padding: 8px 10px;
   border-radius: 10px;
@@ -357,7 +365,6 @@ body,
   white-space: pre-wrap;
 }
 
-/* nicer scrollbar (webkit) */
 .problem-scroll::-webkit-scrollbar {
   width: 10px;
 }

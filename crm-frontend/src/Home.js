@@ -3,7 +3,7 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import api from "./api";
 import moment from "moment";
 import Table from "react-bootstrap/Table";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import "./Home.css";
 
 const REFRESH_MS = 60_000; // auto-refresh orders every 60s
@@ -11,7 +11,9 @@ const REFRESH_MS = 60_000; // auto-refresh orders every 60s
 export default function Home() {
   const [orders, setOrders] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
   const navigate = useNavigate();
+  const location = useLocation();
 
   /* =========================
      Utilities
@@ -25,6 +27,19 @@ export default function Home() {
     const hasZone = /[zZ]|[+\-]\d\d:?\d\d$/.test(s);
     return hasZone ? moment(s).local() : moment(s);
   };
+
+  // Centralized "go to view" so ViewWorkOrder can support Back reliably
+  const goViewOrder = useCallback(
+    (id, extraState = {}) => {
+      navigate(`/view-work-order/${id}`, {
+        state: {
+          from: location.pathname, // ✅ Back button can return to the last page
+          ...extraState,
+        },
+      });
+    },
+    [navigate, location.pathname]
+  );
 
   const fetchOrders = useCallback(async (opts = { silent: false }) => {
     if (!opts?.silent) setIsRefreshing(true);
@@ -229,10 +244,7 @@ export default function Home() {
           workOrderNumber: o.workOrderNumber || null,
           customer: o.customer || "—",
           siteLocation:
-            norm(o.siteLocation) ||
-            norm(o.siteName) ||
-            norm(o.siteLocationName) ||
-            "—",
+            norm(o.siteLocation) || norm(o.siteName) || norm(o.siteLocationName) || "—",
           text,
           by,
           createdAt: createdISO,
@@ -249,9 +261,8 @@ export default function Home() {
     dismissed.add(note.key);
     writeDismissedSet(dismissed);
 
-    navigate(`/view-work-order/${note.orderId}`, {
-      state: { highlightLatestNote: true },
-    });
+    // ✅ pass 'from' so ViewWorkOrder Back returns to Home (and highlight note)
+    goViewOrder(note.orderId, { highlightLatestNote: true });
   };
 
   const clearAllWeeklyNotes = () => {
@@ -337,30 +348,33 @@ export default function Home() {
               }
             />
 
-            {weeklyNotes.length > 0 ? (
-              <div className="notes-list">
-                {weeklyNotes.map((n) => (
-                  <div key={n.key} className="note-row" onClick={() => onClickNote(n)} title="Open work order">
-                    <div className="note-row-top">
-                      <div className="note-row-left">
-                        <span className="note-pill">WO: {n.workOrderNumber || n.orderId}</span>
-                        <span className="note-dot">•</span>
-                        <span className="note-muted">{n.customer}</span>
-                        <span className="note-dot">•</span>
-                        <span className="note-muted">{n.siteLocation}</span>
+            {/* ✅ Add an inner framed body so notes never touch the card edge */}
+            <div className="notes-body">
+              {weeklyNotes.length > 0 ? (
+                <div className="notes-list">
+                  {weeklyNotes.map((n) => (
+                    <div key={n.key} className="note-row" onClick={() => onClickNote(n)} title="Open work order">
+                      <div className="note-row-top">
+                        <div className="note-row-left">
+                          <span className="note-pill">WO: {n.workOrderNumber || n.orderId}</span>
+                          <span className="note-dot">•</span>
+                          <span className="note-muted">{n.customer}</span>
+                          <span className="note-dot">•</span>
+                          <span className="note-muted">{n.siteLocation}</span>
+                        </div>
+                        <div className="note-row-right">
+                          {moment(n.createdAt).fromNow()}
+                          {n.by ? ` • ${n.by}` : ""}
+                        </div>
                       </div>
-                      <div className="note-row-right">
-                        {moment(n.createdAt).fromNow()}
-                        {n.by ? ` • ${n.by}` : ""}
-                      </div>
+                      <div className="note-row-text">{n.text}</div>
                     </div>
-                    <div className="note-row-text">{n.text}</div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="home-empty">No new notes from the past 7 days.</div>
-            )}
+                  ))}
+                </div>
+              ) : (
+                <div className="home-empty">No new notes from the past 7 days.</div>
+              )}
+            </div>
           </div>
 
           {/* RIGHT: Today Agenda */}
@@ -380,12 +394,11 @@ export default function Home() {
                 </thead>
                 <tbody>
                   {agendaOrders.map((o) => (
-                    <tr key={o.id} onClick={() => navigate(`/view-work-order/${o.id}`)} title="Click to view">
+                    <tr key={o.id} onClick={() => goViewOrder(o.id)} title="Click to view">
                       <td className="mono">{woCell(o)}</td>
                       <td>{o.customer || "—"}</td>
                       <td>{o.siteLocation || "—"}</td>
 
-                      {/* ✅ Problem gets its own scroll box if too long */}
                       <td className="hide-md">
                         <div className="problem-scroll" title={o.problemDescription || ""}>
                           {o.problemDescription || "—"}
@@ -419,7 +432,7 @@ export default function Home() {
                 </thead>
                 <tbody>
                   {upcomingOrders.map((o) => (
-                    <tr key={o.id} onClick={() => navigate(`/view-work-order/${o.id}`)} title="Click to view">
+                    <tr key={o.id} onClick={() => goViewOrder(o.id)} title="Click to view">
                       <td className="mono">{woCell(o)}</td>
                       <td>{o.customer || "—"}</td>
                       <td>{o.siteLocation || "—"}</td>
@@ -451,7 +464,7 @@ export default function Home() {
                 </thead>
                 <tbody>
                   {waitingForApprovalOrders.map((o) => (
-                    <tr key={o.id} onClick={() => navigate(`/view-work-order/${o.id}`)} title="Click to view">
+                    <tr key={o.id} onClick={() => goViewOrder(o.id)} title="Click to view">
                       <td className="mono">{woCell(o)}</td>
                       <td>{o.customer || "—"}</td>
                       <td>{o.siteLocation || "—"}</td>
