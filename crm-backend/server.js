@@ -495,6 +495,15 @@ const allowMime = (fOrMime) => {
   return (/^image\//.test(m)) || m === 'application/pdf' || /\.pdf$/i.test(name);
 };
 
+function sanitizeFilename(originalname) {
+  const ext  = path.extname(originalname || '');
+  const base = path.basename(originalname || '', ext)
+    .replace(/[^a-zA-Z0-9_\-]/g, '_')
+    .slice(0, 200);
+  const fallback = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  return (base || fallback) + ext;
+}
+
 function makeUploader() {
   const limits = {
     fileSize: MAX_FILE_SIZE_MB * 1024 * 1024,
@@ -512,9 +521,7 @@ function makeUploader() {
         acl: 'private',
         contentType: multerS3.AUTO_CONTENT_TYPE,
         key: (req, file, cb) => {
-          const base = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-          const ext  = path.extname(file.originalname || '');
-          cb(null, `uploads/${base}${ext}`);
+          cb(null, `uploads/${sanitizeFilename(file.originalname)}`);
         }
       }),
       limits,
@@ -528,9 +535,7 @@ function makeUploader() {
   const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, localDir),
     filename: (req, file, cb) => {
-      const base = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-      const ext  = path.extname(file.originalname || '');
-      cb(null, `${base}${ext}`);
+      cb(null, sanitizeFilename(file.originalname));
     }
   });
 
@@ -1420,6 +1425,54 @@ app.delete(
       return res.status(500).json({ error: 'Failed to delete work order.' });
     } finally {
       try { if (conn) conn.release(); } catch {}
+    }
+  }
+);
+
+// DELETE /work-orders/:id/attachments
+// Removes a single attachment (photo/pdf) from the work order's photoPath list and deletes the file.
+// Body: { key: "uploads/Photo-12345-2025-02-05-1703345678901.jpg" }
+app.delete(
+  '/work-orders/:id/attachments',
+  authenticate,
+  requireNumericParam('id'),
+  async (req, res) => {
+    const wid = Number(req.params.id);
+    const key = String(req.body?.key || '').trim();
+
+    if (!key) {
+      return res.status(400).json({ error: 'Missing attachment key.' });
+    }
+
+    try {
+      const [[existing]] = await db.execute('SELECT photoPath FROM work_orders WHERE id = ?', [wid]);
+      if (!existing) return res.status(404).json({ error: 'Work order not found.' });
+
+      const attachments = existing.photoPath
+        ? existing.photoPath.split(',').filter(Boolean)
+        : [];
+
+      const normalizedKey = normalizeStoredKey(key);
+      const updated = attachments.filter(
+        (a) => normalizeStoredKey(a) !== normalizedKey
+      );
+
+      if (updated.length === attachments.length) {
+        return res.status(404).json({ error: 'Attachment not found on this work order.' });
+      }
+
+      await db.execute('UPDATE work_orders SET photoPath = ? WHERE id = ?', [
+        updated.join(','),
+        wid,
+      ]);
+
+      // Best-effort file deletion
+      await deleteStoredFileByKey(key);
+
+      return res.json({ ok: true, remaining: updated.length });
+    } catch (err) {
+      console.error('Attachment delete error:', err);
+      return res.status(500).json({ error: 'Failed to delete attachment.' });
     }
   }
 );
