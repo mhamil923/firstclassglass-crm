@@ -22,9 +22,6 @@ const STATUS_OPTIONS = [
 // Only show these techs in ViewWorkOrder tech dropdown
 const ALLOWED_TECH_USERNAMES = new Set(["Jeff", "jeffsr", "Adin"]);
 
-// Supplier options (keep in sync with PurchaseOrders.js)
-const SUPPLIER_OPTIONS = ["Chicago Tempered", "CRL", "Oldcastle", "Casco", "Other"];
-
 /* ---------- auth header (match WorkOrders.js) ---------- */
 const authHeaders = () => {
   const token = localStorage.getItem("jwt");
@@ -1358,41 +1355,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  /* ---------- PO Supplier change (view-mode dropdown) ---------- */
-  const handlePoSupplierChange = async (e) => {
-    const next = e.target.value;
-    const prev = poSupplier || woPoSupplier || "";
-    setPoSupplier(next);
-
-    try {
-      const form = new FormData();
-      form.append("poSupplier", next || "");
-      await api.put(`/work-orders/${id}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-      });
-      await fetchWorkOrder();
-    } catch (error) {
-      console.error("⚠️ Error updating PO supplier:", error);
-      setPoSupplier(prev);
-      alert(error?.response?.data?.error || "Failed to update PO supplier.");
-    }
-  };
-
-  /* ---------- PO Picked Up toggle ---------- */
-  const handlePoPickedUpToggle = async (checked) => {
-    try {
-      const form = new FormData();
-      form.append("poPickedUp", checked ? "1" : "0");
-      await api.put(`/work-orders/${id}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-      });
-      await fetchWorkOrder();
-    } catch (error) {
-      console.error("⚠️ Error updating PO picked up:", error);
-      alert(error?.response?.data?.error || "Failed to update PO picked up.");
-    }
-  };
-
   /* ---------- Notes (add + delete) ---------- */
   const handleAddNote = async () => {
     const text = newNote.trim();
@@ -1936,52 +1898,6 @@ export default function ViewWorkOrder() {
         {/* ======================= PO PDF ======================= */}
         <div className="section-card">
           <h3 className="section-header">PO Order PDF</h3>
-
-          <div className="po-meta">
-            <div className="po-meta-left">
-              <label className="inline-label">
-                Supplier
-                {editMode ? (
-                  <select
-                    className="control select"
-                    value={edit.poSupplier || ""}
-                    onChange={(e) => patchEdit({ poSupplier: e.target.value })}
-                  >
-                    <option value="">Select supplier…</option>
-                    {SUPPLIER_OPTIONS.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <select className="control select" value={poSupplier || ""} onChange={handlePoSupplierChange}>
-                    <option value="">Select supplier…</option>
-                    {SUPPLIER_OPTIONS.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </label>
-
-              <label className="checkline">
-                <input
-                  type="checkbox"
-                  checked={editMode ? !!edit.poPickedUp : !!poPickedUp}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    if (editMode) patchEdit({ poPickedUp: checked });
-                    else handlePoPickedUpToggle(checked);
-                  }}
-                />
-                PO picked up
-              </label>
-            </div>
-
-            <div className="po-meta-hint">Supplier + picked-up are used on the Purchase Orders tab.</div>
-          </div>
 
           {poHref ? (
             <div className="attachments-grid">
