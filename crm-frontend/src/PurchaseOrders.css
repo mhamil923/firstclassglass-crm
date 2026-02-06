@@ -623,3 +623,67 @@
 .purchase-orders-page .badge {
   font-weight: 600;
 }
+
+/* ===== Dark mode dropdown fixes ===== */
+[data-theme="dark"] .po-page select,
+[data-theme="dark"] .purchase-orders-page select,
+[data-theme="dark"] .po-page .form-select,
+[data-theme="dark"] .purchase-orders-page .form-select {
+  background-color: #2c2c2e;
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+}
+
+[data-theme="dark"] .po-page select option,
+[data-theme="dark"] .purchase-orders-page select option,
+[data-theme="dark"] .po-page .form-select option,
+[data-theme="dark"] .purchase-orders-page .form-select option {
+  background-color: #2c2c2e;
+  color: #ffffff;
+}
+
+/* ===== Section header alignment fix ===== */
+.po-page .card-header,
+.purchase-orders-page .card-header {
+  background: var(--bg-hover);
+  border-bottom: 2px solid var(--accent-blue);
+  padding: 14px 20px;
+  text-align: left;
+}
+
+[data-theme="dark"] .po-page .card-header,
+[data-theme="dark"] .purchase-orders-page .card-header {
+  background: var(--bg-tertiary);
+}
+
+.po-page .card-header h5,
+.purchase-orders-page .card-header h5,
+.po-page .card-header .card-title,
+.purchase-orders-page .card-header .card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+  text-align: left;
+}
+
+/* ===== Action buttons equal width ===== */
+.po-page .btn-group .btn,
+.purchase-orders-page .btn-group .btn,
+.po-action-btn {
+  min-width: 120px;
+  text-align: center;
+}
+
+.po-page td .btn,
+.purchase-orders-page td .btn {
+  min-width: 120px;
+  margin-right: 6px;
+  margin-bottom: 4px;
+}
