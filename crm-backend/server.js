@@ -1042,6 +1042,10 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
 
 // EXTRACT work order fields from PDF (OCR)
 app.post('/work-orders/extract-pdf', authenticate, withMulter(upload.single('pdf')), async (req, res) => {
+  console.log("=== PDF EXTRACTION ENDPOINT HIT ===");
+  console.log("[EXTRACT-PDF] Request received");
+  console.log("[EXTRACT-PDF] req.file:", req.file);
+  console.log("[EXTRACT-PDF] req.body keys:", Object.keys(req.body || {}));
   console.log("=== PDF EXTRACTION ENDPOINT START ===");
 
   try {
