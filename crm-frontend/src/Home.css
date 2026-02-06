@@ -1,7 +1,7 @@
 /* ===== APPLE-STYLE HOME PAGE ===== */
 .home-page {
   min-height: 100vh;
-  background: var(--bg-primary);
+  background-color: var(--bg-primary);
   padding: 24px;
   box-sizing: border-box;
   transition: var(--transition-default);
@@ -66,24 +66,25 @@
 }
 
 .home-topbar-actions .btn-outline-secondary {
-  background: var(--bg-card-solid);
-  border: 1px solid var(--border-color);
+  background-color: var(--bg-card-solid);
+  border: 1px solid var(--border-color-strong);
   color: var(--text-primary);
 }
 
 .home-topbar-actions .btn-outline-secondary:hover {
-  background: var(--bg-hover);
+  background-color: var(--bg-hover);
   border-color: var(--border-color-strong);
+  color: var(--text-primary);
 }
 
 .home-topbar-actions .btn-primary {
-  background: var(--accent-blue);
+  background-color: var(--accent-blue);
   border: none;
-  color: #ffffff;
+  color: #fff;
 }
 
 .home-topbar-actions .btn-primary:hover {
-  background: var(--accent-blue-hover);
+  background-color: var(--accent-blue-hover);
 }
 
 /* Ghost button */
@@ -100,7 +101,7 @@
 }
 
 .btn.btn-ghost:hover {
-  background: var(--bg-hover);
+  background-color: var(--bg-hover);
 }
 
 /* =========================
@@ -126,9 +127,7 @@
 }
 
 .kpi-tile {
-  background: var(--bg-card);
-  backdrop-filter: blur(var(--blur-amount));
-  -webkit-backdrop-filter: blur(var(--blur-amount));
+  background-color: var(--bg-card-solid);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 24px;
@@ -182,9 +181,7 @@
 }
 
 .home-card {
-  background: var(--bg-card);
-  backdrop-filter: blur(var(--blur-amount));
-  -webkit-backdrop-filter: blur(var(--blur-amount));
+  background-color: var(--bg-card-solid);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -203,7 +200,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  background: var(--bg-hover);
+  background-color: var(--bg-hover);
 }
 
 .home-card-title {
@@ -228,7 +225,7 @@
 ========================= */
 .notes-body {
   padding: 16px 24px;
-  background: var(--bg-card-solid);
+  background-color: var(--bg-card-solid);
 }
 
 .notes-list {
@@ -249,7 +246,7 @@
 ========================= */
 .note-row {
   border: 1px solid var(--border-color);
-  background: var(--bg-hover);
+  background-color: var(--bg-hover);
   border-radius: var(--radius-sm);
   padding: 16px;
   cursor: pointer;
@@ -259,7 +256,7 @@
 .note-row:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
-  background: var(--bg-card-solid);
+  background-color: var(--bg-card-solid);
 }
 
 .note-row-top {
@@ -301,11 +298,11 @@
   font-weight: 600;
   font-size: 11px;
   color: var(--accent-blue);
-  background: rgba(0, 113, 227, 0.12);
+  background-color: rgba(0, 113, 227, 0.1);
 }
 
 [data-theme="dark"] .note-pill {
-  background: rgba(10, 132, 255, 0.15);
+  background-color: rgba(10, 132, 255, 0.15);
 }
 
 .note-dot {
@@ -337,11 +334,11 @@
 ========================= */
 .home-table {
   margin: 0 !important;
-  background: transparent !important;
+  background-color: transparent !important;
 }
 
 .home-table thead th {
-  background: var(--bg-hover) !important;
+  background-color: var(--bg-hover) !important;
   color: var(--text-secondary) !important;
   border: none !important;
   border-bottom: 1px solid var(--border-color) !important;
@@ -354,14 +351,19 @@
   white-space: nowrap;
 }
 
+.home-table tbody {
+  background-color: var(--bg-card-solid);
+}
+
 .home-table tbody td {
   padding: 14px 16px !important;
   border: none !important;
   border-bottom: 1px solid var(--border-color) !important;
   text-align: left;
   vertical-align: middle;
-  color: var(--text-primary);
+  color: var(--text-primary) !important;
   font-size: 14px;
+  background-color: var(--bg-card-solid) !important;
 }
 
 .home-table tbody tr:last-child td {
@@ -373,14 +375,15 @@
   transition: var(--transition-fast);
 }
 
-.home-table tbody tr:hover {
-  background: var(--bg-hover) !important;
+.home-table tbody tr:hover td {
+  background-color: var(--bg-hover) !important;
 }
 
 .mono {
   font-family: 'SF Mono', Monaco, Consolas, monospace;
   font-variant-numeric: tabular-nums;
   font-size: 13px !important;
+  color: var(--text-primary) !important;
 }
 
 /* Problem cell scroll box */
@@ -390,12 +393,13 @@
   overflow: auto;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  background: var(--bg-hover);
+  background-color: var(--bg-hover);
   border: 1px solid var(--border-color);
   text-align: left;
   line-height: 1.4;
   white-space: pre-wrap;
   font-size: 13px;
+  color: var(--text-primary);
 }
 
 .problem-scroll::-webkit-scrollbar {
@@ -403,7 +407,7 @@
 }
 
 .problem-scroll::-webkit-scrollbar-thumb {
-  background: var(--border-color-strong);
+  background-color: var(--border-color-strong);
   border-radius: 999px;
 }
 

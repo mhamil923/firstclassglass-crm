@@ -7,6 +7,8 @@
 
 html {
   scroll-behavior: smooth;
+  background-color: var(--bg-primary);
+  min-height: 100%;
 }
 
 body {
@@ -14,9 +16,15 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   line-height: 1.5;
+  min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+#root {
+  min-height: 100vh;
+  background-color: var(--bg-primary);
 }
 
 a {
@@ -37,6 +45,7 @@ button {
 .btn-primary {
   background-color: var(--accent-blue) !important;
   border-color: var(--accent-blue) !important;
+  color: #fff !important;
 }
 
 .btn-primary:hover {
@@ -47,11 +56,25 @@ button {
 .btn-danger {
   background-color: var(--accent-red) !important;
   border-color: var(--accent-red) !important;
+  color: #fff !important;
 }
 
 .btn-success {
   background-color: var(--accent-green) !important;
   border-color: var(--accent-green) !important;
+  color: #fff !important;
+}
+
+.btn-outline-secondary {
+  background-color: var(--bg-card-solid) !important;
+  border-color: var(--border-color-strong) !important;
+  color: var(--text-primary) !important;
+}
+
+.btn-outline-secondary:hover {
+  background-color: var(--bg-hover) !important;
+  border-color: var(--border-color-strong) !important;
+  color: var(--text-primary) !important;
 }
 
 /* Form controls theme support */
@@ -64,6 +87,8 @@ button {
 }
 
 .form-control:focus, .form-select:focus {
+  background-color: var(--bg-card-solid) !important;
+  color: var(--text-primary) !important;
   border-color: var(--accent-blue) !important;
   box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.2) !important;
 }
@@ -72,25 +97,56 @@ button {
   color: var(--text-tertiary) !important;
 }
 
+/* Labels */
+.form-label, label {
+  color: var(--text-primary);
+}
+
 /* Cards theme support */
 .card {
   background-color: var(--bg-card-solid) !important;
   border-color: var(--border-color) !important;
   border-radius: var(--radius-md) !important;
+  color: var(--text-primary) !important;
+}
+
+.card-header {
+  background-color: var(--bg-hover) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+.card-body {
+  color: var(--text-primary) !important;
 }
 
 /* Tables theme support */
 .table {
   color: var(--text-primary) !important;
+  --bs-table-bg: transparent;
+  --bs-table-color: var(--text-primary);
 }
 
 .table th {
   color: var(--text-secondary) !important;
   background-color: var(--bg-hover) !important;
+  border-color: var(--border-color) !important;
 }
 
 .table td {
+  color: var(--text-primary) !important;
   border-color: var(--border-color) !important;
+  background-color: transparent !important;
+}
+
+.table-striped > tbody > tr:nth-of-type(odd) > * {
+  background-color: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+.table-hover > tbody > tr:hover > * {
+  background-color: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
 }
 
 /* Modal theme support */
@@ -98,6 +154,7 @@ button {
   background-color: var(--bg-card-solid) !important;
   border-color: var(--border-color) !important;
   border-radius: var(--radius-lg) !important;
+  color: var(--text-primary) !important;
 }
 
 .modal-header, .modal-footer {
@@ -106,6 +163,18 @@ button {
 
 .modal-title {
   color: var(--text-primary) !important;
+}
+
+.modal-body {
+  color: var(--text-primary) !important;
+}
+
+.btn-close {
+  filter: var(--bs-btn-close-white-filter, none);
+}
+
+[data-theme="dark"] .btn-close {
+  filter: invert(1) grayscale(100%) brightness(200%);
 }
 
 /* Dropdown theme support */
@@ -122,4 +191,37 @@ button {
 
 .dropdown-item:hover {
   background-color: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Alert theme support */
+.alert {
+  border-radius: var(--radius-sm) !important;
+}
+
+/* Container background fix */
+.container, .container-fluid {
+  background-color: transparent !important;
+}
+
+/* Ensure no white backgrounds leak through */
+.bg-white {
+  background-color: var(--bg-card-solid) !important;
+}
+
+.bg-light {
+  background-color: var(--bg-secondary) !important;
+}
+
+/* Text color utilities */
+.text-dark {
+  color: var(--text-primary) !important;
+}
+
+.text-muted {
+  color: var(--text-secondary) !important;
+}
+
+.text-secondary {
+  color: var(--text-secondary) !important;
 }

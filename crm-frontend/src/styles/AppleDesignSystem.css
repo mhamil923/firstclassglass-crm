@@ -1,14 +1,15 @@
 /* ===== APPLE DESIGN SYSTEM - CSS VARIABLES ===== */
 :root {
-  /* Light Mode (default) */
-  --bg-primary: #f5f5f7;
-  --bg-secondary: #ffffff;
-  --bg-card: rgba(255, 255, 255, 0.8);
+  /* Light Mode (default) - Clean white aesthetic */
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f7;
+  --bg-card: rgba(255, 255, 255, 0.9);
   --bg-card-solid: #ffffff;
-  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-hover: rgba(0, 0, 0, 0.03);
+  --bg-elevated: #ffffff;
 
   --text-primary: #1d1d1f;
-  --text-secondary: #86868b;
+  --text-secondary: #6e6e73;
   --text-tertiary: #aeaeb2;
 
   --accent-blue: #0071e3;
@@ -18,8 +19,8 @@
   --accent-orange: #ff9500;
   --accent-yellow: #ffcc00;
 
-  --border-color: rgba(0, 0, 0, 0.08);
-  --border-color-strong: rgba(0, 0, 0, 0.15);
+  --border-color: rgba(0, 0, 0, 0.06);
+  --border-color-strong: rgba(0, 0, 0, 0.12);
 
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
@@ -36,16 +37,17 @@
   --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
 }
 
-/* Dark Mode */
+/* Dark Mode - Pure black aesthetic */
 [data-theme="dark"] {
   --bg-primary: #000000;
   --bg-secondary: #1c1c1e;
-  --bg-card: rgba(28, 28, 30, 0.8);
+  --bg-card: rgba(28, 28, 30, 0.9);
   --bg-card-solid: #1c1c1e;
-  --bg-hover: rgba(255, 255, 255, 0.08);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-elevated: #2c2c2e;
 
   --text-primary: #f5f5f7;
-  --text-secondary: #86868b;
+  --text-secondary: #a1a1a6;
   --text-tertiary: #636366;
 
   --accent-blue: #0a84ff;
@@ -55,12 +57,21 @@
   --accent-orange: #ff9f0a;
   --accent-yellow: #ffd60a;
 
-  --border-color: rgba(255, 255, 255, 0.1);
-  --border-color-strong: rgba(255, 255, 255, 0.2);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color-strong: rgba(255, 255, 255, 0.15);
 
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+/* Ensure dark mode applies to html element as well */
+[data-theme="dark"] html,
+[data-theme="dark"] body,
+html[data-theme="dark"],
+html[data-theme="dark"] body {
+  background-color: #000000;
+  color: var(--text-primary);
 }
 
 /* ===== ANIMATIONS ===== */
