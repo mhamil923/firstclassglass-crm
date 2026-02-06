@@ -218,6 +218,7 @@
   padding: 16px 20px;
   background: var(--bg-hover);
   border-bottom: 1px solid var(--border-color);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);

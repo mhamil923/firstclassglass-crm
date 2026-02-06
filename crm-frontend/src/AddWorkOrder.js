@@ -540,7 +540,7 @@ export default function AddWorkOrder() {
           <form className="awo-form" onSubmit={handleSubmit}>
             {/* ===== PDF Auto-Fill Section ===== */}
             <div className="awo-section awo-extract-section">
-              <div className="awo-section-title" style={{ color: "#0d6efd" }}>
+              <div className="awo-section-title">
                 Quick Fill from PDF
               </div>
 
@@ -586,12 +586,8 @@ export default function AddWorkOrder() {
                 {extracting && (
                   <div className="awo-extract-loading">
                     <div className="awo-extract-loading-content">
-                      <span
-                        className="spinner-border"
-                        role="status"
-                        style={{ width: 32, height: 32, color: "#0d6efd" }}
-                      />
-                      <div style={{ marginTop: 8, color: "#666" }}>
+                      <div className="loading-spinner" style={{ width: 32, height: 32 }} />
+                      <div style={{ marginTop: 8 }}>
                         Extracting information...
                         <br />
                         <small>This may take up to 30 seconds for scanned PDFs.</small>
