@@ -312,21 +312,22 @@ export default function WorkOrders() {
   };
 
   return (
-    <div className="wo-page">
+    <div className="work-orders-page">
+      <div className="work-orders-container">
       {flashMsg ? <div className="flash-banner">{flashMsg}</div> : null}
 
-      <div className="wo-page-header">
-        <div className="wo-page-titleblock">
-          <h2 className="wo-page-title">Work Orders</h2>
-          <div className="wo-page-subtitle">
+      <div className="work-orders-header">
+        <div>
+          <h2 className="work-orders-title">Work Orders</h2>
+          <div className="work-orders-subtitle">
             Filter by <span className="pill subtle">Today</span> or by status tabs.
           </div>
         </div>
 
-        <div className="wo-page-actions">
+        <div className="work-orders-actions">
           <Link
             to="/add-work-order"
-            className="btn btn-primary"
+            className="btn-primary-apple"
             onClick={(e) => e.stopPropagation()}
           >
             + Add New Work Order
@@ -506,6 +507,7 @@ export default function WorkOrders() {
             </tbody>
           </table>
         </div>
+      </div>
       </div>
     </div>
   );
