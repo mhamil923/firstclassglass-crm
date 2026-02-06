@@ -19,6 +19,9 @@ const jwt        = require('jsonwebtoken');
 // ✅ use axios so we don't depend on Node's global fetch() (EB can be Node < 18)
 const axios      = require('axios');
 
+// PO PDF vendor/number detection from PDF content (with OCR support)
+const { analyzePoPdf, detectSupplierFromText, detectPoNumberFromText } = require('./utils/poVendorDetector');
+
 process.env.TZ = process.env.APP_TZ || 'America/Chicago';
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
@@ -690,6 +693,68 @@ app.get('/', (_, res) => res.send('API running'));
 app.get('/ping', (_, res) => res.send('pong'));
 app.get('/health', (_, res) => res.status(200).json({ ok: true }));
 
+// ─── TEST PDF EXTRACTION WITH OCR (debug endpoint) ─────────────────────────
+app.get('/test-pdf-extract', authenticate, async (req, res) => {
+  try {
+    const testKey = req.query.key; // e.g., ?key=uploads/PO_123.pdf
+    if (!testKey) {
+      // List available PDFs in uploads folder
+      const uploadsDir = path.resolve(__dirname, 'uploads');
+      let files = [];
+      if (fs.existsSync(uploadsDir)) {
+        files = fs.readdirSync(uploadsDir).filter(f => f.toLowerCase().endsWith('.pdf')).slice(0, 20);
+      }
+      return res.json({
+        message: 'Pass ?key=uploads/filename.pdf to test extraction (includes OCR for scanned PDFs)',
+        availablePdfs: files.map(f => `uploads/${f}`),
+        s3Mode: !!S3_BUCKET,
+        note: 'OCR may take 5-15 seconds for scanned documents'
+      });
+    }
+
+    let pdfFilePath;
+    let shouldCleanup = false;
+
+    if (S3_BUCKET) {
+      const tmpPath = path.join(require('os').tmpdir(), `test-${Date.now()}.pdf`);
+      const s3Obj = await s3.getObject({ Bucket: S3_BUCKET, Key: testKey }).promise();
+      fs.writeFileSync(tmpPath, s3Obj.Body);
+      pdfFilePath = tmpPath;
+      shouldCleanup = true;
+    } else {
+      const uploadsDir = path.resolve(__dirname, 'uploads');
+      const filename = testKey.replace(/^uploads\//i, '');
+      pdfFilePath = path.resolve(uploadsDir, filename);
+    }
+
+    if (!fs.existsSync(pdfFilePath)) {
+      return res.status(404).json({ error: 'File not found', path: pdfFilePath });
+    }
+
+    // Use smart analysis with OCR fallback
+    const startTime = Date.now();
+    const analysis = await analyzePoPdf(pdfFilePath);
+    const elapsed = Date.now() - startTime;
+
+    // Cleanup temp file for S3
+    if (shouldCleanup && fs.existsSync(pdfFilePath)) {
+      try { fs.unlinkSync(pdfFilePath); } catch {}
+    }
+
+    res.json({
+      key: testKey,
+      processingTimeMs: elapsed,
+      textLength: analysis.textLength,
+      textPreview: analysis.text ? analysis.text.substring(0, 1000) : '(empty)',
+      detectedSupplier: analysis.supplier || '(none)',
+      detectedPoNumber: analysis.poNumber || '(none)',
+      fullText: analysis.text // Include full text for debugging
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 // ─── USERS ───────────────────────────────────────────────────────────────────
 app.get('/users', authenticate, async (req, res) => {
   try {
@@ -1171,14 +1236,79 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       }
     }
 
+    // Track if we're setting a new PO PDF for vendor detection
+    let newPoPdfFile = null;
     if (poPdf) {
       const newPath = fileKeySafe(poPdf);
       const oldPath = existing.poPdfPath;
       if (wantReplacePo || !oldPath) {
         if (oldPath && moveOldPo && !attachments.includes(oldPath)) attachments.push(oldPath);
         poPdfPath = newPath;
+        newPoPdfFile = poPdf; // Save reference for PDF analysis
       } else {
         attachments.push(newPath);
+      }
+    }
+
+    // ----- PO PDF Content Analysis (with OCR support) -----
+    // If a new PO PDF was set, extract text and auto-detect vendor/PO number
+    let detectedSupplier = null;
+    let detectedPoNumber = null;
+    if (newPoPdfFile && wantReplacePo) {
+      console.log('=== PO PDF UPLOAD DETECTED ===');
+      console.log('File info:', {
+        originalname: newPoPdfFile.originalname,
+        filename: newPoPdfFile.filename,
+        key: newPoPdfFile.key,
+        mimetype: newPoPdfFile.mimetype,
+        size: newPoPdfFile.size
+      });
+
+      try {
+        // Get the file path for PDF analysis
+        let pdfFilePath;
+        let shouldCleanup = false;
+
+        if (S3_BUCKET) {
+          // For S3: download to temp file first
+          const tmpPath = path.join(require('os').tmpdir(), `po-${Date.now()}.pdf`);
+          console.log('S3 mode: downloading to temp file:', tmpPath);
+          const s3Obj = await s3.getObject({ Bucket: S3_BUCKET, Key: newPoPdfFile.key }).promise();
+          fs.writeFileSync(tmpPath, s3Obj.Body);
+          pdfFilePath = tmpPath;
+          shouldCleanup = true;
+        } else {
+          // Local disk: use the uploaded file path directly
+          pdfFilePath = path.resolve(__dirname, 'uploads', newPoPdfFile.filename);
+          console.log('Local mode: reading from:', pdfFilePath);
+          console.log('File exists:', fs.existsSync(pdfFilePath));
+        }
+
+        // Run smart PDF analysis (digital extraction + OCR fallback)
+        const analysis = await analyzePoPdf(pdfFilePath);
+        detectedSupplier = analysis.supplier;
+        detectedPoNumber = analysis.poNumber;
+
+        console.log('=== DETECTION SUMMARY ===');
+        console.log('Text extracted:', analysis.textLength, 'chars');
+        console.log('Detected supplier:', detectedSupplier || '(none)');
+        console.log('Detected PO number:', detectedPoNumber || '(none)');
+        console.log('Frontend supplier:', req.body.poSupplier || '(none)');
+        console.log('Frontend PO number:', req.body.poNumber || '(none)');
+        console.log('Final supplier will be:', detectedSupplier || req.body.poSupplier || existing.poSupplier || '(none)');
+        console.log('Final PO number will be:', detectedPoNumber || req.body.poNumber || existing.poNumber || '(none)');
+        console.log('=========================');
+
+        // Clean up temp file for S3 mode
+        if (shouldCleanup && fs.existsSync(pdfFilePath)) {
+          try { fs.unlinkSync(pdfFilePath); } catch {}
+        }
+      } catch (pdfErr) {
+        console.error('=== PO PDF ANALYSIS ERROR ===');
+        console.error('Error:', pdfErr.message);
+        console.error('Stack:', pdfErr.stack);
+        console.error('(Continuing without auto-detection)');
+        console.error('=============================');
       }
     }
 
@@ -1204,13 +1334,17 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       customerEmail = existing.customerEmail,
       notes = existing.notes,
 
-      poSupplier = existing.poSupplier,
+      poSupplier: bodyPoSupplier = existing.poSupplier,
       poPickedUp = existing.poPickedUp,
 
       scheduledDate: scheduledDateRaw = undefined,
       endTime = null,
       timeWindow = null
     } = body;
+
+    // Priority: PDF content detection > frontend-supplied > existing value
+    const poSupplier = detectedSupplier || bodyPoSupplier || existing.poSupplier;
+    const finalPoNumber = detectedPoNumber || poNumber || existing.poNumber;
 
     const cStatus = canonStatus(status) || existing.status;
 
@@ -1239,7 +1373,7 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     `;
     const params = [
       workOrderNumber || null,
-      poNumber || null,
+      finalPoNumber || null,
       customer,
       siteLocation,
       siteAddress || null,

@@ -1,0 +1,4 @@
+Retrieving logs...
+Logs were saved to /Users/markhamilton/firstclassglass-crm/crm-backend/.elasticbeanstalk/logs/250805_105229
+Logs were saved to /Users/markhamilton/firstclassglass-crm/crm-backend/.elasticbeanstalk/logs/250805_105229
+Updated symlink at /Users/markhamilton/firstclassglass-crm/crm-backend/.elasticbeanstalk/logs/latest
