@@ -1,75 +1,81 @@
 // File: src/Navbar.js
 
-import React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React, { useState } from "react";
+import { Link, NavLink, useNavigate } from "react-router-dom";
+import ThemeToggle from "./components/ThemeToggle";
 import "./Navbar.css";
 
 export default function Navbar() {
   const navigate = useNavigate();
+  const [isOpen, setIsOpen] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem("jwt");
     navigate("/login");
   };
 
+  const toggleNavbar = () => {
+    setIsOpen(!isOpen);
+  };
+
+  // Close navbar when a link is clicked (mobile)
+  const closeNavbar = () => {
+    setIsOpen(false);
+  };
+
   return (
-    <nav className="navbar navbar-expand-lg navbar-custom">
-      <div className="container">
-        <Link className="navbar-brand" to="/">
-          First Class Glass CRM
-        </Link>
+    <nav className="navbar navbar-expand-lg">
+      <Link className="navbar-brand" to="/">
+        First Class Glass CRM
+      </Link>
 
-        <button
-          className="navbar-toggler"
-          type="button"
-          data-bs-toggle="collapse"
-          data-bs-target="#navbarNav"
-          aria-controls="navbarNav"
-          aria-expanded="false"
-          aria-label="Toggle navigation"
-        >
-          <span className="navbar-toggler-icon"></span>
-        </button>
+      <button
+        className="navbar-toggler"
+        type="button"
+        onClick={toggleNavbar}
+        aria-label="Toggle navigation"
+      >
+        <span className="navbar-toggler-icon"></span>
+      </button>
 
-        <div className="collapse navbar-collapse" id="navbarNav">
-          <ul className="navbar-nav ms-auto">
-            <li className="nav-item">
-              <Link className="nav-link" to="/">
-                Home
-              </Link>
-            </li>
+      <div className={`navbar-collapse ${isOpen ? "show" : ""}`}>
+        <ul className="navbar-nav">
+          <li className="nav-item">
+            <NavLink className="nav-link" to="/" end onClick={closeNavbar}>
+              Home
+            </NavLink>
+          </li>
 
-            <li className="nav-item">
-              <Link className="nav-link" to="/work-orders">
-                Work Orders
-              </Link>
-            </li>
+          <li className="nav-item">
+            <NavLink className="nav-link" to="/work-orders" onClick={closeNavbar}>
+              Work Orders
+            </NavLink>
+          </li>
 
-            <li className="nav-item">
-              <Link className="nav-link" to="/calendar">
-                Calendar
-              </Link>
-            </li>
+          <li className="nav-item">
+            <NavLink className="nav-link" to="/calendar" onClick={closeNavbar}>
+              Calendar
+            </NavLink>
+          </li>
 
-            {/* ✅ NEW: Purchase Orders tab */}
-            <li className="nav-item">
-              <Link className="nav-link" to="/purchase-orders">
-                Purchase Orders
-              </Link>
-            </li>
+          <li className="nav-item">
+            <NavLink className="nav-link" to="/purchase-orders" onClick={closeNavbar}>
+              Purchase Orders
+            </NavLink>
+          </li>
 
-            <li className="nav-item">
-              <Link className="nav-link" to="/history">
-                History
-              </Link>
-            </li>
+          <li className="nav-item">
+            <NavLink className="nav-link" to="/history" onClick={closeNavbar}>
+              History
+            </NavLink>
+          </li>
+        </ul>
 
-            <li className="nav-item">
-              <button className="logout-button" onClick={handleLogout}>
-                Logout
-              </button>
-            </li>
-          </ul>
+        <div className="navbar-right">
+          <ThemeToggle />
+          <button className="logout-btn" onClick={handleLogout}>
+            Logout
+          </button>
         </div>
       </div>
     </nav>
