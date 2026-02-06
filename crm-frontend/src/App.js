@@ -32,7 +32,7 @@ export default function App() {
         {/* Render Navbar on all pages */}
         <Navbar />
 
-        <div className="container mt-4">
+        <div className="app-content">
           <Routes>
             {/* Public */}
             <Route path="/login" element={<Login />} />
