@@ -1,24 +1,19 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { execSync } = require("child_process");
 const pdfParse = require("pdf-parse");
 
-// Lazy-load OCR dependencies (they're heavy)
+// Lazy-load Tesseract (it's heavy)
 let Tesseract = null;
-let pdf2pic = null;
 
 /**
- * Initialize OCR dependencies on first use
+ * Initialize Tesseract on first use
  */
-async function initOCR() {
+async function initTesseract() {
   if (!Tesseract) {
     Tesseract = require("tesseract.js");
     console.log("[OCR] Tesseract.js loaded");
-  }
-  if (!pdf2pic) {
-    const { fromPath } = require("pdf2pic");
-    pdf2pic = fromPath;
-    console.log("[OCR] pdf2pic loaded");
   }
 }
 
@@ -32,45 +27,76 @@ async function extractTextFromPdf(filePath) {
 }
 
 /**
+ * Convert PDF first page to PNG using GraphicsMagick/Ghostscript
+ * Returns the path to the generated image, or null if failed
+ */
+function convertPdfToImage(pdfPath) {
+  const tmpDir = os.tmpdir();
+  const outputPath = path.join(tmpDir, `ocr-${Date.now()}.png`);
+
+  try {
+    // Try GraphicsMagick first (gm convert)
+    // -density 200 = 200 DPI for good OCR quality
+    // [0] = first page only
+    const gmCmd = `gm convert -density 200 "${pdfPath}[0]" -resize 1700x2200 "${outputPath}"`;
+    console.log("[OCR] Running:", gmCmd);
+    execSync(gmCmd, { stdio: 'pipe', timeout: 30000 });
+
+    if (fs.existsSync(outputPath)) {
+      console.log("[OCR] PDF converted to image:", outputPath);
+      return outputPath;
+    }
+  } catch (gmErr) {
+    console.log("[OCR] GraphicsMagick failed, trying ImageMagick...");
+
+    try {
+      // Fall back to ImageMagick (convert)
+      const imCmd = `convert -density 200 "${pdfPath}[0]" -resize 1700x2200 "${outputPath}"`;
+      console.log("[OCR] Running:", imCmd);
+      execSync(imCmd, { stdio: 'pipe', timeout: 30000 });
+
+      if (fs.existsSync(outputPath)) {
+        console.log("[OCR] PDF converted to image:", outputPath);
+        return outputPath;
+      }
+    } catch (imErr) {
+      console.error("[OCR] Both GraphicsMagick and ImageMagick failed");
+      console.error("[OCR] GM error:", gmErr.message);
+      console.error("[OCR] IM error:", imErr.message);
+    }
+  }
+
+  return null;
+}
+
+/**
  * Extract text from a scanned PDF using OCR
  * Converts first page to image, then runs Tesseract OCR
  */
 async function extractTextFromScannedPdf(filePath) {
-  await initOCR();
-
-  const tmpDir = os.tmpdir();
-  const baseName = `ocr-${Date.now()}`;
+  await initTesseract();
 
   console.log(`[OCR] Starting OCR extraction for: ${path.basename(filePath)}`);
 
   try {
-    // Convert PDF first page to PNG image
-    const options = {
-      density: 200,           // DPI - higher = better quality but slower
-      saveFilename: baseName,
-      savePath: tmpDir,
-      format: "png",
-      width: 1700,            // Good width for OCR
-      height: 2200,           // Letter paper proportions
-    };
+    // Convert PDF to image
+    const imagePath = convertPdfToImage(filePath);
 
-    const convert = pdf2pic(filePath, options);
-    const pageResult = await convert(1); // Convert first page only
-
-    if (!pageResult || !pageResult.path) {
-      console.warn("[OCR] PDF to image conversion failed - no output path");
+    if (!imagePath) {
+      console.warn("[OCR] Could not convert PDF to image");
       return "";
     }
 
-    console.log(`[OCR] PDF converted to image: ${pageResult.path}`);
-
     // Run Tesseract OCR on the image
     console.log("[OCR] Running Tesseract OCR...");
-    const { data: { text } } = await Tesseract.recognize(pageResult.path, "eng", {
+    const { data: { text } } = await Tesseract.recognize(imagePath, "eng", {
       logger: (m) => {
-        if (m.status === "recognizing text") {
-          // Progress updates (optional - can be noisy)
-          // console.log(`[OCR] Progress: ${Math.round(m.progress * 100)}%`);
+        if (m.status === "recognizing text" && m.progress > 0 && m.progress < 1) {
+          // Only log at 25%, 50%, 75%
+          const pct = Math.round(m.progress * 100);
+          if (pct === 25 || pct === 50 || pct === 75) {
+            console.log(`[OCR] Progress: ${pct}%`);
+          }
         }
       }
     });
@@ -79,8 +105,8 @@ async function extractTextFromScannedPdf(filePath) {
 
     // Clean up temp image file
     try {
-      if (fs.existsSync(pageResult.path)) {
-        fs.unlinkSync(pageResult.path);
+      if (fs.existsSync(imagePath)) {
+        fs.unlinkSync(imagePath);
       }
     } catch (e) {
       // Ignore cleanup errors
@@ -196,15 +222,15 @@ function detectPoNumberFromText(text) {
   // Try multiple patterns in order of specificity
   const patterns = [
     // "PO# 12345" or "PO #12345" or "PO#12345"
-    /po\s*#\s*:?\s*([a-z0-9-]{2,})/i,
-    // "P.O. 12345" or "P.O.# 12345"
-    /p\.o\.?\s*#?\s*:?\s*([a-z0-9-]{2,})/i,
+    /po\s*#\s*:?\s*([a-z0-9][a-z0-9-]{1,})/i,
+    // "P.O. # 12345" or "P.O. No. 12345" or "P.O. NO. 12345" (with the number on next line possibly)
+    /p\.o\.?\s*(?:#|no\.?|number)?\s*:?\s*\n?\s*([a-z0-9][a-z0-9-]{2,})/i,
     // "Purchase Order 12345" or "Purchase Order: 12345" or "Purchase Order #12345"
-    /purchase\s+order\s*[#:]*\s*([a-z0-9-]{2,})/i,
-    // "Order # 12345" or "Order #12345" or "Order Number: 12345"
-    /order\s*(?:#|number|num|no\.?)\s*:?\s*([a-z0-9-]{2,})/i,
-    // "PO Number: 12345"
-    /po\s+(?:number|num|no\.?)\s*:?\s*([a-z0-9-]{2,})/i,
+    /purchase\s+order\s*[#:]*\s*([a-z0-9][a-z0-9-]{2,})/i,
+    // "Order # 12345" or "Order Number: 12345"
+    /order\s*(?:#|number)\s*:?\s*([a-z0-9][a-z0-9-]{2,})/i,
+    // "PO Number: 12345" or "PO No: 12345"
+    /po\s+(?:number|no\.?)\s*:?\s*([a-z0-9][a-z0-9-]{2,})/i,
     // Just "PO 12345" (less specific, try last)
     /\bpo\s+([0-9]{3,})\b/i,
   ];
@@ -213,8 +239,12 @@ function detectPoNumberFromText(text) {
     const match = text.match(pattern);
     if (match && match[1]) {
       const poNum = match[1].trim();
-      // Filter out common false positives
-      if (poNum.length >= 2 && !/^(box|the|and|for)$/i.test(poNum)) {
+      // Filter out common false positives (words, not alphanumeric codes)
+      if (
+        poNum.length >= 3 &&
+        !/^(box|the|and|for|number|num|no)$/i.test(poNum) &&
+        /[0-9]/.test(poNum) // Must contain at least one digit
+      ) {
         return poNum;
       }
     }
@@ -225,7 +255,7 @@ function detectPoNumberFromText(text) {
 
 /**
  * Main extraction function - extracts text and detects vendor/PO
- * Returns { text, supplier, poNumber, method }
+ * Returns { text, supplier, poNumber, textLength }
  */
 async function analyzePoPdf(filePath) {
   console.log("=== PO PDF ANALYSIS START ===");
