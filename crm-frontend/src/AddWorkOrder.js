@@ -119,10 +119,16 @@ export default function AddWorkOrder() {
   const [estimatePdfFile, setEstimatePdfFile] = useState(null);
   const [photoFile, setPhotoFile] = useState(null);
 
+  // PDF extraction state
+  const [extractPdfFile, setExtractPdfFile] = useState(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extractResult, setExtractResult] = useState(null); // { type: 'success'|'warning'|'error', message, fields }
+
   // ✅ refs so removing the chip also clears the native <input type="file">
   const pdfInputRef = useRef(null);
   const estimateInputRef = useRef(null);
   const photoInputRef = useRef(null);
+  const extractPdfInputRef = useRef(null);
 
   const [customers, setCustomers] = useState([]);
   const [techs, setTechs] = useState([]);
@@ -283,6 +289,127 @@ export default function AddWorkOrder() {
     if (photoInputRef.current) photoInputRef.current.value = "";
   };
 
+  // ===== PDF Extraction handlers =====
+  const handleExtractPdfChange = (e) => {
+    const file = e.target.files?.[0] || null;
+    setExtractPdfFile(file);
+    setExtractResult(null); // Clear previous result
+  };
+
+  const removeExtractPdf = () => {
+    setExtractPdfFile(null);
+    setExtractResult(null);
+    if (extractPdfInputRef.current) extractPdfInputRef.current.value = "";
+  };
+
+  const handleExtractFromPdf = async () => {
+    if (!extractPdfFile) {
+      setExtractResult({ type: "warning", message: "Please select a PDF file first." });
+      return;
+    }
+
+    // Validate file type
+    if (!extractPdfFile.type.includes("pdf") && !extractPdfFile.name.toLowerCase().endsWith(".pdf")) {
+      setExtractResult({ type: "error", message: "Please upload a PDF file." });
+      return;
+    }
+
+    setExtracting(true);
+    setExtractResult(null);
+
+    const formData = new FormData();
+    formData.append("pdf", extractPdfFile);
+
+    try {
+      // 30 second timeout for OCR processing
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      const response = await api.post("/work-orders/extract-pdf", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.data?.success && response.data?.extracted) {
+        const ext = response.data.extracted;
+        const filledFields = [];
+
+        // Only fill fields that have values (don't overwrite with null/empty)
+        setWorkOrder((prev) => {
+          const upd = { ...prev };
+
+          if (ext.customer && ext.customer.trim()) {
+            upd.customer = ext.customer.trim();
+            filledFields.push("Customer");
+          }
+          if (ext.poNumber && ext.poNumber.trim()) {
+            upd.poNumber = ext.poNumber.trim();
+            filledFields.push("PO Number");
+          }
+          if (ext.workOrderNumber && ext.workOrderNumber.trim()) {
+            upd.workOrderNumber = ext.workOrderNumber.trim();
+            filledFields.push("Work Order #");
+          }
+          if (ext.siteLocation && ext.siteLocation.trim()) {
+            upd.siteLocation = ext.siteLocation.trim();
+            filledFields.push("Site Location");
+          }
+          if (ext.siteAddress && ext.siteAddress.trim()) {
+            upd.siteAddress = ext.siteAddress.trim();
+            filledFields.push("Site Address");
+          }
+          if (ext.problemDescription && ext.problemDescription.trim()) {
+            upd.problemDescription = ext.problemDescription.trim();
+            filledFields.push("Problem Description");
+          }
+
+          return upd;
+        });
+
+        if (filledFields.length > 0) {
+          setExtractResult({
+            type: "success",
+            message: "Extracted info from PDF. Please review and edit if needed.",
+            fields: filledFields,
+          });
+        } else {
+          setExtractResult({
+            type: "warning",
+            message: "Could not extract information from PDF. Please fill in manually.",
+          });
+        }
+      } else {
+        setExtractResult({
+          type: "warning",
+          message: "Could not extract information from PDF. Please fill in manually.",
+        });
+      }
+    } catch (err) {
+      console.error("PDF extraction error:", err);
+
+      if (err.name === "AbortError" || err.code === "ECONNABORTED") {
+        setExtractResult({
+          type: "error",
+          message: "Extraction timed out. The PDF may be too large or complex. Please fill in manually.",
+        });
+      } else if (err.response?.data?.error) {
+        setExtractResult({
+          type: "error",
+          message: `Extraction failed: ${err.response.data.error}`,
+        });
+      } else {
+        setExtractResult({
+          type: "error",
+          message: "Network error during extraction. Please try again or fill in manually.",
+        });
+      }
+    } finally {
+      setExtracting(false);
+    }
+  };
+
   const validate = () => {
     const missing = [];
     if (!workOrder.customer) missing.push("Customer");
@@ -386,6 +513,88 @@ export default function AddWorkOrder() {
           </div>
 
           <form className="awo-form" onSubmit={handleSubmit}>
+            {/* ===== PDF Auto-Fill Section ===== */}
+            <div className="awo-section awo-extract-section">
+              <div className="awo-section-title" style={{ color: "#0d6efd" }}>
+                Quick Fill from PDF
+              </div>
+
+              <div className="awo-extract-box">
+                <div className="awo-extract-row">
+                  <div className="awo-field" style={{ flex: 1, marginBottom: 0 }}>
+                    <label className="awo-label">Upload Work Order PDF (Optional)</label>
+                    <input
+                      ref={extractPdfInputRef}
+                      type="file"
+                      accept="application/pdf"
+                      onChange={handleExtractPdfChange}
+                      className="awo-file"
+                      disabled={extracting}
+                    />
+                    <div className="awo-help">
+                      Upload a work order PDF to auto-fill form fields using OCR.
+                    </div>
+                    <FileChip file={extractPdfFile} onRemove={removeExtractPdf} />
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-primary awo-extract-btn"
+                    onClick={handleExtractFromPdf}
+                    disabled={!extractPdfFile || extracting}
+                    style={{ alignSelf: "flex-start", marginTop: 24 }}
+                  >
+                    {extracting ? (
+                      <>
+                        <span
+                          className="spinner-border spinner-border-sm"
+                          role="status"
+                          aria-hidden="true"
+                          style={{ marginRight: 8 }}
+                        />
+                        Extracting...
+                      </>
+                    ) : (
+                      "Extract Info from PDF"
+                    )}
+                  </button>
+                </div>
+
+                {/* Extraction result messages */}
+                {extractResult && (
+                  <div
+                    className={`awo-extract-result awo-extract-${extractResult.type}`}
+                    style={{ marginTop: 12 }}
+                  >
+                    <div className="awo-extract-message">{extractResult.message}</div>
+                    {extractResult.fields && extractResult.fields.length > 0 && (
+                      <div className="awo-extract-fields">
+                        <strong>Fields populated:</strong> {extractResult.fields.join(", ")}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Loading overlay */}
+                {extracting && (
+                  <div className="awo-extract-loading">
+                    <div className="awo-extract-loading-content">
+                      <span
+                        className="spinner-border"
+                        role="status"
+                        style={{ width: 32, height: 32, color: "#0d6efd" }}
+                      />
+                      <div style={{ marginTop: 8, color: "#666" }}>
+                        Extracting information...
+                        <br />
+                        <small>This may take up to 30 seconds for scanned PDFs.</small>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* ===== Identity / Contact ===== */}
             <div className="awo-section">
               <div className="awo-section-title">Customer</div>

@@ -225,6 +225,8 @@ function detectPoNumberFromText(text) {
     /po\s*#\s*:?\s*([a-z0-9][a-z0-9-]{1,})/i,
     // "P.O. # 12345" or "P.O. No. 12345" or "P.O. NO. 12345" (with the number on next line possibly)
     /p\.o\.?\s*(?:#|no\.?|number)?\s*:?\s*\n?\s*([a-z0-9][a-z0-9-]{2,})/i,
+    // "P.C. NO." - common OCR misread of "P.O. NO."
+    /p\.c\.?\s*(?:#|no\.?|number)?\s*:?\s*\n?\s*([a-z0-9][a-z0-9-]{2,})/i,
     // "Purchase Order 12345" or "Purchase Order: 12345" or "Purchase Order #12345"
     /purchase\s+order\s*[#:]*\s*([a-z0-9][a-z0-9-]{2,})/i,
     // "Order # 12345" or "Order Number: 12345"
@@ -233,6 +235,10 @@ function detectPoNumberFromText(text) {
     /po\s+(?:number|no\.?)\s*:?\s*([a-z0-9][a-z0-9-]{2,})/i,
     // Just "PO 12345" (less specific, try last)
     /\bpo\s+([0-9]{3,})\b/i,
+    // Standalone number after "no." on its own line (common OCR layout)
+    /(?:p\.?[oc]\.?\s*)?no\.?\s*\n+\s*([0-9]{5,})/i,
+    // Handle OCR noise like "2 02779415" after p.o. no.
+    /p\.?o\.?\s*no\.?\s*\n+\s*\d?\s*([0-9]{5,})/i,
   ];
 
   for (const pattern of patterns) {
@@ -251,6 +257,335 @@ function detectPoNumberFromText(text) {
   }
 
   return null;
+}
+
+/**
+ * Extract customer name from text
+ * Looks for: "Bill To:", "Customer:", "Client:", "Sold To:"
+ */
+function extractCustomer(text) {
+  if (!text) return null;
+
+  const patterns = [
+    // "Bill To" on its own line, then customer on next line
+    /bill\s*to\s*\n+\s*([^\n]{3,50})/i,
+    // "Bill To:" followed by name (but not "Ship To")
+    /bill\s*to[:\s]+(?!ship)([^\n]{3,50})/i,
+    // "Customer:" or "Customer Name:"
+    /customer(?:\s*name)?[:\s]+([^\n]{3,50})/i,
+    // "Client:"
+    /client[:\s]+([^\n]{3,50})/i,
+    // "Sold To:" on its own line, then name
+    /sold\s*to\s*\n+\s*([^\n]{3,50})/i,
+    // "Attn:" or "Attention:"
+    /att(?:n|ention)[:\s]+([^\n]{3,50})/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      let name = match[1].trim();
+      // Clean up common noise
+      name = name.replace(/^\d+\s*/, ''); // Remove leading numbers
+      name = name.replace(/[|].*$/, '').trim(); // Remove everything after pipe
+      // Filter out if it's "ship to" (common in multi-column layouts)
+      if (/^ship\s*to$/i.test(name)) continue;
+      // Filter out if it looks like an address (starts with number + street)
+      if (/^\d+\s+\w+\s+(st|ave|rd|dr|blvd|ln|way|ct)/i.test(name)) continue;
+      if (name.length >= 3 && name.length <= 50) {
+        console.log(`[EXTRACT] Customer found via pattern: "${name}"`);
+        return name;
+      }
+    }
+  }
+
+  // Fallback: look for common multi-column layout "bill to ship to" followed by names on next line
+  // Pattern: "bill to ship to\n<customer> <site>"
+  const multiColMatch = text.match(/bill\s*to\s+ship\s*to\s*\n+\s*([^\n]+)/i);
+  if (multiColMatch && multiColMatch[1]) {
+    // First part before common separators is likely the customer
+    let line = multiColMatch[1].trim();
+    // Split on common patterns like "|" or multiple spaces
+    const parts = line.split(/\s{2,}|\|/).filter(Boolean);
+    if (parts.length > 0) {
+      let name = parts[0].trim();
+      // Clean up
+      name = name.replace(/^\d+\s*/, '');
+      if (name.length >= 3 && name.length <= 50 && !/^\d+\s+\w+\s+(st|ave|rd)/i.test(name)) {
+        console.log(`[EXTRACT] Customer from multi-column: "${name}"`);
+        return name;
+      }
+    }
+  }
+
+  console.log("[EXTRACT] No customer found");
+  return null;
+}
+
+/**
+ * Extract work order number from text
+ * Looks for: "WO#", "Work Order:", "Service Order:", "Job #"
+ */
+function extractWorkOrderNumber(text) {
+  if (!text) return null;
+
+  const patterns = [
+    // "WO# 12345" or "WO #12345" or "WO-12345"
+    /wo\s*[#:\-]\s*([a-z0-9][a-z0-9\-]{2,20})/i,
+    // "Work Order # 12345" or "Work Order: 12345"
+    /work\s*order\s*[#:\-]?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
+    // "Service Order # 12345"
+    /service\s*order\s*[#:\-]?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
+    // "Job # 12345" or "Job Number: 12345"
+    /job\s*(?:#|number|no\.?)\s*[:\-]?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
+    // "Order # 12345" (but not "Purchase Order" which is PO)
+    /(?<!purchase\s)order\s*#\s*([a-z0-9][a-z0-9\-]{2,20})/i,
+    // "Ticket # 12345"
+    /ticket\s*[#:\-]?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const woNum = match[1].trim();
+      // Must contain at least one digit
+      if (/[0-9]/.test(woNum) && woNum.length >= 3) {
+        console.log(`[EXTRACT] Work Order # found: "${woNum}"`);
+        return woNum;
+      }
+    }
+  }
+
+  console.log("[EXTRACT] No work order number found");
+  return null;
+}
+
+/**
+ * Extract site location name from text
+ * Looks for: "Ship To:", "Service Location:", "Job Site:", "Site:", "Location:"
+ */
+function extractSiteLocation(text) {
+  if (!text) return null;
+
+  const patterns = [
+    // "Ship To" on its own line, then location on next line
+    /ship\s*to\s*\n+\s*([^\n]{3,60})/i,
+    // "Ship To:" followed by name
+    /ship\s*to[:\s]+([^\n]{3,60})/i,
+    // "Service Location:"
+    /service\s*location[:\s]+([^\n]{3,60})/i,
+    // "Job Site:"
+    /job\s*site[:\s]+([^\n]{3,60})/i,
+    // "Site Name:"
+    /site\s*name[:\s]+([^\n]{3,60})/i,
+    // "Location:" (less specific)
+    /(?<!service\s)location[:\s]+([^\n]{3,60})/i,
+    // "Store:" or "Store #" (common for retail)
+    /store\s*[#:\-]?\s*([^\n]{3,60})/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      let loc = match[1].trim();
+      // Clean up common noise
+      loc = loc.replace(/[|].*$/, '').trim(); // Remove everything after pipe
+      // If it's just an address, skip it (we'll get that separately)
+      if (/^\d+\s+\w+\s+(st|ave|rd|dr|blvd|ln|way|ct|street|avenue|road|drive)/i.test(loc)) continue;
+      if (loc.length >= 3 && loc.length <= 60) {
+        console.log(`[EXTRACT] Site location found: "${loc}"`);
+        return loc;
+      }
+    }
+  }
+
+  // Fallback: look for multi-column layout "bill to ship to" followed by names
+  const multiColMatch = text.match(/bill\s*to\s+ship\s*to\s*\n+\s*([^\n]+)/i);
+  if (multiColMatch && multiColMatch[1]) {
+    let line = multiColMatch[1].trim();
+    // Second part after common separators is likely the site location
+    const parts = line.split(/\s{2,}|\|/).filter(Boolean);
+    if (parts.length > 1) {
+      let loc = parts[1].trim();
+      // Skip if it looks like an address
+      if (!/^\d+\s+\w+\s+(st|ave|rd)/i.test(loc) && loc.length >= 3 && loc.length <= 60) {
+        console.log(`[EXTRACT] Site location from multi-column: "${loc}"`);
+        return loc;
+      }
+    }
+  }
+
+  // Also look for store patterns like "Little Caesars #01752"
+  const storeMatch = text.match(/([a-z\s]+(?:store|shop|restaurant|cafe|pizza|market|retail|caesars|mcdonald|starbucks|dunkin|subway|target|walmart|walgreens|cvs)[a-z\s]*(?:#|number|no\.?)?\s*\d+)/i);
+  if (storeMatch && storeMatch[1]) {
+    let store = storeMatch[1].trim();
+    if (store.length >= 5 && store.length <= 60) {
+      console.log(`[EXTRACT] Site location from store pattern: "${store}"`);
+      return store;
+    }
+  }
+
+  console.log("[EXTRACT] No site location found");
+  return null;
+}
+
+/**
+ * Extract site address from text
+ * Looks for address patterns: number + street, city, state, zip
+ */
+function extractSiteAddress(text) {
+  if (!text) return null;
+
+  // First try to find address after "Ship To:" section
+  const shipToMatch = text.match(/ship\s*to[:\s]*\n?([^]*?)(?=\n\s*\n|bill\s*to|$)/i);
+  const searchText = shipToMatch ? shipToMatch[1] : text;
+
+  // Look for address pattern: number + street name + (optional city, state zip)
+  const addressPatterns = [
+    // Full address with city, state, zip
+    /(\d+\s+[a-z0-9\s\.]+(?:st|street|ave|avenue|rd|road|dr|drive|blvd|boulevard|ln|lane|way|ct|court|pl|place|pkwy|parkway)[.,]?\s*(?:#\s*\d+|suite\s*\d+|ste\s*\d+|unit\s*\d+)?[,\s]+[a-z\s]+[,\s]+[a-z]{2}\s*\d{5}(?:-\d{4})?)/i,
+    // Address with city state (no zip)
+    /(\d+\s+[a-z0-9\s\.]+(?:st|street|ave|avenue|rd|road|dr|drive|blvd|boulevard|ln|lane|way|ct|court|pl|place)[.,]?\s*[,\s]+[a-z\s]+[,\s]+[a-z]{2})/i,
+    // Just street address
+    /(\d+\s+[a-z0-9\s\.]+(?:st|street|ave|avenue|rd|road|dr|drive|blvd|boulevard|ln|lane|way|ct|court|pl|place|pkwy|parkway)(?:\s*#?\s*\d+)?)/i,
+  ];
+
+  for (const pattern of addressPatterns) {
+    const match = searchText.match(pattern);
+    if (match && match[1]) {
+      let addr = match[1].trim();
+      // Clean up
+      addr = addr.replace(/\s+/g, ' '); // Normalize whitespace
+      addr = addr.replace(/[|].*$/, '').trim();
+      if (addr.length >= 10 && addr.length <= 150) {
+        console.log(`[EXTRACT] Site address found: "${addr}"`);
+        return addr;
+      }
+    }
+  }
+
+  console.log("[EXTRACT] No site address found");
+  return null;
+}
+
+/**
+ * Extract problem description from text
+ * Looks for: "Problem:", "Description:", "Work Description:", "Scope:", "Issue:", "Service Requested:"
+ */
+function extractProblemDescription(text) {
+  if (!text) return null;
+
+  const patterns = [
+    // "Problem:" or "Problem Description:"
+    /problem(?:\s*description)?[:\s]+([^\n]{5,200})/i,
+    // "Description:" (but not "Job Description" which might be something else)
+    /(?<!job\s)description[:\s]+([^\n]{5,200})/i,
+    // "Work Description:"
+    /work\s*description[:\s]+([^\n]{5,200})/i,
+    // "Scope:" or "Scope of Work:"
+    /scope(?:\s*of\s*work)?[:\s]+([^\n]{5,200})/i,
+    // "Issue:"
+    /issue[:\s]+([^\n]{5,200})/i,
+    // "Service Requested:"
+    /service\s*requested[:\s]+([^\n]{5,200})/i,
+    // "Work to be performed:" or "Work to be done:"
+    /work\s*to\s*be\s*(?:performed|done)[:\s]+([^\n]{5,200})/i,
+    // "Reason for call:" or "Reason:"
+    /reason(?:\s*for\s*call)?[:\s]+([^\n]{5,200})/i,
+    // "Notes:" (often contains problem info)
+    /notes[:\s]+([^\n]{5,200})/i,
+    // "Service Call" followed by description
+    /service\s*call[:\s]+([^\n]{5,200})/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      let desc = match[1].trim();
+      // Clean up
+      desc = desc.replace(/[|].*$/, '').trim();
+      if (desc.length >= 5 && desc.length <= 200) {
+        console.log(`[EXTRACT] Problem description found: "${desc}"`);
+        return desc;
+      }
+    }
+  }
+
+  // Fallback: look for common glass-related keywords as problem indicators
+  const glassKeywords = [
+    /(?:broken|cracked|shattered|damaged)\s+(?:glass|window|door|mirror)/i,
+    /(?:glass|window|door|mirror)\s+(?:is|was|needs?|requires?)\s+(?:broken|cracked|replaced|fixed|repaired)/i,
+    /replace\s+(?:glass|window|door|storefront)/i,
+    /door\s*closer/i,
+    /emergency\s+(?:board[- ]?up|glass|repair)/i,
+  ];
+
+  for (const pattern of glassKeywords) {
+    const match = text.match(pattern);
+    if (match) {
+      // Get surrounding context (up to 100 chars before/after)
+      const idx = text.indexOf(match[0]);
+      const start = Math.max(0, idx - 50);
+      const end = Math.min(text.length, idx + match[0].length + 100);
+      let context = text.substring(start, end).trim();
+      context = context.replace(/\s+/g, ' ');
+      if (context.length >= 10) {
+        console.log(`[EXTRACT] Problem from keywords: "${context}"`);
+        return context;
+      }
+    }
+  }
+
+  console.log("[EXTRACT] No problem description found");
+  return null;
+}
+
+/**
+ * Extract all work order fields from OCR text
+ * Returns structured object with all detected fields
+ */
+function extractWorkOrderFields(text) {
+  console.log("=== WORK ORDER FIELD EXTRACTION START ===");
+  console.log(`[EXTRACT] Input text length: ${text ? text.length : 0} chars`);
+
+  if (!text || text.length < 10) {
+    console.log("[EXTRACT] Text too short, returning empty result");
+    return {
+      customer: null,
+      poNumber: null,
+      workOrderNumber: null,
+      siteLocation: null,
+      siteAddress: null,
+      problemDescription: null,
+      rawText: text || ""
+    };
+  }
+
+  const customer = extractCustomer(text);
+  const poNumber = detectPoNumberFromText(text);
+  const workOrderNumber = extractWorkOrderNumber(text);
+  const siteLocation = extractSiteLocation(text);
+  const siteAddress = extractSiteAddress(text);
+  const problemDescription = extractProblemDescription(text);
+
+  console.log("=== EXTRACTION RESULTS ===");
+  console.log(`  Customer: ${customer || "(not found)"}`);
+  console.log(`  PO Number: ${poNumber || "(not found)"}`);
+  console.log(`  Work Order #: ${workOrderNumber || "(not found)"}`);
+  console.log(`  Site Location: ${siteLocation || "(not found)"}`);
+  console.log(`  Site Address: ${siteAddress || "(not found)"}`);
+  console.log(`  Problem: ${problemDescription || "(not found)"}`);
+  console.log("=== WORK ORDER FIELD EXTRACTION END ===");
+
+  return {
+    customer,
+    poNumber,
+    workOrderNumber,
+    siteLocation,
+    siteAddress,
+    problemDescription,
+    rawText: text.substring(0, 1000) // First 1000 chars for debugging
+  };
 }
 
 /**
@@ -288,5 +623,6 @@ module.exports = {
   extractTextSmart,
   detectSupplierFromText,
   detectPoNumberFromText,
+  extractWorkOrderFields,
   analyzePoPdf,
 };
