@@ -3,7 +3,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
-// 1️⃣ Load your Tailwind-enabled index.css first:
+// 1️⃣ Load Apple Design System variables first:
+import './styles/AppleDesignSystem.css';
+
+// 2️⃣ Load global styles:
 import './index.css';
 
 // 2️⃣ Then load Bootstrap (optional—remove if you no longer need it)

@@ -7,6 +7,7 @@ import {
   Routes,
   Navigate
 } from "react-router-dom";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./Home";
 import WorkOrders from "./WorkOrders";
 import AddWorkOrder from "./AddWorkOrder";
@@ -26,88 +27,90 @@ function PrivateRoute({ children }) {
 
 export default function App() {
   return (
-    <Router>
-      {/* Render Navbar on all pages */}
-      <Navbar />
+    <ThemeProvider>
+      <Router>
+        {/* Render Navbar on all pages */}
+        <Navbar />
 
-      <div className="container mt-4">
-        <Routes>
-          {/* Public */}
-          <Route path="/login" element={<Login />} />
+        <div className="container mt-4">
+          <Routes>
+            {/* Public */}
+            <Route path="/login" element={<Login />} />
 
-          {/* Protected */}
-          <Route
-            path="/"
-            element={
-              <PrivateRoute>
-                <Home />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/work-orders"
-            element={
-              <PrivateRoute>
-                <WorkOrders />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/add-work-order"
-            element={
-              <PrivateRoute>
-                <AddWorkOrder />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/view-work-order/:id"
-            element={
-              <PrivateRoute>
-                <ViewWorkOrder />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/calendar"
-            element={
-              <PrivateRoute>
-                <CalendarPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/history"
-            element={
-              <PrivateRoute>
-                <HistoryReport />
-              </PrivateRoute>
-            }
-          />
+            {/* Protected */}
+            <Route
+              path="/"
+              element={
+                <PrivateRoute>
+                  <Home />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/work-orders"
+              element={
+                <PrivateRoute>
+                  <WorkOrders />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/add-work-order"
+              element={
+                <PrivateRoute>
+                  <AddWorkOrder />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/view-work-order/:id"
+              element={
+                <PrivateRoute>
+                  <ViewWorkOrder />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/calendar"
+              element={
+                <PrivateRoute>
+                  <CalendarPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/history"
+              element={
+                <PrivateRoute>
+                  <HistoryReport />
+                </PrivateRoute>
+              }
+            />
 
-          {/* NEW: Purchase Orders tab */}
-          <Route
-            path="/purchase-orders"
-            element={
-              <PrivateRoute>
-                <PurchaseOrders />
-              </PrivateRoute>
-            }
-          />
+            {/* NEW: Purchase Orders tab */}
+            <Route
+              path="/purchase-orders"
+              element={
+                <PrivateRoute>
+                  <PurchaseOrders />
+                </PrivateRoute>
+              }
+            />
 
-          {/* Catch-all redirect */}
-          <Route
-            path="*"
-            element={
-              localStorage.getItem("jwt") ? (
-                <Navigate to="/" replace />
-              ) : (
-                <Navigate to="/login" replace />
-              )
-            }
-          />
-        </Routes>
-      </div>
-    </Router>
+            {/* Catch-all redirect */}
+            <Route
+              path="*"
+              element={
+                localStorage.getItem("jwt") ? (
+                  <Navigate to="/" replace />
+                ) : (
+                  <Navigate to="/login" replace />
+                )
+              }
+            />
+          </Routes>
+        </div>
+      </Router>
+    </ThemeProvider>
   );
 }
