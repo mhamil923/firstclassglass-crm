@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import api from "./api";
 import API_BASE_URL from "./config";
+import "./PurchaseOrders.css";
 
 const SUPPLIERS = ["All Suppliers", "Chicago Tempered", "CRL", "Oldcastle", "Casco"];
 const STATUSES = ["All Statuses", "On Order", "Picked Up"];
@@ -627,31 +628,21 @@ export default function PurchaseOrders() {
   };
 
   return (
-    <div className="container mt-4">
-      {/* ✅ Blue gradient header box */}
-      <div
-        style={{
-          padding: "14px 14px 12px",
-          border: "1px solid #eef2f7",
-          borderRadius: 14,
-          background:
-            "linear-gradient(180deg, rgba(13, 110, 253, 0.16) 0%, rgba(13, 110, 253, 0.06) 100%)",
-          boxShadow: "0 6px 18px rgba(0, 0, 0, 0.06)",
-          marginBottom: 14,
-        }}
-      >
-        <div style={{ fontWeight: 900, fontSize: 22, color: "#0f172a", letterSpacing: "-0.02em" }}>
-          Purchase Orders
+    <div className="po-page">
+      <div className="po-container">
+        {/* Page header */}
+        <div className="po-header">
+          <div>
+            <h1 className="po-title">Purchase Orders</h1>
+            <p className="text-muted" style={{ marginTop: 4, fontSize: 13 }}>
+              Showing all work orders in <b>Waiting on Parts</b> — mark "Picked Up" to move to{" "}
+              <b>{NEEDS_TO_BE_SCHEDULED}</b>.
+            </p>
+          </div>
         </div>
-        <div style={{ marginTop: 2, color: "rgba(15, 23, 42, 0.6)", fontSize: 13, fontWeight: 700 }}>
-          Showing all work orders in <b>Waiting on Parts</b> — mark “Picked Up” to move to{" "}
-          <b>{NEEDS_TO_BE_SCHEDULED}</b>.
-        </div>
-      </div>
 
       {/* Filters */}
-      <div className="card mb-4">
-        <div className="card-body">
+      <div className="po-section-card">
           <div className="row g-3 align-items-end">
             <div className="col-md-3">
               <label className="form-label">Supplier</label>
@@ -728,9 +719,8 @@ export default function PurchaseOrders() {
           <div className="mt-3 text-muted" style={{ fontSize: "0.9rem" }}>
             Purchase orders are derived from work orders (PO Number, Supplier, and PO PDF).
             <br />
-            <b>Showing ALL work orders with status: “Waiting on Parts”.</b>
+            <b>Showing ALL work orders with status: "Waiting on Parts".</b>
           </div>
-        </div>
       </div>
 
       {error && (
@@ -739,29 +729,15 @@ export default function PurchaseOrders() {
         </div>
       )}
 
-      <div className="card">
-        {/* ✅ Updated to match blue gradient header */}
-        <div
-          style={{
-            padding: "14px 14px 12px",
-            borderBottom: "1px solid rgba(15, 23, 42, 0.08)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            background:
-              "linear-gradient(180deg, rgba(13, 110, 253, 0.16) 0%, rgba(13, 110, 253, 0.06) 100%)",
-          }}
-        >
-          <div style={{ fontWeight: 900, color: "#0f172a", fontSize: 15, letterSpacing: "-0.01em" }}>
-            Purchase Orders List
-          </div>
+      <div className="po-section-card" style={{ padding: 0 }}>
+        <div className="po-section-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h3 className="po-section-title" style={{ margin: 0 }}>Purchase Orders List</h3>
           {loading ? (
-            <div style={{ fontWeight: 800, color: "rgba(15, 23, 42, 0.6)", fontSize: 12 }}>Loading…</div>
+            <span className="text-muted" style={{ fontSize: 12 }}>Loading…</span>
           ) : null}
         </div>
 
-        <div className="card-body p-0">
+        <div style={{ padding: 0 }}>
           <div className="table-responsive">
             <table className="table table-striped table-hover mb-0">
               <thead>
@@ -865,27 +841,15 @@ export default function PurchaseOrders() {
           role="dialog"
           aria-modal="true"
           onClick={closePdfModal}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            zIndex: 2000,
-            padding: 20,
-          }}
+          className="pdf-modal"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            style={{
-              maxWidth: 1100,
-              margin: "0 auto",
-              background: "#fff",
-              borderRadius: 10,
-              overflow: "hidden",
-              boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
-            }}
+            className="pdf-modal-content"
+            style={{ maxWidth: 1100 }}
           >
-            <div className="d-flex align-items-center justify-content-between p-3 border-bottom">
-              <div className="fw-bold">{pdfTitle || "Purchase Order PDF"}</div>
+            <div className="pdf-modal-header">
+              <h3 className="pdf-modal-title">{pdfTitle || "Purchase Order PDF"}</h3>
               <div className="d-flex align-items-center gap-2">
                 {pdfCanMarkPickedUp ? (
                   <button className="btn btn-sm btn-primary" onClick={handlePdfMarkPickedUp}>
@@ -893,15 +857,15 @@ export default function PurchaseOrders() {
                   </button>
                 ) : null}
 
-                <button className="btn btn-sm btn-primary" onClick={closePdfModal}>
-                  Close
+                <button className="pdf-modal-close" onClick={closePdfModal} aria-label="Close">
+                  ×
                 </button>
               </div>
             </div>
 
-            <div style={{ height: "80vh" }}>
+            <div className="pdf-modal-body">
               {pdfUrl ? (
-                <iframe title="PO PDF Viewer" src={pdfUrl} style={{ width: "100%", height: "100%", border: 0 }} />
+                <iframe title="PO PDF Viewer" src={pdfUrl} />
               ) : (
                 <div className="p-4 text-muted">No PDF URL.</div>
               )}
@@ -909,6 +873,7 @@ export default function PurchaseOrders() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -1,15 +1,21 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "./api"; // your axios instance with baseURL + interceptor
-// Note: Bootstrap is imported in index.js
+import ThemeToggle from "./components/ThemeToggle";
+import "./Login.css";
 
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = async e => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
+    setLoading(true);
+
     try {
       const { data } = await api.post("/auth/login", { username, password });
       // store the token
@@ -18,41 +24,90 @@ export default function Login() {
       navigate("/work-orders");
     } catch (err) {
       console.error("Login error:", err.response?.data || err);
-      alert(err.response?.data?.error || "Login failed");
+      setError(err.response?.data?.error || "Login failed. Please check your credentials.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="container mt-4">
-      <h2 className="text-center text-primary">Login</h2>
-      <form
-        onSubmit={handleSubmit}
-        className="card p-4 mx-auto"
-        style={{ maxWidth: 400 }}
-      >
-        <div className="mb-3">
-          <label>Username</label>
-          <input
-            required
-            className="form-control"
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-          />
+    <div className="login-page">
+      {/* Theme toggle in top right */}
+      <div className="login-theme-toggle">
+        <ThemeToggle />
+      </div>
+
+      <div className="login-container">
+        {/* Brand/Logo Section */}
+        <div className="login-brand">
+          <h1 className="login-brand-title">First Class Glass</h1>
+          <p className="login-brand-subtitle">CRM System</p>
         </div>
-        <div className="mb-3">
-          <label>Password</label>
-          <input
-            required
-            type="password"
-            className="form-control"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-          />
+
+        {/* Login Card */}
+        <div className="login-card">
+          <h2 className="login-card-title">Welcome Back</h2>
+          <p className="login-card-subtitle">Sign in to your account</p>
+
+          {/* Error Message */}
+          {error && (
+            <div className="login-error">
+              <span className="login-error-icon">⚠</span>
+              <span className="login-error-text">{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="login-form">
+            <div className="login-form-group">
+              <label className="login-label" htmlFor="username">
+                Username
+              </label>
+              <input
+                id="username"
+                required
+                className="login-input"
+                placeholder="Enter your username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                disabled={loading}
+                autoComplete="username"
+              />
+            </div>
+
+            <div className="login-form-group">
+              <label className="login-label" htmlFor="password">
+                Password
+              </label>
+              <input
+                id="password"
+                required
+                type="password"
+                className="login-input"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+                autoComplete="current-password"
+              />
+            </div>
+
+            <button
+              type="submit"
+              className={`login-btn ${loading ? "loading" : ""}`}
+              disabled={loading}
+            >
+              {loading ? "Signing in..." : "Sign In"}
+            </button>
+          </form>
         </div>
-        <button type="submit" className="btn btn-primary w-100">
-          Log In
-        </button>
-      </form>
+
+        {/* Footer */}
+        <div className="login-footer">
+          <p className="login-footer-text">
+            First Class Glass CRM &copy; {new Date().getFullYear()}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

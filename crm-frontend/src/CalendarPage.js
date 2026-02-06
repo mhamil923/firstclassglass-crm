@@ -1024,17 +1024,13 @@ export default function WorkOrderCalendar() {
             </div>
           </div>
 
-          <div className="text-muted mt-2" style={{ fontSize: 12 }}>
-            {unscheduledSearch ? (
-              <>
-                Showing {listForStrip.length} match{listForStrip.length === 1 ? "" : "es"} across{" "}
-                {allOrders.length} total work order{allOrders.length === 1 ? "" : "s"} (drag any item
-                to schedule/reschedule).
-              </>
-            ) : (
-              <>Showing {listForStrip.length} item(s) (from /work-orders/unscheduled)</>
-            )}
-          </div>
+          {unscheduledSearch && (
+            <div className="text-muted mt-2" style={{ fontSize: 12 }}>
+              Showing {listForStrip.length} match{listForStrip.length === 1 ? "" : "es"} across{" "}
+              {allOrders.length} total work order{allOrders.length === 1 ? "" : "s"} (drag any item
+              to schedule/reschedule).
+            </div>
+          )}
 
           <div className="unscheduled-list">
             {listForStrip.map((order) => {

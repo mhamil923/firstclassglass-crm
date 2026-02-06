@@ -1,0 +1,625 @@
+/* ===== APPLE-STYLE PURCHASE ORDERS PAGE ===== */
+.po-page {
+  min-height: 100vh;
+  background: var(--bg-primary);
+  padding: 24px;
+  transition: var(--transition-default);
+}
+
+.po-container {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* Page Header */
+.po-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.po-title {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+.po-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Filter Section */
+.po-filters {
+  background: var(--bg-card-solid);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  border-top: 3px solid var(--accent-blue);
+  padding: 20px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow-sm);
+}
+
+.po-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.po-search {
+  flex: 1;
+  min-width: 250px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  transition: var(--transition-fast);
+}
+
+.po-search:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+.po-search::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Supplier Filter Chips */
+.supplier-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.supplier-chip {
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-solid);
+  color: var(--text-primary);
+}
+
+.supplier-chip:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-blue);
+}
+
+.supplier-chip.active {
+  background: var(--accent-blue);
+  color: #ffffff;
+  border-color: var(--accent-blue);
+}
+
+/* PO Table */
+.po-table-container {
+  background: var(--bg-card-solid);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.po-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.po-table th {
+  text-align: left;
+  padding: 14px 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-blue);
+  background: var(--bg-hover);
+  border-bottom: 2px solid var(--accent-blue);
+}
+
+.po-table td {
+  padding: 16px 20px;
+  font-size: 14px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+.po-table tr:last-child td {
+  border-bottom: none;
+}
+
+.po-table tbody tr {
+  transition: var(--transition-fast);
+  cursor: pointer;
+}
+
+.po-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+/* PO Number Link */
+.po-number-link {
+  font-weight: 600;
+  color: var(--accent-blue);
+  text-decoration: none;
+}
+
+.po-number-link:hover {
+  text-decoration: underline;
+}
+
+/* Status Badges */
+.po-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.po-status.on-order {
+  background: rgba(255, 149, 0, 0.12);
+  color: var(--accent-orange);
+}
+
+.po-status.received {
+  background: rgba(52, 199, 89, 0.12);
+  color: var(--accent-green);
+}
+
+.po-status.picked-up {
+  background: rgba(0, 113, 227, 0.12);
+  color: var(--accent-blue);
+}
+
+.po-status.cancelled {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+/* Supplier Badge */
+.supplier-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Action Buttons in Table */
+.po-action-btn {
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  border: none;
+  margin-right: 8px;
+}
+
+.po-action-btn:last-child {
+  margin-right: 0;
+}
+
+.po-action-btn.view {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color-strong);
+}
+
+.po-action-btn.view:hover {
+  background: var(--border-color);
+}
+
+.po-action-btn.primary {
+  background: var(--accent-blue);
+  color: #ffffff;
+}
+
+.po-action-btn.primary:hover {
+  background: var(--accent-blue-hover);
+}
+
+.po-action-btn.success {
+  background: var(--accent-green);
+  color: #ffffff;
+}
+
+.po-action-btn.success:hover {
+  filter: brightness(1.1);
+}
+
+/* Add PO Button */
+.btn-add-po {
+  background: var(--accent-blue);
+  color: #ffffff;
+  border: none;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition-default);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3);
+}
+
+.btn-add-po:hover {
+  background: var(--accent-blue-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 113, 227, 0.4);
+}
+
+/* PO Card View (alternative) */
+.po-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.po-card {
+  background: var(--bg-card-solid);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  padding: 20px;
+  transition: var(--transition-default);
+  cursor: pointer;
+}
+
+.po-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--border-color-strong);
+}
+
+.po-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.po-card-number {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.po-card-supplier {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 4px 0 0 0;
+}
+
+.po-card-body {
+  margin-bottom: 16px;
+}
+
+.po-card-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 14px;
+}
+
+.po-card-row:last-child {
+  border-bottom: none;
+}
+
+.po-card-label {
+  color: var(--text-secondary);
+}
+
+.po-card-value {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.po-card-footer {
+  display: flex;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+/* PDF Viewer Modal */
+.pdf-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.pdf-modal-content {
+  background: var(--bg-card-solid);
+  border-radius: var(--radius-lg);
+  width: 90%;
+  max-width: 900px;
+  height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+
+.pdf-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.pdf-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.pdf-modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+}
+
+.pdf-modal-close:hover {
+  color: var(--text-primary);
+}
+
+.pdf-modal-body {
+  flex: 1;
+  overflow: auto;
+  background: var(--bg-primary);
+}
+
+.pdf-modal-body iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+/* Empty State */
+.po-empty {
+  text-align: center;
+  padding: 64px 24px;
+}
+
+.po-empty-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.po-empty-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+}
+
+.po-empty-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* Loading */
+.po-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px;
+  gap: 16px;
+}
+
+.po-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .po-filter-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .po-search {
+    min-width: unset;
+  }
+}
+
+@media (max-width: 768px) {
+  .po-page {
+    padding: 16px;
+  }
+
+  .po-title {
+    font-size: 28px;
+  }
+
+  .po-table-container {
+    overflow-x: auto;
+  }
+
+  .po-table th,
+  .po-table td {
+    padding: 12px 16px;
+    font-size: 13px;
+  }
+}
+
+/* ===== Legacy/Fallback Styles ===== */
+/* Support for existing class names */
+.purchase-orders-page {
+  min-height: 100vh;
+  background: var(--bg-primary);
+  padding: 24px;
+}
+
+[data-theme="dark"] .purchase-orders-page {
+  background: #000000;
+}
+
+/* Form controls */
+.po-page .form-control,
+.purchase-orders-page .form-control {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+}
+
+[data-theme="dark"] .po-page .form-control,
+[data-theme="dark"] .purchase-orders-page .form-control {
+  background: #2c2c2e;
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+.po-page .form-control:focus,
+.purchase-orders-page .form-control:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+  outline: none;
+}
+
+/* Card styling */
+.po-page .card,
+.purchase-orders-page .card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+[data-theme="dark"] .po-page .card,
+[data-theme="dark"] .purchase-orders-page .card {
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+}
+
+/* Table styling for Bootstrap tables */
+.po-page .table,
+.purchase-orders-page .table {
+  color: var(--text-primary);
+}
+
+.po-page .table thead th,
+.purchase-orders-page .table thead th {
+  background: var(--bg-hover);
+  color: var(--accent-blue);
+  border-bottom: 2px solid var(--accent-blue);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+[data-theme="dark"] .po-page .table thead th,
+[data-theme="dark"] .purchase-orders-page .table thead th {
+  background: var(--bg-tertiary);
+}
+
+.po-page .table tbody td,
+.purchase-orders-page .table tbody td {
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+.po-page .table tbody tr:hover,
+.purchase-orders-page .table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+/* Section cards */
+.po-section-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="dark"] .po-section-card {
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+}
+
+.po-section-header {
+  background: var(--bg-hover);
+  border-bottom: 2px solid var(--accent-blue);
+  padding: 14px 20px;
+  margin: -20px -20px 20px -20px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+[data-theme="dark"] .po-section-header {
+  background: var(--bg-tertiary);
+}
+
+.po-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+/* Text styling */
+.po-page .text-muted,
+.purchase-orders-page .text-muted {
+  color: var(--text-secondary) !important;
+}
+
+/* Badge styling */
+.po-page .badge,
+.purchase-orders-page .badge {
+  font-weight: 600;
+}

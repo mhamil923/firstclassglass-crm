@@ -1050,3 +1050,226 @@
   color: var(--text-primary) !important;
   border-color: var(--border-secondary);
 }
+
+/* ===========================
+   Calendar grid lines - dark mode fix
+   =========================== */
+
+/* React Big Calendar month view grid */
+.rbc-month-view {
+  border: 1px solid var(--border-primary);
+}
+
+.rbc-month-row {
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.rbc-day-bg + .rbc-day-bg {
+  border-left: 1px solid var(--border-primary);
+}
+
+.rbc-header + .rbc-header {
+  border-left: 1px solid var(--border-primary);
+}
+
+/* Dark mode grid lines - more visible */
+[data-theme="dark"] .rbc-month-view {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="dark"] .rbc-month-row {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="dark"] .rbc-day-bg {
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+[data-theme="dark"] .rbc-day-bg + .rbc-day-bg {
+  border-left-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="dark"] .rbc-header {
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+[data-theme="dark"] .rbc-header + .rbc-header {
+  border-left-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="dark"] .rbc-month-row + .rbc-month-row {
+  border-top-color: rgba(255, 255, 255, 0.15);
+}
+
+/* Time view grid lines */
+[data-theme="dark"] .rbc-time-view {
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+[data-theme="dark"] .rbc-time-content {
+  border-top-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+[data-theme="dark"] .rbc-time-header-content {
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+[data-theme="dark"] .rbc-timeslot-group {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme="dark"] .rbc-day-slot .rbc-time-slot {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-theme="dark"] .rbc-time-content > * + * > * {
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+/* ===========================
+   Event popup/tooltip styling
+   =========================== */
+
+/* React Big Calendar overlay/popup */
+.rbc-overlay {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border-primary) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-lg) !important;
+  padding: 0 !important;
+  color: var(--text-primary) !important;
+  overflow: hidden;
+}
+
+[data-theme="dark"] .rbc-overlay {
+  background: #1c1c1e !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+}
+
+.rbc-overlay-header {
+  background: var(--bg-tertiary) !important;
+  border-bottom: 1px solid var(--border-primary) !important;
+  padding: 12px 16px !important;
+  color: var(--text-primary) !important;
+  font-weight: 600 !important;
+  margin: 0 !important;
+}
+
+[data-theme="dark"] .rbc-overlay-header {
+  background: #2c2c2e !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+/* Events inside the overlay */
+.rbc-overlay .rbc-event {
+  margin: 8px 12px !important;
+}
+
+/* Bootstrap Popover styling (used by OverlayTrigger) */
+.popover {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border-primary) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+.popover-header {
+  background: var(--bg-tertiary) !important;
+  border-bottom: 1px solid var(--border-primary) !important;
+  color: var(--text-primary) !important;
+  font-weight: 600 !important;
+  padding: 12px 16px !important;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0 !important;
+}
+
+.popover-body {
+  background: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  padding: 12px 16px !important;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg) !important;
+}
+
+/* Popover arrow */
+.popover .popover-arrow::before,
+.popover .popover-arrow::after {
+  border-color: transparent !important;
+}
+
+.bs-popover-top > .popover-arrow::after,
+.bs-popover-auto[data-popper-placement^="top"] > .popover-arrow::after {
+  border-top-color: var(--bg-secondary) !important;
+}
+
+.bs-popover-bottom > .popover-arrow::after,
+.bs-popover-auto[data-popper-placement^="bottom"] > .popover-arrow::after {
+  border-bottom-color: var(--bg-tertiary) !important;
+}
+
+.bs-popover-start > .popover-arrow::after,
+.bs-popover-auto[data-popper-placement^="left"] > .popover-arrow::after {
+  border-left-color: var(--bg-secondary) !important;
+}
+
+.bs-popover-end > .popover-arrow::after,
+.bs-popover-auto[data-popper-placement^="right"] > .popover-arrow::after {
+  border-right-color: var(--bg-secondary) !important;
+}
+
+/* Dark mode popover */
+[data-theme="dark"] .popover {
+  background: #1c1c1e !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+[data-theme="dark"] .popover-header {
+  background: #2c2c2e !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+[data-theme="dark"] .popover-body {
+  background: #1c1c1e !important;
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .bs-popover-top > .popover-arrow::after,
+[data-theme="dark"] .bs-popover-auto[data-popper-placement^="top"] > .popover-arrow::after {
+  border-top-color: #1c1c1e !important;
+}
+
+[data-theme="dark"] .bs-popover-bottom > .popover-arrow::after,
+[data-theme="dark"] .bs-popover-auto[data-popper-placement^="bottom"] > .popover-arrow::after {
+  border-bottom-color: #2c2c2e !important;
+}
+
+[data-theme="dark"] .bs-popover-start > .popover-arrow::after,
+[data-theme="dark"] .bs-popover-auto[data-popper-placement^="left"] > .popover-arrow::after {
+  border-left-color: #1c1c1e !important;
+}
+
+[data-theme="dark"] .bs-popover-end > .popover-arrow::after,
+[data-theme="dark"] .bs-popover-auto[data-popper-placement^="right"] > .popover-arrow::after {
+  border-right-color: #1c1c1e !important;
+}
+
+/* Custom tooltip classes if used */
+.calendar-tooltip,
+.event-tooltip,
+.wo-tooltip {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border-primary) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-lg) !important;
+  padding: 16px !important;
+  color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .calendar-tooltip,
+[data-theme="dark"] .event-tooltip,
+[data-theme="dark"] .wo-tooltip {
+  background: #1c1c1e !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+}
