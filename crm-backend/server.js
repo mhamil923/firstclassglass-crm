@@ -547,6 +547,22 @@ function makeUploader() {
 
 const upload = makeUploader();
 
+// Separate uploader for temporary extraction (always uses disk, not S3)
+const extractUploader = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, require('os').tmpdir()),
+    filename: (req, file, cb) => cb(null, `extract-${Date.now()}-${file.originalname}`)
+  }),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF files allowed'), false);
+    }
+  }
+});
+
 if (!S3_BUCKET) {
   const localDir = path.resolve(__dirname, 'uploads');
   app.use('/uploads', express.static(localDir));
@@ -1041,12 +1057,17 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
 });
 
 // EXTRACT work order fields from PDF (OCR)
-app.post('/work-orders/extract-pdf', authenticate, withMulter(upload.single('pdf')), async (req, res) => {
+// Uses extractUploader (disk-based) instead of upload (S3) so we can read the file directly
+app.post('/work-orders/extract-pdf', authenticate, extractUploader.single('pdf'), async (req, res) => {
   console.log("=== PDF EXTRACTION ENDPOINT HIT ===");
   console.log("[EXTRACT-PDF] Request received");
-  console.log("[EXTRACT-PDF] req.file:", req.file);
-  console.log("[EXTRACT-PDF] req.body keys:", Object.keys(req.body || {}));
-  console.log("=== PDF EXTRACTION ENDPOINT START ===");
+  console.log("[EXTRACT-PDF] req.file:", req.file ? {
+    originalname: req.file.originalname,
+    path: req.file.path,
+    size: req.file.size
+  } : null);
+
+  let filePath = null;
 
   try {
     // Check if file was uploaded
@@ -1059,57 +1080,23 @@ app.post('/work-orders/extract-pdf', authenticate, withMulter(upload.single('pdf
     }
 
     const file = req.file;
+    filePath = file.path; // extractUploader always uses disk storage
+
     console.log(`[EXTRACT-PDF] Received file: ${file.originalname}`);
+    console.log(`[EXTRACT-PDF] Temp file path: ${filePath}`);
     console.log(`[EXTRACT-PDF] File size: ${file.size} bytes`);
-    console.log(`[EXTRACT-PDF] MIME type: ${file.mimetype}`);
 
-    // Check if it's a PDF
-    if (file.mimetype !== 'application/pdf' && !file.originalname.toLowerCase().endsWith('.pdf')) {
-      console.log("[EXTRACT-PDF] Not a PDF file");
-      return res.status(400).json({
-        success: false,
-        error: 'File must be a PDF'
-      });
-    }
-
-    // Get file path (works for both disk and S3 storage)
-    let filePath;
-    if (file.path) {
-      // Disk storage
-      filePath = file.path;
-      console.log(`[EXTRACT-PDF] Using disk path: ${filePath}`);
-    } else if (file.key || file.location) {
-      // S3 storage - need to download first
-      console.log("[EXTRACT-PDF] S3 storage detected, downloading...");
-      const s3Key = file.key;
-      const tmpPath = path.join(require('os').tmpdir(), `extract-${Date.now()}.pdf`);
-
-      try {
-        const s3 = new AWS.S3();
-        const s3Data = await s3.getObject({
-          Bucket: process.env.AWS_S3_BUCKET,
-          Key: s3Key
-        }).promise();
-        fs.writeFileSync(tmpPath, s3Data.Body);
-        filePath = tmpPath;
-        console.log(`[EXTRACT-PDF] Downloaded to: ${filePath}`);
-      } catch (s3Err) {
-        console.error("[EXTRACT-PDF] S3 download failed:", s3Err.message);
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to download PDF from storage'
-        });
-      }
-    } else {
-      console.log("[EXTRACT-PDF] Cannot determine file path");
+    // Verify file exists
+    if (!fs.existsSync(filePath)) {
+      console.error("[EXTRACT-PDF] Temp file not found at:", filePath);
       return res.status(500).json({
         success: false,
-        error: 'Cannot determine file location'
+        error: 'Uploaded file not found on server'
       });
     }
 
     // Extract text from PDF (uses OCR if needed)
-    console.log("[EXTRACT-PDF] Starting text extraction...");
+    console.log("[EXTRACT-PDF] Starting text extraction from:", filePath);
     const text = await extractTextSmart(filePath);
     console.log(`[EXTRACT-PDF] Extracted ${text.length} characters`);
 
@@ -1117,24 +1104,13 @@ app.post('/work-orders/extract-pdf', authenticate, withMulter(upload.single('pdf
     console.log("[EXTRACT-PDF] Extracting fields from text...");
     const extracted = extractWorkOrderFields(text);
 
-    // Clean up temp file if we downloaded from S3
-    if (file.key && filePath.includes(require('os').tmpdir())) {
-      try {
-        fs.unlinkSync(filePath);
-        console.log("[EXTRACT-PDF] Cleaned up temp file");
-      } catch (e) {
-        // Ignore cleanup errors
-      }
-    }
-
-    // Also delete the uploaded file if using disk storage (we don't need it anymore)
-    if (file.path && fs.existsSync(file.path)) {
-      try {
-        fs.unlinkSync(file.path);
-        console.log("[EXTRACT-PDF] Cleaned up uploaded file");
-      } catch (e) {
-        // Ignore cleanup errors
-      }
+    // Clean up temp file - we don't need to keep it
+    try {
+      fs.unlinkSync(filePath);
+      console.log("[EXTRACT-PDF] Cleaned up temp file");
+      filePath = null;
+    } catch (e) {
+      console.warn("[EXTRACT-PDF] Could not delete temp file:", e.message);
     }
 
     console.log("=== PDF EXTRACTION ENDPOINT END ===");
@@ -1155,6 +1131,17 @@ app.post('/work-orders/extract-pdf', authenticate, withMulter(upload.single('pdf
 
   } catch (err) {
     console.error("[EXTRACT-PDF] Error:", err);
+
+    // Clean up temp file on error
+    if (filePath && fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+        console.log("[EXTRACT-PDF] Cleaned up temp file after error");
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+    }
+
     res.status(500).json({
       success: false,
       error: 'Failed to extract PDF content: ' + err.message
