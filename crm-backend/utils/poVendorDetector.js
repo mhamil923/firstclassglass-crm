@@ -215,12 +215,19 @@ function detectSupplierFromText(text) {
 /**
  * Detect PO number from PDF text
  * Looks for common PO number patterns
+ * Supports: CLM (VENDOR PO #), Clear Vision (Client PO #), True Source (Customer Tracking #)
  */
 function detectPoNumberFromText(text) {
   if (!text) return null;
 
   // Try multiple patterns in order of specificity
   const patterns = [
+    // CLM: "VENDOR PO #" or "Vendor PO:"
+    /vendor\s*po\s*[#:\-]?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,})/i,
+    // Clear Vision: "Client PO #" or "Client PO:"
+    /client\s*po\s*[#:\-]?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,})/i,
+    // True Source: "Customer Tracking #" or "Customer Tracking Number"
+    /customer\s*tracking\s*[#:\-]?\s*(?:number)?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,})/i,
     // "PO# 12345" or "PO #12345" or "PO#12345"
     /po\s*#\s*:?\s*([a-z0-9][a-z0-9-]{1,})/i,
     // "P.O. # 12345" or "P.O. No. 12345" or "P.O. NO. 12345" (with the number on next line possibly)
@@ -262,9 +269,27 @@ function detectPoNumberFromText(text) {
 /**
  * Extract customer name from text
  * Looks for: "Bill To:", "Customer:", "Client:", "Sold To:"
+ * Also detects known customers: Clear Vision, True Source, 1st Time Fixed, KFM, CLM Midwest
  */
 function extractCustomer(text) {
   if (!text) return null;
+
+  // First check for known customer names directly in text
+  const knownCustomers = [
+    { pattern: /clear\s*vision/i, name: "Clear Vision" },
+    { pattern: /truesource|true\s*source/i, name: "True Source" },
+    { pattern: /1st\s*time\s*fixed|first\s*time\s*fixed/i, name: "1st Time Fixed" },
+    { pattern: /\bkfm\b/i, name: "KFM" },
+    { pattern: /clm\s*midwest|clm\s*services/i, name: "CLM Midwest" },
+    { pattern: /\bclm\b(?!\s*midwest)/i, name: "CLM" },
+  ];
+
+  for (const { pattern, name } of knownCustomers) {
+    if (pattern.test(text)) {
+      console.log(`[EXTRACT] Known customer detected: "${name}"`);
+      return name;
+    }
+  }
 
   const patterns = [
     // "Bill To" on its own line, then customer on next line
@@ -325,11 +350,21 @@ function extractCustomer(text) {
 /**
  * Extract work order number from text
  * Looks for: "WO#", "Work Order:", "Service Order:", "Job #"
+ * Supports: Clear Vision (#R...), True Source (WO-...), 1st Time Fixed (W.O. NUMBER:),
+ *           KFM (Work Order Number #), CLM (VENDOR PO # as WO)
  */
 function extractWorkOrderNumber(text) {
   if (!text) return null;
 
   const patterns = [
+    // Clear Vision format: "#R" followed by number (e.g. #R1234567)
+    /#r\s*(\d{5,})/i,
+    // True Source format: "WO #: WO-" or "WO-" followed by number
+    /wo\s*#?\s*:?\s*(wo-[a-z0-9\-]{2,20})/i,
+    // 1st Time Fixed format: "W.O. NUMBER:" (may be on next line)
+    /w\.?o\.?\s*number\s*:?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
+    // KFM format: "Work Order Number #" or "Work Order Number:"
+    /work\s*order\s*number\s*[#:\-]?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
     // "WO# 12345" or "WO #12345" or "WO-12345"
     /wo\s*[#:\-]\s*([a-z0-9][a-z0-9\-]{2,20})/i,
     // "Work Order # 12345" or "Work Order: 12345"
@@ -363,17 +398,23 @@ function extractWorkOrderNumber(text) {
 /**
  * Extract site location name from text
  * Looks for: "Ship To:", "Service Location:", "Job Site:", "Site:", "Location:"
+ * Supports: Clear Vision (SERVICE LOCATION), True Source (SITE Name & Number),
+ *           1st Time Fixed (CUSTOMER / LOCATION), KFM/CLM (store patterns)
  */
 function extractSiteLocation(text) {
   if (!text) return null;
 
   const patterns = [
+    // Clear Vision: "SERVICE LOCATION" followed by name (possibly on next line)
+    /service\s*location\s*:?\s*\n?\s*([^\n]{3,60})/i,
+    // True Source: "SITE Name & Number:" (may be on next line)
+    /site\s*name\s*(?:&|and)\s*number\s*:?\s*\n?\s*([^\n]{3,60})/i,
+    // 1st Time Fixed: "CUSTOMER / LOCATION:" (may have store on next line)
+    /customer\s*\/?\s*location\s*:?\s*\n?\s*([^\n]{3,60})/i,
     // "Ship To" on its own line, then location on next line
     /ship\s*to\s*\n+\s*([^\n]{3,60})/i,
     // "Ship To:" followed by name
     /ship\s*to[:\s]+([^\n]{3,60})/i,
-    // "Service Location:"
-    /service\s*location[:\s]+([^\n]{3,60})/i,
     // "Job Site:"
     /job\s*site[:\s]+([^\n]{3,60})/i,
     // "Site Name:"
@@ -432,13 +473,39 @@ function extractSiteLocation(text) {
 /**
  * Extract site address from text
  * Looks for address patterns: number + street, city, state, zip
+ * Supports: True Source (Site Address:), Clear Vision (after SERVICE LOCATION),
+ *           1st Time Fixed (Address label), general patterns
  */
 function extractSiteAddress(text) {
   if (!text) return null;
 
-  // First try to find address after "Ship To:" section
-  const shipToMatch = text.match(/ship\s*to[:\s]*\n?([^]*?)(?=\n\s*\n|bill\s*to|$)/i);
-  const searchText = shipToMatch ? shipToMatch[1] : text;
+  // Try labeled address patterns first (more specific)
+  const labeledPatterns = [
+    // True Source: "Site Address:" followed by address
+    /site\s*address\s*:?\s*\n?\s*([^\n]{10,100})/i,
+    // General "Address:" label
+    /(?<!email\s|e-mail\s|web\s)address\s*:?\s*\n?\s*(\d+[^\n]{8,100})/i,
+    // "Service Address:"
+    /service\s*address\s*:?\s*\n?\s*([^\n]{10,100})/i,
+    // "Location Address:"
+    /location\s*address\s*:?\s*\n?\s*([^\n]{10,100})/i,
+  ];
+
+  for (const pattern of labeledPatterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      let addr = match[1].trim();
+      addr = addr.replace(/\s+/g, ' ');
+      if (addr.length >= 10 && addr.length <= 150) {
+        console.log(`[EXTRACT] Site address from label: "${addr}"`);
+        return addr;
+      }
+    }
+  }
+
+  // Try to find address after "Ship To:" or "SERVICE LOCATION" section
+  const sectionMatch = text.match(/(?:ship\s*to|service\s*location)[:\s]*\n?([^]*?)(?=\n\s*\n|bill\s*to|service\s*instructions|problem|$)/i);
+  const searchText = sectionMatch ? sectionMatch[1] : text;
 
   // Look for address pattern: number + street name + (optional city, state zip)
   const addressPatterns = [
@@ -471,17 +538,28 @@ function extractSiteAddress(text) {
 /**
  * Extract problem description from text
  * Looks for: "Problem:", "Description:", "Work Description:", "Scope:", "Issue:", "Service Requested:"
+ * Supports: Clear Vision (SERVICE INSTRUCTIONS), True Source (Problem Reported),
+ *           1st Time Fixed (WORK DESCRIPTION), KFM (SERVICE DESCRIPTION), CLM (Description from Client)
  */
 function extractProblemDescription(text) {
   if (!text) return null;
 
   const patterns = [
+    // Clear Vision: "SERVICE INSTRUCTIONS" (may span multiple lines)
+    /service\s*instructions\s*:?\s*\n?\s*([^\n]{5,200})/i,
+    // True Source: "Problem Reported:" or "Problem Reported"
+    /problem\s*reported\s*:?\s*\n?\s*([^\n]{5,200})/i,
+    // 1st Time Fixed: "WORK DESCRIPTION:" (may be on next line)
+    /work\s*description\s*:?\s*\n?\s*([^\n]{5,200})/i,
+    // KFM: "SERVICE DESCRIPTION" or "Service Description:"
+    /service\s*description\s*:?\s*\n?\s*([^\n]{5,200})/i,
+    // CLM: "Description from Client" or "Client Description"
+    /description\s*from\s*client\s*:?\s*\n?\s*([^\n]{5,200})/i,
+    /client\s*description\s*:?\s*\n?\s*([^\n]{5,200})/i,
     // "Problem:" or "Problem Description:"
     /problem(?:\s*description)?[:\s]+([^\n]{5,200})/i,
     // "Description:" (but not "Job Description" which might be something else)
     /(?<!job\s)description[:\s]+([^\n]{5,200})/i,
-    // "Work Description:"
-    /work\s*description[:\s]+([^\n]{5,200})/i,
     // "Scope:" or "Scope of Work:"
     /scope(?:\s*of\s*work)?[:\s]+([^\n]{5,200})/i,
     // "Issue:"

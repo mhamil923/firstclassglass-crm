@@ -1059,61 +1059,92 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
 // EXTRACT work order fields from PDF (OCR)
 // Uses extractUploader (disk-based) instead of upload (S3) so we can read the file directly
 app.post('/work-orders/extract-pdf', authenticate, extractUploader.single('pdf'), async (req, res) => {
+  console.log("\n" + "=".repeat(60));
   console.log("=== PDF EXTRACTION ENDPOINT HIT ===");
-  console.log("[EXTRACT-PDF] Request received");
-  console.log("[EXTRACT-PDF] req.file:", req.file ? {
-    originalname: req.file.originalname,
-    path: req.file.path,
-    size: req.file.size
-  } : null);
+  console.log("=".repeat(60));
+  console.log("[EXTRACT-PDF] Timestamp:", new Date().toISOString());
+  console.log("[EXTRACT-PDF] req.file exists:", !!req.file);
+  if (req.file) {
+    console.log("[EXTRACT-PDF] File details:", JSON.stringify({
+      fieldname: req.file.fieldname,
+      originalname: req.file.originalname,
+      encoding: req.file.encoding,
+      mimetype: req.file.mimetype,
+      destination: req.file.destination,
+      filename: req.file.filename,
+      path: req.file.path,
+      size: req.file.size
+    }, null, 2));
+  }
 
   let filePath = null;
 
   try {
-    // Check if file was uploaded
+    // Step 1: Check if file was uploaded
+    console.log("[EXTRACT-PDF] Step 1: Checking file upload...");
     if (!req.file) {
-      console.log("[EXTRACT-PDF] No file uploaded");
+      console.log("[EXTRACT-PDF] FAILED: No file in request");
       return res.status(400).json({
         success: false,
         error: 'No PDF file uploaded. Use field name "pdf".'
       });
     }
+    console.log("[EXTRACT-PDF] Step 1: PASSED - File received");
 
     const file = req.file;
-    filePath = file.path; // extractUploader always uses disk storage
+    filePath = file.path;
 
-    console.log(`[EXTRACT-PDF] Received file: ${file.originalname}`);
-    console.log(`[EXTRACT-PDF] Temp file path: ${filePath}`);
-    console.log(`[EXTRACT-PDF] File size: ${file.size} bytes`);
-
-    // Verify file exists
-    if (!fs.existsSync(filePath)) {
-      console.error("[EXTRACT-PDF] Temp file not found at:", filePath);
+    // Step 2: Verify file exists on disk
+    console.log("[EXTRACT-PDF] Step 2: Checking file exists at:", filePath);
+    const fileExists = fs.existsSync(filePath);
+    console.log("[EXTRACT-PDF] File exists:", fileExists);
+    if (!fileExists) {
+      console.error("[EXTRACT-PDF] FAILED: File not found at path:", filePath);
       return res.status(500).json({
         success: false,
         error: 'Uploaded file not found on server'
       });
     }
 
-    // Extract text from PDF (uses OCR if needed)
-    console.log("[EXTRACT-PDF] Starting text extraction from:", filePath);
+    // Get file stats
+    const stats = fs.statSync(filePath);
+    console.log("[EXTRACT-PDF] File stats:", {
+      size: stats.size,
+      created: stats.birthtime,
+      modified: stats.mtime
+    });
+    console.log("[EXTRACT-PDF] Step 2: PASSED - File exists on disk");
+
+    // Step 3: Extract text from PDF (uses OCR if needed)
+    console.log("[EXTRACT-PDF] Step 3: Starting OCR extraction...");
+    console.log("[EXTRACT-PDF] Calling extractTextSmart() on:", filePath);
+
     const text = await extractTextSmart(filePath);
-    console.log(`[EXTRACT-PDF] Extracted ${text.length} characters`);
 
-    // Extract work order fields from text
-    console.log("[EXTRACT-PDF] Extracting fields from text...");
+    console.log("[EXTRACT-PDF] OCR Result:");
+    console.log("[EXTRACT-PDF]   - Text length:", text.length, "characters");
+    console.log("[EXTRACT-PDF]   - First 500 chars:", text.substring(0, 500));
+    console.log("[EXTRACT-PDF] Step 3: PASSED - Text extracted");
+
+    // Step 4: Extract work order fields from text
+    console.log("[EXTRACT-PDF] Step 4: Extracting fields from text...");
     const extracted = extractWorkOrderFields(text);
+    console.log("[EXTRACT-PDF] Extracted fields:", JSON.stringify(extracted, null, 2));
+    console.log("[EXTRACT-PDF] Step 4: PASSED - Fields extracted");
 
-    // Clean up temp file - we don't need to keep it
+    // Step 5: Clean up temp file
+    console.log("[EXTRACT-PDF] Step 5: Cleaning up temp file...");
     try {
       fs.unlinkSync(filePath);
-      console.log("[EXTRACT-PDF] Cleaned up temp file");
+      console.log("[EXTRACT-PDF] Step 5: PASSED - Temp file deleted");
       filePath = null;
     } catch (e) {
-      console.warn("[EXTRACT-PDF] Could not delete temp file:", e.message);
+      console.warn("[EXTRACT-PDF] Step 5: WARNING - Could not delete temp file:", e.message);
     }
 
-    console.log("=== PDF EXTRACTION ENDPOINT END ===");
+    console.log("=".repeat(60));
+    console.log("=== PDF EXTRACTION COMPLETE - SUCCESS ===");
+    console.log("=".repeat(60) + "\n");
 
     res.json({
       success: true,
@@ -1130,7 +1161,12 @@ app.post('/work-orders/extract-pdf', authenticate, extractUploader.single('pdf')
     });
 
   } catch (err) {
-    console.error("[EXTRACT-PDF] Error:", err);
+    console.error("=".repeat(60));
+    console.error("=== PDF EXTRACTION FAILED ===");
+    console.error("=".repeat(60));
+    console.error("[EXTRACT-PDF] Error message:", err.message);
+    console.error("[EXTRACT-PDF] Error stack:", err.stack);
+    console.error("[EXTRACT-PDF] Full error:", err);
 
     // Clean up temp file on error
     if (filePath && fs.existsSync(filePath)) {
@@ -1145,6 +1181,100 @@ app.post('/work-orders/extract-pdf', authenticate, extractUploader.single('pdf')
     res.status(500).json({
       success: false,
       error: 'Failed to extract PDF content: ' + err.message
+    });
+  }
+});
+
+// TEST ENDPOINT: Test PDF extraction on an existing file
+app.get('/test-extract-pdf', authenticate, async (req, res) => {
+  console.log("\n=== TEST PDF EXTRACTION ===");
+
+  try {
+    // Check if GraphicsMagick/ImageMagick are available
+    const { execSync } = require('child_process');
+    let gmVersion = null, imVersion = null, gsVersion = null;
+
+    try {
+      gmVersion = execSync('gm -version 2>&1').toString().split('\n')[0];
+      console.log("[TEST] GraphicsMagick:", gmVersion);
+    } catch (e) {
+      console.log("[TEST] GraphicsMagick: NOT INSTALLED");
+    }
+
+    try {
+      imVersion = execSync('convert -version 2>&1').toString().split('\n')[0];
+      console.log("[TEST] ImageMagick:", imVersion);
+    } catch (e) {
+      console.log("[TEST] ImageMagick: NOT INSTALLED");
+    }
+
+    try {
+      gsVersion = execSync('gs --version 2>&1').toString().trim();
+      console.log("[TEST] Ghostscript:", gsVersion);
+    } catch (e) {
+      console.log("[TEST] Ghostscript: NOT INSTALLED");
+    }
+
+    // Find a PDF file to test with
+    const uploadsDir = path.resolve(__dirname, 'uploads');
+    let testFile = req.query.file;
+
+    if (!testFile) {
+      // Find first PDF in uploads
+      if (fs.existsSync(uploadsDir)) {
+        const files = fs.readdirSync(uploadsDir).filter(f => f.toLowerCase().endsWith('.pdf'));
+        if (files.length > 0) {
+          testFile = path.join(uploadsDir, files[0]);
+          console.log("[TEST] Using first PDF found:", testFile);
+        }
+      }
+    }
+
+    if (!testFile) {
+      return res.json({
+        success: false,
+        error: 'No PDF file to test. Pass ?file=/path/to/file.pdf or add PDFs to uploads folder',
+        dependencies: { graphicsmagick: gmVersion, imagemagick: imVersion, ghostscript: gsVersion }
+      });
+    }
+
+    if (!fs.existsSync(testFile)) {
+      return res.json({
+        success: false,
+        error: 'Test file not found: ' + testFile,
+        dependencies: { graphicsmagick: gmVersion, imagemagick: imVersion, ghostscript: gsVersion }
+      });
+    }
+
+    console.log("[TEST] Testing extraction on:", testFile);
+
+    // Run extraction
+    const text = await extractTextSmart(testFile);
+    console.log("[TEST] Extracted", text.length, "characters");
+    console.log("[TEST] First 500 chars:", text.substring(0, 500));
+
+    const extracted = extractWorkOrderFields(text);
+    console.log("[TEST] Extracted fields:", extracted);
+
+    res.json({
+      success: true,
+      testFile,
+      dependencies: {
+        graphicsmagick: gmVersion || 'NOT INSTALLED',
+        imagemagick: imVersion || 'NOT INSTALLED',
+        ghostscript: gsVersion || 'NOT INSTALLED'
+      },
+      textLength: text.length,
+      rawText: text.substring(0, 1000),
+      extracted
+    });
+
+  } catch (err) {
+    console.error("[TEST] Error:", err);
+    res.json({
+      success: false,
+      error: err.message,
+      stack: err.stack
     });
   }
 });
