@@ -332,43 +332,54 @@ export default function AddWorkOrder() {
         timeout: 60000, // 60 second timeout for OCR
       });
 
-      console.log("[PDF Extract] Response:", response.data);
+      console.log("[PDF Extract] Response status:", response.status);
+      console.log("[PDF Extract] Response data:", JSON.stringify(response.data, null, 2));
 
       if (response.data?.success && response.data?.extracted) {
         const ext = response.data.extracted;
+        console.log("[PDF Extract] Extracted fields:", ext);
+
+        // Build list of filled fields OUTSIDE setState to avoid closure issues
         const filledFields = [];
+        const updates = {};
 
-        // Only fill fields that have values (don't overwrite with null/empty)
-        setWorkOrder((prev) => {
-          const upd = { ...prev };
+        if (ext.customer && ext.customer.trim()) {
+          updates.customer = ext.customer.trim();
+          filledFields.push("Customer");
+          console.log("[PDF Extract] Found customer:", updates.customer);
+        }
+        if (ext.poNumber && ext.poNumber.trim()) {
+          updates.poNumber = ext.poNumber.trim();
+          filledFields.push("PO Number");
+          console.log("[PDF Extract] Found poNumber:", updates.poNumber);
+        }
+        if (ext.workOrderNumber && ext.workOrderNumber.trim()) {
+          updates.workOrderNumber = ext.workOrderNumber.trim();
+          filledFields.push("Work Order #");
+          console.log("[PDF Extract] Found workOrderNumber:", updates.workOrderNumber);
+        }
+        if (ext.siteLocation && ext.siteLocation.trim()) {
+          updates.siteLocation = ext.siteLocation.trim();
+          filledFields.push("Site Location");
+          console.log("[PDF Extract] Found siteLocation:", updates.siteLocation);
+        }
+        if (ext.siteAddress && ext.siteAddress.trim()) {
+          updates.siteAddress = ext.siteAddress.trim();
+          filledFields.push("Site Address");
+          console.log("[PDF Extract] Found siteAddress:", updates.siteAddress);
+        }
+        if (ext.problemDescription && ext.problemDescription.trim()) {
+          updates.problemDescription = ext.problemDescription.trim();
+          filledFields.push("Problem Description");
+          console.log("[PDF Extract] Found problemDescription:", updates.problemDescription);
+        }
 
-          if (ext.customer && ext.customer.trim()) {
-            upd.customer = ext.customer.trim();
-            filledFields.push("Customer");
-          }
-          if (ext.poNumber && ext.poNumber.trim()) {
-            upd.poNumber = ext.poNumber.trim();
-            filledFields.push("PO Number");
-          }
-          if (ext.workOrderNumber && ext.workOrderNumber.trim()) {
-            upd.workOrderNumber = ext.workOrderNumber.trim();
-            filledFields.push("Work Order #");
-          }
-          if (ext.siteLocation && ext.siteLocation.trim()) {
-            upd.siteLocation = ext.siteLocation.trim();
-            filledFields.push("Site Location");
-          }
-          if (ext.siteAddress && ext.siteAddress.trim()) {
-            upd.siteAddress = ext.siteAddress.trim();
-            filledFields.push("Site Address");
-          }
-          if (ext.problemDescription && ext.problemDescription.trim()) {
-            upd.problemDescription = ext.problemDescription.trim();
-            filledFields.push("Problem Description");
-          }
+        console.log("[PDF Extract] Total fields found:", filledFields.length, filledFields);
 
-          return upd;
-        });
+        // Apply updates to form state
+        if (Object.keys(updates).length > 0) {
+          setWorkOrder((prev) => ({ ...prev, ...updates }));
+        }
 
         if (filledFields.length > 0) {
           setExtractResult({
@@ -380,6 +391,7 @@ export default function AddWorkOrder() {
           setExtractResult({
             type: "warning",
             message: "Could not extract information from PDF. Please fill in manually.",
+            rawText: response.data.rawText?.substring(0, 200) || "(no text)",
           });
         }
       } else {
@@ -560,6 +572,11 @@ export default function AddWorkOrder() {
                     {extractResult.fields && extractResult.fields.length > 0 && (
                       <div className="awo-extract-fields">
                         <strong>Fields populated:</strong> {extractResult.fields.join(", ")}
+                      </div>
+                    )}
+                    {extractResult.rawText && (
+                      <div className="awo-extract-fields" style={{ marginTop: 6, fontSize: 11, opacity: 0.7 }}>
+                        <strong>OCR text preview:</strong> {extractResult.rawText}...
                       </div>
                     )}
                   </div>
