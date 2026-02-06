@@ -10,7 +10,6 @@ import {
 import Home from "./Home";
 import WorkOrders from "./WorkOrders";
 import AddWorkOrder from "./AddWorkOrder";
-import EditWorkOrder from "./EditWorkOrder";
 import ViewWorkOrder from "./ViewWorkOrder";
 import CalendarPage from "./CalendarPage";
 import HistoryReport from "./HistoryReport";   // ← existing
@@ -58,14 +57,6 @@ export default function App() {
             element={
               <PrivateRoute>
                 <AddWorkOrder />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/edit-work-order/:id"
-            element={
-              <PrivateRoute>
-                <EditWorkOrder />
               </PrivateRoute>
             }
           />
