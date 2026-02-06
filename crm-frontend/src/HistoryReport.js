@@ -148,58 +148,7 @@ export default function HistoryReport() {
     return `${n} match${n === 1 ? "" : "es"}`;
   }, [results.length]);
 
-  // chip styles (minimal inline)
-  const chipStyle = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
-    maxWidth: 420,
-    padding: "6px 12px",
-    borderRadius: 999,
-    background: "#f1f5f9",
-    border: "1px solid #e2e8f0",
-    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    fontSize: 13,
-    lineHeight: 1.25,
-  };
-
-  // ✅ Center everything in the table (headers + cells)
-  const thCenter = { textAlign: "center", verticalAlign: "middle" };
-  const tdCenter = { textAlign: "center", verticalAlign: "middle" };
-
-  // ✅ Site cell stack (Site then Site Address)
-  const siteCellWrap = {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center", // center within the cell
-    justifyContent: "center",
-    gap: 2,
-    minWidth: 0,
-  };
-
-  const sitePrimary = {
-    fontWeight: 600,
-    lineHeight: 1.2,
-    textAlign: "center",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    maxWidth: 520,
-  };
-
-  const siteSecondary = {
-    fontSize: 12,
-    color: "rgba(0,0,0,0.65)",
-    lineHeight: 1.2,
-    textAlign: "center",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    maxWidth: 520,
-  };
+  // Use CSS classes for styling (defined in HistoryReport.css)
 
   // ✅ When opening a WO, send "from" so ViewWorkOrder Back button can return here
   const openWorkOrder = (id) => {
@@ -219,14 +168,7 @@ export default function HistoryReport() {
       {/* Search bar card */}
       <form
         onSubmit={handleSearch}
-        className="filter-form"
-        style={{
-          background: "#fff",
-          borderRadius: 12,
-          padding: 16,
-          boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
-          border: "1px solid #eef2f7",
-        }}
+        className="filter-form search-card"
       >
         <div
           style={{
@@ -251,15 +193,7 @@ export default function HistoryReport() {
 
       {/* Recent search history (today) */}
       {hasAnyHistory && (
-        <div
-          className="recent-searches mt-3"
-          style={{
-            background: "#fff",
-            borderRadius: 12,
-            padding: 12,
-            border: "1px solid #eef2f7",
-          }}
-        >
+        <div className="recent-searches recent-searches-card mt-3">
           <div className="d-flex align-items-center justify-content-between mb-2">
             <div className="text-muted" style={{ fontSize: 13, fontWeight: 600 }}>
               Recent Searches (today)
@@ -279,7 +213,7 @@ export default function HistoryReport() {
             {history.map((h) => {
               const label = summarizeQuery(h.query);
               return (
-                <div key={h.key} className="recent-chip" title={label} style={chipStyle}>
+                <div key={h.key} className="recent-chip" title={label}>
                   <button
                     className="btn btn-sm btn-link p-0 text-reset"
                     style={{
@@ -314,25 +248,17 @@ export default function HistoryReport() {
             {prettyResultsCount}
           </div>
 
-          <div
-            className="results-table"
-            style={{
-              background: "#fff",
-              borderRadius: 12,
-              border: "1px solid #eef2f7",
-              boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
-            }}
-          >
+          <div className="results-table">
             <table className="table mb-0">
-              <thead className="table-light">
+              <thead>
                 <tr>
-                  <th style={thCenter}>WO #</th>
-                  <th style={thCenter}>PO #</th>
-                  <th style={thCenter}>Customer</th>
-                  <th style={thCenter}>Site</th>
-                  <th style={thCenter}>Status</th>
-                  <th style={thCenter}>Assigned To</th>
-                  <th style={thCenter}>Scheduled</th>
+                  <th>WO #</th>
+                  <th>PO #</th>
+                  <th>Customer</th>
+                  <th>Site</th>
+                  <th>Status</th>
+                  <th>Assigned To</th>
+                  <th>Scheduled</th>
                 </tr>
               </thead>
 
@@ -346,29 +272,28 @@ export default function HistoryReport() {
                       key={o.id}
                       onClick={() => openWorkOrder(o.id)}
                       title="Click to view"
-                      style={{ cursor: "pointer" }}
                     >
-                      <td style={tdCenter}>{o.workOrderNumber || "—"}</td>
-                      <td style={tdCenter}>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
-                      <td style={tdCenter}>{o.customer || "—"}</td>
+                      <td>{o.workOrderNumber || "—"}</td>
+                      <td>{displayPO(o.workOrderNumber, o.poNumber) || "—"}</td>
+                      <td>{o.customer || "—"}</td>
 
-                      {/* ✅ Site + Site Address stacked */}
-                      <td style={tdCenter}>
-                        <div style={siteCellWrap}>
-                          <div style={sitePrimary} title={siteLoc}>
+                      {/* Site + Site Address stacked */}
+                      <td>
+                        <div className="site-cell">
+                          <div className="site-primary" title={siteLoc}>
                             {siteLoc}
                           </div>
                           {siteAddr ? (
-                            <div style={siteSecondary} title={siteAddr}>
+                            <div className="site-secondary" title={siteAddr}>
                               {siteAddr}
                             </div>
                           ) : null}
                         </div>
                       </td>
 
-                      <td style={tdCenter}>{o.status || "—"}</td>
-                      <td style={tdCenter}>{o.assignedToName || "—"}</td>
-                      <td style={tdCenter}>
+                      <td>{o.status || "—"}</td>
+                      <td>{o.assignedToName || "—"}</td>
+                      <td>
                         {o.scheduledDate ? o.scheduledDate.substring(0, 16) : "—"}
                       </td>
                     </tr>
@@ -379,7 +304,7 @@ export default function HistoryReport() {
           </div>
         </>
       ) : (
-        <p className="empty-text text-muted mt-4" style={{ fontStyle: "italic" }}>
+        <p className="empty-text mt-4">
           {loading ? "Searching…" : "No matching work orders."}
         </p>
       )}

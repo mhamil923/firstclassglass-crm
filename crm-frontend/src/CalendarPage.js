@@ -266,92 +266,10 @@ function StackedWeekView(props) {
     onDropFromOutside({ start: startTime });
   };
 
-  // ✅ inline styling (no CSS edits required)
-  const wrapStyle = {
-    padding: 10,
-    borderRadius: 12,
-    background: "#f7f8fa",
-    border: "1px solid rgba(0,0,0,0.06)",
-  };
-
-  const gridStyle = {
-    display: "grid",
-    gridTemplateColumns: "repeat(7, minmax(220px, 1fr))",
-    gap: 10,
-    overflowX: "auto",
-    paddingBottom: 6,
-  };
-
-  const colStyle = {
-    minHeight: "72vh",
-    background: "white",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.08)",
-    boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-  };
-
-  const headerStyle = {
-    position: "sticky",
-    top: 0,
-    zIndex: 2,
-    background: "linear-gradient(180deg, #ffffff 0%, #fbfbfc 100%)",
-    borderBottom: "1px solid rgba(0,0,0,0.08)",
-    padding: "10px 10px 8px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-  };
-
-  const countStyle = {
-    minWidth: 28,
-    height: 24,
-    padding: "0 8px",
-    borderRadius: 999,
-    background: "rgba(13,110,253,0.08)",
-    border: "1px solid rgba(13,110,253,0.25)",
-    color: "#0d6efd",
-    fontWeight: 700,
-    fontSize: 12,
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-  };
-
-  const bodyStyle = {
-    padding: 10,
-    overflowY: "auto",
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-  };
-
-  const cardStyle = {
-    textAlign: "left",
-    width: "100%",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.12)",
-    background: "white",
-    padding: 10,
-    cursor: "pointer",
-    boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-  };
-
-  const emptyStyle = {
-    border: "1px dashed rgba(0,0,0,0.18)",
-    borderRadius: 12,
-    padding: 12,
-    textAlign: "center",
-    color: "rgba(0,0,0,0.55)",
-    background: "rgba(0,0,0,0.02)",
-  };
-
+  // Use CSS classes for theming (defined in Calendar.css)
   return (
-    <div style={wrapStyle}>
-      <div style={gridStyle}>
+    <div className="stacked-week">
+      <div className="stacked-week-grid">
         {days.map((d) => {
           const key = fmtDate(d);
           const list = eventsByDay.get(key) || [];
@@ -360,28 +278,25 @@ function StackedWeekView(props) {
           return (
             <div
               key={key}
+              className="stacked-day"
               style={{
-                ...colStyle,
-                outline: isToday ? "2px solid rgba(13,110,253,0.35)" : "none",
+                minHeight: "72vh",
+                outline: isToday ? "2px solid var(--accent-blue)" : "none",
               }}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => handleDropOnDay(d, e)}
             >
-              <div style={headerStyle}>
+              <div className="stacked-day-header">
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 800, fontSize: 13, lineHeight: 1.1 }}>
-                    {moment(d).format("ddd")}
-                  </div>
-                  <div style={{ fontSize: 12, color: "rgba(0,0,0,0.60)" }}>
-                    {moment(d).format("MMM D")}
-                  </div>
+                  <div className="dow">{moment(d).format("ddd")}</div>
+                  <div className="date">{moment(d).format("MMM D")}</div>
                 </div>
-                <div style={countStyle} title={`${list.length} work order(s)`}>
+                <div className="cw-day-count" title={`${list.length} work order(s)`}>
                   {list.length}
                 </div>
               </div>
 
-              <div style={bodyStyle}>
+              <div className="stacked-day-body">
                 {list.length ? (
                   list.map((ev) => {
                     const idLabel = displayWOThenPO(ev);
@@ -404,26 +319,26 @@ function StackedWeekView(props) {
                       <button
                         key={ev.id}
                         type="button"
-                        style={cardStyle}
+                        className="week-event-card"
                         onClick={() => onSelectEvent && onSelectEvent(ev)}
                         onDoubleClick={() => onDoubleClickEvent && onDoubleClickEvent(ev)}
                         title={title}
                       >
-                        <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 4, ...clamp2 }}>
+                        <div className="title" style={{ ...clamp2 }}>
                           {title}
                         </div>
                         {timeLabel ? (
-                          <div style={{ fontSize: 12, color: "rgba(0,0,0,0.62)", ...clamp1 }}>
+                          <div className="meta" style={{ ...clamp1 }}>
                             {timeLabel}
                           </div>
                         ) : null}
                         {siteLoc ? (
-                          <div style={{ fontSize: 12, color: "rgba(0,0,0,0.62)", ...clamp1 }}>
+                          <div className="meta" style={{ ...clamp1 }}>
                             {siteLoc}
                           </div>
                         ) : null}
                         {siteAddr ? (
-                          <div style={{ fontSize: 12, color: "rgba(0,0,0,0.55)", ...clamp2 }}>
+                          <div className="meta" style={{ ...clamp2 }}>
                             {siteAddr}
                           </div>
                         ) : null}
@@ -431,7 +346,7 @@ function StackedWeekView(props) {
                     );
                   })
                 ) : (
-                  <div style={emptyStyle}>No work orders</div>
+                  <div className="empty-text">No work orders</div>
                 )}
               </div>
             </div>
@@ -1263,10 +1178,6 @@ export default function WorkOrderCalendar() {
             style={{
               height: "auto",
               minHeight: view === "week" ? "86vh" : "78vh",
-              borderRadius: 12,
-              overflow: "hidden",
-              background: "#fff",
-              border: "1px solid rgba(0,0,0,0.08)",
             }}
             showAllEvents
             resizable={view === "day"}
