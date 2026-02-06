@@ -294,6 +294,11 @@ export default function AddWorkOrder() {
     const file = e.target.files?.[0] || null;
     setExtractPdfFile(file);
     setExtractResult(null); // Clear previous result
+
+    // Auto-trigger extraction when file is selected
+    if (file) {
+      extractFromPdf(file);
+    }
   };
 
   const removeExtractPdf = () => {
@@ -302,35 +307,32 @@ export default function AddWorkOrder() {
     if (extractPdfInputRef.current) extractPdfInputRef.current.value = "";
   };
 
-  const handleExtractFromPdf = async () => {
-    if (!extractPdfFile) {
-      setExtractResult({ type: "warning", message: "Please select a PDF file first." });
-      return;
-    }
+  const extractFromPdf = async (file) => {
+    if (!file) return;
 
     // Validate file type
-    if (!extractPdfFile.type.includes("pdf") && !extractPdfFile.name.toLowerCase().endsWith(".pdf")) {
+    if (!file.type.includes("pdf") && !file.name.toLowerCase().endsWith(".pdf")) {
       setExtractResult({ type: "error", message: "Please upload a PDF file." });
       return;
     }
 
+    console.log("[PDF Extract] Starting extraction for:", file.name);
     setExtracting(true);
     setExtractResult(null);
 
     const formData = new FormData();
-    formData.append("pdf", extractPdfFile);
+    formData.append("pdf", file);
 
     try {
-      // 30 second timeout for OCR processing
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      console.log("[PDF Extract] Calling API: /work-orders/extract-pdf");
 
+      // Use longer timeout for OCR (60 seconds)
       const response = await api.post("/work-orders/extract-pdf", formData, {
         headers: { "Content-Type": "multipart/form-data" },
-        signal: controller.signal,
+        timeout: 60000, // 60 second timeout for OCR
       });
 
-      clearTimeout(timeoutId);
+      console.log("[PDF Extract] Response:", response.data);
 
       if (response.data?.success && response.data?.extracted) {
         const ext = response.data.extracted;
@@ -387,9 +389,15 @@ export default function AddWorkOrder() {
         });
       }
     } catch (err) {
-      console.error("PDF extraction error:", err);
+      console.error("[PDF Extract] Error:", err);
+      console.error("[PDF Extract] Error details:", {
+        message: err.message,
+        code: err.code,
+        response: err.response?.data,
+        status: err.response?.status,
+      });
 
-      if (err.name === "AbortError" || err.code === "ECONNABORTED") {
+      if (err.code === "ECONNABORTED") {
         setExtractResult({
           type: "error",
           message: "Extraction timed out. The PDF may be too large or complex. Please fill in manually.",
@@ -399,10 +407,15 @@ export default function AddWorkOrder() {
           type: "error",
           message: `Extraction failed: ${err.response.data.error}`,
         });
+      } else if (err.response?.status) {
+        setExtractResult({
+          type: "error",
+          message: `Server error (${err.response.status}). Please try again or fill in manually.`,
+        });
       } else {
         setExtractResult({
           type: "error",
-          message: "Network error during extraction. Please try again or fill in manually.",
+          message: `Network error: ${err.message}. Please try again or fill in manually.`,
         });
       }
     } finally {
@@ -520,44 +533,21 @@ export default function AddWorkOrder() {
               </div>
 
               <div className="awo-extract-box">
-                <div className="awo-extract-row">
-                  <div className="awo-field" style={{ flex: 1, marginBottom: 0 }}>
-                    <label className="awo-label">Upload Work Order PDF (Optional)</label>
-                    <input
-                      ref={extractPdfInputRef}
-                      type="file"
-                      accept="application/pdf"
-                      onChange={handleExtractPdfChange}
-                      className="awo-file"
-                      disabled={extracting}
-                    />
-                    <div className="awo-help">
-                      Upload a work order PDF to auto-fill form fields using OCR.
-                    </div>
-                    <FileChip file={extractPdfFile} onRemove={removeExtractPdf} />
+                <div className="awo-field" style={{ marginBottom: 0 }}>
+                  <label className="awo-label">Upload Work Order PDF (Optional)</label>
+                  <input
+                    ref={extractPdfInputRef}
+                    type="file"
+                    accept="application/pdf"
+                    onChange={handleExtractPdfChange}
+                    className="awo-file"
+                    disabled={extracting}
+                  />
+                  <div className="awo-help">
+                    Upload a work order PDF to auto-fill form fields using OCR.
+                    {extracting && " Extraction starts automatically..."}
                   </div>
-
-                  <button
-                    type="button"
-                    className="btn btn-primary awo-extract-btn"
-                    onClick={handleExtractFromPdf}
-                    disabled={!extractPdfFile || extracting}
-                    style={{ alignSelf: "flex-start", marginTop: 24 }}
-                  >
-                    {extracting ? (
-                      <>
-                        <span
-                          className="spinner-border spinner-border-sm"
-                          role="status"
-                          aria-hidden="true"
-                          style={{ marginRight: 8 }}
-                        />
-                        Extracting...
-                      </>
-                    ) : (
-                      "Extract Info from PDF"
-                    )}
-                  </button>
+                  {!extracting && <FileChip file={extractPdfFile} onRemove={removeExtractPdf} />}
                 </div>
 
                 {/* Extraction result messages */}
