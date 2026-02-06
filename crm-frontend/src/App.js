@@ -17,7 +17,7 @@ import HistoryReport from "./HistoryReport";   // ← existing
 import Login from "./Login";
 import Navbar from "./Navbar";
 import PurchaseOrders from "./PurchaseOrders"; // ← NEW import
-import "bootstrap/dist/css/bootstrap.min.css";
+// Note: Bootstrap is imported in index.js before our custom styles
 
 // A wrapper for protecting routes
 function PrivateRoute({ children }) {

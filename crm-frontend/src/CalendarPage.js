@@ -8,7 +8,7 @@ import { OverlayTrigger, Popover } from "react-bootstrap";
 
 import "react-big-calendar/lib/css/react-big-calendar.css";
 import "react-big-calendar/lib/addons/dragAndDrop/styles.css";
-import "bootstrap/dist/css/bootstrap.min.css";
+// Note: Bootstrap is imported in index.js
 import "./Calendar.css";
 
 const localizer = momentLocalizer(moment);

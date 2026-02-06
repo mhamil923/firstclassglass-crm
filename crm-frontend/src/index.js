@@ -3,14 +3,17 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 
-// 1️⃣ Load Apple Design System variables first:
+// 1️⃣ Load Bootstrap FIRST so we can override it:
+import 'bootstrap/dist/css/bootstrap.min.css';
+
+// 2️⃣ Load Apple Design System variables:
 import './styles/AppleDesignSystem.css';
 
-// 2️⃣ Load global styles:
+// 3️⃣ Load global styles (overrides Bootstrap):
 import './index.css';
 
-// 2️⃣ Then load Bootstrap (optional—remove if you no longer need it)
-import 'bootstrap/dist/css/bootstrap.min.css';
+// 4️⃣ Load App styles:
+import './App.css';
 
 import App from './App';
 import reportWebVitals from './reportWebVitals';

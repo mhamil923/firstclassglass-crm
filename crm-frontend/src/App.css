@@ -1,14 +1,20 @@
 /* ===== APP CONTAINER STYLES ===== */
 .App {
   min-height: 100vh;
-  background: var(--bg-primary);
+  background: var(--bg-primary) !important;
 }
 
 /* Main app content area */
 .app-content {
   min-height: calc(100vh - 52px); /* Account for navbar height */
-  background: var(--bg-primary);
+  background: var(--bg-primary) !important;
   width: 100%;
+}
+
+/* Dark mode app styles */
+[data-theme="dark"] .App,
+[data-theme="dark"] .app-content {
+  background: #000000 !important;
 }
 
 /* Override Bootstrap container to use theme */
@@ -32,7 +38,7 @@
 
 /* Ensure no white backgrounds leak through */
 .App-header {
-  background-color: var(--bg-primary);
+  background-color: var(--bg-primary) !important;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -40,6 +46,10 @@
   justify-content: center;
   font-size: calc(10px + 2vmin);
   color: var(--text-primary);
+}
+
+[data-theme="dark"] .App-header {
+  background-color: #000000 !important;
 }
 
 .App-link {

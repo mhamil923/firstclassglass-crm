@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "./api"; // your axios instance with baseURL + interceptor
-import "bootstrap/dist/css/bootstrap.min.css";
+// Note: Bootstrap is imported in index.js
 
 export default function Login() {
   const [username, setUsername] = useState("");
