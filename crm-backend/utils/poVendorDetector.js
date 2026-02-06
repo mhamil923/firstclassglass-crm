@@ -213,457 +213,330 @@ function detectSupplierFromText(text) {
 }
 
 /**
- * Detect PO number from PDF text
- * Looks for common PO number patterns
- * Supports: CLM (VENDOR PO #), Clear Vision (Client PO #), True Source (Customer Tracking #)
+ * Detect PO number from PDF text (generic fallback)
+ * Used by analyzePoPdf for supplier PO detection
  */
 function detectPoNumberFromText(text) {
   if (!text) return null;
 
-  // Try multiple patterns in order of specificity
   const patterns = [
-    // CLM: "VENDOR PO #" or "Vendor PO:"
     /vendor\s*po\s*[#:\-]?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,})/i,
-    // Clear Vision: "Client PO #" or "Client PO:"
     /client\s*po\s*[#:\-]?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,})/i,
-    // True Source: "Customer Tracking #" or "Customer Tracking Number"
-    /customer\s*tracking\s*[#:\-]?\s*(?:number)?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,})/i,
-    // "PO# 12345" or "PO #12345" or "PO#12345"
     /po\s*#\s*:?\s*([a-z0-9][a-z0-9-]{1,})/i,
-    // "P.O. # 12345" or "P.O. No. 12345" or "P.O. NO. 12345" (with the number on next line possibly)
     /p\.o\.?\s*(?:#|no\.?|number)?\s*:?\s*\n?\s*([a-z0-9][a-z0-9-]{2,})/i,
-    // "P.C. NO." - common OCR misread of "P.O. NO."
-    /p\.c\.?\s*(?:#|no\.?|number)?\s*:?\s*\n?\s*([a-z0-9][a-z0-9-]{2,})/i,
-    // "Purchase Order 12345" or "Purchase Order: 12345" or "Purchase Order #12345"
     /purchase\s+order\s*[#:]*\s*([a-z0-9][a-z0-9-]{2,})/i,
-    // "Order # 12345" or "Order Number: 12345"
-    /order\s*(?:#|number)\s*:?\s*([a-z0-9][a-z0-9-]{2,})/i,
-    // "PO Number: 12345" or "PO No: 12345"
-    /po\s+(?:number|no\.?)\s*:?\s*([a-z0-9][a-z0-9-]{2,})/i,
-    // Just "PO 12345" (less specific, try last)
     /\bpo\s+([0-9]{3,})\b/i,
-    // Standalone number after "no." on its own line (common OCR layout)
-    /(?:p\.?[oc]\.?\s*)?no\.?\s*\n+\s*([0-9]{5,})/i,
-    // Handle OCR noise like "2 02779415" after p.o. no.
-    /p\.?o\.?\s*no\.?\s*\n+\s*\d?\s*([0-9]{5,})/i,
   ];
 
   for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
       const poNum = match[1].trim();
-      // Filter out common false positives (words, not alphanumeric codes)
-      if (
-        poNum.length >= 3 &&
-        !/^(box|the|and|for|number|num|no)$/i.test(poNum) &&
-        /[0-9]/.test(poNum) // Must contain at least one digit
-      ) {
+      if (poNum.length >= 3 && /[0-9]/.test(poNum)) {
         return poNum;
       }
     }
   }
+  return null;
+}
 
+// ============================================================
+// CUSTOMER PROFILES - Customer-specific extraction patterns
+// ============================================================
+
+const CUSTOMER_PROFILES = {
+  CLEAR_VISION: {
+    names: ["CLEAR VISION", "CLEARVISION", "CLEAR VISION FACILITIES"],
+    displayName: "Clear Vision",
+    billingAddress: "2050 W Wickenburg Way Ste 2-128, Wickenburg, AZ 85390",
+    patterns: {
+      workOrderNumber: /#R(\d+)/i,  // #R77510 → "R77510"
+      siteLocation: /SERVICE LOCATION[\s\S]*?#?\d*\s*([A-Za-z].*?)(?:\n\d|\n[A-Z]{2}\s|\nPHONE)/i,
+      siteAddress: /SERVICE LOCATION[\s\S]*?\n.*?\n([\d].*?(?:IL|WI|IN|OH|MI|AZ|CA|TX|FL)\s*\d{5})/i,
+      problemDescription: /SERVICE INSTRUCTIONS\s*\n([\s\S]*?)(?:\n\n|PROBLEM|$)/i
+    }
+  },
+
+  TRUE_SOURCE: {
+    names: ["TRUESOURCE", "TRUE SOURCE", "TRUESOURCE.COM"],
+    displayName: "True Source",
+    billingAddress: "TrueSource, LLC, 800-669-3667",
+    patterns: {
+      workOrderNumber: /WO\s*#?:?\s*WO-(\d+)/i,  // WO #: WO-03237351 → "03237351"
+      siteLocation: /SITE Name\s*&?\s*Number:?\s*([\s\S]*?)(?:Priority|Site Address)/i,
+      siteAddress: /Site Address:?\s*([\s\S]*?)(?:Site Contact|Customer|Phone)/i,
+      problemDescription: /Problem Reported\s*([\s\S]*?)(?:Action Required|Work Plan|Notes|$)/i
+    }
+  },
+
+  CLM_MIDWEST: {
+    names: ["CLM MIDWEST", "CLM", "CLMMIDWEST", "CLM SERVICES"],
+    displayName: "CLM Midwest",
+    billingAddress: "2655 N Erie St, River Grove, IL 60171",
+    patterns: {
+      workOrderNumber: /VENDOR PO #\s*\n?\s*(\d+-?\d*)/i,  // 450089-01
+      poNumber: /Client PO #\s*(\d+)/i,  // 340315111
+      siteLocation: /SERVICE LOCATION\s*\n([\s\S]*?)(?:\n\d|\nPhone|\nSERVICE)/i,
+      siteAddress: /SERVICE LOCATION[\s\S]*?\n.*?\n([\d].*?(?:IL|WI|IN|OH|MI)\s*\d{5})/i,
+      problemDescription: /SERVICE DESCRIPTION\s*\n?([\s\S]*?)(?:\nBILLING|STORE STAMP|NTE|$)/i
+    }
+  },
+
+  FIRST_TIME_FIXED: {
+    names: ["1ST TIME FIXED", "1st Time Fixed", "1STTIMEFIXED", "FIRST TIME FIXED"],
+    displayName: "1st Time Fixed",
+    billingAddress: "334 Kevyn Ln, Bensenville, IL 60106",
+    patterns: {
+      workOrderNumber: /W\.?O\.?\s*NUMBER:?\s*(\d+)/i,  // 338678150
+      siteLocation: /CUSTOMER\s*\/?\s*LOCATION:?\s*([\s\S]*?)(?:\n\d|VENDOR|W\.?O\.?\s*NUMBER)/i,
+      siteAddress: /CUSTOMER\s*\/?\s*LOCATION:?[\s\S]*?\n\s*([\d].*?(?:IL|WI|IN|OH|MI)\s*\d{0,5})/i,
+      problemDescription: /WORK DESCRIPTION:?\s*"?([\s\S]*?)"?(?:\nSTORE MANAGER|STORE STAMP|$)/i
+    }
+  },
+
+  KFM: {
+    names: ["KFM", "KFM247", "KFM 247"],
+    displayName: "KFM",
+    billingAddress: "15947 Frederick Road, Woodbine, MD 21797",
+    patterns: {
+      workOrderNumber: /Work Order Number #?(\d+)/i,  // 1073774
+      siteLocation: /Location\s+([\s\S]*?)(?:\nMall|\nLocation Phone|\nAddress)/i,
+      siteAddress: /Address\s+([\s\S]*?)(?:\nRT-|IVR|Location Phone|$)/i,
+      problemDescription: /Description from Client\s*([\s\S]*?)(?:Service Requested|Location|Trade|$)/i
+    }
+  }
+};
+
+/**
+ * Clean extracted text - removes noise and normalizes whitespace
+ */
+function cleanExtractedText(text, maxLength = 500) {
+  if (!text) return null;
+
+  let cleaned = text
+    // Normalize whitespace
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    // Remove excessive line breaks (3+ becomes 2)
+    .replace(/\n{3,}/g, '\n\n')
+    // Trim each line
+    .split('\n')
+    .map(line => line.trim())
+    .join('\n')
+    // Remove trailing labels that got accidentally captured
+    .replace(/\n?(PHONE|FAX|EMAIL|CONTACT|BILLING|VENDOR|NTE|Priority|Site Contact|Action Required|Work Plan).*$/i, '')
+    // Remove leading/trailing whitespace
+    .trim();
+
+  // Limit length
+  if (cleaned.length > maxLength) {
+    cleaned = cleaned.substring(0, maxLength).trim();
+    // Try to end at a word boundary
+    const lastSpace = cleaned.lastIndexOf(' ');
+    if (lastSpace > maxLength - 50) {
+      cleaned = cleaned.substring(0, lastSpace) + '...';
+    }
+  }
+
+  return cleaned || null;
+}
+
+/**
+ * Detect which customer profile matches the PDF text
+ * Returns the profile key (e.g., "CLEAR_VISION") or null
+ */
+function detectCustomerProfile(text) {
+  if (!text) return null;
+  const upperText = text.toUpperCase();
+
+  for (const [profileKey, profile] of Object.entries(CUSTOMER_PROFILES)) {
+    for (const name of profile.names) {
+      if (upperText.includes(name.toUpperCase())) {
+        console.log(`[WO Extract] Detected customer: ${profile.displayName} (matched "${name}")`);
+        return profileKey;
+      }
+    }
+  }
+
+  console.log("[WO Extract] No known customer detected, using generic extraction");
   return null;
 }
 
 /**
- * Extract customer name from text
- * Looks for: "Bill To:", "Customer:", "Client:", "Sold To:"
- * Also detects known customers: Clear Vision, True Source, 1st Time Fixed, KFM, CLM Midwest
+ * Extract field using customer-specific pattern
  */
-function extractCustomer(text) {
-  if (!text) return null;
+function extractWithPattern(text, pattern) {
+  if (!text || !pattern) return null;
 
-  // First check for known customer names directly in text
-  const knownCustomers = [
-    { pattern: /clear\s*vision/i, name: "Clear Vision" },
-    { pattern: /truesource|true\s*source/i, name: "True Source" },
-    { pattern: /1st\s*time\s*fixed|first\s*time\s*fixed/i, name: "1st Time Fixed" },
-    { pattern: /\bkfm\b/i, name: "KFM" },
-    { pattern: /clm\s*midwest|clm\s*services/i, name: "CLM Midwest" },
-    { pattern: /\bclm\b(?!\s*midwest)/i, name: "CLM" },
-  ];
-
-  for (const { pattern, name } of knownCustomers) {
-    if (pattern.test(text)) {
-      console.log(`[EXTRACT] Known customer detected: "${name}"`);
-      return name;
-    }
+  const match = text.match(pattern);
+  if (match && match[1]) {
+    return cleanExtractedText(match[1]);
   }
-
-  const patterns = [
-    // "Bill To" on its own line, then customer on next line
-    /bill\s*to\s*\n+\s*([^\n]{3,50})/i,
-    // "Bill To:" followed by name (but not "Ship To")
-    /bill\s*to[:\s]+(?!ship)([^\n]{3,50})/i,
-    // "Customer:" or "Customer Name:"
-    /customer(?:\s*name)?[:\s]+([^\n]{3,50})/i,
-    // "Client:"
-    /client[:\s]+([^\n]{3,50})/i,
-    // "Sold To:" on its own line, then name
-    /sold\s*to\s*\n+\s*([^\n]{3,50})/i,
-    // "Attn:" or "Attention:"
-    /att(?:n|ention)[:\s]+([^\n]{3,50})/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      let name = match[1].trim();
-      // Clean up common noise
-      name = name.replace(/^\d+\s*/, ''); // Remove leading numbers
-      name = name.replace(/[|].*$/, '').trim(); // Remove everything after pipe
-      // Filter out if it's "ship to" (common in multi-column layouts)
-      if (/^ship\s*to$/i.test(name)) continue;
-      // Filter out if it looks like an address (starts with number + street)
-      if (/^\d+\s+\w+\s+(st|ave|rd|dr|blvd|ln|way|ct)/i.test(name)) continue;
-      if (name.length >= 3 && name.length <= 50) {
-        console.log(`[EXTRACT] Customer found via pattern: "${name}"`);
-        return name;
-      }
-    }
-  }
-
-  // Fallback: look for common multi-column layout "bill to ship to" followed by names on next line
-  // Pattern: "bill to ship to\n<customer> <site>"
-  const multiColMatch = text.match(/bill\s*to\s+ship\s*to\s*\n+\s*([^\n]+)/i);
-  if (multiColMatch && multiColMatch[1]) {
-    // First part before common separators is likely the customer
-    let line = multiColMatch[1].trim();
-    // Split on common patterns like "|" or multiple spaces
-    const parts = line.split(/\s{2,}|\|/).filter(Boolean);
-    if (parts.length > 0) {
-      let name = parts[0].trim();
-      // Clean up
-      name = name.replace(/^\d+\s*/, '');
-      if (name.length >= 3 && name.length <= 50 && !/^\d+\s+\w+\s+(st|ave|rd)/i.test(name)) {
-        console.log(`[EXTRACT] Customer from multi-column: "${name}"`);
-        return name;
-      }
-    }
-  }
-
-  console.log("[EXTRACT] No customer found");
   return null;
 }
 
 /**
- * Extract work order number from text
- * Looks for: "WO#", "Work Order:", "Service Order:", "Job #"
- * Supports: Clear Vision (#R...), True Source (WO-...), 1st Time Fixed (W.O. NUMBER:),
- *           KFM (Work Order Number #), CLM (VENDOR PO # as WO)
+ * Generic fallback extraction for unknown customers
  */
-function extractWorkOrderNumber(text) {
-  if (!text) return null;
+function extractGenericWorkOrderFields(text) {
+  const result = {
+    workOrderNumber: null,
+    poNumber: null,
+    siteLocation: null,
+    siteAddress: null,
+    problemDescription: null
+  };
 
-  const patterns = [
-    // Clear Vision format: "#R" followed by number (e.g. #R1234567)
-    /#r\s*(\d{5,})/i,
-    // True Source format: "WO #: WO-" or "WO-" followed by number
-    /wo\s*#?\s*:?\s*(wo-[a-z0-9\-]{2,20})/i,
-    // 1st Time Fixed format: "W.O. NUMBER:" (may be on next line)
-    /w\.?o\.?\s*number\s*:?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
-    // KFM format: "Work Order Number #" or "Work Order Number:"
-    /work\s*order\s*number\s*[#:\-]?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
-    // "WO# 12345" or "WO #12345" or "WO-12345"
-    /wo\s*[#:\-]\s*([a-z0-9][a-z0-9\-]{2,20})/i,
-    // "Work Order # 12345" or "Work Order: 12345"
-    /work\s*order\s*[#:\-]?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
-    // "Service Order # 12345"
-    /service\s*order\s*[#:\-]?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
-    // "Job # 12345" or "Job Number: 12345"
-    /job\s*(?:#|number|no\.?)\s*[:\-]?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
-    // "Order # 12345" (but not "Purchase Order" which is PO)
-    /(?<!purchase\s)order\s*#\s*([a-z0-9][a-z0-9\-]{2,20})/i,
-    // "Ticket # 12345"
-    /ticket\s*[#:\-]?\s*([a-z0-9][a-z0-9\-]{2,20})/i,
+  // Work order number patterns
+  const woPatterns = [
+    /WO\s*#?:?\s*([A-Z0-9\-]+)/i,
+    /Work\s*Order\s*(?:#|Number)?:?\s*([A-Z0-9\-]+)/i,
+    /Service\s*Order\s*#?:?\s*([A-Z0-9\-]+)/i,
+    /Job\s*#?:?\s*([A-Z0-9\-]+)/i
   ];
+  for (const pattern of woPatterns) {
+    const match = text.match(pattern);
+    if (match && match[1] && /\d/.test(match[1])) {
+      result.workOrderNumber = match[1].trim();
+      break;
+    }
+  }
 
-  for (const pattern of patterns) {
+  // PO number
+  result.poNumber = detectPoNumberFromText(text);
+
+  // Site location patterns
+  const locPatterns = [
+    /(?:Ship\s*To|Service\s*Location|Site|Location)\s*:?\s*\n?\s*([A-Za-z][^\n]{3,50})/i,
+    /Store\s*(?:#|Name)?:?\s*([^\n]{3,50})/i
+  ];
+  for (const pattern of locPatterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      const woNum = match[1].trim();
-      // Must contain at least one digit
-      if (/[0-9]/.test(woNum) && woNum.length >= 3) {
-        console.log(`[EXTRACT] Work Order # found: "${woNum}"`);
-        return woNum;
+      const loc = cleanExtractedText(match[1], 100);
+      if (loc && !/^\d+\s+\w+\s+(st|ave|rd|dr|blvd)/i.test(loc)) {
+        result.siteLocation = loc;
+        break;
       }
     }
   }
 
-  console.log("[EXTRACT] No work order number found");
-  return null;
-}
-
-/**
- * Extract site location name from text
- * Looks for: "Ship To:", "Service Location:", "Job Site:", "Site:", "Location:"
- * Supports: Clear Vision (SERVICE LOCATION), True Source (SITE Name & Number),
- *           1st Time Fixed (CUSTOMER / LOCATION), KFM/CLM (store patterns)
- */
-function extractSiteLocation(text) {
-  if (!text) return null;
-
-  const patterns = [
-    // Clear Vision: "SERVICE LOCATION" followed by name (possibly on next line)
-    /service\s*location\s*:?\s*\n?\s*([^\n]{3,60})/i,
-    // True Source: "SITE Name & Number:" (may be on next line)
-    /site\s*name\s*(?:&|and)\s*number\s*:?\s*\n?\s*([^\n]{3,60})/i,
-    // 1st Time Fixed: "CUSTOMER / LOCATION:" (may have store on next line)
-    /customer\s*\/?\s*location\s*:?\s*\n?\s*([^\n]{3,60})/i,
-    // "Ship To" on its own line, then location on next line
-    /ship\s*to\s*\n+\s*([^\n]{3,60})/i,
-    // "Ship To:" followed by name
-    /ship\s*to[:\s]+([^\n]{3,60})/i,
-    // "Job Site:"
-    /job\s*site[:\s]+([^\n]{3,60})/i,
-    // "Site Name:"
-    /site\s*name[:\s]+([^\n]{3,60})/i,
-    // "Location:" (less specific)
-    /(?<!service\s)location[:\s]+([^\n]{3,60})/i,
-    // "Store:" or "Store #" (common for retail)
-    /store\s*[#:\-]?\s*([^\n]{3,60})/i,
+  // Address patterns
+  const addrPatterns = [
+    /(?:Site\s*)?Address:?\s*([\d].*?(?:IL|WI|IN|OH|MI|AZ|CA|TX|FL|NY|PA|NJ)\s*\d{5})/i,
+    /(\d+\s+[A-Za-z0-9\s\.]+(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Blvd|Ln|Way|Ct)[.,]?\s*[A-Za-z\s]+,?\s*[A-Z]{2}\s*\d{5})/i
   ];
-
-  for (const pattern of patterns) {
+  for (const pattern of addrPatterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      let loc = match[1].trim();
-      // Clean up common noise
-      loc = loc.replace(/[|].*$/, '').trim(); // Remove everything after pipe
-      // If it's just an address, skip it (we'll get that separately)
-      if (/^\d+\s+\w+\s+(st|ave|rd|dr|blvd|ln|way|ct|street|avenue|road|drive)/i.test(loc)) continue;
-      if (loc.length >= 3 && loc.length <= 60) {
-        console.log(`[EXTRACT] Site location found: "${loc}"`);
-        return loc;
-      }
+      result.siteAddress = cleanExtractedText(match[1], 150);
+      break;
     }
   }
 
-  // Fallback: look for multi-column layout "bill to ship to" followed by names
-  const multiColMatch = text.match(/bill\s*to\s+ship\s*to\s*\n+\s*([^\n]+)/i);
-  if (multiColMatch && multiColMatch[1]) {
-    let line = multiColMatch[1].trim();
-    // Second part after common separators is likely the site location
-    const parts = line.split(/\s{2,}|\|/).filter(Boolean);
-    if (parts.length > 1) {
-      let loc = parts[1].trim();
-      // Skip if it looks like an address
-      if (!/^\d+\s+\w+\s+(st|ave|rd)/i.test(loc) && loc.length >= 3 && loc.length <= 60) {
-        console.log(`[EXTRACT] Site location from multi-column: "${loc}"`);
-        return loc;
-      }
-    }
-  }
-
-  // Also look for store patterns like "Little Caesars #01752"
-  const storeMatch = text.match(/([a-z\s]+(?:store|shop|restaurant|cafe|pizza|market|retail|caesars|mcdonald|starbucks|dunkin|subway|target|walmart|walgreens|cvs)[a-z\s]*(?:#|number|no\.?)?\s*\d+)/i);
-  if (storeMatch && storeMatch[1]) {
-    let store = storeMatch[1].trim();
-    if (store.length >= 5 && store.length <= 60) {
-      console.log(`[EXTRACT] Site location from store pattern: "${store}"`);
-      return store;
-    }
-  }
-
-  console.log("[EXTRACT] No site location found");
-  return null;
-}
-
-/**
- * Extract site address from text
- * Looks for address patterns: number + street, city, state, zip
- * Supports: True Source (Site Address:), Clear Vision (after SERVICE LOCATION),
- *           1st Time Fixed (Address label), general patterns
- */
-function extractSiteAddress(text) {
-  if (!text) return null;
-
-  // Try labeled address patterns first (more specific)
-  const labeledPatterns = [
-    // True Source: "Site Address:" followed by address
-    /site\s*address\s*:?\s*\n?\s*([^\n]{10,100})/i,
-    // General "Address:" label
-    /(?<!email\s|e-mail\s|web\s)address\s*:?\s*\n?\s*(\d+[^\n]{8,100})/i,
-    // "Service Address:"
-    /service\s*address\s*:?\s*\n?\s*([^\n]{10,100})/i,
-    // "Location Address:"
-    /location\s*address\s*:?\s*\n?\s*([^\n]{10,100})/i,
+  // Problem description patterns
+  const descPatterns = [
+    /(?:Problem|Issue|Description|Service\s*Instructions|Work\s*Description)\s*:?\s*\n?\s*([\s\S]{10,300}?)(?:\n\n|BILLING|CONTACT|$)/i
   ];
-
-  for (const pattern of labeledPatterns) {
+  for (const pattern of descPatterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      let addr = match[1].trim();
-      addr = addr.replace(/\s+/g, ' ');
-      if (addr.length >= 10 && addr.length <= 150) {
-        console.log(`[EXTRACT] Site address from label: "${addr}"`);
-        return addr;
-      }
+      result.problemDescription = cleanExtractedText(match[1], 500);
+      break;
     }
   }
 
-  // Try to find address after "Ship To:" or "SERVICE LOCATION" section
-  const sectionMatch = text.match(/(?:ship\s*to|service\s*location)[:\s]*\n?([^]*?)(?=\n\s*\n|bill\s*to|service\s*instructions|problem|$)/i);
-  const searchText = sectionMatch ? sectionMatch[1] : text;
-
-  // Look for address pattern: number + street name + (optional city, state zip)
-  const addressPatterns = [
-    // Full address with city, state, zip
-    /(\d+\s+[a-z0-9\s\.]+(?:st|street|ave|avenue|rd|road|dr|drive|blvd|boulevard|ln|lane|way|ct|court|pl|place|pkwy|parkway)[.,]?\s*(?:#\s*\d+|suite\s*\d+|ste\s*\d+|unit\s*\d+)?[,\s]+[a-z\s]+[,\s]+[a-z]{2}\s*\d{5}(?:-\d{4})?)/i,
-    // Address with city state (no zip)
-    /(\d+\s+[a-z0-9\s\.]+(?:st|street|ave|avenue|rd|road|dr|drive|blvd|boulevard|ln|lane|way|ct|court|pl|place)[.,]?\s*[,\s]+[a-z\s]+[,\s]+[a-z]{2})/i,
-    // Just street address
-    /(\d+\s+[a-z0-9\s\.]+(?:st|street|ave|avenue|rd|road|dr|drive|blvd|boulevard|ln|lane|way|ct|court|pl|place|pkwy|parkway)(?:\s*#?\s*\d+)?)/i,
-  ];
-
-  for (const pattern of addressPatterns) {
-    const match = searchText.match(pattern);
-    if (match && match[1]) {
-      let addr = match[1].trim();
-      // Clean up
-      addr = addr.replace(/\s+/g, ' '); // Normalize whitespace
-      addr = addr.replace(/[|].*$/, '').trim();
-      if (addr.length >= 10 && addr.length <= 150) {
-        console.log(`[EXTRACT] Site address found: "${addr}"`);
-        return addr;
-      }
-    }
-  }
-
-  console.log("[EXTRACT] No site address found");
-  return null;
-}
-
-/**
- * Extract problem description from text
- * Looks for: "Problem:", "Description:", "Work Description:", "Scope:", "Issue:", "Service Requested:"
- * Supports: Clear Vision (SERVICE INSTRUCTIONS), True Source (Problem Reported),
- *           1st Time Fixed (WORK DESCRIPTION), KFM (SERVICE DESCRIPTION), CLM (Description from Client)
- */
-function extractProblemDescription(text) {
-  if (!text) return null;
-
-  const patterns = [
-    // Clear Vision: "SERVICE INSTRUCTIONS" (may span multiple lines)
-    /service\s*instructions\s*:?\s*\n?\s*([^\n]{5,200})/i,
-    // True Source: "Problem Reported:" or "Problem Reported"
-    /problem\s*reported\s*:?\s*\n?\s*([^\n]{5,200})/i,
-    // 1st Time Fixed: "WORK DESCRIPTION:" (may be on next line)
-    /work\s*description\s*:?\s*\n?\s*([^\n]{5,200})/i,
-    // KFM: "SERVICE DESCRIPTION" or "Service Description:"
-    /service\s*description\s*:?\s*\n?\s*([^\n]{5,200})/i,
-    // CLM: "Description from Client" or "Client Description"
-    /description\s*from\s*client\s*:?\s*\n?\s*([^\n]{5,200})/i,
-    /client\s*description\s*:?\s*\n?\s*([^\n]{5,200})/i,
-    // "Problem:" or "Problem Description:"
-    /problem(?:\s*description)?[:\s]+([^\n]{5,200})/i,
-    // "Description:" (but not "Job Description" which might be something else)
-    /(?<!job\s)description[:\s]+([^\n]{5,200})/i,
-    // "Scope:" or "Scope of Work:"
-    /scope(?:\s*of\s*work)?[:\s]+([^\n]{5,200})/i,
-    // "Issue:"
-    /issue[:\s]+([^\n]{5,200})/i,
-    // "Service Requested:"
-    /service\s*requested[:\s]+([^\n]{5,200})/i,
-    // "Work to be performed:" or "Work to be done:"
-    /work\s*to\s*be\s*(?:performed|done)[:\s]+([^\n]{5,200})/i,
-    // "Reason for call:" or "Reason:"
-    /reason(?:\s*for\s*call)?[:\s]+([^\n]{5,200})/i,
-    // "Notes:" (often contains problem info)
-    /notes[:\s]+([^\n]{5,200})/i,
-    // "Service Call" followed by description
-    /service\s*call[:\s]+([^\n]{5,200})/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      let desc = match[1].trim();
-      // Clean up
-      desc = desc.replace(/[|].*$/, '').trim();
-      if (desc.length >= 5 && desc.length <= 200) {
-        console.log(`[EXTRACT] Problem description found: "${desc}"`);
-        return desc;
-      }
-    }
-  }
-
-  // Fallback: look for common glass-related keywords as problem indicators
-  const glassKeywords = [
-    /(?:broken|cracked|shattered|damaged)\s+(?:glass|window|door|mirror)/i,
-    /(?:glass|window|door|mirror)\s+(?:is|was|needs?|requires?)\s+(?:broken|cracked|replaced|fixed|repaired)/i,
-    /replace\s+(?:glass|window|door|storefront)/i,
-    /door\s*closer/i,
-    /emergency\s+(?:board[- ]?up|glass|repair)/i,
-  ];
-
-  for (const pattern of glassKeywords) {
-    const match = text.match(pattern);
-    if (match) {
-      // Get surrounding context (up to 100 chars before/after)
-      const idx = text.indexOf(match[0]);
-      const start = Math.max(0, idx - 50);
-      const end = Math.min(text.length, idx + match[0].length + 100);
-      let context = text.substring(start, end).trim();
-      context = context.replace(/\s+/g, ' ');
-      if (context.length >= 10) {
-        console.log(`[EXTRACT] Problem from keywords: "${context}"`);
-        return context;
-      }
-    }
-  }
-
-  console.log("[EXTRACT] No problem description found");
-  return null;
+  return result;
 }
 
 /**
  * Extract all work order fields from OCR text
+ * Uses customer-specific extraction rules when a known customer is detected
  * Returns structured object with all detected fields
  */
 function extractWorkOrderFields(text) {
   console.log("=== WORK ORDER FIELD EXTRACTION START ===");
-  console.log(`[EXTRACT] Input text length: ${text ? text.length : 0} chars`);
+  console.log(`[WO Extract] Input text length: ${text ? text.length : 0} chars`);
 
   if (!text || text.length < 10) {
-    console.log("[EXTRACT] Text too short, returning empty result");
+    console.log("[WO Extract] Text too short, returning empty result");
     return {
       customer: null,
-      poNumber: null,
+      billingAddress: null,
       workOrderNumber: null,
+      poNumber: null,
       siteLocation: null,
       siteAddress: null,
       problemDescription: null,
+      detectedCustomerProfile: false,
       rawText: text || ""
     };
   }
 
-  const customer = extractCustomer(text);
-  const poNumber = detectPoNumberFromText(text);
-  const workOrderNumber = extractWorkOrderNumber(text);
-  const siteLocation = extractSiteLocation(text);
-  const siteAddress = extractSiteAddress(text);
-  const problemDescription = extractProblemDescription(text);
+  // Step 1: Detect which customer this PDF is from
+  const profileKey = detectCustomerProfile(text);
+
+  let result = {
+    customer: null,
+    billingAddress: null,
+    workOrderNumber: null,
+    poNumber: null,
+    siteLocation: null,
+    siteAddress: null,
+    problemDescription: null,
+    detectedCustomerProfile: false,
+    rawText: text.substring(0, 1000)
+  };
+
+  if (profileKey) {
+    // Step 2: Use customer-specific patterns
+    const profile = CUSTOMER_PROFILES[profileKey];
+    result.customer = profile.displayName;
+    result.billingAddress = profile.billingAddress;
+    result.detectedCustomerProfile = true;
+
+    console.log(`[WO Extract] Using ${profile.displayName} extraction patterns`);
+
+    // Extract each field using customer's specific pattern
+    if (profile.patterns.workOrderNumber) {
+      result.workOrderNumber = extractWithPattern(text, profile.patterns.workOrderNumber);
+    }
+    if (profile.patterns.poNumber) {
+      result.poNumber = extractWithPattern(text, profile.patterns.poNumber);
+    }
+    if (profile.patterns.siteLocation) {
+      result.siteLocation = extractWithPattern(text, profile.patterns.siteLocation);
+    }
+    if (profile.patterns.siteAddress) {
+      result.siteAddress = extractWithPattern(text, profile.patterns.siteAddress);
+    }
+    if (profile.patterns.problemDescription) {
+      result.problemDescription = extractWithPattern(text, profile.patterns.problemDescription);
+    }
+
+    // If no PO found with customer pattern, try generic
+    if (!result.poNumber) {
+      result.poNumber = detectPoNumberFromText(text);
+    }
+
+  } else {
+    // Step 3: Fall back to generic extraction
+    const genericResult = extractGenericWorkOrderFields(text);
+    result = { ...result, ...genericResult };
+  }
 
   console.log("=== EXTRACTION RESULTS ===");
-  console.log(`  Customer: ${customer || "(not found)"}`);
-  console.log(`  PO Number: ${poNumber || "(not found)"}`);
-  console.log(`  Work Order #: ${workOrderNumber || "(not found)"}`);
-  console.log(`  Site Location: ${siteLocation || "(not found)"}`);
-  console.log(`  Site Address: ${siteAddress || "(not found)"}`);
-  console.log(`  Problem: ${problemDescription || "(not found)"}`);
+  console.log(`  Customer: ${result.customer || "(not found)"}`);
+  console.log(`  Billing Address: ${result.billingAddress || "(not found)"}`);
+  console.log(`  Work Order #: ${result.workOrderNumber || "(not found)"}`);
+  console.log(`  PO Number: ${result.poNumber || "(not found)"}`);
+  console.log(`  Site Location: ${result.siteLocation || "(not found)"}`);
+  console.log(`  Site Address: ${result.siteAddress || "(not found)"}`);
+  console.log(`  Problem: ${result.problemDescription ? result.problemDescription.substring(0, 100) + "..." : "(not found)"}`);
+  console.log(`  Used Profile: ${result.detectedCustomerProfile ? "Yes" : "No (generic)"}`);
   console.log("=== WORK ORDER FIELD EXTRACTION END ===");
 
-  return {
-    customer,
-    poNumber,
-    workOrderNumber,
-    siteLocation,
-    siteAddress,
-    problemDescription,
-    rawText: text.substring(0, 1000) // First 1000 chars for debugging
-  };
+  return result;
 }
 
 /**
