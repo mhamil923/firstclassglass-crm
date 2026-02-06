@@ -17,6 +17,8 @@
   align-items: center;
   justify-content: space-between;
   margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-color);
   flex-wrap: wrap;
   gap: 16px;
 }
@@ -43,12 +45,12 @@
 
 /* Buttons */
 .btn-primary-apple {
-  background-color: var(--accent-blue);
+  background: var(--accent-blue);
   color: #ffffff;
   border: none;
   padding: 12px 24px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: var(--transition-default);
@@ -56,16 +58,19 @@
   align-items: center;
   gap: 8px;
   text-decoration: none;
+  box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3);
 }
 
 .btn-primary-apple:hover {
-  background-color: var(--accent-blue-hover);
-  transform: scale(1.02);
+  background: var(--accent-blue-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 113, 227, 0.4);
   color: #ffffff;
 }
 
 .btn-primary-apple:active {
-  transform: scale(0.98);
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 113, 227, 0.3);
 }
 
 .btn-secondary-apple {
@@ -104,6 +109,7 @@
 .section-card {
   background-color: var(--bg-card-solid);
   border: 1px solid var(--border-color);
+  border-top: 3px solid var(--accent-blue);
   border-radius: var(--radius-md);
   padding: 20px;
   box-shadow: var(--shadow-sm);
@@ -138,13 +144,18 @@
   transition: var(--transition-fast);
   border: 1px solid var(--border-color-strong);
   background-color: var(--bg-card-solid);
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .chip:hover {
-  background-color: var(--bg-hover);
+  background-color: rgba(0, 113, 227, 0.1);
   border-color: var(--accent-blue);
-  color: var(--text-primary);
+  color: var(--accent-blue);
+}
+
+[data-theme="dark"] .chip:hover {
+  background-color: rgba(10, 132, 255, 0.15);
+  color: var(--accent-blue);
 }
 
 .chip.active {
@@ -155,6 +166,7 @@
 
 .chip.active:hover {
   background-color: var(--accent-blue-hover);
+  color: #ffffff;
 }
 
 .chip-label {
@@ -202,6 +214,7 @@
   overflow-x: auto;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
 }
 
 /* Work Orders Table */
@@ -218,9 +231,9 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text-secondary);
+  color: var(--accent-blue);
   background-color: var(--bg-hover);
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 2px solid var(--accent-blue);
   white-space: nowrap;
   position: sticky;
   top: 0;
@@ -247,6 +260,11 @@
 
 .wo-row:hover td {
   background-color: var(--bg-hover) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .wo-row:hover td {
+  background-color: rgba(255, 255, 255, 0.06) !important;
 }
 
 /* ID Cell */
@@ -274,15 +292,20 @@
   justify-content: center;
   height: 20px;
   padding: 0 8px;
-  border-radius: 999px;
-  background-color: rgba(0, 113, 227, 0.1);
-  color: var(--accent-blue);
+  border-radius: 6px;
+  background-color: var(--accent-blue);
+  color: #ffffff;
   font-size: 11px;
   font-weight: 600;
 }
 
 .badge.badge-subtle {
   background-color: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+[data-theme="dark"] .badge.badge-subtle {
+  background-color: rgba(255, 255, 255, 0.1);
   color: var(--text-secondary);
 }
 
@@ -320,7 +343,7 @@
   margin: 0;
   color: var(--accent-blue);
   font-weight: 500;
-  text-decoration: underline;
+  text-decoration: none;
   cursor: pointer;
   text-align: left;
   font-size: inherit;
@@ -328,6 +351,7 @@
 
 .linklike:hover {
   color: var(--accent-blue-hover);
+  text-decoration: underline;
 }
 
 /* Controls (select dropdowns) */
@@ -360,9 +384,35 @@ select.control.select {
   cursor: pointer;
 }
 
-/* Dark mode select arrow */
+/* Dark mode dropdown styling */
 [data-theme="dark"] select.control.select {
-  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23a1a1a6' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-color: #2c2c2e;
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23ffffff' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+[data-theme="dark"] select.control.select option {
+  background-color: #2c2c2e;
+  color: #ffffff;
+}
+
+[data-theme="dark"] .control {
+  background-color: #2c2c2e;
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Ensure all selects in wo-table are properly styled in dark mode */
+[data-theme="dark"] .wo-table select {
+  background-color: #2c2c2e !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+[data-theme="dark"] .wo-table select option {
+  background-color: #2c2c2e;
+  color: #ffffff;
 }
 
 /* Empty State */
