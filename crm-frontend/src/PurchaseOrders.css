@@ -660,6 +660,11 @@
   background: var(--bg-tertiary);
 }
 
+/* Dark mode list header */
+[data-theme="dark"] .po-section-card > div:first-child {
+  background: var(--bg-tertiary) !important;
+}
+
 .po-page .card-header h5,
 .purchase-orders-page .card-header h5,
 .po-page .card-header .card-title,
@@ -674,16 +679,43 @@
 }
 
 /* ===== Action buttons equal width ===== */
-.po-page .btn-group .btn,
-.purchase-orders-page .btn-group .btn,
-.po-action-btn {
-  min-width: 120px;
-  text-align: center;
-}
-
 .po-page td .btn,
 .purchase-orders-page td .btn {
-  min-width: 120px;
-  margin-right: 6px;
-  margin-bottom: 4px;
+  min-width: 110px;
+  width: 110px;
+  padding: 8px 6px;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+/* View PDF button - teal/info color */
+.po-page .btn-info,
+.purchase-orders-page .btn-info {
+  background-color: #17a2b8;
+  border-color: #17a2b8;
+  color: #ffffff;
+}
+
+.po-page .btn-info:hover,
+.purchase-orders-page .btn-info:hover {
+  background-color: #138496;
+  border-color: #117a8b;
+}
+
+/* Mark Picked Up button - success/green */
+.po-page .btn-success,
+.purchase-orders-page .btn-success {
+  background-color: var(--accent-green);
+  border-color: var(--accent-green);
+  color: #ffffff;
+}
+
+.po-page .btn-success:hover,
+.purchase-orders-page .btn-success:hover {
+  filter: brightness(1.1);
 }

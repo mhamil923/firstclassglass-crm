@@ -611,7 +611,7 @@ export default function PurchaseOrders() {
     });
   }, [combinedWaitingRows, search, supplierFilter, statusFilter]);
 
-  const btnStyle = { minWidth: 140 };
+  const actionBtnStyle = { minWidth: 110, width: 110, fontSize: 12, padding: '8px 6px' };
 
   const pdfCanMarkPickedUp = useMemo(() => {
     if (!pdfPo) return false;
@@ -729,9 +729,9 @@ export default function PurchaseOrders() {
         </div>
       )}
 
-      <div className="po-section-card" style={{ padding: 0 }}>
-        <div className="po-section-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h3 className="po-section-title" style={{ margin: 0 }}>Purchase Orders List</h3>
+      <div className="po-section-card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', background: 'var(--bg-hover)', borderBottom: '2px solid var(--accent-blue)' }}>
+          <h3 style={{ margin: 0, padding: 0, fontSize: 14, fontWeight: 600, color: 'var(--accent-blue)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Purchase Orders List</h3>
           {loading ? (
             <span className="text-muted" style={{ fontSize: 12 }}>Loading…</span>
           ) : null}
@@ -748,16 +748,14 @@ export default function PurchaseOrders() {
                   <th>Site</th>
                   <th>Work Order #</th>
                   <th>PO Status</th>
-                  <th>Created</th>
-                  <th>PDF</th>
-                  <th>Actions</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
 
               <tbody>
                 {filteredPurchaseOrders.length === 0 && !loading && (
                   <tr>
-                    <td colSpan="9" className="text-center py-3">
+                    <td colSpan="7" className="text-center py-3">
                       No purchase orders found.
                     </td>
                   </tr>
@@ -778,46 +776,45 @@ export default function PurchaseOrders() {
                       <td>{row.siteLocation || row.siteAddress || "-"}</td>
                       <td>{row.workOrderNumber || "-"}</td>
                       <td>{row.poStatus || (row.poPickedUp ? "Picked Up" : "On Order")}</td>
-                      <td>{row.createdAt ? new Date(row.createdAt).toLocaleString() : "-"}</td>
 
                       <td>
-                        {row.poPdfPath ? (
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                          {row.poPdfPath ? (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-info"
+                              style={actionBtnStyle}
+                              onClick={() => handleOpenPdf(row)}
+                              disabled={isBusy}
+                            >
+                              View PDF
+                            </button>
+                          ) : (
+                            <div style={{ ...actionBtnStyle, visibility: 'hidden' }} />
+                          )}
+
                           <button
                             type="button"
                             className="btn btn-sm btn-primary"
-                            style={btnStyle}
-                            onClick={() => handleOpenPdf(row)}
-                            disabled={isBusy}
-                          >
-                            View PDF
-                          </button>
-                        ) : (
-                          <span className="text-muted">No PDF</span>
-                        )}
-                      </td>
-
-                      <td>
-                        <div className="d-flex align-items-center gap-2" style={{ flexWrap: "nowrap" }}>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-primary"
-                            style={btnStyle}
+                            style={actionBtnStyle}
                             onClick={() => handleViewWorkOrder(row)}
                             disabled={isBusy}
                           >
-                            View Work Order
+                            View WO
                           </button>
 
-                          {stillWaiting && (
+                          {stillWaiting ? (
                             <button
                               type="button"
-                              className="btn btn-sm btn-primary"
-                              style={btnStyle}
+                              className="btn btn-sm btn-success"
+                              style={actionBtnStyle}
                               onClick={() => handleMarkPickedUp(row)}
                               disabled={isBusy}
                             >
                               {isBusy ? "Working..." : "Mark Picked Up"}
                             </button>
+                          ) : (
+                            <div style={{ ...actionBtnStyle, visibility: 'hidden' }} />
                           )}
                         </div>
                       </td>
