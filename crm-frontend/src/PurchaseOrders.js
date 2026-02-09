@@ -133,79 +133,109 @@ export default function PurchaseOrders() {
   const fetchWaitingOnPartsWorkOrders = useCallback(async () => {
     const headers = authHeaders();
 
-    const tryCalls = [
-      () => api.get("/work-orders", { headers, params: { status: "waiting-on-parts" } }),
-      () => api.get("/work-orders", { headers, params: { workOrderStatus: "Waiting on Parts" } }),
-      () => api.get("/work-orders", { headers, params: { status: "Waiting on Parts" } }),
-      () => api.get("/work-orders", { headers }), // fallback: fetch all and filter client-side
-    ];
+    // Simplified: just fetch all work orders and filter client-side
+    // The backend doesn't support status filtering, so all calls return the same data
+    try {
+      console.log("[PurchaseOrders] Calling GET /work-orders...");
+      console.log("[PurchaseOrders] Auth headers:", headers);
 
-    for (const fn of tryCalls) {
-      try {
-        const r = await fn();
-        const rows = Array.isArray(r.data) ? r.data : r.data?.rows;
-        const list = Array.isArray(rows) ? rows : [];
+      const r = await api.get("/work-orders", { headers });
 
-        const waitingOnly = list.filter((wo) => {
-          const st = firstNonNullish(
-            wo.workOrderStatus,
-            wo.work_order_status,
-            wo.status,
-            wo.statusText,
-            wo.workOrderStatusText,
-            ""
-          );
-          return isWaitingOnPartsText(st);
+      console.log("[PurchaseOrders] API Response status:", r.status);
+      console.log("[PurchaseOrders] API Response data type:", typeof r.data, Array.isArray(r.data) ? "array" : "not array");
+
+      const rows = Array.isArray(r.data) ? r.data : r.data?.rows;
+      const list = Array.isArray(rows) ? rows : [];
+
+      console.log(`[PurchaseOrders] Fetched ${list.length} total work orders`);
+
+      // Log first few work orders to see their structure
+      if (list.length > 0) {
+        console.log("[PurchaseOrders] Sample work order structure:", {
+          id: list[0].id,
+          status: list[0].status,
+          workOrderStatus: list[0].workOrderStatus,
+          work_order_status: list[0].work_order_status
         });
-
-        const idSet = new Set();
-        const meta = {};
-
-        waitingOnly.forEach((wo) => {
-          const id = firstNonNullish(wo.id, wo.workOrderId, wo.work_order_id, wo.woId, null);
-          if (!id) return;
-
-          const st = firstNonNullish(
-            wo.workOrderStatus,
-            wo.work_order_status,
-            wo.status,
-            wo.statusText,
-            wo.workOrderStatusText,
-            ""
-          );
-
-          const num = firstNonNullish(
-            wo.workOrderNumber,
-            wo.work_order_number,
-            wo.woNumber,
-            wo.workOrderNo,
-            ""
-          );
-
-          const customer = firstNonNullish(wo.customer, wo.customerName, wo.customer_name, "");
-          const siteLocation = firstNonNullish(wo.siteLocation, wo.site_name, wo.siteName, wo.site, "");
-          const siteAddress = firstNonNullish(wo.siteAddress, wo.site_address, wo.address, "");
-
-          idSet.add(id);
-          meta[id] = {
-            status: st || "",
-            number: num || "",
-            customer: customer || "",
-            siteLocation: siteLocation || "",
-            siteAddress: siteAddress || "",
-          };
-        });
-
-        setWaitingWoIdSet(idSet);
-        setWoMetaById(meta);
-        return;
-      } catch {
-        // keep trying
       }
-    }
 
-    setWaitingWoIdSet(new Set());
-    setWoMetaById({});
+      // Log all unique status values found
+      const uniqueStatuses = [...new Set(list.map(wo => wo.status))];
+      console.log("[PurchaseOrders] Unique status values in response:", uniqueStatuses);
+
+      const waitingOnly = list.filter((wo) => {
+        const st = firstNonNullish(
+          wo.workOrderStatus,
+          wo.work_order_status,
+          wo.status,
+          wo.statusText,
+          wo.workOrderStatusText,
+          ""
+        );
+        const isWaiting = isWaitingOnPartsText(st);
+
+        // Log work orders that have "waiting" in their status (for debugging)
+        if (st && st.toLowerCase().includes("waiting")) {
+          console.log(`[PurchaseOrders] WO ${wo.id}: status="${st}", isWaitingOnParts=${isWaiting}`);
+        }
+
+        return isWaiting;
+      });
+
+      console.log(`[PurchaseOrders] Found ${waitingOnly.length} work orders with "Waiting on Parts" status`);
+
+      // Log the IDs of waiting work orders
+      if (waitingOnly.length > 0) {
+        console.log("[PurchaseOrders] Waiting on Parts WO IDs:", waitingOnly.map(wo => wo.id));
+      }
+
+      const idSet = new Set();
+      const meta = {};
+
+      waitingOnly.forEach((wo) => {
+        const id = firstNonNullish(wo.id, wo.workOrderId, wo.work_order_id, wo.woId, null);
+        if (!id) return;
+
+        const st = firstNonNullish(
+          wo.workOrderStatus,
+          wo.work_order_status,
+          wo.status,
+          wo.statusText,
+          wo.workOrderStatusText,
+          ""
+        );
+
+        const num = firstNonNullish(
+          wo.workOrderNumber,
+          wo.work_order_number,
+          wo.woNumber,
+          wo.workOrderNo,
+          ""
+        );
+
+        const customer = firstNonNullish(wo.customer, wo.customerName, wo.customer_name, "");
+        const siteLocation = firstNonNullish(wo.siteLocation, wo.site_name, wo.siteName, wo.site, "");
+        const siteAddress = firstNonNullish(wo.siteAddress, wo.site_address, wo.address, "");
+
+        idSet.add(id);
+        meta[id] = {
+          status: st || "",
+          number: num || "",
+          customer: customer || "",
+          siteLocation: siteLocation || "",
+          siteAddress: siteAddress || "",
+        };
+      });
+
+      console.log(`[PurchaseOrders] waitingWoIdSet has ${idSet.size} IDs:`, [...idSet]);
+
+      setWaitingWoIdSet(idSet);
+      setWoMetaById(meta);
+    } catch (err) {
+      console.error("[PurchaseOrders] Error fetching work orders for Waiting on Parts filter:", err);
+      setWaitingWoIdSet(new Set());
+      setWoMetaById({});
+    }
   }, []);
 
   const loadPurchaseOrders = useCallback(async () => {
@@ -233,12 +263,15 @@ export default function PurchaseOrders() {
         params.search = searchApplied.trim();
       }
 
+      console.log("[PurchaseOrders] Starting parallel fetch of /purchase-orders and /work-orders...");
+
       const [poRes] = await Promise.all([
         api.get("/purchase-orders", { headers: authHeaders(), params }),
         fetchWaitingOnPartsWorkOrders(),
       ]);
 
       const rows = Array.isArray(poRes.data) ? poRes.data : poRes.data?.rows;
+      console.log(`[PurchaseOrders] Received ${rows?.length || 0} rows from /purchase-orders endpoint`);
       setPurchaseOrders(Array.isArray(rows) ? rows : []);
     } catch (err) {
       console.error("❌ Error loading purchase orders:", err?.response || err);
@@ -548,11 +581,17 @@ export default function PurchaseOrders() {
       if (po?.workOrderId) poByWoId.set(po.workOrderId, po);
     });
 
+    console.log(`[PurchaseOrders] combinedWaitingRows: ${normalizedPurchaseOrders.length} from /purchase-orders, ${waitingWoIdSet.size} in waitingWoIdSet`);
+
     const synthetic = [];
     for (const woId of waitingWoIdSet) {
-      if (poByWoId.has(woId)) continue;
+      if (poByWoId.has(woId)) {
+        console.log(`[PurchaseOrders] WO ${woId} already in purchase orders, skipping synthetic`);
+        continue;
+      }
 
       const meta = woMetaById[woId] || {};
+      console.log(`[PurchaseOrders] Creating synthetic row for WO ${woId}:`, meta);
       synthetic.push({
         id: `wo-${woId}`,
         supplier: "",
@@ -575,11 +614,14 @@ export default function PurchaseOrders() {
 
     const all = [...normalizedPurchaseOrders, ...synthetic];
 
-    return all.filter((row) => {
+    const filtered = all.filter((row) => {
       const byLookup = row.workOrderId ? waitingWoIdSet.has(row.workOrderId) : false;
       const byText = isWaitingOnPartsText(row.workOrderStatus);
       return byLookup || byText;
     });
+
+    console.log(`[PurchaseOrders] combinedWaitingRows result: ${filtered.length} rows (${synthetic.length} synthetic)`);
+    return filtered;
   }, [normalizedPurchaseOrders, waitingWoIdSet, woMetaById]);
 
   const filteredPurchaseOrders = useMemo(() => {
