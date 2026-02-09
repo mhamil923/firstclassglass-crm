@@ -4,6 +4,8 @@
 // ===============================
 
 // ─── IMPORTS ─────────────────────────────────────────────────────────────────
+require('dotenv').config(); // Load .env file FIRST before accessing process.env
+
 const express    = require('express');
 const cors       = require('cors');
 const bodyParser = require('body-parser');
@@ -66,6 +68,13 @@ const MAX_PARTS  = Number(process.env.MAX_PARTS  || 2000);
 if (S3_BUCKET) AWS.config.update({ region: AWS_REGION });
 else console.warn('⚠️ S3_BUCKET not set; using local disk for uploads.');
 const s3 = new AWS.S3();
+
+// Log route optimization configuration
+if (GOOGLE_MAPS_API_KEY) {
+  console.log('✅ GOOGLE_MAPS_API_KEY is set (route optimization enabled)');
+} else {
+  console.warn('⚠️ GOOGLE_MAPS_API_KEY not set; route optimization will use fallback algorithm');
+}
 
 // ─── EXPRESS ────────────────────────────────────────────────────────────────
 const app = express();
@@ -2149,9 +2158,136 @@ function normalizeStops(arr) {
     const k = address.toLowerCase();
     if (seen.has(k)) continue;
     seen.add(k);
-    out.push({ id, address, label: s?.label || null });
+    out.push({ id, address, label: s?.label || null, lat: s?.lat, lng: s?.lng });
   }
   return out;
+}
+
+// ─── FALLBACK ROUTE OPTIMIZATION (when no Google API key) ───────────────────
+// Uses nearest-neighbor algorithm with geocoding
+
+function toRad(deg) {
+  return deg * (Math.PI / 180);
+}
+
+// Haversine formula for distance between two lat/lng points (returns miles)
+function haversineDistance(lat1, lng1, lat2, lng2) {
+  const R = 3959; // Earth's radius in miles
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// Geocode an address using Google Geocoding API
+async function geocodeAddress(address) {
+  if (!GOOGLE_MAPS_API_KEY || !address) return null;
+  try {
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_MAPS_API_KEY}`;
+    const resp = await axios.get(url, { timeout: 5000 });
+    const data = resp?.data;
+    if (data?.status === 'OK' && data.results?.length > 0) {
+      const loc = data.results[0].geometry.location;
+      return { lat: loc.lat, lng: loc.lng };
+    }
+  } catch (e) {
+    console.warn('[ROUTE] Geocoding failed for:', address, e?.message);
+  }
+  return null;
+}
+
+// Nearest-neighbor algorithm for route optimization
+async function nearestNeighborOptimize(stops, startAddress) {
+  console.log('[ROUTE] Using nearest-neighbor fallback optimization');
+
+  // Try to geocode all addresses
+  const stopsWithCoords = [];
+  for (const stop of stops) {
+    let lat = stop.lat;
+    let lng = stop.lng;
+
+    // If no coordinates, try to geocode (only if we have API key)
+    if ((!lat || !lng) && GOOGLE_MAPS_API_KEY) {
+      const coords = await geocodeAddress(stop.address);
+      if (coords) {
+        lat = coords.lat;
+        lng = coords.lng;
+      }
+    }
+
+    stopsWithCoords.push({ ...stop, lat, lng });
+  }
+
+  // Check how many have valid coordinates
+  const withCoords = stopsWithCoords.filter(s => s.lat && s.lng);
+  console.log(`[ROUTE] ${withCoords.length}/${stops.length} stops have coordinates`);
+
+  if (withCoords.length < 2) {
+    console.log('[ROUTE] Not enough geocoded stops for optimization, returning original order');
+    return { orderedStops: stops, optimized: false, method: 'none' };
+  }
+
+  // Get start coordinates
+  let currentLat, currentLng;
+  if (startAddress && GOOGLE_MAPS_API_KEY) {
+    const startCoords = await geocodeAddress(startAddress);
+    if (startCoords) {
+      currentLat = startCoords.lat;
+      currentLng = startCoords.lng;
+    }
+  }
+
+  // If no start coords, use first stop
+  if (!currentLat || !currentLng) {
+    const first = withCoords[0];
+    currentLat = first.lat;
+    currentLng = first.lng;
+  }
+
+  // Nearest-neighbor algorithm
+  const remaining = [...withCoords];
+  const ordered = [];
+  let totalDistance = 0;
+
+  while (remaining.length > 0) {
+    let nearestIdx = 0;
+    let nearestDist = Infinity;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const stop = remaining[i];
+      if (stop.lat && stop.lng) {
+        const dist = haversineDistance(currentLat, currentLng, stop.lat, stop.lng);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestIdx = i;
+        }
+      }
+    }
+
+    const nearest = remaining.splice(nearestIdx, 1)[0];
+    ordered.push(nearest);
+    totalDistance += nearestDist;
+    currentLat = nearest.lat;
+    currentLng = nearest.lng;
+  }
+
+  // Add back any stops without coordinates at the end
+  const withoutCoords = stopsWithCoords.filter(s => !s.lat || !s.lng);
+  ordered.push(...withoutCoords);
+
+  console.log('[ROUTE] Nearest-neighbor optimization complete');
+  console.log('[ROUTE] Estimated total distance:', totalDistance.toFixed(1), 'miles (straight-line)');
+
+  return {
+    orderedStops: ordered,
+    optimized: true,
+    method: 'nearest-neighbor',
+    estimatedDistanceMiles: totalDistance,
+  };
 }
 
 async function handleBestRoute(req, res) {
@@ -2233,10 +2369,34 @@ async function handleBestRoute(req, res) {
     }
 
     if (!GOOGLE_MAPS_API_KEY) {
+      console.warn('[ROUTE] GOOGLE_MAPS_API_KEY not set - using fallback optimization');
+
+      // Try nearest-neighbor with any stored coordinates
+      const fallbackResult = await nearestNeighborOptimize(stops, startAddress);
+
+      if (fallbackResult.optimized) {
+        const orderedStops = fallbackResult.orderedStops;
+        return res.json({
+          ok: true,
+          optimized: true,
+          method: fallbackResult.method,
+          warning: 'Using nearest-neighbor fallback (no Google API key). Distance is straight-line estimate.',
+          start: startAddress,
+          end: endAddress,
+          stops,
+          orderedStops,
+          orderedIds: orderedStops.map(s => s.id),
+          totalDistanceMeters: fallbackResult.estimatedDistanceMiles ? Math.round(fallbackResult.estimatedDistanceMiles * 1609.34) : null,
+          totalDurationSeconds: null,
+          googleMapsUrl: mapsUrlForStops(startAddress, endAddress, orderedStops.map(s => s.address)),
+        });
+      }
+
+      // If fallback also failed, return original order
       return res.json({
         ok: true,
         optimized: false,
-        warning: 'GOOGLE_MAPS_API_KEY not set. Returning stops in current order.',
+        warning: 'GOOGLE_MAPS_API_KEY not set and no coordinates available. Returning stops in current order.',
         start: startAddress,
         end: endAddress,
         stops,
