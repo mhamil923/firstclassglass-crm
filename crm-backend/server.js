@@ -2452,10 +2452,26 @@ async function handleBestRoute(req, res) {
     }
 
     if (!data || data.status !== 'OK' || !Array.isArray(data.routes) || !data.routes.length) {
+      // Log detailed error for debugging
+      console.error('[ROUTE] ❌ Google Directions API Error:');
+      console.error('[ROUTE] Status:', data?.status);
+      console.error('[ROUTE] Error Message:', data?.error_message);
+      console.error('[ROUTE] Full Response:', JSON.stringify(data, null, 2));
+
+      // Provide helpful troubleshooting info based on error
+      let troubleshooting = '';
+      if (data?.status === 'REQUEST_DENIED') {
+        troubleshooting = 'Check: 1) Directions API enabled in Google Cloud Console, 2) API key restrictions, 3) Billing enabled';
+      } else if (data?.status === 'OVER_QUERY_LIMIT') {
+        troubleshooting = 'API quota exceeded. Check billing or wait and retry.';
+      } else if (data?.status === 'INVALID_REQUEST') {
+        troubleshooting = 'Invalid addresses or parameters in request.';
+      }
+
       return res.json({
         ok: true,
         optimized: false,
-        warning: `Google Directions returned status=${data?.status || 'UNKNOWN'}`,
+        warning: `Google Directions returned status=${data?.status || 'UNKNOWN'}. ${data?.error_message || ''} ${troubleshooting}`,
         start: startAddress,
         end: endAddress,
         stops,
@@ -2528,6 +2544,88 @@ async function handleBestRoute(req, res) {
 
 app.get('/routes/best', authenticate, handleBestRoute);
 app.post('/routes/best', authenticate, handleBestRoute);
+
+// ─── GOOGLE API TEST ENDPOINT ────────────────────────────────────────────────
+app.get('/routes/test-google-api', authenticate, async (req, res) => {
+  console.log('[TEST] Testing Google Maps API configuration...');
+  console.log('[TEST] API Key exists:', !!GOOGLE_MAPS_API_KEY);
+  console.log('[TEST] API Key length:', GOOGLE_MAPS_API_KEY?.length);
+  console.log('[TEST] API Key prefix:', GOOGLE_MAPS_API_KEY?.substring(0, 10) + '...');
+
+  if (!GOOGLE_MAPS_API_KEY) {
+    return res.json({
+      success: false,
+      error: 'GOOGLE_MAPS_API_KEY not set in environment',
+      troubleshooting: [
+        '1. Check .env file has GOOGLE_MAPS_API_KEY=your_key',
+        '2. For Elastic Beanstalk: Add env var in Configuration → Software → Environment properties',
+        '3. Restart the server after adding the key'
+      ]
+    });
+  }
+
+  // Test with a simple directions request
+  const testUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=Chicago,IL&destination=Milwaukee,WI&key=${GOOGLE_MAPS_API_KEY}`;
+
+  try {
+    const resp = await axios.get(testUrl, { timeout: 10000 });
+    const data = resp?.data;
+
+    console.log('[TEST] Google Response Status:', data?.status);
+    if (data?.error_message) {
+      console.log('[TEST] Error Message:', data.error_message);
+    }
+
+    if (data?.status === 'OK') {
+      const route = data.routes?.[0];
+      const leg = route?.legs?.[0];
+      return res.json({
+        success: true,
+        status: data.status,
+        testRoute: {
+          from: 'Chicago, IL',
+          to: 'Milwaukee, WI',
+          distance: leg?.distance?.text,
+          duration: leg?.duration?.text
+        },
+        message: '✅ Google Directions API is working correctly!'
+      });
+    } else {
+      // API returned an error
+      let troubleshooting = [];
+      if (data?.status === 'REQUEST_DENIED') {
+        troubleshooting = [
+          '1. Go to Google Cloud Console: https://console.cloud.google.com/',
+          '2. APIs & Services → Library → Search "Directions API" → ENABLE it',
+          '3. APIs & Services → Credentials → Click your API key',
+          '4. Under "API restrictions": Add "Directions API" or select "Don\'t restrict key"',
+          '5. Under "Application restrictions": Select "None" for server use',
+          '6. Billing → Make sure billing is enabled (required even for free tier)'
+        ];
+      } else if (data?.status === 'OVER_QUERY_LIMIT') {
+        troubleshooting = [
+          '1. Check your Google Cloud billing status',
+          '2. You may have exceeded your daily quota',
+          '3. Wait a few minutes and try again'
+        ];
+      }
+
+      return res.json({
+        success: false,
+        status: data?.status,
+        errorMessage: data?.error_message,
+        troubleshooting
+      });
+    }
+  } catch (e) {
+    console.error('[TEST] Request failed:', e?.message);
+    return res.json({
+      success: false,
+      error: 'Failed to connect to Google API',
+      details: e?.message
+    });
+  }
+});
 
 // ─── KEY NORMALIZATION / FIXERS ──────────────────────────────────────────────
 function logFiles(...args){ if (FILES_VERBOSE === '1') console.log('[files]', ...args); }
