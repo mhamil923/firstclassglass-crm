@@ -883,11 +883,94 @@ function poStatusFromRow(r) {
 
 // ─── WORK ORDERS SEARCH/LIST/CRUD ───────────────────────────────────────────
 
+// DEBUG: Show all distinct status values in database (temporary endpoint)
+app.get('/debug/status-values', authenticate, async (req, res) => {
+  try {
+    const [rawStatus] = await db.execute('SELECT DISTINCT status FROM work_orders ORDER BY status');
+    const [waitingRows] = await db.execute(
+      `SELECT id, workOrderNumber, status, poNumber, poSupplier, poPdfPath FROM work_orders
+       WHERE LOWER(status) LIKE '%waiting%' OR LOWER(status) LIKE '%parts%'
+       ORDER BY id DESC LIMIT 20`
+    );
+    const [totalCount] = await db.execute('SELECT COUNT(*) as total FROM work_orders');
+
+    console.log('=== DEBUG: Status Values ===');
+    console.log('Total work orders:', totalCount[0]?.total);
+    console.log('Distinct raw status values:', rawStatus.map(r => r.status));
+    console.log('Work orders with waiting/parts in status:', waitingRows.length);
+    waitingRows.forEach(r => {
+      console.log(`  - WO ${r.id}: "${r.status}" (normalized: "${displayStatusOrDefault(r.status)}")`);
+    });
+
+    res.json({
+      totalWorkOrders: totalCount[0]?.total || 0,
+      distinctStatuses: rawStatus.map(r => r.status),
+      waitingOnPartsCount: waitingRows.length,
+      waitingOnPartsWorkOrders: waitingRows.map(r => ({
+        id: r.id,
+        workOrderNumber: r.workOrderNumber,
+        rawStatus: r.status,
+        normalizedStatus: displayStatusOrDefault(r.status),
+        poNumber: r.poNumber || null,
+        poSupplier: r.poSupplier || null,
+        hasPoPdf: !!r.poPdfPath
+      }))
+    });
+  } catch (err) {
+    console.error('Debug status-values error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DEBUG: Check a specific work order by ID
+app.get('/debug/work-order/:id', authenticate, async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+
+    if (!row) {
+      return res.status(404).json({ error: 'Work order not found' });
+    }
+
+    console.log(`=== DEBUG: Work Order ${wid} ===`);
+    console.log('Raw status:', row.status);
+    console.log('Normalized status:', displayStatusOrDefault(row.status));
+    console.log('PO Number:', row.poNumber);
+    console.log('PO Supplier:', row.poSupplier);
+    console.log('PO PDF Path:', row.poPdfPath);
+
+    res.json({
+      id: row.id,
+      workOrderNumber: row.workOrderNumber,
+      customer: row.customer,
+      rawStatus: row.status,
+      normalizedStatus: displayStatusOrDefault(row.status),
+      poNumber: row.poNumber || null,
+      poSupplier: row.poSupplier || null,
+      poPdfPath: row.poPdfPath || null,
+      poPickedUp: !!row.poPickedUp,
+      createdAt: row.createdAt || row.created_at || null
+    });
+  } catch (err) {
+    console.error('Debug work-order error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // LIST ALL
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
     const [raw] = await db.execute(workOrdersSelectSQL({ orderSql: 'ORDER BY w.id DESC' }));
     const rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status) }));
+
+    // DEBUG: Log count of "Waiting on Parts" work orders
+    const waitingCount = rows.filter(r => r.status === 'Waiting on Parts').length;
+    console.log(`[WORK-ORDERS-LIST] Total: ${rows.length}, Waiting on Parts: ${waitingCount}`);
+    if (waitingCount > 0) {
+      const waitingIds = rows.filter(r => r.status === 'Waiting on Parts').map(r => r.id);
+      console.log(`[WORK-ORDERS-LIST] Waiting on Parts IDs: ${waitingIds.join(', ')}`);
+    }
+
     res.json(rows);
   } catch (err) {
     console.error('Work-orders list error:', err);
@@ -1586,6 +1669,11 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     const finalPoNumber = detectedPoNumber || poNumber || existing.poNumber;
 
     const cStatus = canonStatus(status) || existing.status;
+
+    // DEBUG: Log status processing for "Waiting on Parts" investigation
+    if (status !== existing.status || (status && status.toLowerCase().includes('waiting'))) {
+      console.log(`[STATUS-DEBUG] WO ${wid}: incoming="${status}", canonStatus="${canonStatus(status)}", final="${cStatus}", existing="${existing.status}"`);
+    }
 
     let scheduledDate = existing.scheduledDate || null;
     let scheduledEnd  = existing.scheduledEnd  || null;
