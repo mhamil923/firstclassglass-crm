@@ -2248,19 +2248,26 @@ async function handleBestRoute(req, res) {
       });
     }
 
-    const waypointAddresses = stops.map(s => s.address);
-    const wpParam = `optimize:true|${waypointAddresses.join('|')}`;
+    // Encode each address individually, NOT the entire waypoints string
+    // Otherwise optimize:true becomes optimize%3Atrue and Google ignores it!
+    const encodedAddresses = stops.map(s => encodeURIComponent(s.address));
+    const wpParam = `optimize:true|${encodedAddresses.join('|')}`;
+
+    console.log('[ROUTE] Calling Google Directions API...');
+    console.log('[ROUTE] Origin:', startAddress);
+    console.log('[ROUTE] Destination:', endAddress);
+    console.log('[ROUTE] Waypoints:', stops.map(s => s.address));
 
     const url =
       `https://maps.googleapis.com/maps/api/directions/json` +
       `?origin=${encodeURIComponent(startAddress)}` +
       `&destination=${encodeURIComponent(endAddress)}` +
-      `&waypoints=${encodeURIComponent(wpParam)}` +
-      `&mode=${encodeURIComponent(travelMode)}` +
+      `&waypoints=${wpParam}` +
+      `&mode=${travelMode}` +
       `&departure_time=now` +
       `&traffic_model=best_guess` +
       `&alternatives=false` +
-      `&key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}`;
+      `&key=${GOOGLE_MAPS_API_KEY}`;
 
     let data = null;
     try {
@@ -2304,9 +2311,16 @@ async function handleBestRoute(req, res) {
 
     const route = data.routes[0];
     const orderIdx = Array.isArray(route.waypoint_order) ? route.waypoint_order : [];
+
+    console.log('[ROUTE] Google API returned OK');
+    console.log('[ROUTE] Original order:', stops.map((s, i) => `${i}: ${s.address.substring(0, 30)}...`));
+    console.log('[ROUTE] Google waypoint_order:', orderIdx);
+
     const orderedStopsBase = orderIdx.length
       ? orderIdx.map(i => stops[i]).filter(Boolean)
       : stops;
+
+    console.log('[ROUTE] Optimized order:', orderedStopsBase.map((s, i) => `${i}: ${s.address.substring(0, 30)}...`));
 
     const legs = Array.isArray(route.legs) ? route.legs : [];
 
@@ -2325,6 +2339,11 @@ async function handleBestRoute(req, res) {
     const totalDurationInTrafficSeconds = legs.reduce((sum, l) => sum + (l?.duration_in_traffic?.value || 0), 0) || null;
 
     const orderedWaypointAddresses = orderedStops.map(s => s.address);
+
+    const totalMiles = totalDistanceMeters ? (totalDistanceMeters / 1609.34).toFixed(1) : null;
+    const totalMins = totalDurationSeconds ? Math.round(totalDurationSeconds / 60) : null;
+    const totalMinsTraffic = totalDurationInTrafficSeconds ? Math.round(totalDurationInTrafficSeconds / 60) : null;
+    console.log(`[ROUTE] Totals: ${totalMiles} mi, ${totalMins} min (${totalMinsTraffic} min w/ traffic)`);
 
     return res.json({
       ok: true,
