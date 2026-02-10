@@ -248,12 +248,16 @@ const CUSTOMER_PROFILES = {
   CLEAR_VISION: {
     names: ["CLEAR VISION", "CLEARVISION", "CLEAR VISION FACILITIES"],
     displayName: "Clear Vision",
-    billingAddress: "2050 W Wickenburg Way Ste 2-128, Wickenburg, AZ 85390",
+    billingAddress: "1525 Rancho Conejo Blvd. STE #207, Newbury Park, CA 91320",
     patterns: {
-      workOrderNumber: /#R(\d+)/i,  // #R77510 → "R77510"
-      siteLocation: /SERVICE LOCATION[\s\S]*?#?\d*\s*([A-Za-z].*?)(?:\n\d|\n[A-Z]{2}\s|\nPHONE)/i,
-      siteAddress: /SERVICE LOCATION[\s\S]*?\n.*?\n([\d].*?(?:IL|WI|IN|OH|MI|AZ|CA|TX|FL)\s*\d{5})/i,
-      problemDescription: /SERVICE INSTRUCTIONS\s*\n([\s\S]*?)(?:\n\n|PROBLEM|$)/i
+      // #R77544 or R77544 → captures "R77544" (with R prefix)
+      workOrderNumber: /#?(R\d{4,6})/i,
+      // Store/restaurant name line after "SERVICE LOCATION", before the address (digit-starting line)
+      siteLocation: /service location\s*\n+\s*([^\n]+?)(?=\s*\n\s*\d)/i,
+      // Full street address: starts with digit, through ZIP code (optionally followed by ", USA")
+      siteAddress: /service location\s*\n+[^\n]+\n+\s*(\d+[\s\S]*?\d{5}(?:-\d{4})?(?:,?\s*usa)?)/i,
+      // Everything after "SERVICE INSTRUCTIONS" until double-newline or next section header
+      problemDescription: /service instructions\s*\n+([\s\S]*?)(?:\n\s*\n|please call|phone:|fax:|billing|vendor|thank you!?\s*$|$)/i
     }
   },
 
@@ -517,6 +521,11 @@ function extractWorkOrderFields(text) {
     // If no PO found with customer pattern, try generic
     if (!result.poNumber) {
       result.poNumber = detectPoNumberFromText(text);
+    }
+
+    // Uppercase work order numbers (OCR text is lowercase, e.g. "r77544" → "R77544")
+    if (result.workOrderNumber) {
+      result.workOrderNumber = result.workOrderNumber.toUpperCase();
     }
 
   } else {

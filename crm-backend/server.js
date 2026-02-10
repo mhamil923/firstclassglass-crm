@@ -1242,6 +1242,7 @@ app.post('/work-orders/extract-pdf', authenticate, extractUploader.single('pdf')
       success: true,
       extracted: {
         customer: extracted.customer,
+        billingAddress: extracted.billingAddress,
         poNumber: extracted.poNumber,
         workOrderNumber: extracted.workOrderNumber,
         siteLocation: extracted.siteLocation,
