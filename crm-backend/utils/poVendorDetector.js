@@ -357,6 +357,9 @@ function extractClearVisionFields(text) {
  *   ... (all details including IVR codes, store hours, etc.)
  */
 function extractTrueSourceFields(text) {
+  console.log('[TRUE SOURCE EXTRACTION] Raw PDF text (first 2000 chars):', text.substring(0, 2000));
+  console.log('[TRUE SOURCE EXTRACTION] Text length:', text.length);
+
   const result = {
     workOrderNumber: null,
     skipPoNumber: true,   // True Source: never auto-fill PO #
@@ -371,11 +374,15 @@ function extractTrueSourceFields(text) {
     || text.match(/\bwo-(\d{7,8})\b/i);
   if (woMatch) {
     result.workOrderNumber = woMatch[1];
+    console.log('[TRUE SOURCE] WO# matched:', result.workOrderNumber);
   } else {
     // Fallback: standalone 0-prefixed 8-digit number
     const standaloneMatch = text.match(/\b(0\d{7})\b/);
     if (standaloneMatch) {
       result.workOrderNumber = standaloneMatch[1];
+      console.log('[TRUE SOURCE] WO# fallback matched:', result.workOrderNumber);
+    } else {
+      console.log('[TRUE SOURCE] WARNING: No WO# found');
     }
   }
 
@@ -392,6 +399,7 @@ function extractTrueSourceFields(text) {
   }
 
   if (rawLoc) {
+    console.log('[TRUE SOURCE] Raw site location:', rawLoc);
     // Strip any "{site}" or similar prefix
     rawLoc = rawLoc.replace(/^\{?\s*site\s*\}?\s*/i, '');
     // Split into store name and #identifier
@@ -404,19 +412,99 @@ function extractTrueSourceFields(text) {
       // No #identifier found, just uppercase the whole thing
       result.siteLocation = rawLoc.toUpperCase();
     }
+    console.log('[TRUE SOURCE] Final site location:', result.siteLocation);
+  } else {
+    console.log('[TRUE SOURCE] WARNING: No site location found');
   }
 
-  // Site Address — line(s) after "site address" header
-  // May be one line "9800 76th st, pleasant prairie, wi 53158"
-  // or multiple lines; grab until next header/blank
-  const addrMatch = text.match(
-    /site\s*address[:\s]*\n+\s*([\s\S]*?)(?=\n\s*(?:site\s*contact|customer|phone|problem|scope|description|priority|trade|nte|\n\s*\n))/i
-  );
-  if (addrMatch) {
-    let addr = addrMatch[1].trim().replace(/\n+/g, ', ').replace(/\s+/g, ' ');
+  // Site Address — try multiple patterns, most specific first
+  // OCR text is always lowercase. Address may be on one line or split across lines.
+  // NOTE: [: \t]* used instead of [:\s]* to avoid eating newlines before \n
+  let rawAddr = null;
 
-    // Title-case the street parts, uppercase state abbreviation
-    // Try to parse: "9800 76th st, pleasant prairie, wi 53158"
+  // Pattern 1a: "site address" header, address on NEXT line(s) until next section
+  if (!rawAddr) {
+    const m = text.match(
+      /site\s*address[: \t]*\n+[ \t]*([\s\S]*?)(?=\n[ \t]*(?:site\s*contact|contact\s*name|contact\s*phone|customer\b|phone\b|problem|scope|description|priority|trade|nte\b|service\s*type|dispatch|wo\s|work\s*order)|\n[ \t]*\n)/i
+    );
+    if (m) {
+      rawAddr = m[1].trim();
+      console.log('[TRUE SOURCE] Address Pattern 1a (site address + next lines):', rawAddr);
+    }
+  }
+
+  // Pattern 1b: "site address" header, address on SAME line (inline)
+  if (!rawAddr) {
+    const m = text.match(/site\s*address[: \t]+(\d+[^\n]+)/i);
+    if (m) {
+      rawAddr = m[1].trim();
+      console.log('[TRUE SOURCE] Address Pattern 1b (site address inline):', rawAddr);
+    }
+  }
+
+  // Pattern 2a: broader "address" header, address on NEXT line(s)
+  if (!rawAddr) {
+    const m = text.match(
+      /(?:service\s*)?address[: \t]*\n+[ \t]*([\s\S]*?)(?=\n[ \t]*(?:contact|phone|problem|scope|description|priority|trade|nte\b|dispatch|wo\s|work\s*order)|\n[ \t]*\n)/i
+    );
+    if (m) {
+      rawAddr = m[1].trim();
+      console.log('[TRUE SOURCE] Address Pattern 2a (address + next lines):', rawAddr);
+    }
+  }
+
+  // Pattern 2b: broader "address" header, address on SAME line (inline)
+  if (!rawAddr) {
+    const m = text.match(/(?:service\s*)?address[: \t]+(\d+[^\n]+)/i);
+    if (m) {
+      rawAddr = m[1].trim();
+      console.log('[TRUE SOURCE] Address Pattern 2b (address inline):', rawAddr);
+    }
+  }
+
+  // Pattern 3: Street line (single line, no newline crossing) + city/state/zip on next line
+  // e.g. "9800 76th st\npleasant prairie, wi 53158"
+  // Use [^\n] instead of [\w\s] to avoid crossing line boundaries
+  if (!rawAddr) {
+    const m = text.match(
+      /(\d+[^\n]+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|ct|court|pl|place|pkwy|parkway|hwy|highway)\.?)[ \t]*[,\n]+[ \t]*([a-z][a-z \t.]+,?[ \t]*[a-z]{2}[ \t]+\d{5}(?:-\d{4})?)/i
+    );
+    if (m) {
+      rawAddr = `${m[1].trim()}, ${m[2].trim()}`;
+      console.log('[TRUE SOURCE] Address Pattern 3 (street line + city/state/zip):', rawAddr);
+    }
+  }
+
+  // Pattern 4: Street number on one line, city/state/zip on next — no street type suffix
+  // e.g. "9800 76th\npleasant prairie, wi 53158"
+  if (!rawAddr) {
+    const m = text.match(
+      /(\d+[ \t]+[^\n]{3,30})\n+[ \t]*([a-z][a-z \t.]+,?[ \t]*[a-z]{2}[ \t]+\d{5}(?:-\d{4})?)/i
+    );
+    if (m) {
+      rawAddr = `${m[1].trim()}, ${m[2].trim()}`;
+      console.log('[TRUE SOURCE] Address Pattern 4 (street number + city line):', rawAddr);
+    }
+  }
+
+  // Pattern 5: Full address on one line anywhere — "9800 76th st, pleasant prairie, wi 53158"
+  if (!rawAddr) {
+    const m = text.match(
+      /(\d+[^\n,]+,[ \t]*[a-z][a-z \t.]+,?[ \t]*[a-z]{2}[ \t]+\d{5}(?:-\d{4})?)/i
+    );
+    if (m) {
+      rawAddr = m[1].trim();
+      console.log('[TRUE SOURCE] Address Pattern 5 (full address one line):', rawAddr);
+    }
+  }
+
+  console.log('[TRUE SOURCE] Raw address before formatting:', rawAddr || '(none)');
+
+  if (rawAddr) {
+    // Collapse multi-line into single line
+    let addr = rawAddr.replace(/\n+/g, ', ').replace(/[ \t]+/g, ' ').replace(/,\s*,/g, ',').trim();
+
+    // Try to parse into street, city, state, zip
     const parts = addr.match(/^(.+?),\s*(.+?),?\s+([a-z]{2})\s+(\d{5}(?:-\d{4})?)(.*)$/i);
     if (parts) {
       const street = toTitleCase(parts[1].trim());
@@ -425,14 +513,13 @@ function extractTrueSourceFields(text) {
       const zip = parts[4];
       const rest = parts[5] ? parts[5].trim() : '';
       addr = `${street}, ${city}, ${state} ${zip}`;
-      if (rest && !rest.toLowerCase().includes('usa')) {
-        addr += ', USA';
-      } else if (rest) {
+      if (rest && rest.toLowerCase().includes('usa')) {
         addr += `, ${rest}`;
       } else {
         addr += ', USA';
       }
     } else {
+      // Couldn't parse structure — title-case and append USA
       addr = toTitleCase(addr);
       if (!addr.toLowerCase().includes('usa')) {
         addr += ', USA';
@@ -440,6 +527,9 @@ function extractTrueSourceFields(text) {
     }
 
     result.siteAddress = addr;
+    console.log('[TRUE SOURCE] Final formatted address:', result.siteAddress);
+  } else {
+    console.log('[TRUE SOURCE] WARNING: No address pattern matched in entire text');
   }
 
   // Problem Description — include ALL details after "problem reported" / "scope of work"
@@ -466,6 +556,14 @@ function extractTrueSourceFields(text) {
       result.problemDescription = desc || null;
     }
   }
+
+  console.log('[TRUE SOURCE] Problem description:', result.problemDescription ? result.problemDescription.substring(0, 150) + '...' : '(not found)');
+  console.log('[TRUE SOURCE EXTRACTION] Final result:', JSON.stringify({
+    workOrderNumber: result.workOrderNumber,
+    siteLocation: result.siteLocation,
+    siteAddress: result.siteAddress,
+    problemDescription: result.problemDescription ? result.problemDescription.substring(0, 80) + '...' : null,
+  }, null, 2));
 
   return result;
 }
