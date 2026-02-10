@@ -791,6 +791,172 @@ function extractCLMFields(text) {
   return result;
 }
 
+/**
+ * 1st Time Fixed dedicated extraction (OCR text is always lowercase)
+ *
+ * PDF layout (typical):
+ *   CUSTOMER / LOCATION:
+ *   LITTLE CAESARS 01724
+ *   6233 Hohman Ave
+ *   Hammond, IN 46324
+ *   ...
+ *   W.O. NUMBER: 336317184
+ *   ...
+ *   WORK DESCRIPTION:
+ *   "CUSTOMER AREA / DOOR REPAIR / ENTRY DOOR / DOOR CLOSER / DOOR CLOSER BROKEN ..."
+ */
+function extractFirstTimeFixedFields(text) {
+  console.log('[1TF] Detected 1st Time Fixed work order');
+  console.log('[1TF] Raw PDF text (first 2000 chars):', text.substring(0, 2000));
+  console.log('[1TF] Text length:', text.length);
+
+  const result = {
+    workOrderNumber: null,
+    skipPoNumber: true,   // 1TF: don't auto-fill PO #
+    siteLocation: null,
+    siteAddress: null,
+    problemDescription: null,
+  };
+
+  // ── Work Order # ──
+  // Handles: "w.o. number: 336317184", "w.o. number 336317184", "wo number: 336317184",
+  //          "w.o.number:336317184", "w.o. #: 336317184", label and number on separate lines
+  const woMatch = text.match(/w\.?o\.?\s*(?:#|number)[:\s]*(\d+)/i)
+    || text.match(/w\.?o\.?\s*(?:#|number)[: \t]*\n[ \t]*(\d+)/i);
+  if (woMatch) {
+    result.workOrderNumber = woMatch[1].trim();
+    console.log('[1TF] WO# matched:', result.workOrderNumber);
+  } else {
+    console.log('[1TF] WARNING: No WO# found');
+    // Debug: look for "w.o" or "wo" anywhere
+    const woIdx = text.search(/w\.?o\.?\s/i);
+    if (woIdx >= 0) {
+      console.log('[1TF] Text around "w.o":', JSON.stringify(text.substring(woIdx, woIdx + 80)));
+    }
+  }
+
+  // ── Site Location ──
+  // After "customer / location:" or "customer/location:" label, first non-empty line is the store name
+  // Raw: "little caesars 01724" → Want: "LITTLE CAESARS 01724" (uppercase)
+  const custLocMatch = text.match(
+    /customer\s*\/?\s*location[: \t]*\n+[ \t]*([^\n]+)/i
+  );
+  if (custLocMatch) {
+    let loc = custLocMatch[1].trim();
+    console.log('[1TF] Raw site location:', loc);
+    // Don't strip store numbers — keep full name like "LITTLE CAESARS 01724"
+    result.siteLocation = loc.toUpperCase();
+    console.log('[1TF] Site Location:', result.siteLocation);
+  } else {
+    console.log('[1TF] WARNING: No site location found');
+  }
+
+  // ── Site Address ──
+  // Lines after the store name under "customer / location:" section, before next section
+  // Could be: "6233 hohman ave\nhammond, in 46324"
+  // or:       "6233 hohman ave, hammond, in 46324"
+  let rawAddr = null;
+
+  // Pattern 1: After "customer / location:" header, skip the store-name line, grab address lines
+  const addrAfterCust = text.match(
+    /customer\s*\/?\s*location[: \t]*\n+[^\n]+\n+[ \t]*([\s\S]*?)(?=\n[ \t]*(?:phone|fax|email|vendor|w\.?o\.?\s|work\s*description|store\s*manager|special|billing|nte\b|\n[ \t]*\n))/i
+  );
+  if (addrAfterCust) {
+    rawAddr = addrAfterCust[1].trim();
+    console.log('[1TF] Address Pattern 1 (after customer/location):', rawAddr);
+  }
+
+  // Pattern 2: Street line + city/state/zip structural match
+  if (!rawAddr) {
+    const streetMatch = text.match(
+      /(\d+[^\n]+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|ct|court|pl|place|pkwy|hwy)\.?)[ \t]*[,\n]+[ \t]*([a-z][a-z \t.]+,?[ \t]*[a-z]{2}[ \t]+\d{5}(?:-\d{4})?)/i
+    );
+    if (streetMatch) {
+      rawAddr = `${streetMatch[1].trim()}, ${streetMatch[2].trim()}`;
+      console.log('[1TF] Address Pattern 2 (street + city):', rawAddr);
+    }
+  }
+
+  // Pattern 3: Full address on one line
+  if (!rawAddr) {
+    const oneLine = text.match(
+      /(\d+[^\n,]+,[ \t]*[a-z][a-z \t.]+,?[ \t]*[a-z]{2}[ \t]+\d{5}(?:-\d{4})?)/i
+    );
+    if (oneLine) {
+      rawAddr = oneLine[1].trim();
+      console.log('[1TF] Address Pattern 3 (one line):', rawAddr);
+    }
+  }
+
+  if (rawAddr) {
+    let addr = rawAddr.replace(/\n+/g, ', ').replace(/[ \t]+/g, ' ').replace(/,\s*,/g, ',').trim();
+
+    // Parse into street, city, state, zip and title-case
+    const parts = addr.match(/^(.+?),\s*(.+?),?\s+([a-z]{2})\s+(\d{5}(?:-\d{4})?)(.*)$/i);
+    if (parts) {
+      const street = toTitleCase(parts[1].trim());
+      const city = toTitleCase(parts[2].trim());
+      const state = parts[3].toUpperCase();
+      const zip = parts[4];
+      addr = `${street}, ${city}, ${state} ${zip}`;
+      if (!(parts[5] || '').toLowerCase().includes('usa')) {
+        addr += ', USA';
+      }
+    } else {
+      addr = toTitleCase(addr);
+      if (!addr.toLowerCase().includes('usa')) {
+        addr += ', USA';
+      }
+    }
+
+    result.siteAddress = addr;
+    console.log('[1TF] Final formatted address:', result.siteAddress);
+  } else {
+    console.log('[1TF] WARNING: No address found');
+  }
+
+  // ── Problem Description ──
+  // After "work description:" label — capture everything until next section
+  // Keep the full text including slash-separated categories
+  // Remove surrounding quotes if present
+  const descMatch = text.match(
+    /work\s*description[: \t]*\n*[ \t]*"?([\s\S]*?)(?=\n[ \t]*(?:store\s*manager|store\s*stamp|vendor|special\s*instructions|billing|nte\b|technician|\n[ \t]*\n)|"?\s*$)/i
+  );
+  if (descMatch) {
+    let desc = descMatch[1].trim();
+    // Remove trailing quote if present
+    desc = desc.replace(/"$/, '').trim();
+    // Collapse whitespace
+    desc = desc.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+    // Uppercase to match expected format
+    desc = desc.toUpperCase();
+    result.problemDescription = desc || null;
+    console.log('[1TF] Problem description:', result.problemDescription ? result.problemDescription.substring(0, 150) + '...' : '(not found)');
+  } else {
+    // Fallback: try broader patterns
+    const fallback = text.match(
+      /(?:description|problem|scope)[: \t]*\n*[ \t]*"?([\s\S]*?)(?=\n[ \t]*(?:store|vendor|billing|special|\n[ \t]*\n)|"?\s*$)/i
+    );
+    if (fallback) {
+      let desc = fallback[1].trim().replace(/"$/, '').replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+      desc = desc.toUpperCase();
+      result.problemDescription = desc || null;
+      console.log('[1TF] Problem description (fallback):', result.problemDescription ? result.problemDescription.substring(0, 150) + '...' : '(not found)');
+    } else {
+      console.log('[1TF] WARNING: No problem description found');
+    }
+  }
+
+  console.log('[1TF] Full extracted data:', JSON.stringify({
+    workOrderNumber: result.workOrderNumber,
+    siteLocation: result.siteLocation,
+    siteAddress: result.siteAddress,
+    problemDescription: result.problemDescription ? result.problemDescription.substring(0, 80) + '...' : null,
+  }, null, 2));
+
+  return result;
+}
+
 const CUSTOMER_PROFILES = {
   CLEAR_VISION: {
     names: ["CLEAR VISION", "CLEARVISION", "CLEAR VISION FACILITIES"],
@@ -817,12 +983,7 @@ const CUSTOMER_PROFILES = {
     names: ["1ST TIME FIXED", "1st Time Fixed", "1STTIMEFIXED", "FIRST TIME FIXED"],
     displayName: "1st Time Fixed",
     billingAddress: "334 Kevyn Ln, Bensenville, IL 60106",
-    patterns: {
-      workOrderNumber: /W\.?O\.?\s*NUMBER:?\s*(\d+)/i,  // 338678150
-      siteLocation: /CUSTOMER\s*\/?\s*LOCATION:?\s*([\s\S]*?)(?:\n\d|VENDOR|W\.?O\.?\s*NUMBER)/i,
-      siteAddress: /CUSTOMER\s*\/?\s*LOCATION:?[\s\S]*?\n\s*([\d].*?(?:IL|WI|IN|OH|MI)\s*\d{0,5})/i,
-      problemDescription: /WORK DESCRIPTION:?\s*"?([\s\S]*?)"?(?:\nSTORE MANAGER|STORE STAMP|$)/i
-    }
+    customExtract: extractFirstTimeFixedFields,
   },
 
   KFM: {
