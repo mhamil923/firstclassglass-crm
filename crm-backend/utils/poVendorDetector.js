@@ -568,6 +568,174 @@ function extractTrueSourceFields(text) {
   return result;
 }
 
+/**
+ * CLM dedicated extraction (OCR text is always lowercase)
+ *
+ * PDF layout (typical):
+ *   SERVICE LOCATION
+ *   CVS #07142I01
+ *   16760 W 167th St
+ *   Lockport, IL 60441
+ *   ...
+ *   SERVICE DESCRIPTION
+ *   front store / door - automatic / sliding doors / cracked/broken glass / ...
+ */
+function extractCLMFields(text) {
+  console.log('[CLM EXTRACTION] Raw PDF text (first 2000 chars):', text.substring(0, 2000));
+  console.log('[CLM EXTRACTION] Text length:', text.length);
+
+  const result = {
+    workOrderNumber: null,
+    skipPoNumber: true,   // CLM: never auto-fill PO #
+    siteLocation: null,
+    siteAddress: null,
+    problemDescription: null,
+  };
+
+  // Work Order # — CLM doesn't use a WO#, leave empty
+  // (no extraction needed)
+
+  // Site Location (Name) — line after "service location" header
+  // Raw OCR:  "cvs #07142i01"
+  // Want:     "CVS #07142I01" (uppercase store name, keep #identifier)
+  const locMatch = text.match(/service\s*location[: \t]*\n+[ \t]*([^\n]+)/i);
+  let rawLoc = locMatch ? locMatch[1].trim() : null;
+
+  if (!rawLoc) {
+    // Fallback: look for store patterns like "cvs #xxx", "walgreens #xxx"
+    const storeMatch = text.match(/\b([a-z][a-z&'.]+\s*#[a-z0-9]+)\b/i);
+    if (storeMatch) rawLoc = storeMatch[1].trim();
+  }
+
+  if (rawLoc) {
+    console.log('[CLM] Raw site location:', rawLoc);
+    // Strip any "{site}" prefix
+    rawLoc = rawLoc.replace(/^\{?\s*site\s*\}?\s*/i, '');
+    // Split into store name and #identifier, uppercase the store name
+    const locParts = rawLoc.match(/^(.+?)\s*(#[a-z0-9]+)$/i);
+    if (locParts) {
+      const storeName = locParts[1].trim().toUpperCase();
+      const storeId = locParts[2].toUpperCase();
+      result.siteLocation = `${storeName} ${storeId}`;
+    } else {
+      result.siteLocation = rawLoc.toUpperCase();
+    }
+    console.log('[CLM] Final site location:', result.siteLocation);
+  } else {
+    console.log('[CLM] WARNING: No site location found');
+  }
+
+  // Site Address — line(s) after site location name, before next section
+  // May be: "16760 w 167th st\nlockport, il 60441"
+  // or:     "16760 w 167th st, lockport, il 60441"
+  let rawAddr = null;
+
+  // Pattern 1: After "service location" header, skip the name line, grab address line(s)
+  const addrAfterLoc = text.match(
+    /service\s*location[: \t]*\n+[^\n]+\n+[ \t]*([\s\S]*?)(?=\n[ \t]*(?:phone|service\s*description|service\s*type|contact|billing|nte\b|store\s*stamp|dispatch|\n[ \t]*\n))/i
+  );
+  if (addrAfterLoc) {
+    rawAddr = addrAfterLoc[1].trim();
+    console.log('[CLM] Address Pattern 1 (after service location name):', rawAddr);
+  }
+
+  // Pattern 2: "address" or "site address" header
+  if (!rawAddr) {
+    const addrHeader = text.match(
+      /(?:site\s*)?address[: \t]*\n+[ \t]*([\s\S]*?)(?=\n[ \t]*(?:contact|phone|problem|service\s*description|billing|nte\b|dispatch|\n[ \t]*\n))/i
+    );
+    if (addrHeader) {
+      rawAddr = addrHeader[1].trim();
+      console.log('[CLM] Address Pattern 2 (address header):', rawAddr);
+    }
+  }
+
+  // Pattern 3: Street line + city/state/zip on next line (structural)
+  if (!rawAddr) {
+    const streetMatch = text.match(
+      /(\d+[^\n]+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|ct|court|pl|place|pkwy|hwy)\.?)[ \t]*[,\n]+[ \t]*([a-z][a-z \t.]+,?[ \t]*[a-z]{2}[ \t]+\d{5}(?:-\d{4})?)/i
+    );
+    if (streetMatch) {
+      rawAddr = `${streetMatch[1].trim()}, ${streetMatch[2].trim()}`;
+      console.log('[CLM] Address Pattern 3 (street + city):', rawAddr);
+    }
+  }
+
+  // Pattern 4: Full address on one line
+  if (!rawAddr) {
+    const oneLine = text.match(
+      /(\d+[^\n,]+,[ \t]*[a-z][a-z \t.]+,?[ \t]*[a-z]{2}[ \t]+\d{5}(?:-\d{4})?)/i
+    );
+    if (oneLine) {
+      rawAddr = oneLine[1].trim();
+      console.log('[CLM] Address Pattern 4 (one line):', rawAddr);
+    }
+  }
+
+  console.log('[CLM] Raw address before formatting:', rawAddr || '(none)');
+
+  if (rawAddr) {
+    let addr = rawAddr.replace(/\n+/g, ', ').replace(/[ \t]+/g, ' ').replace(/,\s*,/g, ',').trim();
+
+    // Parse into street, city, state, zip and title-case
+    const parts = addr.match(/^(.+?),\s*(.+?),?\s+([a-z]{2})\s+(\d{5}(?:-\d{4})?)(.*)$/i);
+    if (parts) {
+      const street = toTitleCase(parts[1].trim());
+      const city = toTitleCase(parts[2].trim());
+      const state = parts[3].toUpperCase();
+      const zip = parts[4];
+      addr = `${street}, ${city}, ${state} ${zip}`;
+      if (!(parts[5] || '').toLowerCase().includes('usa')) {
+        addr += ', USA';
+      }
+    } else {
+      addr = toTitleCase(addr);
+      if (!addr.toLowerCase().includes('usa')) {
+        addr += ', USA';
+      }
+    }
+
+    result.siteAddress = addr;
+    console.log('[CLM] Final formatted address:', result.siteAddress);
+  } else {
+    console.log('[CLM] WARNING: No address pattern matched');
+  }
+
+  // Problem Description — everything after "service description" header
+  // CLM format: "front store / door - automatic / sliding doors / cracked/broken glass / ..."
+  // Include ALL details — category, subcategory, problem, emergency status, full description
+  const descMatch = text.match(
+    /service\s*description[: \t]*\n+([\s\S]*?)(?=\n[ \t]*(?:billing|store\s*stamp|nte\b|vendor|payment|dispatch|technician|attachments|documents|\n[ \t]*\n)|\s*$)/i
+  );
+  if (descMatch) {
+    let desc = descMatch[1].trim();
+    desc = desc.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+    desc = desc.replace(/\s*page\s*\d+\s*(?:of\s*\d+)?\s*$/gi, '').trim();
+    result.problemDescription = desc || null;
+  }
+
+  // Fallback: try broader description headers
+  if (!result.problemDescription) {
+    const fallback = text.match(
+      /(?:problem|issue|description|scope|notes|instructions)[: \t]*\n+([\s\S]*?)(?=\n[ \t]*(?:billing|contact|phone|attachments|documents|\n[ \t]*\n)|\s*$)/i
+    );
+    if (fallback) {
+      let desc = fallback[1].trim().replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+      result.problemDescription = desc || null;
+    }
+  }
+
+  console.log('[CLM] Problem description:', result.problemDescription ? result.problemDescription.substring(0, 150) + '...' : '(not found)');
+  console.log('[CLM EXTRACTION] Final result:', JSON.stringify({
+    workOrderNumber: result.workOrderNumber,
+    siteLocation: result.siteLocation,
+    siteAddress: result.siteAddress,
+    problemDescription: result.problemDescription ? result.problemDescription.substring(0, 80) + '...' : null,
+  }, null, 2));
+
+  return result;
+}
+
 const CUSTOMER_PROFILES = {
   CLEAR_VISION: {
     names: ["CLEAR VISION", "CLEARVISION", "CLEAR VISION FACILITIES"],
@@ -584,16 +752,10 @@ const CUSTOMER_PROFILES = {
   },
 
   CLM_MIDWEST: {
-    names: ["CLM MIDWEST", "CLM", "CLMMIDWEST", "CLM SERVICES"],
-    displayName: "CLM Midwest",
-    billingAddress: "2655 N Erie St, River Grove, IL 60171",
-    patterns: {
-      workOrderNumber: /VENDOR PO #\s*\n?\s*(\d+-?\d*)/i,  // 450089-01
-      poNumber: /Client PO #\s*(\d+)/i,  // 340315111
-      siteLocation: /SERVICE LOCATION\s*\n([\s\S]*?)(?:\n\d|\nPhone|\nSERVICE)/i,
-      siteAddress: /SERVICE LOCATION[\s\S]*?\n.*?\n([\d].*?(?:IL|WI|IN|OH|MI)\s*\d{5})/i,
-      problemDescription: /SERVICE DESCRIPTION\s*\n?([\s\S]*?)(?:\nBILLING|STORE STAMP|NTE|$)/i
-    }
+    names: ["CLM MIDWEST", "CLM", "CLMMIDWEST", "CLM SERVICES", "C.L.M"],
+    displayName: "CLM",
+    billingAddress: "2655 Erie St. River Grove, IL 60171",
+    customExtract: extractCLMFields,
   },
 
   FIRST_TIME_FIXED: {
