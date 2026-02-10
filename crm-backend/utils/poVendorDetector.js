@@ -624,6 +624,14 @@ function extractCLMFields(text) {
     console.log('[CLM] WO# Pattern C (after vendor, next line):', woMatchC ? woMatchC[1] : 'no match');
   }
 
+  // Pattern D: Last resort — find any "NNN-NN" pattern (6+ digits, dash, 2+ digits) in first 500 chars
+  // CLM WO numbers look like "450089-01"
+  let woMatchD = null;
+  const topText = text.substring(0, 500);
+  const dMatch = topText.match(/\b(\d{5,}[\-–—]\d{1,3})\b/);
+  if (dMatch) woMatchD = dMatch;
+  console.log('[CLM] WO# Pattern D (digit-dash-digit in top 500):', woMatchD ? woMatchD[1] : 'no match');
+
   // Use first match found
   if (woMatchA) {
     result.workOrderNumber = woMatchA[1].trim();
@@ -634,9 +642,12 @@ function extractCLMFields(text) {
   } else if (woMatchC) {
     result.workOrderNumber = woMatchC[1].trim();
     console.log('[CLM] WO# matched (pattern C):', result.workOrderNumber);
+  } else if (woMatchD) {
+    result.workOrderNumber = woMatchD[1].trim();
+    console.log('[CLM] WO# matched (pattern D - fallback digit-dash):', result.workOrderNumber);
   } else {
-    console.log('[CLM] WARNING: No VENDOR PO # found after trying all patterns');
-    console.log('[CLM] First 300 chars of text:', JSON.stringify(text.substring(0, 300)));
+    console.log('[CLM] WARNING: No VENDOR PO # found after trying all 4 patterns');
+    console.log('[CLM] First 500 chars of text:', JSON.stringify(text.substring(0, 500)));
   }
 
   // Site Location (Name) — line after "service location" header
@@ -1021,6 +1032,14 @@ function extractWorkOrderFields(text) {
       // Use dedicated extraction function for this customer
       console.log(`[WO Extract] Using custom extraction function for ${profile.displayName}`);
       const custom = profile.customExtract(text);
+      console.log(`[WO Extract] customExtract returned:`, JSON.stringify({
+        workOrderNumber: custom.workOrderNumber,
+        poNumber: custom.poNumber,
+        skipPoNumber: custom.skipPoNumber,
+        siteLocation: custom.siteLocation,
+        siteAddress: custom.siteAddress ? custom.siteAddress.substring(0, 50) : null,
+        problemDescription: custom.problemDescription ? custom.problemDescription.substring(0, 50) + '...' : null,
+      }));
       if (custom.workOrderNumber) result.workOrderNumber = custom.workOrderNumber;
       if (custom.poNumber) result.poNumber = custom.poNumber;
       if (custom.skipPoNumber) result.skipPoNumber = true; // suppress generic PO fallback

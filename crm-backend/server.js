@@ -1234,11 +1234,7 @@ app.post('/work-orders/extract-pdf', authenticate, extractUploader.single('pdf')
       console.warn("[EXTRACT-PDF] Step 5: WARNING - Could not delete temp file:", e.message);
     }
 
-    console.log("=".repeat(60));
-    console.log("=== PDF EXTRACTION COMPLETE - SUCCESS ===");
-    console.log("=".repeat(60) + "\n");
-
-    res.json({
+    const responsePayload = {
       success: true,
       extracted: {
         customer: extracted.customer,
@@ -1251,7 +1247,16 @@ app.post('/work-orders/extract-pdf', authenticate, extractUploader.single('pdf')
       },
       rawText: extracted.rawText,
       textLength: text.length
-    });
+    };
+
+    console.log("=".repeat(60));
+    console.log("=== PDF EXTRACTION COMPLETE - SUCCESS ===");
+    console.log("[EXTRACT-PDF] Response workOrderNumber:", JSON.stringify(extracted.workOrderNumber));
+    console.log("[EXTRACT-PDF] Response payload keys:", Object.keys(responsePayload.extracted));
+    console.log("[EXTRACT-PDF] Full extracted:", JSON.stringify(responsePayload.extracted, null, 2));
+    console.log("=".repeat(60) + "\n");
+
+    res.json(responsePayload);
 
   } catch (err) {
     console.error("=".repeat(60));
