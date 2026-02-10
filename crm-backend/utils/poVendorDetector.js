@@ -340,6 +340,122 @@ function extractClearVisionFields(text) {
   return result;
 }
 
+/**
+ * True Source dedicated extraction (OCR text is always lowercase)
+ *
+ * PDF layout (typical):
+ *   WO #: WO-03237351
+ *   ...
+ *   Site Name & Number:
+ *   at&t #atr001998
+ *   ...
+ *   Site Address:
+ *   9800 76th St, Pleasant Prairie, WI 53158
+ *   ...
+ *   Problem Reported:
+ *   lock/unlock door *262-220-1545 zachary* wo check in/out phone #: ...
+ *   ... (all details including IVR codes, store hours, etc.)
+ */
+function extractTrueSourceFields(text) {
+  const result = {
+    workOrderNumber: null,
+    siteLocation: null,
+    siteAddress: null,
+    problemDescription: null,
+  };
+
+  // Work Order # — "wo #: wo-03237351" or "wo-03237351" or standalone 8-digit
+  const woMatch = text.match(/wo[#:\s-]*wo-?(\d{7,8})/i)
+    || text.match(/work\s*order[#:\s-]*(\d{7,8})/i)
+    || text.match(/\bwo-(\d{7,8})\b/i);
+  if (woMatch) {
+    result.workOrderNumber = woMatch[1];
+  } else {
+    // Fallback: standalone 0-prefixed 8-digit number
+    const standaloneMatch = text.match(/\b(0\d{7})\b/);
+    if (standaloneMatch) {
+      result.workOrderNumber = standaloneMatch[1];
+    }
+  }
+
+  // Site Location (Name) — line(s) after "site name" header
+  // Raw:  "at&t #atr001998"
+  // Keep as-is (lowercase), this is how True Source formats it
+  const locMatch = text.match(/site\s*name\s*(?:&|and)?\s*(?:number)?[:\s]*\n+\s*([^\n]+)/i);
+  if (locMatch) {
+    result.siteLocation = locMatch[1].trim();
+  } else {
+    // Fallback: look for store name patterns like "at&t #xxx"
+    const storeMatch = text.match(/\b([a-z][a-z&'.]+\s*#[a-z0-9]+)\b/i);
+    if (storeMatch) {
+      result.siteLocation = storeMatch[1].trim();
+    }
+  }
+
+  // Site Address — line(s) after "site address" header
+  // May be one line "9800 76th st, pleasant prairie, wi 53158"
+  // or multiple lines; grab until next header/blank
+  const addrMatch = text.match(
+    /site\s*address[:\s]*\n+\s*([\s\S]*?)(?=\n\s*(?:site\s*contact|customer|phone|problem|scope|description|priority|trade|nte|\n\s*\n))/i
+  );
+  if (addrMatch) {
+    let addr = addrMatch[1].trim().replace(/\n+/g, ', ').replace(/\s+/g, ' ');
+
+    // Title-case the street parts, uppercase state abbreviation
+    // Try to parse: "9800 76th st, pleasant prairie, wi 53158"
+    const parts = addr.match(/^(.+?),\s*(.+?),?\s+([a-z]{2})\s+(\d{5}(?:-\d{4})?)(.*)$/i);
+    if (parts) {
+      const street = toTitleCase(parts[1].trim());
+      const city = toTitleCase(parts[2].trim());
+      const state = parts[3].toUpperCase();
+      const zip = parts[4];
+      const rest = parts[5] ? parts[5].trim() : '';
+      addr = `${street}, ${city}, ${state} ${zip}`;
+      if (rest && !rest.toLowerCase().includes('usa')) {
+        addr += ', USA';
+      } else if (rest) {
+        addr += `, ${rest}`;
+      } else {
+        addr += ', USA';
+      }
+    } else {
+      addr = toTitleCase(addr);
+      if (!addr.toLowerCase().includes('usa')) {
+        addr += ', USA';
+      }
+    }
+
+    result.siteAddress = addr;
+  }
+
+  // Problem Description — include ALL details after "problem reported" / "scope of work"
+  // True Source techs need: contact info, phone numbers, IVR codes, store hours, everything
+  const descMatch = text.match(
+    /(?:problem\s*reported|scope\s*of\s*work|work\s*description|description|notes|instructions)[:\s]*\n+([\s\S]*?)(?=\n\s*(?:attachments|documents|files|action\s*required|work\s*plan|vendor\s*info|billing|payment|dispatch|technician\s*notes)\b|\s*$)/i
+  );
+  if (descMatch) {
+    let desc = descMatch[1].trim();
+    // Collapse whitespace but keep it readable
+    desc = desc.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+    // Remove trailing page numbers
+    desc = desc.replace(/\s*page\s*\d+\s*(?:of\s*\d+)?\s*$/gi, '').trim();
+    result.problemDescription = desc || null;
+  }
+
+  // If no description found, try a broader capture for contact/IVR patterns
+  if (!result.problemDescription) {
+    const broadMatch = text.match(
+      /((?:lock\/unlock|check\s*in\/out|phone\s*#|ivr\s*code|service\s*type)[\s\S]+?)(?=\n\s*(?:attachments|documents|vendor|billing|payment|dispatch)\b|\s*$)/i
+    );
+    if (broadMatch) {
+      let desc = broadMatch[1].trim().replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+      result.problemDescription = desc || null;
+    }
+  }
+
+  return result;
+}
+
 const CUSTOMER_PROFILES = {
   CLEAR_VISION: {
     names: ["CLEAR VISION", "CLEARVISION", "CLEAR VISION FACILITIES"],
@@ -351,13 +467,8 @@ const CUSTOMER_PROFILES = {
   TRUE_SOURCE: {
     names: ["TRUESOURCE", "TRUE SOURCE", "TRUESOURCE.COM"],
     displayName: "True Source",
-    billingAddress: "TrueSource, LLC, 800-669-3667",
-    patterns: {
-      workOrderNumber: /WO\s*#?:?\s*WO-(\d+)/i,  // WO #: WO-03237351 → "03237351"
-      siteLocation: /SITE Name\s*&?\s*Number:?\s*([\s\S]*?)(?:Priority|Site Address)/i,
-      siteAddress: /Site Address:?\s*([\s\S]*?)(?:Site Contact|Customer|Phone)/i,
-      problemDescription: /Problem Reported\s*([\s\S]*?)(?:Action Required|Work Plan|Notes|$)/i
-    }
+    billingAddress: "263 Jenckes Hill Rd, Lincoln, RI 02865",
+    customExtract: extractTrueSourceFields,
   },
 
   CLM_MIDWEST: {
