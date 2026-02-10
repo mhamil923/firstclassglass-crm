@@ -386,6 +386,13 @@ export default function AddWorkOrder() {
           setWorkOrder((prev) => ({ ...prev, ...updates }));
         }
 
+        // Auto-attach the extracted PDF as the Work Order PDF
+        if (file && !pdfFile) {
+          setPdfFile(file);
+          filledFields.push("Work Order PDF (auto-attached)");
+          console.log("[PDF Extract] Auto-attached extracted PDF as Work Order PDF");
+        }
+
         if (filledFields.length > 0) {
           setExtractResult({
             type: "success",
