@@ -835,115 +835,123 @@ function extractFirstTimeFixedFields(text) {
     }
   }
 
-  // ── Site Location ──
-  // After "customer / location:" or "customer/location:" label, first non-empty line is the store name
-  // Raw: "little caesars 01724" → Want: "LITTLE CAESARS 01724" (uppercase)
-  const custLocMatch = text.match(
-    /customer\s*\/?\s*location[: \t]*\n+[ \t]*([^\n]+)/i
+  // ── Site Location + Site Address ──
+  // 1TF PDFs have two formats:
+  //   A) Same line:  "customer / location: little caesars 01724"
+  //   B) Next line:  "customer / location:\nlittle caesars 01724"
+  // Address lines follow immediately after the store name.
+  //
+  // We extract the store name and address in one block, then split them.
+
+  // First, find the customer/location section and grab everything after it
+  // until the next known section header
+  const custBlock = text.match(
+    /customer\s*\/?\s*location[: \t]*([\s\S]*?)(?=\n[ \t]*(?:phone|fax|email|vendor\b|w\.?o\.?\s|work\s*desc|store\s*manager|special|billing|nte\b|\n[ \t]*\n))/i
   );
-  if (custLocMatch) {
-    let loc = custLocMatch[1].trim();
-    console.log('[1TF] Raw site location:', loc);
-    // Don't strip store numbers — keep full name like "LITTLE CAESARS 01724"
-    result.siteLocation = loc.toUpperCase();
-    console.log('[1TF] Site Location:', result.siteLocation);
-  } else {
-    console.log('[1TF] WARNING: No site location found');
-  }
 
-  // ── Site Address ──
-  // Lines after the store name under "customer / location:" section, before next section
-  // Could be: "6233 hohman ave\nhammond, in 46324"
-  // or:       "6233 hohman ave, hammond, in 46324"
-  let rawAddr = null;
+  console.log('[1TF] customer/location block match:', custBlock ? JSON.stringify(custBlock[1].substring(0, 200)) : 'NO MATCH');
 
-  // Pattern 1: After "customer / location:" header, skip the store-name line, grab address lines
-  const addrAfterCust = text.match(
-    /customer\s*\/?\s*location[: \t]*\n+[^\n]+\n+[ \t]*([\s\S]*?)(?=\n[ \t]*(?:phone|fax|email|vendor|w\.?o\.?\s|work\s*description|store\s*manager|special|billing|nte\b|\n[ \t]*\n))/i
-  );
-  if (addrAfterCust) {
-    rawAddr = addrAfterCust[1].trim();
-    console.log('[1TF] Address Pattern 1 (after customer/location):', rawAddr);
-  }
+  if (custBlock) {
+    // Split the block into non-empty lines
+    const lines = custBlock[1].split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    console.log('[1TF] customer/location block lines:', JSON.stringify(lines));
 
-  // Pattern 2: Street line + city/state/zip structural match
-  if (!rawAddr) {
-    const streetMatch = text.match(
-      /(\d+[^\n]+(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|ct|court|pl|place|pkwy|hwy)\.?)[ \t]*[,\n]+[ \t]*([a-z][a-z \t.]+,?[ \t]*[a-z]{2}[ \t]+\d{5}(?:-\d{4})?)/i
-    );
-    if (streetMatch) {
-      rawAddr = `${streetMatch[1].trim()}, ${streetMatch[2].trim()}`;
-      console.log('[1TF] Address Pattern 2 (street + city):', rawAddr);
-    }
-  }
+    // Line 0 = store name (may be on same line as label, or first line after it)
+    // Lines 1+ = address lines
+    if (lines.length >= 1) {
+      // ── Site Location: first line is the store name ──
+      let loc = lines[0];
+      // Strip trailing store number codes (just digits at end, like "01724")
+      loc = loc.replace(/\s+\d{4,}$/, '');
+      result.siteLocation = loc.toUpperCase().trim();
+      console.log('[1TF] Site Location:', result.siteLocation);
 
-  // Pattern 3: Full address on one line
-  if (!rawAddr) {
-    const oneLine = text.match(
-      /(\d+[^\n,]+,[ \t]*[a-z][a-z \t.]+,?[ \t]*[a-z]{2}[ \t]+\d{5}(?:-\d{4})?)/i
-    );
-    if (oneLine) {
-      rawAddr = oneLine[1].trim();
-      console.log('[1TF] Address Pattern 3 (one line):', rawAddr);
-    }
-  }
-
-  if (rawAddr) {
-    let addr = rawAddr.replace(/\n+/g, ', ').replace(/[ \t]+/g, ' ').replace(/,\s*,/g, ',').trim();
-
-    // Parse into street, city, state, zip and title-case
-    const parts = addr.match(/^(.+?),\s*(.+?),?\s+([a-z]{2})\s+(\d{5}(?:-\d{4})?)(.*)$/i);
-    if (parts) {
-      const street = toTitleCase(parts[1].trim());
-      const city = toTitleCase(parts[2].trim());
-      const state = parts[3].toUpperCase();
-      const zip = parts[4];
-      addr = `${street}, ${city}, ${state} ${zip}`;
-      if (!(parts[5] || '').toLowerCase().includes('usa')) {
-        addr += ', USA';
+      // ── Site Address: remaining lines that look like an address ──
+      // Skip lines that are just the store name / don't start with a digit
+      const addrLines = [];
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        // Stop if we hit something that's not address-like
+        if (/^(?:phone|fax|email|vendor|w\.?o\.?|work\s*desc|store|special|billing)/i.test(line)) break;
+        addrLines.push(line);
       }
-    } else {
-      addr = toTitleCase(addr);
-      if (!addr.toLowerCase().includes('usa')) {
-        addr += ', USA';
+      console.log('[1TF] Address lines:', JSON.stringify(addrLines));
+
+      if (addrLines.length > 0) {
+        let rawAddr = addrLines.join(', ');
+        // Avoid picking up the 1TF billing address as site address
+        if (rawAddr.includes('bensenville') || rawAddr.includes('kevyn')) {
+          console.log('[1TF] WARNING: Address looks like billing address, skipping:', rawAddr);
+        } else {
+          // Clean up and format
+          let addr = rawAddr.replace(/[ \t]+/g, ' ').replace(/,\s*,/g, ',').trim();
+
+          const parts = addr.match(/^(.+?),\s*(.+?),?\s+([a-z]{2})\s+(\d{5}(?:-\d{4})?)(.*)$/i);
+          if (parts) {
+            const street = toTitleCase(parts[1].trim());
+            const city = toTitleCase(parts[2].trim());
+            const state = parts[3].toUpperCase();
+            const zip = parts[4];
+            addr = `${street}, ${city}, ${state} ${zip}`;
+          } else {
+            addr = toTitleCase(addr);
+          }
+
+          result.siteAddress = addr;
+          console.log('[1TF] Final formatted address:', result.siteAddress);
+        }
       }
     }
-
-    result.siteAddress = addr;
-    console.log('[1TF] Final formatted address:', result.siteAddress);
   } else {
-    console.log('[1TF] WARNING: No address found');
+    console.log('[1TF] WARNING: No customer/location section found');
+    // Debug: show where "customer" appears
+    const custIdx = text.indexOf('customer');
+    if (custIdx >= 0) {
+      console.log('[1TF] Text around "customer":', JSON.stringify(text.substring(custIdx, custIdx + 120)));
+    }
   }
 
   // ── Problem Description ──
-  // After "work description:" label — capture everything until next section
-  // Keep the full text including slash-separated categories
-  // Remove surrounding quotes if present
-  const descMatch = text.match(
-    /work\s*description[: \t]*\n*[ \t]*"?([\s\S]*?)(?=\n[ \t]*(?:store\s*manager|store\s*stamp|vendor|special\s*instructions|billing|nte\b|technician|\n[ \t]*\n)|"?\s*$)/i
+  // MUST use "work description" specifically (not just "description" which matches invoice boilerplate)
+  // The text is usually in quotes: work description: "CUSTOMER AREA / DOOR REPAIR / ..."
+  // Or without quotes: work description:\nCUSTOMER AREA / DOOR REPAIR / ...
+
+  // Pattern A: Text in quotes after "work description"
+  let descFound = false;
+  const descQuoted = text.match(
+    /work\s*description[: \t]*\n?[ \t]*"([^"]+)"/i
   );
-  if (descMatch) {
-    let desc = descMatch[1].trim();
-    // Remove trailing quote if present
-    desc = desc.replace(/"$/, '').trim();
-    // Collapse whitespace
-    desc = desc.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
-    // Uppercase to match expected format
-    desc = desc.toUpperCase();
-    result.problemDescription = desc || null;
-    console.log('[1TF] Problem description:', result.problemDescription ? result.problemDescription.substring(0, 150) + '...' : '(not found)');
-  } else {
-    // Fallback: try broader patterns
-    const fallback = text.match(
-      /(?:description|problem|scope)[: \t]*\n*[ \t]*"?([\s\S]*?)(?=\n[ \t]*(?:store|vendor|billing|special|\n[ \t]*\n)|"?\s*$)/i
+  if (descQuoted) {
+    let desc = descQuoted[1].trim().replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+    result.problemDescription = desc.toUpperCase();
+    descFound = true;
+    console.log('[1TF] Problem description (quoted):', result.problemDescription.substring(0, 150));
+  }
+
+  // Pattern B: Text after "work description" until a stop-marker (no quotes)
+  if (!descFound) {
+    const descUnquoted = text.match(
+      /work\s*description[: \t]*\n?[ \t]*([\s\S]*?)(?=\n[ \t]*(?:special\s*instruction|store\s*manager|store\s*stamp|vendor\b|submit\s*all|before\s*and\s*after|invoice|billing|nte\b|\n[ \t]*\n))/i
     );
-    if (fallback) {
-      let desc = fallback[1].trim().replace(/"$/, '').replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
-      desc = desc.toUpperCase();
-      result.problemDescription = desc || null;
-      console.log('[1TF] Problem description (fallback):', result.problemDescription ? result.problemDescription.substring(0, 150) + '...' : '(not found)');
-    } else {
-      console.log('[1TF] WARNING: No problem description found');
+    if (descUnquoted) {
+      let desc = descUnquoted[1].trim();
+      // Strip leading/trailing quotes that may be partial
+      desc = desc.replace(/^"/, '').replace(/"$/, '').trim();
+      desc = desc.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (desc) {
+        result.problemDescription = desc.toUpperCase();
+        descFound = true;
+        console.log('[1TF] Problem description (unquoted):', result.problemDescription.substring(0, 150));
+      }
+    }
+  }
+
+  if (!descFound) {
+    console.log('[1TF] WARNING: No work description found');
+    // Debug
+    const descIdx = text.indexOf('work description');
+    if (descIdx >= 0) {
+      console.log('[1TF] Text around "work description":', JSON.stringify(text.substring(descIdx, descIdx + 200)));
     }
   }
 
