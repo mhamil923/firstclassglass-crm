@@ -348,6 +348,11 @@ export default function AddWorkOrder() {
           filledFields.push("Customer");
           console.log("[PDF Extract] Found customer:", updates.customer);
         }
+        if (ext.billingAddress && ext.billingAddress.trim()) {
+          updates.billingAddress = ext.billingAddress.trim();
+          filledFields.push("Billing Address");
+          console.log("[PDF Extract] Found billingAddress:", updates.billingAddress);
+        }
         if (ext.poNumber && ext.poNumber.trim()) {
           updates.poNumber = ext.poNumber.trim();
           filledFields.push("PO Number");
