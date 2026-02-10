@@ -595,24 +595,48 @@ function extractCLMFields(text) {
   // Work Order # — CLM uses "VENDOR PO #" as the work order number
   // e.g. "vendor po #\n450089-01" or "vendor po # 450089-01"
   // OCR text is always lowercase
-  const woMatch = text.match(/vendor\s*po\s*#?[: \t]*\n?[ \t]*(\d+[-]?\d*)/i);
-  if (woMatch) {
-    result.workOrderNumber = woMatch[1].trim();
-    console.log('[CLM] WO# (vendor po) matched:', result.workOrderNumber);
+  // Debug: show text around "vendor" to see exact format
+  const vendorIdx = text.indexOf('vendor');
+  if (vendorIdx >= 0) {
+    console.log('[CLM] Text around "vendor" keyword:', JSON.stringify(text.substring(Math.max(0, vendorIdx - 10), vendorIdx + 100)));
   } else {
-    // Broader fallback: look for "vendor po" anywhere nearby a number
-    const woFallback = text.match(/vendor\s*po[^a-z\n]*?(\d{4,}[-]?\d*)/i);
-    if (woFallback) {
-      result.workOrderNumber = woFallback[1].trim();
-      console.log('[CLM] WO# fallback matched:', result.workOrderNumber);
-    } else {
-      console.log('[CLM] WARNING: No VENDOR PO # found');
-      // Log surrounding text to help debug
-      const vendorIdx = text.indexOf('vendor');
-      if (vendorIdx >= 0) {
-        console.log('[CLM] Text around "vendor":', text.substring(Math.max(0, vendorIdx - 20), vendorIdx + 80));
-      }
-    }
+    console.log('[CLM] WARNING: "vendor" not found in text at all');
+  }
+
+  // Try multiple patterns from most specific to broadest
+  // Pattern A: "vendor po #" with number on same/next line (handles multiple newlines, optional #, dashes)
+  const woPatternA = /vendor\s*po\s*#?\s*[:\s]*?(\d+[\-–—]?\d*)/i;
+  const woMatchA = text.match(woPatternA);
+  console.log('[CLM] WO# Pattern A result:', woMatchA ? woMatchA[1] : 'no match');
+
+  // Pattern B: "vendor po" then within 20 chars find a multi-digit number
+  const woPatternB = /vendor\s*po[\s#:]*(\d{4,}[\-–—]?\d*)/i;
+  const woMatchB = text.match(woPatternB);
+  console.log('[CLM] WO# Pattern B result:', woMatchB ? woMatchB[1] : 'no match');
+
+  // Pattern C: Look for the number on lines near "vendor po" (handle label on one line, number on next)
+  let woMatchC = null;
+  if (vendorIdx >= 0) {
+    // Grab 150 chars after "vendor" and look for any digit sequence
+    const afterVendor = text.substring(vendorIdx, vendorIdx + 150);
+    const cMatch = afterVendor.match(/(?:vendor\s*po[^\n]*\n\s*)(\d{4,}[\-–—]?\d*)/i);
+    if (cMatch) woMatchC = cMatch;
+    console.log('[CLM] WO# Pattern C (after vendor, next line):', woMatchC ? woMatchC[1] : 'no match');
+  }
+
+  // Use first match found
+  if (woMatchA) {
+    result.workOrderNumber = woMatchA[1].trim();
+    console.log('[CLM] WO# matched (pattern A):', result.workOrderNumber);
+  } else if (woMatchB) {
+    result.workOrderNumber = woMatchB[1].trim();
+    console.log('[CLM] WO# matched (pattern B):', result.workOrderNumber);
+  } else if (woMatchC) {
+    result.workOrderNumber = woMatchC[1].trim();
+    console.log('[CLM] WO# matched (pattern C):', result.workOrderNumber);
+  } else {
+    console.log('[CLM] WARNING: No VENDOR PO # found after trying all patterns');
+    console.log('[CLM] First 300 chars of text:', JSON.stringify(text.substring(0, 300)));
   }
 
   // Site Location (Name) — line after "service location" header
