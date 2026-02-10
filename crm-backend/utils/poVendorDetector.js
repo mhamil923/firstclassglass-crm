@@ -244,21 +244,108 @@ function detectPoNumberFromText(text) {
 // CUSTOMER PROFILES - Customer-specific extraction patterns
 // ============================================================
 
+/**
+ * Title-case a string: "sweetgreen restaurant #122" → "Sweetgreen Restaurant #122"
+ */
+function toTitleCase(str) {
+  if (!str) return str;
+  return str.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * Clear Vision dedicated extraction (OCR text is always lowercase)
+ *
+ * PDF layout:
+ *   #R77544
+ *   ...
+ *   SERVICE LOCATION
+ *   #122 Sweetgreen Restaurant #122
+ *   1471 N. Milwaukee Ave Wicker Park
+ *   Chicago IL  60622
+ *   ...
+ *   SERVICE INSTRUCTIONS
+ *   The door near the restrooms is not closing properly. ...
+ */
+function extractClearVisionFields(text) {
+  const result = {
+    workOrderNumber: null,
+    siteLocation: null,
+    siteAddress: null,
+    problemDescription: null,
+  };
+
+  // Work Order # — #R77544 or R77544 → "R77544"
+  const woMatch = text.match(/#?(r\d{4,6})/i);
+  if (woMatch) {
+    result.workOrderNumber = woMatch[1].toUpperCase();
+  }
+
+  // Site Location — first non-empty line after "service location"
+  // Raw:  "#122 sweetgreen restaurant #122"
+  // Want: "Sweetgreen Restaurant #122"
+  const locMatch = text.match(/service location\s*\n+\s*([^\n]+)/i);
+  if (locMatch) {
+    let loc = locMatch[1].trim();
+    // Strip leading "#NNN " prefix (duplicate store number)
+    loc = loc.replace(/^#\d+\s+/, '');
+    result.siteLocation = toTitleCase(loc);
+  }
+
+  // Site Address — two lines below the site-name line
+  //   Line 1: "1471 n. milwaukee ave wicker park"
+  //   Line 2: "chicago il  60622"
+  //   Want:   "1471 N. Milwaukee Ave Wicker Park, Chicago, IL 60622"
+  const addrMatch = text.match(
+    /service location\s*\n+[^\n]+\n+\s*(\d+[^\n]+)\n+\s*([^\n]*\d{5}[^\n]*)/i
+  );
+  if (addrMatch) {
+    const street = toTitleCase(addrMatch[1].trim());
+
+    // Normalise city / state / ZIP: "chicago il  60622" → "Chicago, IL 60622"
+    let cityLine = addrMatch[2].trim().replace(/\s+/g, ' ');
+    const csz = cityLine.match(/^(.+?)\s+([a-z]{2})\s+(\d{5}(?:-\d{4})?)(.*)$/i);
+    if (csz) {
+      const city  = toTitleCase(csz[1]);
+      const state = csz[2].toUpperCase();
+      const zip   = csz[3];
+      const rest  = csz[4] ? csz[4].trim() : '';
+      cityLine = `${city}, ${state} ${zip}${rest ? ' ' + rest : ''}`;
+    } else {
+      cityLine = toTitleCase(cityLine);
+    }
+
+    result.siteAddress = `${street}, ${cityLine}`;
+  }
+
+  // Problem Description — ONLY the SERVICE INSTRUCTIONS content
+  // Stop BEFORE any work-order numbers, "work order" labels, dates, or blank lines
+  const descMatch = text.match(
+    /service instructions\s*\n+([\s\S]*?)(?=#?r\d{4,6}|\bwork order\b|\bdate\s*:|\n\s*\n|$)/i
+  );
+  if (descMatch) {
+    let desc = descMatch[1].trim();
+    // Safety: strip any stray WO numbers or date lines that slipped through
+    desc = desc.replace(/#?r\d{4,6}/gi, '');
+    desc = desc.replace(/work\s*order[^.\n]*/gi, '');
+    desc = desc.replace(/date:\s*\d{4}-\d{2}-\d{2}/gi, '');
+    desc = desc.replace(/\s+/g, ' ').trim();
+    // Sentence-case: capitalise first char + first char after ". "
+    if (desc) {
+      desc = desc.charAt(0).toUpperCase() + desc.slice(1);
+      desc = desc.replace(/\.\s+([a-z])/g, (_, c) => '. ' + c.toUpperCase());
+    }
+    result.problemDescription = desc || null;
+  }
+
+  return result;
+}
+
 const CUSTOMER_PROFILES = {
   CLEAR_VISION: {
     names: ["CLEAR VISION", "CLEARVISION", "CLEAR VISION FACILITIES"],
     displayName: "Clear Vision",
     billingAddress: "1525 Rancho Conejo Blvd. STE #207, Newbury Park, CA 91320",
-    patterns: {
-      // #R77544 or R77544 → captures "R77544" (with R prefix)
-      workOrderNumber: /#?(R\d{4,6})/i,
-      // Store/restaurant name line after "SERVICE LOCATION", before the address (digit-starting line)
-      siteLocation: /service location\s*\n+\s*([^\n]+?)(?=\s*\n\s*\d)/i,
-      // Full street address: starts with digit, through ZIP code (optionally followed by ", USA")
-      siteAddress: /service location\s*\n+[^\n]+\n+\s*(\d+[\s\S]*?\d{5}(?:-\d{4})?(?:,?\s*usa)?)/i,
-      // Everything after "SERVICE INSTRUCTIONS" until double-newline or next section header
-      problemDescription: /service instructions\s*\n+([\s\S]*?)(?:\n\s*\n|please call|phone:|fax:|billing|vendor|thank you!?\s*$|$)/i
-    }
+    customExtract: extractClearVisionFields,
   },
 
   TRUE_SOURCE: {
@@ -499,23 +586,34 @@ function extractWorkOrderFields(text) {
     result.billingAddress = profile.billingAddress;
     result.detectedCustomerProfile = true;
 
-    console.log(`[WO Extract] Using ${profile.displayName} extraction patterns`);
+    console.log(`[WO Extract] Using ${profile.displayName} extraction`);
 
-    // Extract each field using customer's specific pattern
-    if (profile.patterns.workOrderNumber) {
-      result.workOrderNumber = extractWithPattern(text, profile.patterns.workOrderNumber);
-    }
-    if (profile.patterns.poNumber) {
-      result.poNumber = extractWithPattern(text, profile.patterns.poNumber);
-    }
-    if (profile.patterns.siteLocation) {
-      result.siteLocation = extractWithPattern(text, profile.patterns.siteLocation);
-    }
-    if (profile.patterns.siteAddress) {
-      result.siteAddress = extractWithPattern(text, profile.patterns.siteAddress);
-    }
-    if (profile.patterns.problemDescription) {
-      result.problemDescription = extractWithPattern(text, profile.patterns.problemDescription);
+    if (profile.customExtract) {
+      // Use dedicated extraction function for this customer
+      console.log(`[WO Extract] Using custom extraction function for ${profile.displayName}`);
+      const custom = profile.customExtract(text);
+      if (custom.workOrderNumber) result.workOrderNumber = custom.workOrderNumber;
+      if (custom.poNumber) result.poNumber = custom.poNumber;
+      if (custom.siteLocation) result.siteLocation = custom.siteLocation;
+      if (custom.siteAddress) result.siteAddress = custom.siteAddress;
+      if (custom.problemDescription) result.problemDescription = custom.problemDescription;
+    } else if (profile.patterns) {
+      // Extract each field using customer's specific pattern
+      if (profile.patterns.workOrderNumber) {
+        result.workOrderNumber = extractWithPattern(text, profile.patterns.workOrderNumber);
+      }
+      if (profile.patterns.poNumber) {
+        result.poNumber = extractWithPattern(text, profile.patterns.poNumber);
+      }
+      if (profile.patterns.siteLocation) {
+        result.siteLocation = extractWithPattern(text, profile.patterns.siteLocation);
+      }
+      if (profile.patterns.siteAddress) {
+        result.siteAddress = extractWithPattern(text, profile.patterns.siteAddress);
+      }
+      if (profile.patterns.problemDescription) {
+        result.problemDescription = extractWithPattern(text, profile.patterns.problemDescription);
+      }
     }
 
     // If no PO found with customer pattern, try generic
