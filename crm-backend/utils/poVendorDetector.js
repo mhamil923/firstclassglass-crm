@@ -359,6 +359,7 @@ function extractClearVisionFields(text) {
 function extractTrueSourceFields(text) {
   const result = {
     workOrderNumber: null,
+    skipPoNumber: true,   // True Source: never auto-fill PO #
     siteLocation: null,
     siteAddress: null,
     problemDescription: null,
@@ -379,16 +380,29 @@ function extractTrueSourceFields(text) {
   }
 
   // Site Location (Name) — line(s) after "site name" header
-  // Raw:  "at&t #atr001998"
-  // Keep as-is (lowercase), this is how True Source formats it
+  // Raw OCR:  "at&t #atr001998" or "{site} at&t #atr001998"
+  // Want:     "AT&T #atr001998"  (uppercase store name, keep #identifier as-is)
   const locMatch = text.match(/site\s*name\s*(?:&|and)?\s*(?:number)?[:\s]*\n+\s*([^\n]+)/i);
-  if (locMatch) {
-    result.siteLocation = locMatch[1].trim();
-  } else {
+  let rawLoc = locMatch ? locMatch[1].trim() : null;
+
+  if (!rawLoc) {
     // Fallback: look for store name patterns like "at&t #xxx"
     const storeMatch = text.match(/\b([a-z][a-z&'.]+\s*#[a-z0-9]+)\b/i);
-    if (storeMatch) {
-      result.siteLocation = storeMatch[1].trim();
+    if (storeMatch) rawLoc = storeMatch[1].trim();
+  }
+
+  if (rawLoc) {
+    // Strip any "{site}" or similar prefix
+    rawLoc = rawLoc.replace(/^\{?\s*site\s*\}?\s*/i, '');
+    // Split into store name and #identifier
+    const locParts = rawLoc.match(/^(.+?)\s*(#[a-z0-9]+)$/i);
+    if (locParts) {
+      const storeName = locParts[1].trim().toUpperCase();
+      const storeId = locParts[2];  // keep #identifier as-is
+      result.siteLocation = `${storeName} ${storeId}`;
+    } else {
+      // No #identifier found, just uppercase the whole thing
+      result.siteLocation = rawLoc.toUpperCase();
     }
   }
 
@@ -705,6 +719,7 @@ function extractWorkOrderFields(text) {
       const custom = profile.customExtract(text);
       if (custom.workOrderNumber) result.workOrderNumber = custom.workOrderNumber;
       if (custom.poNumber) result.poNumber = custom.poNumber;
+      if (custom.skipPoNumber) result.skipPoNumber = true; // suppress generic PO fallback
       if (custom.siteLocation) result.siteLocation = custom.siteLocation;
       if (custom.siteAddress) result.siteAddress = custom.siteAddress;
       if (custom.problemDescription) result.problemDescription = custom.problemDescription;
@@ -727,8 +742,8 @@ function extractWorkOrderFields(text) {
       }
     }
 
-    // If no PO found with customer pattern, try generic
-    if (!result.poNumber) {
+    // If no PO found with customer pattern, try generic (unless explicitly skipped)
+    if (!result.poNumber && !result.skipPoNumber) {
       result.poNumber = detectPoNumberFromText(text);
     }
 
@@ -753,6 +768,9 @@ function extractWorkOrderFields(text) {
   console.log(`  Problem: ${result.problemDescription ? result.problemDescription.substring(0, 100) + "..." : "(not found)"}`);
   console.log(`  Used Profile: ${result.detectedCustomerProfile ? "Yes" : "No (generic)"}`);
   console.log("=== WORK ORDER FIELD EXTRACTION END ===");
+
+  // Clean up internal flags before returning
+  delete result.skipPoNumber;
 
   return result;
 }
