@@ -2292,6 +2292,15 @@ async function nearestNeighborOptimize(stops, startAddress) {
 
 async function handleBestRoute(req, res) {
   try {
+    // Debug API key configuration
+    console.log('[ROUTE] ==========================================');
+    console.log('[ROUTE] API Key Debug:');
+    console.log('[ROUTE]   - Loaded from env:', !!GOOGLE_MAPS_API_KEY);
+    console.log('[ROUTE]   - Length:', GOOGLE_MAPS_API_KEY?.length);
+    console.log('[ROUTE]   - Starts with:', GOOGLE_MAPS_API_KEY?.substring(0, 12) + '...');
+    console.log('[ROUTE]   - Ends with:', '...' + GOOGLE_MAPS_API_KEY?.slice(-8));
+    console.log('[ROUTE] ==========================================');
+
     const b = coerceBody(req);
 
     const startIn = (b.start ?? req.query.start ?? ROUTE_START_ADDRESS);
@@ -2593,7 +2602,33 @@ app.get('/routes/test-google-api', authenticate, async (req, res) => {
     } else {
       // API returned an error
       let troubleshooting = [];
-      if (data?.status === 'REQUEST_DENIED') {
+      let diagnosis = '';
+
+      const errorMsg = (data?.error_message || '').toLowerCase();
+
+      if (errorMsg.includes('referer restriction')) {
+        diagnosis = 'YOUR API KEY HAS HTTP REFERRER RESTRICTIONS - This prevents server-side use!';
+        troubleshooting = [
+          '⚠️ THE PROBLEM: Your API key has "HTTP referrers" restriction which ONLY works in browsers.',
+          '',
+          'TO FIX - Go to Google Cloud Console:',
+          '1. https://console.cloud.google.com/apis/credentials',
+          '2. Click on your API key (the one ending in: ...' + GOOGLE_MAPS_API_KEY?.slice(-8) + ')',
+          '3. Under "Application restrictions" section:',
+          '   - Change FROM: "HTTP referrers (web sites)"',
+          '   - Change TO: "None" (or "IP addresses" if you want to restrict by server IP)',
+          '4. Click SAVE',
+          '5. Wait 5 minutes for changes to propagate',
+          '6. Retry the route optimization',
+          '',
+          'ALTERNATIVE: Create a NEW API key specifically for server use:',
+          '1. Click "Create Credentials" → "API Key"',
+          '2. Set "Application restrictions" to "None"',
+          '3. Set "API restrictions" to "Directions API" only',
+          '4. Update your .env file with the new key'
+        ];
+      } else if (data?.status === 'REQUEST_DENIED') {
+        diagnosis = 'API request was denied - check API enablement and restrictions';
         troubleshooting = [
           '1. Go to Google Cloud Console: https://console.cloud.google.com/',
           '2. APIs & Services → Library → Search "Directions API" → ENABLE it',
@@ -2603,6 +2638,7 @@ app.get('/routes/test-google-api', authenticate, async (req, res) => {
           '6. Billing → Make sure billing is enabled (required even for free tier)'
         ];
       } else if (data?.status === 'OVER_QUERY_LIMIT') {
+        diagnosis = 'API quota exceeded';
         troubleshooting = [
           '1. Check your Google Cloud billing status',
           '2. You may have exceeded your daily quota',
@@ -2614,6 +2650,8 @@ app.get('/routes/test-google-api', authenticate, async (req, res) => {
         success: false,
         status: data?.status,
         errorMessage: data?.error_message,
+        diagnosis,
+        apiKeyUsed: '...' + GOOGLE_MAPS_API_KEY?.slice(-8),
         troubleshooting
       });
     }
