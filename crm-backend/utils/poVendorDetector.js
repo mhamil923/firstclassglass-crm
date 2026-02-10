@@ -592,8 +592,28 @@ function extractCLMFields(text) {
     problemDescription: null,
   };
 
-  // Work Order # — CLM doesn't use a WO#, leave empty
-  // (no extraction needed)
+  // Work Order # — CLM uses "VENDOR PO #" as the work order number
+  // e.g. "vendor po #\n450089-01" or "vendor po # 450089-01"
+  // OCR text is always lowercase
+  const woMatch = text.match(/vendor\s*po\s*#?[: \t]*\n?[ \t]*(\d+[-]?\d*)/i);
+  if (woMatch) {
+    result.workOrderNumber = woMatch[1].trim();
+    console.log('[CLM] WO# (vendor po) matched:', result.workOrderNumber);
+  } else {
+    // Broader fallback: look for "vendor po" anywhere nearby a number
+    const woFallback = text.match(/vendor\s*po[^a-z\n]*?(\d{4,}[-]?\d*)/i);
+    if (woFallback) {
+      result.workOrderNumber = woFallback[1].trim();
+      console.log('[CLM] WO# fallback matched:', result.workOrderNumber);
+    } else {
+      console.log('[CLM] WARNING: No VENDOR PO # found');
+      // Log surrounding text to help debug
+      const vendorIdx = text.indexOf('vendor');
+      if (vendorIdx >= 0) {
+        console.log('[CLM] Text around "vendor":', text.substring(Math.max(0, vendorIdx - 20), vendorIdx + 80));
+      }
+    }
+  }
 
   // Site Location (Name) — line after "service location" header
   // Raw OCR:  "cvs #07142i01"
