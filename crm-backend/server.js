@@ -428,6 +428,84 @@ async function ensureCols() {
 
 ensureCols().catch(() => {});
 
+// ─── WORK_ORDER_POS TABLE (multi-PO support) ────────────────────────────────
+async function ensurePoTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS work_order_pos (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        workOrderId INT NOT NULL,
+        poNumber    VARCHAR(64)  NULL,
+        poSupplier  VARCHAR(128) NULL,
+        poPdfPath   VARCHAR(255) NULL,
+        poPickedUp  TINYINT(1) NOT NULL DEFAULT 0,
+        createdAt   DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (workOrderId) REFERENCES work_orders(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('[PO Table] work_order_pos table ready');
+  } catch (e) {
+    console.warn('[PO Table] Could not create work_order_pos:', e.message);
+    return;
+  }
+
+  // One-time migration: copy legacy PO data from work_orders into work_order_pos
+  try {
+    const [[{ cnt }]] = await db.query('SELECT COUNT(*) AS cnt FROM work_order_pos');
+    if (cnt === 0) {
+      const [legacyRows] = await db.query(`
+        SELECT id, poNumber, poSupplier, poPdfPath, poPickedUp
+        FROM work_orders
+        WHERE poNumber IS NOT NULL OR poSupplier IS NOT NULL OR poPdfPath IS NOT NULL
+      `);
+      if (legacyRows.length) {
+        for (const r of legacyRows) {
+          await db.query(
+            `INSERT INTO work_order_pos (workOrderId, poNumber, poSupplier, poPdfPath, poPickedUp)
+             VALUES (?, ?, ?, ?, ?)`,
+            [r.id, r.poNumber || null, r.poSupplier || null, r.poPdfPath || null, Number(r.poPickedUp) ? 1 : 0]
+          );
+        }
+        console.log(`[PO Table] Migrated ${legacyRows.length} legacy PO(s) into work_order_pos`);
+      } else {
+        console.log('[PO Table] No legacy PO data to migrate');
+      }
+    }
+  } catch (e) {
+    console.warn('[PO Table] Migration check failed:', e.message);
+  }
+}
+
+ensurePoTable().catch(() => {});
+
+/**
+ * Sync the first (oldest) PO from work_order_pos back to the legacy columns
+ * on work_orders so existing code that reads those columns still works.
+ */
+async function syncLegacyPoColumns(workOrderId) {
+  try {
+    const [rows] = await db.query(
+      'SELECT poNumber, poSupplier, poPdfPath, poPickedUp FROM work_order_pos WHERE workOrderId = ? ORDER BY createdAt ASC LIMIT 1',
+      [workOrderId]
+    );
+    if (rows.length) {
+      const r = rows[0];
+      await db.query(
+        'UPDATE work_orders SET poNumber=?, poSupplier=?, poPdfPath=?, poPickedUp=? WHERE id=?',
+        [r.poNumber || null, r.poSupplier || null, r.poPdfPath || null, Number(r.poPickedUp) ? 1 : 0, workOrderId]
+      );
+    } else {
+      // No POs left — clear legacy columns
+      await db.query(
+        'UPDATE work_orders SET poNumber=NULL, poSupplier=NULL, poPdfPath=NULL, poPickedUp=0 WHERE id=?',
+        [workOrderId]
+      );
+    }
+  } catch (e) {
+    console.warn('[PO Sync] Failed to sync legacy columns for WO', workOrderId, ':', e.message);
+  }
+}
+
 // ─── SAFE SELECT BUILDER ────────────────────────────────────────────────────
 function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', limitSql = '' } = {}) {
   const hasA = !!SCHEMA.hasAssignedTo;
@@ -1703,6 +1781,20 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       console.log('[PO Upload] DB SAVE - WO#', wid, '| poSupplier:', JSON.stringify(poSupplier), '| poNumber:', JSON.stringify(finalPoNumber), '| poPdfPath:', JSON.stringify(poPdfPath));
     }
 
+    // Insert into work_order_pos table for multi-PO support
+    if (newPoPdfFile && wantReplacePo && poPdfPath) {
+      try {
+        await db.query(
+          `INSERT INTO work_order_pos (workOrderId, poNumber, poSupplier, poPdfPath)
+           VALUES (?, ?, ?, ?)`,
+          [wid, finalPoNumber || null, poSupplier || null, poPdfPath]
+        );
+        console.log('[PO Upload] Inserted new PO record into work_order_pos for WO#', wid);
+      } catch (poInsertErr) {
+        console.warn('[PO Upload] Failed to insert into work_order_pos:', poInsertErr.message);
+      }
+    }
+
     const cStatus = canonStatus(status) || existing.status;
 
     // DEBUG: Log status processing for "Waiting on Parts" investigation
@@ -1766,6 +1858,11 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     params.push(wid);
 
     await db.execute(sql, params);
+
+    // Sync legacy PO columns from work_order_pos if a PO was added
+    if (newPoPdfFile && wantReplacePo) {
+      await syncLegacyPoColumns(wid);
+    }
 
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
@@ -1973,43 +2070,115 @@ app.delete(
   }
 );
 
-// ─── PURCHASE ORDERS (derived from work_orders) ─────────────────────────────
+// ─── WORK ORDER POs (multi-PO per work order) ──────────────────────────────
+
+// GET /work-orders/:id/pos — list all POs for a work order
+app.get('/work-orders/:id/pos', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const [rows] = await db.query(
+      'SELECT * FROM work_order_pos WHERE workOrderId = ? ORDER BY createdAt ASC',
+      [wid]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Work-order POs list error:', err);
+    res.status(500).json({ error: 'Failed to fetch POs for this work order.' });
+  }
+});
+
+// DELETE /work-orders/:id/pos/:poId — delete a specific PO
+app.delete('/work-orders/:id/pos/:poId', authenticate, requireNumericParam('id'), requireNumericParam('poId'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const poId = Number(req.params.poId);
+
+    const [[row]] = await db.query(
+      'SELECT * FROM work_order_pos WHERE id = ? AND workOrderId = ?',
+      [poId, wid]
+    );
+    if (!row) return res.status(404).json({ error: 'PO not found on this work order.' });
+
+    await db.query('DELETE FROM work_order_pos WHERE id = ?', [poId]);
+    await syncLegacyPoColumns(wid);
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Work-order PO delete error:', err);
+    res.status(500).json({ error: 'Failed to delete PO.' });
+  }
+});
+
+// PUT /work-orders/:id/pos/:poId/mark-picked-up — mark a specific PO as picked up
+app.put('/work-orders/:id/pos/:poId/mark-picked-up', authenticate, requireNumericParam('id'), requireNumericParam('poId'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const poId = Number(req.params.poId);
+
+    const [[po]] = await db.query(
+      'SELECT * FROM work_order_pos WHERE id = ? AND workOrderId = ?',
+      [poId, wid]
+    );
+    if (!po) return res.status(404).json({ error: 'PO not found on this work order.' });
+
+    await db.query('UPDATE work_order_pos SET poPickedUp = 1 WHERE id = ?', [poId]);
+
+    // Append note to work order
+    const [[wo]] = await db.query('SELECT notes FROM work_orders WHERE id = ?', [wid]);
+    const who = req.user?.username || 'system';
+    const stamp = new Date().toISOString().replace('T', ' ').replace('Z', '');
+    const line = `[${stamp}] ${who}: PO ${po.poNumber || '(no PO #)'}${po.poSupplier ? ` (${po.poSupplier})` : ''} marked PICKED UP.`;
+    const newNotes = (wo?.notes || '') + (wo?.notes ? '\n\n' : '') + line;
+    await db.query('UPDATE work_orders SET notes = ? WHERE id = ?', [newNotes, wid]);
+
+    await syncLegacyPoColumns(wid);
+
+    const [[updated]] = await db.query('SELECT * FROM work_order_pos WHERE id = ?', [poId]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Work-order PO mark-picked-up error:', err);
+    res.status(500).json({ error: 'Failed to mark PO as picked up.' });
+  }
+});
+
+// ─── PURCHASE ORDERS (derived from work_order_pos) ──────────────────────────
 
 // GET /purchase-orders?supplier=Chicago%20Tempered&status=on-order|picked-up
+// Now reads from work_order_pos joined with work_orders for multi-PO support
 app.get('/purchase-orders', authenticate, async (req, res) => {
   try {
     const supplierQ = String(req.query.supplier || '').trim();
     const statusQ   = String(req.query.status || '').trim().toLowerCase();
 
-    const whereParts = [
-      `(COALESCE(w.poNumber,'') <> '' OR COALESCE(w.poPdfPath,'') <> '' OR COALESCE(w.poSupplier,'') <> '')`
-    ];
+    const whereParts = ['1=1'];
     const params = [];
 
     if (supplierQ) {
-      whereParts.push(`COALESCE(w.poSupplier,'') LIKE ?`);
+      whereParts.push(`COALESCE(p.poSupplier,'') LIKE ?`);
       params.push(`%${supplierQ}%`);
     }
 
     if (statusQ === 'on-order' || statusQ === 'on' || statusQ === 'open') {
-      whereParts.push(`COALESCE(w.poPickedUp,0) = 0`);
+      whereParts.push(`COALESCE(p.poPickedUp,0) = 0`);
     } else if (statusQ === 'picked-up' || statusQ === 'picked' || statusQ === 'closed') {
-      whereParts.push(`COALESCE(w.poPickedUp,0) = 1`);
+      whereParts.push(`COALESCE(p.poPickedUp,0) = 1`);
     }
 
-    const whereSql = `WHERE ${whereParts.join(' AND ')}`;
+    const sql = `
+      SELECT p.id AS poId, p.workOrderId, p.poNumber, p.poSupplier, p.poPdfPath, p.poPickedUp, p.createdAt AS poCreatedAt,
+             w.customer, w.siteLocation, w.siteAddress, w.workOrderNumber, w.status
+      FROM work_order_pos p
+      JOIN work_orders w ON p.workOrderId = w.id
+      WHERE ${whereParts.join(' AND ')}
+      ORDER BY p.poSupplier ASC, p.id DESC
+    `;
 
-    const [rows] = await db.execute(
-      workOrdersSelectSQL({
-        whereSql,
-        orderSql: 'ORDER BY w.poSupplier ASC, w.id DESC'
-      }),
-      params
-    );
+    const [rows] = await db.execute(sql, params);
 
     const out = rows.map(r => ({
-      id: r.id,
-      workOrderId: r.id,
+      id: r.poId,
+      poId: r.poId,
+      workOrderId: r.workOrderId,
       workOrderNumber: r.workOrderNumber || null,
       poNumber: r.poNumber || null,
       supplier: r.poSupplier || '',
@@ -2018,8 +2187,8 @@ app.get('/purchase-orders', authenticate, async (req, res) => {
       siteAddress: r.siteAddress || '',
       poPdfPath: r.poPdfPath || null,
       poPickedUp: !!Number(r.poPickedUp || 0),
-      poStatus: poStatusFromRow(r),
-      createdAt: r.createdAt || null,
+      poStatus: Number(r.poPickedUp || 0) ? 'Picked Up' : 'On Order',
+      createdAt: r.poCreatedAt || null,
       workOrderStatus: displayStatusOrDefault(r.status),
     }));
 
@@ -2030,13 +2199,47 @@ app.get('/purchase-orders', authenticate, async (req, res) => {
   }
 });
 
-// PUT /purchase-orders/:id/mark-picked-up   (id = work_orders.id)
+// PUT /purchase-orders/:id/mark-picked-up   (id = work_order_pos.id)
 app.put('/purchase-orders/:id/mark-picked-up', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
-    const wid = Number(req.params.id);
+    const poId = Number(req.params.id);
 
-    const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-    if (!row) return res.status(404).json({ error: 'Work order not found.' });
+    // Try work_order_pos first (new multi-PO path)
+    const [[po]] = await db.query('SELECT * FROM work_order_pos WHERE id = ?', [poId]);
+
+    if (po) {
+      // New path: mark specific PO record
+      await db.query('UPDATE work_order_pos SET poPickedUp = 1 WHERE id = ?', [poId]);
+
+      const wid = po.workOrderId;
+      const [[wo]] = await db.query('SELECT * FROM work_orders WHERE id = ?', [wid]);
+
+      const who = req.user?.username || 'system';
+      const stamp = new Date().toISOString().replace('T', ' ').replace('Z', '');
+      const line = `[${stamp}] ${who}: PO ${po.poNumber || '(no PO #)'}${po.poSupplier ? ` (${po.poSupplier})` : ''} marked PICKED UP.`;
+      const newNotes = (wo?.notes || '') + (wo?.notes ? '\n\n' : '') + line;
+      await db.query('UPDATE work_orders SET notes = ? WHERE id = ?', [newNotes, wid]);
+
+      await syncLegacyPoColumns(wid);
+
+      const [[updated]] = await db.query('SELECT * FROM work_order_pos WHERE id = ?', [poId]);
+      return res.json({
+        id: updated.id,
+        poId: updated.id,
+        workOrderId: updated.workOrderId,
+        workOrderNumber: wo?.workOrderNumber || null,
+        poNumber: updated.poNumber || null,
+        supplier: updated.poSupplier || '',
+        poPickedUp: !!Number(updated.poPickedUp || 0),
+        poStatus: Number(updated.poPickedUp || 0) ? 'Picked Up' : 'On Order',
+        notes: newNotes,
+        workOrderStatus: displayStatusOrDefault(wo?.status),
+      });
+    }
+
+    // Fallback: legacy path using work_orders.id (for backwards compat)
+    const [[row]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [poId]);
+    if (!row) return res.status(404).json({ error: 'PO / Work order not found.' });
 
     const who = req.user?.username || 'system';
     const stamp = new Date().toISOString().replace('T',' ').replace('Z','');
@@ -2048,10 +2251,10 @@ app.put('/purchase-orders/:id/mark-picked-up', authenticate, requireNumericParam
 
     await db.execute(
       'UPDATE work_orders SET poPickedUp = 1, notes = ? WHERE id = ?',
-      [newNotes, wid]
+      [newNotes, poId]
     );
 
-    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [poId]);
 
     res.json({
       id: updated.id,
