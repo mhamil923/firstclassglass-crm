@@ -23,7 +23,7 @@ async function initTesseract() {
 async function extractTextFromPdf(filePath) {
   const buffer = fs.readFileSync(filePath);
   const data = await pdfParse(buffer);
-  return (data.text || "").toLowerCase();
+  return data.text || "";
 }
 
 /**
@@ -112,7 +112,7 @@ async function extractTextFromScannedPdf(filePath) {
       // Ignore cleanup errors
     }
 
-    return (text || "").toLowerCase();
+    return text || "";
   } catch (err) {
     console.error("[OCR] Error during extraction:", err.message);
     return "";
@@ -159,59 +159,73 @@ async function extractTextSmart(filePath) {
 /**
  * Layout-based supplier detection for FCG Purchase Order PDFs.
  * These are OUR PO PDFs with a consistent layout: "Vendor\n<VENDOR NAME>\n<ADDRESS>..."
- * Works on RAW text (newlines preserved) for the most reliable detection.
+ * Handles all pdf-parse output formats:
+ *   "Vendor\nOLDCASTLE"   (newline separated)
+ *   "Vendor OLDCASTLE"    (same line)
+ *   "Vendor\n\nOLDCASTLE" (double newline)
+ *   "Vendor  OLDCASTLE"   (extra spaces)
+ *   "vendor\noldcastle"   (all lowercase)
  */
 function detectSupplierFromPOLayout(text) {
   if (!text) return null;
 
   console.log('[PO Layout] Attempting layout-based vendor detection...');
 
-  // FCG POs have "Vendor\n<NAME>" or "Vendor:\n<NAME>" format
-  // Match "Vendor" label followed by the vendor name on the next line
-  const vendorMatch = text.match(/vendor[:\s]*\n\s*([^\n]+)/i);
+  // Try next-line pattern first (most common for our POs)
+  //   "Vendor\nOLDCASTLE" or "Vendor:\nOLDCASTLE" or "Vendor\n\nOLDCASTLE"
+  let vendorMatch = text.match(/vendor[:\s]*\n\s*([^\n]+)/i);
   if (vendorMatch) {
-    const vendorLine = vendorMatch[1].trim().toUpperCase();
-    console.log('[PO Layout] Found vendor line from layout:', JSON.stringify(vendorLine));
-
-    if (vendorLine.includes('CHICAGO TEMPERED') || vendorLine.includes('CHICAGO TEMP'))   return 'Chicago Tempered';
-    if (vendorLine.includes('OLDCASTLE') || vendorLine.includes('OLD CASTLE'))             return 'Oldcastle';
-    if (vendorLine.includes('LAURENCE') || vendorLine.includes('CRL') || vendorLine.includes('C.R.')) return 'CRL';
-    if (vendorLine.includes('CASCO'))                                                       return 'Casco';
-
-    // Vendor field found but name not recognized — return the raw name as-is (title-cased)
-    console.log('[PO Layout] Unknown vendor name in layout field:', vendorLine);
-    // Return the cleaned vendor line — better than nothing
-    const cleaned = vendorLine.charAt(0) + vendorLine.slice(1).toLowerCase();
-    return cleaned;
+    console.log('[PO Layout] Matched next-line pattern');
   }
 
-  console.log('[PO Layout] No "Vendor\\n<name>" layout found in text');
+  // Try same-line pattern: "Vendor OLDCASTLE" or "Vendor: OLDCASTLE"
+  if (!vendorMatch) {
+    vendorMatch = text.match(/vendor[:\s]+([^\n]{2,})/i);
+    if (vendorMatch) {
+      console.log('[PO Layout] Matched same-line pattern');
+    }
+  }
+
+  if (vendorMatch) {
+    const vendorLine = vendorMatch[1].trim().toLowerCase();
+    console.log('[PO Layout] Captured vendor text:', JSON.stringify(vendorMatch[1].trim()));
+
+    if (vendorLine.includes('chicago') && vendorLine.includes('temper'))  return 'Chicago Tempered';
+    if (vendorLine.includes('oldcastle') || vendorLine.includes('old castle')) return 'Oldcastle';
+    if (vendorLine.includes('laurence') || vendorLine.includes('crl') || vendorLine.includes('c.r.')) return 'CRL';
+    if (vendorLine.includes('casco'))                                     return 'Casco';
+
+    // Vendor field found but name not recognized — return it cleaned up
+    console.log('[PO Layout] Unknown vendor name:', vendorMatch[1].trim());
+    const raw = vendorMatch[1].trim();
+    return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+  }
+
+  console.log('[PO Layout] No vendor field found in text');
   return null;
 }
 
 /**
  * Layout-based PO number detection for FCG Purchase Order PDFs.
- * Our POs have "P.O. No.\n<NUMBER>" format at the top.
+ * Our POs have "P.O. No.\n<NUMBER>" or "P.O. No. 484" format.
+ * Single unified regex handles both same-line and next-line with \n? (optional newline).
  */
 function detectPoNumberFromPOLayout(text) {
   if (!text) return null;
 
   console.log('[PO Layout] Attempting layout-based PO# detection...');
 
-  // Pattern: "P.O. No." (or variations) followed by number on same or next line
   const patterns = [
-    /p\.?\s*o\.?\s*no\.?\s*\n\s*(\d+)/i,            // "P.O. No.\n484"
-    /p\.?\s*o\.?\s*#\s*\n\s*(\d+)/i,                // "P.O. #\n484"
-    /p\.?\s*o\.?\s*number\s*\n\s*(\d+)/i,            // "P.O. Number\n484"
-    /p\.?\s*o\.?\s*no\.?\s*:?\s*(\d+)/i,             // "P.O. No.: 484" (same line)
-    /p\.?\s*o\.?\s*#\s*:?\s*(\d+)/i,                 // "P.O. #: 484" (same line)
-    /purchase\s*order\s*(?:#|no\.?)?\s*\n\s*(\d+)/i, // "Purchase Order\n484"
+    /p\.?\s*o\.?\s*no\.?\s*:?\s*\n?\s*(\d+)/i,          // "P.O. No.\n484" or "P.O. No. 484"
+    /p\.?\s*o\.?\s*#\s*:?\s*\n?\s*(\d+)/i,              // "P.O. #\n484" or "P.O. # 484"
+    /p\.?\s*o\.?\s*number\s*:?\s*\n?\s*(\d+)/i,          // "P.O. Number\n484" or "P.O. Number 484"
+    /purchase\s*order\s*(?:#|no\.?)?\s*:?\s*\n?\s*(\d+)/i, // "Purchase Order\n484" or "Purchase Order 484"
   ];
 
   for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match && match[1]) {
-      console.log('[PO Layout] Found PO# from layout:', match[1], 'via pattern:', pattern.toString());
+      console.log('[PO Layout] Found PO#:', match[1], 'via pattern:', pattern.toString());
       return match[1];
     }
   }
@@ -966,7 +980,7 @@ function extractFirstTimeFixedFields(text) {
       if (addrLines.length > 0) {
         let rawAddr = addrLines.join(', ');
         // Avoid picking up the 1TF billing address as site address
-        if (rawAddr.includes('bensenville') || rawAddr.includes('kevyn')) {
+        if (rawAddr.toLowerCase().includes('bensenville') || rawAddr.toLowerCase().includes('kevyn')) {
           console.log('[1TF] WARNING: Address looks like billing address, skipping:', rawAddr);
         } else {
           // Clean up and format
@@ -1358,33 +1372,39 @@ function extractWorkOrderFields(text) {
  * Returns { text, supplier, poNumber, textLength }
  */
 async function analyzePoPdf(filePath) {
-  console.log("=== PO PDF ANALYSIS START ===");
-  console.log(`[PO OCR] File: ${filePath}`);
+  console.log('[PO DETECT] ===== Starting PO PDF Analysis =====');
+  console.log('[PO DETECT] File:', filePath);
 
   const text = await extractTextSmart(filePath);
 
-  console.log(`[PO OCR] Full extracted text (${text.length} chars):`);
-  console.log(text || "(empty)");
-  console.log('--- END RAW TEXT ---');
+  console.log('[PO DETECT] Raw extracted text (first 1000 chars):', text.substring(0, 1000));
+  console.log('[PO DETECT] Text length:', text.length);
+
+  // Debug: show what the layout regexes will see
+  console.log('[PO DETECT] Layout regex attempt 1 (next-line):', text.match(/vendor[:\s]*\n\s*([^\n]+)/i));
+  console.log('[PO DETECT] Layout regex attempt 2 (same-line):', text.match(/vendor[:\s]+([^\n]{2,})/i));
+  console.log('[PO DETECT] Keyword search - contains "oldcastle":', text.toLowerCase().includes('oldcastle'));
+  console.log('[PO DETECT] Keyword search - contains "chicago":', text.toLowerCase().includes('chicago'));
+  console.log('[PO DETECT] Keyword search - contains "casco":', text.toLowerCase().includes('casco'));
+  console.log('[PO DETECT] Keyword search - contains "laurence":', text.toLowerCase().includes('laurence'));
 
   // Step 1: Try layout-based detection FIRST (most reliable for FCG POs)
-  // Layout detection works on raw text with newlines preserved
   let supplier = detectSupplierFromPOLayout(text);
   let poNumber = detectPoNumberFromPOLayout(text);
 
   // Step 2: Fall back to keyword-based detection if layout didn't find them
   if (!supplier) {
-    console.log('[PO OCR] Layout detection failed for supplier, trying keyword fallback...');
+    console.log('[PO DETECT] Layout failed for supplier, trying keyword fallback...');
     supplier = detectSupplierFromText(text);
   }
   if (!poNumber) {
-    console.log('[PO OCR] Layout detection failed for PO#, trying keyword fallback...');
+    console.log('[PO DETECT] Layout failed for PO#, trying keyword fallback...');
     poNumber = detectPoNumberFromText(text);
   }
 
-  console.log(`[PO OCR] FINAL Detected supplier: ${supplier || "(none)"}`);
-  console.log(`[PO OCR] FINAL Detected PO#: ${poNumber || "(none)"}`);
-  console.log("=== PO PDF ANALYSIS END ===");
+  console.log('[PO DETECT] Final detected supplier:', supplier || '(none)');
+  console.log('[PO DETECT] Final detected PO#:', poNumber || '(none)');
+  console.log('[PO DETECT] ===== End PO PDF Analysis =====');
 
   return {
     text,
