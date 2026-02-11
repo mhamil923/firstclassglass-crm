@@ -1,6 +1,6 @@
 // File: src/ViewWorkOrder.js
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import api from "./api";
 import moment from "moment";
 import API_BASE_URL from "./config";
@@ -398,6 +398,7 @@ export default function ViewWorkOrder() {
   const [keepOldInAttachments, setKeepOldInAttachments] = useState(true);
   const [busyPoUpload, setBusyPoUpload] = useState(false);
   const [poList, setPoList] = useState([]);
+  const [linkedEstimates, setLinkedEstimates] = useState([]);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
   const [busyImageUpload, setBusyImageUpload] = useState(false);
 
@@ -556,6 +557,15 @@ export default function ViewWorkOrder() {
     }
   };
 
+  const fetchLinkedEstimates = async () => {
+    try {
+      const res = await api.get("/estimates", { params: { workOrderId: id } });
+      setLinkedEstimates(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Error fetching linked estimates:", err);
+    }
+  };
+
   useEffect(() => {
     // Reset init state when id changes
     quickScheduleInitializedRef.current = false;
@@ -563,6 +573,7 @@ export default function ViewWorkOrder() {
 
     fetchWorkOrder();
     fetchWorkOrderPos();
+    fetchLinkedEstimates();
     fetchTechUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -1684,6 +1695,16 @@ export default function ViewWorkOrder() {
                       value={edit.customer}
                       onChange={(e) => patchEdit({ customer: e.target.value })}
                     />
+                  ) : workOrder.customerId ? (
+                    <div className="value">
+                      <Link
+                        to={`/customers/${workOrder.customerId}`}
+                        style={{ color: "var(--accent-blue)", textDecoration: "none", fontWeight: 600 }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {customer || "—"}
+                      </Link>
+                    </div>
                   ) : (
                     <div className="value">{customer || "—"}</div>
                   )}
@@ -1924,6 +1945,70 @@ export default function ViewWorkOrder() {
               />
             </label>
           </div>
+        </div>
+
+        {/* ======================= Linked Estimates ======================= */}
+        <div className="section-card">
+          <h3 className="section-header">
+            Estimates
+            <Link
+              to={`/estimates/new?workOrderId=${woId}`}
+              className="btn btn-light"
+              style={{ fontSize: 12, padding: "4px 12px", textDecoration: "none" }}
+            >
+              + Create Estimate
+            </Link>
+          </h3>
+          {linkedEstimates.length > 0 ? (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Project</th>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Status</th>
+                    <th style={{ padding: "10px 16px", textAlign: "right", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Total</th>
+                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {linkedEstimates.map((est) => {
+                    const estTotal = Number(est.total) || 0;
+                    const estStatusStyle = (() => {
+                      const sl = (est.status || "").toLowerCase();
+                      if (sl === "sent") return { background: "rgba(0,113,227,0.1)", color: "var(--accent-blue)" };
+                      if (sl === "accepted") return { background: "rgba(52,199,89,0.12)", color: "#34c759" };
+                      if (sl === "declined") return { background: "rgba(255,59,48,0.12)", color: "#ff3b30" };
+                      return { background: "rgba(142,142,147,0.12)", color: "#8e8e93" };
+                    })();
+                    return (
+                      <tr
+                        key={est.id}
+                        style={{ cursor: "pointer", borderBottom: "1px solid var(--border-color)", transition: "var(--transition-fast)" }}
+                        onClick={() => navigate(`/estimates/${est.id}`)}
+                        onMouseEnter={(ev) => { ev.currentTarget.style.background = "var(--bg-hover)"; }}
+                        onMouseLeave={(ev) => { ev.currentTarget.style.background = ""; }}
+                      >
+                        <td style={{ padding: "12px 16px", fontSize: 14, color: "var(--text-primary)" }}>{est.projectName || "—"}</td>
+                        <td style={{ padding: "12px 16px" }}>
+                          <span style={{ ...estStatusStyle, display: "inline-block", padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
+                            {est.status || "Draft"}
+                          </span>
+                        </td>
+                        <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums", color: "var(--text-primary)" }}>
+                          {"$" + estTotal.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
+                        </td>
+                        <td style={{ padding: "12px 16px", fontSize: 14, color: "var(--text-secondary)" }}>
+                          {est.issueDate ? new Date(est.issueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="empty-text" style={{ padding: "20px" }}>No estimates linked to this work order.</p>
+          )}
         </div>
 
         {/* ======================= PO PDFs (Multi-PO) ======================= */}

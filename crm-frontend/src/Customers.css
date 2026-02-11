@@ -1,0 +1,182 @@
+/* Customers List Page */
+.customers-page {
+  min-height: 100vh;
+  background: var(--bg-primary);
+  padding: 24px;
+  animation: fadeIn 0.3s ease;
+}
+
+.customers-container {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.customers-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.customers-title {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.customers-subtitle {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.customers-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* Search */
+.customers-search-wrap {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.customers-search-input {
+  flex: 1;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-solid);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  transition: var(--transition-fast);
+}
+
+.customers-search-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+.customers-search-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Table */
+.customers-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.customers-table thead th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.customers-table tbody tr {
+  cursor: pointer;
+  transition: var(--transition-fast);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.customers-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.customers-table tbody td {
+  padding: 14px 16px;
+  font-size: 14px;
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.customers-table .company-name {
+  font-weight: 600;
+  color: var(--accent-blue);
+}
+
+.customers-table .wo-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(0, 113, 227, 0.1);
+  color: var(--accent-blue);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.customers-empty {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 15px;
+}
+
+/* Reusable section card */
+.cust-section-card {
+  background: var(--bg-card-solid);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.cust-section-header {
+  padding: 14px 20px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cust-section-body {
+  padding: 20px;
+}
+
+@media (max-width: 768px) {
+  .customers-page { padding: 16px; }
+  .customers-title { font-size: 26px; }
+  .customers-header { flex-direction: column; align-items: flex-start; }
+  .customers-table thead { display: none; }
+  .customers-table tbody tr {
+    display: flex;
+    flex-direction: column;
+    padding: 12px 16px;
+    gap: 4px;
+  }
+  .customers-table tbody td {
+    padding: 2px 0;
+    font-size: 13px;
+  }
+  .customers-table tbody td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: block;
+  }
+}

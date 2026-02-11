@@ -53,6 +53,18 @@ export default function Navbar() {
           </li>
 
           <li className="nav-item">
+            <NavLink className="nav-link" to="/customers" onClick={closeNavbar}>
+              Customers
+            </NavLink>
+          </li>
+
+          <li className="nav-item">
+            <NavLink className="nav-link" to="/estimates" onClick={closeNavbar}>
+              Estimates
+            </NavLink>
+          </li>
+
+          <li className="nav-item">
             <NavLink className="nav-link" to="/calendar" onClick={closeNavbar}>
               Calendar
             </NavLink>

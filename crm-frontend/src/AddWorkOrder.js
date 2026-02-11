@@ -113,6 +113,7 @@ export default function AddWorkOrder() {
     customerPhone: "",
     customerEmail: "",
     scheduledDate: "",
+    customerId: null,
   });
 
   const [pdfFile, setPdfFile] = useState(null);
@@ -132,6 +133,8 @@ export default function AddWorkOrder() {
 
   const [customers, setCustomers] = useState([]);
   const [techs, setTechs] = useState([]);
+  const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const customerDropdownRef = useRef(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [loadingRefs, setLoadingRefs] = useState(false);
@@ -249,14 +252,52 @@ export default function AddWorkOrder() {
     return first || "";
   };
 
+  // Filter customers for dropdown
+  const filteredCustomers = useMemo(() => {
+    const q = (workOrder.customer || "").toLowerCase().trim();
+    if (!q) return customers;
+    return customers.filter(
+      (c) =>
+        (c.companyName || c.name || "").toLowerCase().includes(q) ||
+        (c.contactName || "").toLowerCase().includes(q)
+    );
+  }, [customers, workOrder.customer]);
+
+  // Select a customer from the dropdown
+  const selectCustomer = (c) => {
+    const name = c.companyName || c.name || "";
+    const parts = [c.billingAddress, c.billingCity, c.billingState, c.billingZip].filter(Boolean);
+    setWorkOrder((prev) => ({
+      ...prev,
+      customer: name,
+      customerId: c.id,
+      billingAddress: parts.length ? parts.join(", ") : prev.billingAddress,
+      customerPhone: c.phone || prev.customerPhone,
+      customerEmail: c.email || prev.customerEmail,
+    }));
+    setShowCustomerDropdown(false);
+  };
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (customerDropdownRef.current && !customerDropdownRef.current.contains(e.target)) {
+        setShowCustomerDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setWorkOrder((prev) => {
       const upd = { ...prev, [name]: value };
 
       if (name === "customer") {
-        const found = customers.find((c) => c.name === value);
-        if (found?.billingAddress) upd.billingAddress = found.billingAddress;
+        // Clear customerId when user types (they might be changing the name)
+        upd.customerId = null;
+        setShowCustomerDropdown(true);
       }
 
       if (name === "billingAddress") {
@@ -481,6 +522,7 @@ export default function AddWorkOrder() {
     form.append("customerPhone", workOrder.customerPhone || "");
     form.append("customerEmail", workOrder.customerEmail || "");
     if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
+    if (workOrder.customerId) form.append("customerId", workOrder.customerId);
 
     if (workOrder.scheduledDate) {
       form.append("scheduledDate", workOrder.scheduledDate);
@@ -615,24 +657,42 @@ export default function AddWorkOrder() {
               <div className="awo-section-title">Customer</div>
 
               <div className="awo-grid awo-grid-2">
-                <div className="awo-field">
+                <div className="awo-field" ref={customerDropdownRef} style={{ position: "relative" }}>
                   <label className="awo-label">
                     Customer Name <span className="awo-req">*</span>
                   </label>
                   <input
                     name="customer"
-                    list="customers-list"
                     value={workOrder.customer}
                     onChange={handleChange}
+                    onFocus={() => setShowCustomerDropdown(true)}
                     className="awo-input"
-                    placeholder="Customer name"
+                    placeholder="Search or type customer name"
                     autoComplete="off"
                   />
-                  <datalist id="customers-list">
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.name} />
-                    ))}
-                  </datalist>
+                  {showCustomerDropdown && (workOrder.customer || "").trim().length > 0 && (
+                    <div className="awo-customer-dropdown">
+                      {filteredCustomers.map((c) => (
+                        <div
+                          key={c.id}
+                          className="awo-customer-option"
+                          onMouseDown={() => selectCustomer(c)}
+                        >
+                          <div className="awo-customer-option-name">
+                            {c.companyName || c.name}
+                          </div>
+                          {c.contactName && (
+                            <div className="awo-customer-option-sub">{c.contactName}</div>
+                          )}
+                        </div>
+                      ))}
+                      {filteredCustomers.length === 0 && (
+                        <div className="awo-customer-option muted">
+                          No matching customers — name will be saved as-is
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {role !== "tech" ? (

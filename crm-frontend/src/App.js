@@ -17,6 +17,11 @@ import HistoryReport from "./HistoryReport";   // ← existing
 import Login from "./Login";
 import Navbar from "./Navbar";
 import PurchaseOrders from "./PurchaseOrders"; // ← NEW import
+import Customers from "./Customers";
+import ViewCustomer from "./ViewCustomer";
+import Estimates from "./Estimates";
+import CreateEstimate from "./CreateEstimate";
+import ViewEstimate from "./ViewEstimate";
 // Note: Bootstrap is imported in index.js before our custom styles
 
 // A wrapper for protecting routes
@@ -83,6 +88,66 @@ export default function App() {
               element={
                 <PrivateRoute>
                   <HistoryReport />
+                </PrivateRoute>
+              }
+            />
+
+            {/* Customers */}
+            <Route
+              path="/customers"
+              element={
+                <PrivateRoute>
+                  <Customers />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/customers/new"
+              element={
+                <PrivateRoute>
+                  <ViewCustomer />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/customers/:id"
+              element={
+                <PrivateRoute>
+                  <ViewCustomer />
+                </PrivateRoute>
+              }
+            />
+
+            {/* Estimates */}
+            <Route
+              path="/estimates"
+              element={
+                <PrivateRoute>
+                  <Estimates />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/estimates/new"
+              element={
+                <PrivateRoute>
+                  <CreateEstimate />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/estimates/:id"
+              element={
+                <PrivateRoute>
+                  <ViewEstimate />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/estimates/:id/edit"
+              element={
+                <PrivateRoute>
+                  <CreateEstimate />
                 </PrivateRoute>
               }
             />
