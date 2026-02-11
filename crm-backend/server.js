@@ -1592,8 +1592,9 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     let detectedSupplier = null;
     let detectedPoNumber = null;
     if (newPoPdfFile && wantReplacePo) {
-      console.log('=== PO PDF UPLOAD DETECTED ===');
-      console.log('File info:', {
+      console.log('[PO Upload] === PO PDF UPLOAD DETECTED ===');
+      console.log('[PO Upload] Received PO PDF for work order:', wid);
+      console.log('[PO Upload] File info:', {
         originalname: newPoPdfFile.originalname,
         filename: newPoPdfFile.filename,
         key: newPoPdfFile.key,
@@ -1609,7 +1610,7 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
         if (S3_BUCKET) {
           // For S3: download to temp file first
           const tmpPath = path.join(require('os').tmpdir(), `po-${Date.now()}.pdf`);
-          console.log('S3 mode: downloading to temp file:', tmpPath);
+          console.log('[PO Upload] S3 mode: downloading to temp file:', tmpPath);
           const s3Obj = await s3.getObject({ Bucket: S3_BUCKET, Key: newPoPdfFile.key }).promise();
           fs.writeFileSync(tmpPath, s3Obj.Body);
           pdfFilePath = tmpPath;
@@ -1617,36 +1618,50 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
         } else {
           // Local disk: use the uploaded file path directly
           pdfFilePath = path.resolve(__dirname, 'uploads', newPoPdfFile.filename);
-          console.log('Local mode: reading from:', pdfFilePath);
-          console.log('File exists:', fs.existsSync(pdfFilePath));
+          console.log('[PO Upload] Local mode: reading from:', pdfFilePath);
+          console.log('[PO Upload] File exists:', fs.existsSync(pdfFilePath));
         }
+
+        console.log('[PO Upload] File path:', pdfFilePath);
+        console.log('[PO Upload] Starting OCR/text extraction...');
 
         // Run smart PDF analysis (digital extraction + OCR fallback)
         const analysis = await analyzePoPdf(pdfFilePath);
         detectedSupplier = analysis.supplier;
         detectedPoNumber = analysis.poNumber;
 
-        console.log('=== DETECTION SUMMARY ===');
-        console.log('Text extracted:', analysis.textLength, 'chars');
-        console.log('Detected supplier:', detectedSupplier || '(none)');
-        console.log('Detected PO number:', detectedPoNumber || '(none)');
-        console.log('Frontend supplier:', req.body.poSupplier || '(none)');
-        console.log('Frontend PO number:', req.body.poNumber || '(none)');
-        console.log('Final supplier will be:', detectedSupplier || req.body.poSupplier || existing.poSupplier || '(none)');
-        console.log('Final PO number will be:', detectedPoNumber || req.body.poNumber || existing.poNumber || '(none)');
-        console.log('=========================');
+        console.log('[PO Upload] Extracted text:', (analysis.text || '').substring(0, 500));
+        console.log('[PO Upload] Detected supplier:', detectedSupplier || '(none)');
+        console.log('[PO Upload] Detected PO#:', detectedPoNumber || '(none)');
+
+        console.log('[PO Upload] === DETECTION SUMMARY ===');
+        console.log('[PO Upload] Text extracted:', analysis.textLength, 'chars');
+        console.log('[PO Upload] Frontend supplier:', req.body.poSupplier || '(none)');
+        console.log('[PO Upload] Frontend PO number:', req.body.poNumber || '(none)');
+        console.log('[PO Upload] Existing DB supplier:', existing.poSupplier || '(none)');
+        console.log('[PO Upload] Existing DB poNumber:', existing.poNumber || '(none)');
+        const finalSupplierPreview = detectedSupplier || req.body.poSupplier || existing.poSupplier || '(none)';
+        const finalPoPreview = detectedPoNumber || req.body.poNumber || existing.poNumber || '(none)';
+        console.log('[PO Upload] FINAL supplier will be:', finalSupplierPreview);
+        console.log('[PO Upload] FINAL PO# will be:', finalPoPreview);
+        console.log('[PO Upload] Updating work order with supplier:', finalSupplierPreview, 'poNumber:', finalPoPreview);
+        console.log('[PO Upload] =========================');
 
         // Clean up temp file for S3 mode
         if (shouldCleanup && fs.existsSync(pdfFilePath)) {
           try { fs.unlinkSync(pdfFilePath); } catch {}
         }
       } catch (pdfErr) {
-        console.error('=== PO PDF ANALYSIS ERROR ===');
-        console.error('Error:', pdfErr.message);
-        console.error('Stack:', pdfErr.stack);
-        console.error('(Continuing without auto-detection)');
-        console.error('=============================');
+        console.error('[PO Upload] === PO PDF ANALYSIS ERROR ===');
+        console.error('[PO Upload] Error:', pdfErr.message);
+        console.error('[PO Upload] Stack:', pdfErr.stack);
+        console.error('[PO Upload] (Continuing without auto-detection)');
+        console.error('[PO Upload] =============================');
       }
+    } else if (newPoPdfFile && !wantReplacePo) {
+      console.log('[PO Upload] WARNING: PO PDF uploaded but wantReplacePo is FALSE');
+      console.log('[PO Upload] setAsPoPdf:', req.body.setAsPoPdf, 'replacePoPdf:', req.body.replacePoPdf);
+      console.log('[PO Upload] PO PDF will be added as attachment, NOT analyzed for vendor');
     }
 
     const newPhotos    = images.map(fileKeySafe);
@@ -1682,6 +1697,11 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     // Priority: PDF content detection > frontend-supplied > existing value
     const poSupplier = detectedSupplier || bodyPoSupplier || existing.poSupplier;
     const finalPoNumber = detectedPoNumber || poNumber || existing.poNumber;
+
+    // Log final PO fields being saved to DB
+    if (detectedSupplier || detectedPoNumber || bodyPoSupplier || req.body.poNumber) {
+      console.log('[PO Upload] DB SAVE - WO#', wid, '| poSupplier:', JSON.stringify(poSupplier), '| poNumber:', JSON.stringify(finalPoNumber), '| poPdfPath:', JSON.stringify(poPdfPath));
+    }
 
     const cStatus = canonStatus(status) || existing.status;
 

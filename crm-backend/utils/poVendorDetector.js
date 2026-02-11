@@ -157,38 +157,90 @@ async function extractTextSmart(filePath) {
 }
 
 /**
- * Detect supplier from extracted PDF text
- * Uses regex patterns to handle OCR artifacts (extra spaces, character swaps, etc.)
- * These are First Class Glass's OWN purchase orders - vendor name is in a "Vendor" field.
+ * Layout-based supplier detection for FCG Purchase Order PDFs.
+ * These are OUR PO PDFs with a consistent layout: "Vendor\n<VENDOR NAME>\n<ADDRESS>..."
+ * Works on RAW text (newlines preserved) for the most reliable detection.
+ */
+function detectSupplierFromPOLayout(text) {
+  if (!text) return null;
+
+  console.log('[PO Layout] Attempting layout-based vendor detection...');
+
+  // FCG POs have "Vendor\n<NAME>" or "Vendor:\n<NAME>" format
+  // Match "Vendor" label followed by the vendor name on the next line
+  const vendorMatch = text.match(/vendor[:\s]*\n\s*([^\n]+)/i);
+  if (vendorMatch) {
+    const vendorLine = vendorMatch[1].trim().toUpperCase();
+    console.log('[PO Layout] Found vendor line from layout:', JSON.stringify(vendorLine));
+
+    if (vendorLine.includes('CHICAGO TEMPERED') || vendorLine.includes('CHICAGO TEMP'))   return 'Chicago Tempered';
+    if (vendorLine.includes('OLDCASTLE') || vendorLine.includes('OLD CASTLE'))             return 'Oldcastle';
+    if (vendorLine.includes('LAURENCE') || vendorLine.includes('CRL') || vendorLine.includes('C.R.')) return 'CRL';
+    if (vendorLine.includes('CASCO'))                                                       return 'Casco';
+
+    // Vendor field found but name not recognized — return the raw name as-is (title-cased)
+    console.log('[PO Layout] Unknown vendor name in layout field:', vendorLine);
+    // Return the cleaned vendor line — better than nothing
+    const cleaned = vendorLine.charAt(0) + vendorLine.slice(1).toLowerCase();
+    return cleaned;
+  }
+
+  console.log('[PO Layout] No "Vendor\\n<name>" layout found in text');
+  return null;
+}
+
+/**
+ * Layout-based PO number detection for FCG Purchase Order PDFs.
+ * Our POs have "P.O. No.\n<NUMBER>" format at the top.
+ */
+function detectPoNumberFromPOLayout(text) {
+  if (!text) return null;
+
+  console.log('[PO Layout] Attempting layout-based PO# detection...');
+
+  // Pattern: "P.O. No." (or variations) followed by number on same or next line
+  const patterns = [
+    /p\.?\s*o\.?\s*no\.?\s*\n\s*(\d+)/i,            // "P.O. No.\n484"
+    /p\.?\s*o\.?\s*#\s*\n\s*(\d+)/i,                // "P.O. #\n484"
+    /p\.?\s*o\.?\s*number\s*\n\s*(\d+)/i,            // "P.O. Number\n484"
+    /p\.?\s*o\.?\s*no\.?\s*:?\s*(\d+)/i,             // "P.O. No.: 484" (same line)
+    /p\.?\s*o\.?\s*#\s*:?\s*(\d+)/i,                 // "P.O. #: 484" (same line)
+    /purchase\s*order\s*(?:#|no\.?)?\s*\n\s*(\d+)/i, // "Purchase Order\n484"
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      console.log('[PO Layout] Found PO# from layout:', match[1], 'via pattern:', pattern.toString());
+      return match[1];
+    }
+  }
+
+  console.log('[PO Layout] No PO# found via layout detection');
+  return null;
+}
+
+/**
+ * Keyword-based supplier detection (fallback).
+ * Searches the entire text for vendor name keywords with OCR-tolerant patterns.
  */
 function detectSupplierFromText(text) {
   if (!text) return null;
 
-  // Normalize: lowercase, collapse multiple spaces, strip common OCR noise
+  // Normalize: lowercase, collapse multiple spaces
   const t = text.toLowerCase().replace(/\s+/g, ' ');
 
-  console.log('[PO Vendor] Scanning text for vendor match...');
+  console.log('[PO Vendor] Fallback: keyword-based vendor scan...');
   console.log('[PO Vendor] Normalized text (first 600 chars):', t.substring(0, 600));
 
-  // --- Try to extract text specifically from "Vendor" field first ---
-  // FCG POs always have a Vendor field/box. If we can isolate it, matching is easier.
-  const vendorFieldMatch = t.match(/vendor[:\s]*\n?\s*([^\n]{3,60})/i)
-    || t.match(/vendor\s*name[:\s]*\n?\s*([^\n]{3,60})/i)
-    || t.match(/ship\s*to[:\s]*\n?\s*([^\n]{3,60})/i);
-  if (vendorFieldMatch) {
-    console.log('[PO Vendor] Found vendor field text:', JSON.stringify(vendorFieldMatch[1].trim()));
-  }
-
   // Each vendor has multiple regex patterns to handle OCR variations
-  // Patterns are tested in order; first match wins
   const vendors = {
     'Chicago Tempered': [
       /chicago\s*tempered/i,
-      /chicago\s*temp/i,
+      /chicago\s*temp(?:ered)?/i,
       /chicag[o0]\s*tempered/i,       // OCR: o→0
       /\bctg\b/i,
       /chicago.*tempered\s*glass/i,
-      /chicago.*glass.*temper/i,
     ],
     'Oldcastle': [
       /[o0]ld\s*castle/i,             // OCR: o→0, optional space
@@ -224,7 +276,7 @@ function detectSupplierFromText(text) {
     }
   }
 
-  console.log('[PO Vendor] WARNING: No vendor matched!');
+  console.log('[PO Vendor] WARNING: No vendor matched by keywords!');
   console.log('[PO Vendor] Full OCR text for debugging:', t.substring(0, 1500));
   return null;
 }
@@ -1315,11 +1367,23 @@ async function analyzePoPdf(filePath) {
   console.log(text || "(empty)");
   console.log('--- END RAW TEXT ---');
 
-  const supplier = detectSupplierFromText(text);
-  const poNumber = detectPoNumberFromText(text);
+  // Step 1: Try layout-based detection FIRST (most reliable for FCG POs)
+  // Layout detection works on raw text with newlines preserved
+  let supplier = detectSupplierFromPOLayout(text);
+  let poNumber = detectPoNumberFromPOLayout(text);
 
-  console.log(`[PO OCR] Detected supplier: ${supplier || "(none)"}`);
-  console.log(`[PO OCR] Detected PO#: ${poNumber || "(none)"}`);
+  // Step 2: Fall back to keyword-based detection if layout didn't find them
+  if (!supplier) {
+    console.log('[PO OCR] Layout detection failed for supplier, trying keyword fallback...');
+    supplier = detectSupplierFromText(text);
+  }
+  if (!poNumber) {
+    console.log('[PO OCR] Layout detection failed for PO#, trying keyword fallback...');
+    poNumber = detectPoNumberFromText(text);
+  }
+
+  console.log(`[PO OCR] FINAL Detected supplier: ${supplier || "(none)"}`);
+  console.log(`[PO OCR] FINAL Detected PO#: ${poNumber || "(none)"}`);
   console.log("=== PO PDF ANALYSIS END ===");
 
   return {
@@ -1334,6 +1398,8 @@ module.exports = {
   extractTextFromPdf,
   extractTextFromScannedPdf,
   extractTextSmart,
+  detectSupplierFromPOLayout,
+  detectPoNumberFromPOLayout,
   detectSupplierFromText,
   detectPoNumberFromText,
   extractWorkOrderFields,
