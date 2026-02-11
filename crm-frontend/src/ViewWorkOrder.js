@@ -90,14 +90,6 @@ function loadDrawNoteOverrides(workOrderId) {
     return new Set();
   }
 }
-function saveDrawNoteOverrides(workOrderId, set) {
-  try {
-    localStorage.setItem(drawNoteStoreKey(workOrderId), JSON.stringify([...set]));
-  } catch {
-    // ignore
-  }
-}
-
 /* ---------- Scheduled Date helpers (FIX: parse backend + send MySQL) ---------- */
 
 // Convert backend date -> datetime-local string safely
@@ -713,15 +705,6 @@ export default function ViewWorkOrder() {
   const drawNoteImages = allImageAttachments.filter((k) => isDrawNote(k));
   const photoImages = allImageAttachments.filter((k) => !isDrawNote(k));
 
-  const toggleDrawNote = (key) => {
-    setDrawNoteOverrides((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      saveDrawNoteOverrides(id, next);
-      return next;
-    });
-  };
 
   // ✅ Date Created (robust field fallbacks)
   const createdRaw =
@@ -1908,7 +1891,7 @@ export default function ViewWorkOrder() {
             <div className="po-pdf-grid">
               <div className="po-pdf-card">
                 <div className="po-pdf-thumbnail">
-                  <iframe title="Estimate PDF" src={estimateHref} />
+                  <iframe title="Estimate PDF" src={`${estimateHref}#toolbar=0&navpanes=0`} />
                 </div>
                 <div className="po-pdf-label" title={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}>
                   {(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
@@ -1958,7 +1941,7 @@ export default function ViewWorkOrder() {
 
                     {href ? (
                       <div className="po-pdf-thumbnail">
-                        <iframe title={label} src={href} />
+                        <iframe title={label} src={`${href}#toolbar=0&navpanes=0`} />
                       </div>
                     ) : (
                       <div className="po-pdf-no-file">No PDF</div>
@@ -2073,11 +2056,6 @@ export default function ViewWorkOrder() {
                     fileName={fileName}
                     onExpand={() => openLightbox("image", href, fileName)}
                     onDelete={() => handleDeleteAttachment(relPath)}
-                    extraAction={
-                      <button className="btn btn-ghost w-full" type="button" onClick={() => toggleDrawNote(relPath)}>
-                        Move to Draw Notes
-                      </button>
-                    }
                   />
                 );
               })}
@@ -2112,11 +2090,6 @@ export default function ViewWorkOrder() {
                     fileName={fileName}
                     onExpand={() => openLightbox("image", href, fileName)}
                     onDelete={() => handleDeleteAttachment(relPath)}
-                    extraAction={
-                      <button className="btn btn-ghost w-full" type="button" onClick={() => toggleDrawNote(relPath)}>
-                        Move to Photos
-                      </button>
-                    }
                   />
                 );
               })}
