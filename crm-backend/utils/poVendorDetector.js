@@ -194,6 +194,8 @@ function detectSupplierFromPOLayout(text) {
     if (vendorLine.includes('oldcastle') || vendorLine.includes('old castle')) return 'Oldcastle';
     if (vendorLine.includes('laurence') || vendorLine.includes('crl') || vendorLine.includes('c.r.')) return 'CRL';
     if (vendorLine.includes('casco'))                                     return 'Casco';
+    if (vendorLine.includes('all state') || vendorLine.includes('allstate') || vendorLine.includes('all-state')) return 'All State Metal Fab';
+    if (vendorLine.includes('metal fab'))                                 return 'All State Metal Fab';
 
     // Vendor field found but name not recognized — return it cleaned up
     console.log('[PO Layout] Unknown vendor name:', vendorMatch[1].trim());
@@ -278,6 +280,13 @@ function detectSupplierFromText(text) {
       /casco/i,                        // Base name
       /casc[o0]\s*industries/i,        // OCR: o→0
       /casc[o0]\s*glass/i,            // OCR: o→0
+    ],
+    'All State Metal Fab': [
+      /all\s*state\s*metal/i,          // "All State Metal" or "AllState Metal"
+      /all[\-\s]*state\s*metal\s*fab/i, // "All-State Metal Fab"
+      /allstate\s*metal/i,             // "Allstate Metal"
+      /all\s*state\s*fab/i,            // "All State Fab"
+      /\basmf\b/i,                     // Abbreviation
     ],
   };
 
@@ -1387,6 +1396,7 @@ async function analyzePoPdf(filePath) {
   console.log('[PO DETECT] Keyword search - contains "chicago":', text.toLowerCase().includes('chicago'));
   console.log('[PO DETECT] Keyword search - contains "casco":', text.toLowerCase().includes('casco'));
   console.log('[PO DETECT] Keyword search - contains "laurence":', text.toLowerCase().includes('laurence'));
+  console.log('[PO DETECT] Keyword search - contains "all state":', text.toLowerCase().includes('all state'));
 
   // Step 1: Try layout-based detection FIRST (most reliable for FCG POs)
   let supplier = detectSupplierFromPOLayout(text);
