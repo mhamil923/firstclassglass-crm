@@ -596,6 +596,7 @@
   overflow: hidden;
   background: var(--bg-hover);
   border: 1px solid var(--border-color);
+  cursor: pointer;
 }
 
 .po-pdf-thumbnail iframe {
