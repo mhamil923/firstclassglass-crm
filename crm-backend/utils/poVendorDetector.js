@@ -158,84 +158,118 @@ async function extractTextSmart(filePath) {
 
 /**
  * Detect supplier from extracted PDF text
- * Searches for vendor names, addresses, phone numbers, and unique identifiers
+ * Uses regex patterns to handle OCR artifacts (extra spaces, character swaps, etc.)
+ * These are First Class Glass's OWN purchase orders - vendor name is in a "Vendor" field.
  */
 function detectSupplierFromText(text) {
   if (!text) return null;
-  const t = text.toLowerCase();
 
-  // Chicago Tempered - check name and known identifiers
-  if (
-    t.includes("chicago tempered") ||
-    t.includes("chicagotempered") ||
-    t.includes("chicago temp") ||
-    /\bctg\b/.test(t) ||
-    (t.includes("chicago") && t.includes("tempered glass")) ||
-    (t.includes("chicago") && t.includes("glass") && t.includes("temper"))
-  ) {
-    return "Chicago Tempered";
+  // Normalize: lowercase, collapse multiple spaces, strip common OCR noise
+  const t = text.toLowerCase().replace(/\s+/g, ' ');
+
+  console.log('[PO Vendor] Scanning text for vendor match...');
+  console.log('[PO Vendor] Normalized text (first 600 chars):', t.substring(0, 600));
+
+  // --- Try to extract text specifically from "Vendor" field first ---
+  // FCG POs always have a Vendor field/box. If we can isolate it, matching is easier.
+  const vendorFieldMatch = t.match(/vendor[:\s]*\n?\s*([^\n]{3,60})/i)
+    || t.match(/vendor\s*name[:\s]*\n?\s*([^\n]{3,60})/i)
+    || t.match(/ship\s*to[:\s]*\n?\s*([^\n]{3,60})/i);
+  if (vendorFieldMatch) {
+    console.log('[PO Vendor] Found vendor field text:', JSON.stringify(vendorFieldMatch[1].trim()));
   }
 
-  // CRL / C.R. Laurence - check various name formats
-  if (
-    t.includes("c.r. laurence") ||
-    t.includes("cr laurence") ||
-    t.includes("c r laurence") ||
-    t.includes("crlaurence") ||
-    t.includes("c.r.laurence") ||
-    /\bcrl\b/.test(t) ||
-    t.includes("crl.com")
-  ) {
-    return "CRL";
+  // Each vendor has multiple regex patterns to handle OCR variations
+  // Patterns are tested in order; first match wins
+  const vendors = {
+    'Chicago Tempered': [
+      /chicago\s*tempered/i,
+      /chicago\s*temp/i,
+      /chicag[o0]\s*tempered/i,       // OCR: o→0
+      /\bctg\b/i,
+      /chicago.*tempered\s*glass/i,
+      /chicago.*glass.*temper/i,
+    ],
+    'Oldcastle': [
+      /[o0]ld\s*castle/i,             // OCR: o→0, optional space
+      /[o0]ldcastle/i,                // No space variant
+      /[o0]ld\s*cast[l1]e/i,          // OCR: l→1
+      /building\s*envelope/i,          // Just the product line name
+      /\bobe\b/i,                      // Abbreviation
+      /[o0]be\s*glass/i,              // OCR: o→0
+      /[o0]ldcastle\s*b/i,            // Partial "Oldcastle B..."
+      /[o0][il1]dcastle/i,            // OCR: l→i or l→1
+    ],
+    'CRL': [
+      /c\.?\s*r\.?\s*laurence/i,       // c.r. laurence, cr laurence, c r laurence
+      /c\.?\s*r\.?\s*[l1]aurence/i,   // OCR: l→1
+      /\bcrl\b/i,                      // Abbreviation
+      /crl\.com/i,                     // Website
+      /laurence\s*co/i,               // "Laurence Co" partial
+      /\blaurence\b/i,                // Just "laurence" (unique enough)
+    ],
+    'Casco': [
+      /casco/i,                        // Base name
+      /casc[o0]\s*industries/i,        // OCR: o→0
+      /casc[o0]\s*glass/i,            // OCR: o→0
+    ],
+  };
+
+  for (const [vendor, patterns] of Object.entries(vendors)) {
+    for (const pattern of patterns) {
+      if (pattern.test(t)) {
+        console.log('[PO Vendor] MATCHED vendor:', vendor, 'with pattern:', pattern.toString());
+        return vendor;
+      }
+    }
   }
 
-  // Oldcastle - check name variations
-  if (
-    t.includes("oldcastle") ||
-    t.includes("old castle") ||
-    t.includes("oldcastle buildingenvelope") ||
-    t.includes("obe glass") ||
-    t.includes("oldcastle be")
-  ) {
-    return "Oldcastle";
-  }
-
-  // Casco - check name
-  if (
-    t.includes("casco") ||
-    t.includes("casco industries") ||
-    t.includes("casco glass")
-  ) {
-    return "Casco";
-  }
-
+  console.log('[PO Vendor] WARNING: No vendor matched!');
+  console.log('[PO Vendor] Full OCR text for debugging:', t.substring(0, 1500));
   return null;
 }
 
 /**
- * Detect PO number from PDF text (generic fallback)
- * Used by analyzePoPdf for supplier PO detection
+ * Detect PO number from PDF text
+ * Used by analyzePoPdf for FCG purchase order number detection.
+ * These are First Class Glass's OWN POs, so the PO # is our number.
  */
 function detectPoNumberFromText(text) {
   if (!text) return null;
 
+  console.log('[PO Number] Scanning for PO number...');
+
   const patterns = [
-    /vendor\s*po\s*[#:\-]?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,})/i,
-    /client\s*po\s*[#:\-]?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,})/i,
-    /po\s*#\s*:?\s*([a-z0-9][a-z0-9-]{1,})/i,
-    /p\.o\.?\s*(?:#|no\.?|number)?\s*:?\s*\n?\s*([a-z0-9][a-z0-9-]{2,})/i,
-    /purchase\s+order\s*[#:]*\s*([a-z0-9][a-z0-9-]{2,})/i,
-    /\bpo\s+([0-9]{3,})\b/i,
+    // Labeled patterns (most reliable - look for explicit PO labels)
+    { re: /po\s*#\s*:?\s*([a-z0-9][a-z0-9\-]{1,})/i,                         label: 'PO #' },
+    { re: /po\s*number\s*:?\s*([a-z0-9][a-z0-9\-]{2,})/i,                    label: 'PO Number' },
+    { re: /p\.?\s*o\.?\s*#\s*:?\s*([a-z0-9][a-z0-9\-]{1,})/i,               label: 'P.O. #' },
+    { re: /p\.?\s*o\.?\s*(?:no\.?|number)\s*:?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,})/i, label: 'P.O. No/Number' },
+    { re: /purchase\s*order\s*(?:#|no\.?|number)?\s*:?\s*([a-z0-9][a-z0-9\-]{2,})/i, label: 'Purchase Order' },
+    { re: /vendor\s*po\s*[#:\-]?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,})/i,        label: 'Vendor PO' },
+    { re: /client\s*po\s*[#:\-]?\s*\n?\s*([a-z0-9][a-z0-9\-]{2,})/i,        label: 'Client PO' },
+    // Number on next line after PO label
+    { re: /\bpo\s*#?\s*:?\s*\n\s*([0-9][a-z0-9\-]{2,})/i,                   label: 'PO (next line)' },
+    // Bare "PO" followed by a number
+    { re: /\bpo\s+([0-9]{3,})\b/i,                                            label: 'PO + digits' },
   ];
 
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
+  for (const { re, label } of patterns) {
+    const match = text.match(re);
     if (match && match[1]) {
       const poNum = match[1].trim();
-      if (poNum.length >= 3 && /[0-9]/.test(poNum)) {
+      if (poNum.length >= 2 && /[0-9]/.test(poNum)) {
+        console.log('[PO Number] MATCHED PO#:', poNum, 'via pattern:', label);
         return poNum;
       }
     }
+  }
+
+  console.log('[PO Number] WARNING: No PO number found');
+  // Debug: show area around "po" in text
+  const poIdx = text.toLowerCase().indexOf('po');
+  if (poIdx >= 0) {
+    console.log('[PO Number] Text around "po":', JSON.stringify(text.substring(Math.max(0, poIdx - 20), poIdx + 60)));
   }
   return null;
 }
@@ -1273,19 +1307,19 @@ function extractWorkOrderFields(text) {
  */
 async function analyzePoPdf(filePath) {
   console.log("=== PO PDF ANALYSIS START ===");
-  console.log(`File: ${filePath}`);
+  console.log(`[PO OCR] File: ${filePath}`);
 
   const text = await extractTextSmart(filePath);
 
-  console.log(`[ANALYSIS] Raw text (first 500 chars):`);
-  console.log(text.substring(0, 500) || "(empty)");
-  console.log("---");
+  console.log(`[PO OCR] Full extracted text (${text.length} chars):`);
+  console.log(text || "(empty)");
+  console.log('--- END RAW TEXT ---');
 
   const supplier = detectSupplierFromText(text);
   const poNumber = detectPoNumberFromText(text);
 
-  console.log(`[ANALYSIS] Detected supplier: ${supplier || "(none)"}`);
-  console.log(`[ANALYSIS] Detected PO number: ${poNumber || "(none)"}`);
+  console.log(`[PO OCR] Detected supplier: ${supplier || "(none)"}`);
+  console.log(`[PO OCR] Detected PO#: ${poNumber || "(none)"}`);
   console.log("=== PO PDF ANALYSIS END ===");
 
   return {
