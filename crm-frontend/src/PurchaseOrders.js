@@ -576,16 +576,16 @@ export default function PurchaseOrders() {
   }, [purchaseOrders, woMetaById]);
 
   const combinedWaitingRows = useMemo(() => {
-    const poByWoId = new Map();
+    const woIdsWithPos = new Set();
     normalizedPurchaseOrders.forEach((po) => {
-      if (po?.workOrderId) poByWoId.set(po.workOrderId, po);
+      if (po?.workOrderId) woIdsWithPos.add(po.workOrderId);
     });
 
     console.log(`[PurchaseOrders] combinedWaitingRows: ${normalizedPurchaseOrders.length} from /purchase-orders, ${waitingWoIdSet.size} in waitingWoIdSet`);
 
     const synthetic = [];
     for (const woId of waitingWoIdSet) {
-      if (poByWoId.has(woId)) {
+      if (woIdsWithPos.has(woId)) {
         console.log(`[PurchaseOrders] WO ${woId} already in purchase orders, skipping synthetic`);
         continue;
       }

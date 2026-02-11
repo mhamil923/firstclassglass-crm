@@ -405,6 +405,7 @@ export default function ViewWorkOrder() {
   const [busyReplace, setBusyReplace] = useState(false);
   const [keepOldInAttachments, setKeepOldInAttachments] = useState(true);
   const [busyPoUpload, setBusyPoUpload] = useState(false);
+  const [poList, setPoList] = useState([]);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
   const [busyImageUpload, setBusyImageUpload] = useState(false);
 
@@ -551,12 +552,25 @@ export default function ViewWorkOrder() {
     }
   };
 
+  const fetchWorkOrderPos = async () => {
+    try {
+      const res = await api.get(`/work-orders/${id}/pos`, {
+        headers: authHeaders(),
+      });
+      setPoList(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("⚠️ Error fetching PO list:", err);
+      setPoList([]);
+    }
+  };
+
   useEffect(() => {
     // Reset init state when id changes
     quickScheduleInitializedRef.current = false;
     setQuickScheduledDate("");
 
     fetchWorkOrder();
+    fetchWorkOrderPos();
     fetchTechUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -1237,6 +1251,7 @@ export default function ViewWorkOrder() {
       });
 
       await fetchWorkOrder();
+      await fetchWorkOrderPos();
       alert("PO PDF uploaded successfully.");
     } catch (error) {
       console.error("⚠️ Error uploading/replacing PO PDF:", error);
@@ -1244,6 +1259,20 @@ export default function ViewWorkOrder() {
     } finally {
       setBusyPoUpload(false);
       e.target.value = "";
+    }
+  };
+
+  const handleDeletePo = async (poId) => {
+    if (!window.confirm("Delete this PO PDF?")) return;
+    try {
+      await api.delete(`/work-orders/${id}/pos/${poId}`, {
+        headers: authHeaders(),
+      });
+      await fetchWorkOrder();
+      await fetchWorkOrderPos();
+    } catch (err) {
+      console.error("Error deleting PO:", err);
+      alert(err?.response?.data?.error || "Failed to delete PO.");
     }
   };
 
@@ -1895,26 +1924,55 @@ export default function ViewWorkOrder() {
           </div>
         </div>
 
-        {/* ======================= PO PDF ======================= */}
+        {/* ======================= PO PDFs (Multi-PO) ======================= */}
         <div className="section-card">
-          <h3 className="section-header">PO Order PDF</h3>
+          <h3 className="section-header">Purchase Order PDFs</h3>
 
-          {poHref ? (
+          {poList.length > 0 ? (
             <div className="attachments-grid">
-              <FileTile
-                kind="pdf"
-                href={poHref}
-                fileName={(poPdfPath || "").split("/").pop() || "po.pdf"}
-                onExpand={() => openLightbox("pdf", poHref, "PO PDF")}
-              />
+              {poList.map((po) => {
+                const href = po.poPdfPath ? pdfThumbUrl(po.poPdfPath) : null;
+                const fileName = (po.poPdfPath || "").split("/").pop() || "po.pdf";
+                const label = [po.poSupplier, po.poNumber ? `PO# ${po.poNumber}` : null].filter(Boolean).join(" — ") || fileName;
+                return (
+                  <div key={po.id} style={{ position: "relative" }}>
+                    {href ? (
+                      <FileTile
+                        kind="pdf"
+                        href={href}
+                        fileName={label}
+                        onExpand={() => openLightbox("pdf", href, label)}
+                        onDelete={() => handleDeletePo(po.id)}
+                      />
+                    ) : (
+                      <div className="tile">
+                        <div className="tile-name" style={{ padding: "12px" }}>
+                          <span>{label}</span>
+                          {po.poPickedUp ? <span style={{ color: "#16a34a", fontWeight: 600, marginLeft: 8 }}>Picked Up</span> : null}
+                        </div>
+                        <div className="tile-actions">
+                          <button className="btn btn-danger" onClick={() => handleDeletePo(po.id)} title="Delete">
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {po.poPickedUp ? (
+                      <span style={{ position: "absolute", top: 4, right: 4, background: "#16a34a", color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4 }}>
+                        Picked Up
+                      </span>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           ) : (
-            <p className="empty-text">No PO PDF attached.</p>
+            <p className="empty-text">No PO PDFs attached.</p>
           )}
 
           <div className="row-actions">
             <label className="btn btn-light">
-              {busyPoUpload ? "Uploading…" : poHref ? "Replace PO PDF" : "Upload PO PDF"}
+              {busyPoUpload ? "Uploading…" : "Add PO PDF"}
               <input
                 type="file"
                 accept="application/pdf"
