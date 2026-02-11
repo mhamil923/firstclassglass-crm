@@ -1939,13 +1939,16 @@ export default function ViewWorkOrder() {
                   <div key={po.id} className="po-pdf-card">
                     {po.poPickedUp ? <span className="po-pdf-badge">Picked Up</span> : null}
 
-                    {href ? (
-                      <div className="po-pdf-thumbnail">
-                        <iframe title={label} src={`${href}#toolbar=0&navpanes=0`} />
-                      </div>
-                    ) : (
-                      <div className="po-pdf-no-file">No PDF</div>
-                    )}
+                    <div
+                      className="po-pdf-placeholder"
+                      onClick={href ? () => openLightbox("pdf", href, label) : undefined}
+                      role={href ? "button" : undefined}
+                      tabIndex={href ? 0 : undefined}
+                    >
+                      <span className="pdf-icon">📄</span>
+                      {po.poSupplier ? <span className="pdf-vendor">{po.poSupplier}</span> : null}
+                      <span className="pdf-label">{po.poNumber ? `PO# ${po.poNumber}` : href ? "View PDF" : "No PDF"}</span>
+                    </div>
 
                     <div className="po-pdf-label" title={label}>{label}</div>
 
