@@ -455,7 +455,7 @@ export default function PurchaseOrders() {
     }
 
     const url = `${API_BASE_URL}/files?key=${encodeURIComponent(key)}`;
-    const title = `PO ${po?.poNumber || ""}`.trim();
+    const title = `PO ${po?.poNumber ? `#${po.poNumber}` : ""}`.trim();
 
     setPdfPo(po || null);
     setPdfUrl(url);
@@ -810,10 +810,15 @@ export default function PurchaseOrders() {
 
                   const isBusy = busyIds.has(String(row.id));
 
+                  const showAllPos = !supplierFilter || supplierFilter === "All Suppliers";
+                  const poDisplay = showAllPos && row.allPoNumbersFormatted
+                    ? row.allPoNumbersFormatted
+                    : row.poNumber ? `#${row.poNumber}` : "-";
+
                   return (
                     <tr key={row.id}>
                       <td>{row.supplier || "-"}</td>
-                      <td>{row.poNumber || "-"}</td>
+                      <td>{poDisplay}</td>
                       <td>{row.customer || "-"}</td>
                       <td>{row.siteLocation || row.siteAddress || "-"}</td>
                       <td>{row.workOrderNumber || "-"}</td>

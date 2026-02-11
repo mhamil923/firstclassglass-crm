@@ -401,7 +401,7 @@ export default function WorkOrders() {
                   siteLocationName = rawLocField;
                 }
 
-                const cleanedPO = displayPO(order.workOrderNumber, order.poNumber);
+                const cleanedPO = order.allPoNumbersFormatted || displayPO(order.workOrderNumber, order.poNumber);
 
                 return (
                   <tr

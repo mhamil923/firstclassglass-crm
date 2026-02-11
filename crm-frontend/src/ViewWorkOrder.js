@@ -688,6 +688,11 @@ export default function ViewWorkOrder() {
   const cleanedPo = displayPO(workOrderNumber, poNumber);
   const cleanedWo = displayWO(workOrderNumber);
 
+  // Aggregated PO numbers display: prefer backend-provided, else build from poList
+  const allPoDisplay = workOrder?.allPoNumbersFormatted
+    || poList.filter(p => p.poNumber).map(p => `#${p.poNumber}`).join(', ')
+    || (cleanedPo ? `#${cleanedPo}` : '');
+
   const signedHref = pdfPath ? pdfThumbUrl(pdfPath) : null;
   const estimateHref = estimatePdfPath ? pdfThumbUrl(estimatePdfPath) : null;
   const poHref = poPdfPath ? pdfThumbUrl(poPdfPath) : null;
@@ -1498,7 +1503,7 @@ export default function ViewWorkOrder() {
             <h2 className="view-title">Work Order Details</h2>
             <div className="view-subtitle">
               <span className="pill">WO: {cleanedWo}</span>
-              {cleanedPo ? <span className="pill">PO: {cleanedPo}</span> : null}
+              {allPoDisplay ? <span className="pill">PO: {allPoDisplay}</span> : null}
               <span className="pill subtle">Created: {createdDisplay}</span>
             </div>
           </div>
@@ -1671,6 +1676,8 @@ export default function ViewWorkOrder() {
                       onChange={(e) => patchEdit({ poNumber: e.target.value })}
                       placeholder="(optional)"
                     />
+                  ) : allPoDisplay ? (
+                    <div className="po-value">{allPoDisplay}</div>
                   ) : (
                     <PONumberEditor
                       orderId={woId}
@@ -1898,20 +1905,32 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">Estimate PDF</h3>
 
           {estimateHref ? (
-            <div className="attachments-grid">
-              <FileTile
-                kind="pdf"
-                href={estimateHref}
-                fileName={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
-                onExpand={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
-              />
+            <div className="po-pdf-grid">
+              <div className="po-pdf-card">
+                <div className="po-pdf-thumbnail">
+                  <iframe title="Estimate PDF" src={estimateHref} />
+                </div>
+                <div className="po-pdf-label" title={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}>
+                  {(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
+                </div>
+                <div className="po-pdf-actions">
+                  <button
+                    type="button"
+                    className="po-btn-expand"
+                    onClick={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
+                  >
+                    Expand
+                  </button>
+                </div>
+              </div>
             </div>
           ) : (
-            <p className="empty-text">No estimate PDF attached.</p>
+            <p className="empty-text" style={{ padding: "20px" }}>No estimate PDF attached.</p>
           )}
 
-          <div className="row-actions">
-            <label className="btn btn-light">
+          <div className="row-actions" style={{ padding: "0 20px 16px" }}>
+            <label className="btn btn-light po-add-btn">
+              <span className="po-add-icon">+</span>
               {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
               <input
                 type="file"
@@ -1929,49 +1948,54 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">Purchase Order PDFs</h3>
 
           {poList.length > 0 ? (
-            <div className="attachments-grid">
+            <div className="po-pdf-grid">
               {poList.map((po) => {
                 const href = po.poPdfPath ? pdfThumbUrl(po.poPdfPath) : null;
-                const fileName = (po.poPdfPath || "").split("/").pop() || "po.pdf";
-                const label = [po.poSupplier, po.poNumber ? `PO# ${po.poNumber}` : null].filter(Boolean).join(" — ") || fileName;
+                const label = [po.poSupplier, po.poNumber ? `PO# ${po.poNumber}` : null].filter(Boolean).join(" \u2014 ") || "PO PDF";
                 return (
-                  <div key={po.id} style={{ position: "relative" }}>
+                  <div key={po.id} className="po-pdf-card">
+                    {po.poPickedUp ? <span className="po-pdf-badge">Picked Up</span> : null}
+
                     {href ? (
-                      <FileTile
-                        kind="pdf"
-                        href={href}
-                        fileName={label}
-                        onExpand={() => openLightbox("pdf", href, label)}
-                        onDelete={() => handleDeletePo(po.id)}
-                      />
-                    ) : (
-                      <div className="tile">
-                        <div className="tile-name" style={{ padding: "12px" }}>
-                          <span>{label}</span>
-                          {po.poPickedUp ? <span style={{ color: "#16a34a", fontWeight: 600, marginLeft: 8 }}>Picked Up</span> : null}
-                        </div>
-                        <div className="tile-actions">
-                          <button className="btn btn-danger" onClick={() => handleDeletePo(po.id)} title="Delete">
-                            ✕
-                          </button>
-                        </div>
+                      <div className="po-pdf-thumbnail">
+                        <iframe title={label} src={href} />
                       </div>
+                    ) : (
+                      <div className="po-pdf-no-file">No PDF</div>
                     )}
-                    {po.poPickedUp ? (
-                      <span style={{ position: "absolute", top: 4, right: 4, background: "#16a34a", color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4 }}>
-                        Picked Up
-                      </span>
-                    ) : null}
+
+                    <div className="po-pdf-label" title={label}>{label}</div>
+
+                    <div className="po-pdf-actions">
+                      {href ? (
+                        <button
+                          type="button"
+                          className="po-btn-expand"
+                          onClick={() => openLightbox("pdf", href, label)}
+                        >
+                          Expand
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="po-btn-delete"
+                        onClick={() => handleDeletePo(po.id)}
+                        title="Delete PO"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <p className="empty-text">No PO PDFs attached.</p>
+            <p className="empty-text" style={{ padding: "20px" }}>No PO PDFs attached.</p>
           )}
 
-          <div className="row-actions">
-            <label className="btn btn-light">
+          <div className="row-actions" style={{ padding: "0 20px 16px" }}>
+            <label className="btn btn-light po-add-btn">
+              <span className="po-add-icon">+</span>
               {busyPoUpload ? "Uploading…" : "Add PO PDF"}
               <input
                 type="file"
