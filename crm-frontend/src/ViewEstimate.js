@@ -40,6 +40,7 @@ export default function ViewEstimate() {
   const [loading, setLoading] = useState(true);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [converting, setConverting] = useState(false);
 
   const fetchEstimate = useCallback(async () => {
     setLoading(true);
@@ -91,6 +92,26 @@ export default function ViewEstimate() {
     } catch (err) {
       console.error("Error sending email:", err);
       alert("Failed to send email.");
+    }
+  };
+
+  const handleConvertToInvoice = async () => {
+    if (!window.confirm("Convert this estimate to an invoice?")) return;
+    setConverting(true);
+    try {
+      const res = await api.post(`/estimates/${id}/convert-to-invoice`);
+      const newInvoiceId = res.data?.invoiceId;
+      if (newInvoiceId) {
+        navigate(`/invoices/${newInvoiceId}`);
+      } else {
+        alert("Invoice created successfully.");
+        await fetchEstimate();
+      }
+    } catch (err) {
+      console.error("Error converting to invoice:", err);
+      alert("Failed to convert estimate to invoice.");
+    } finally {
+      setConverting(false);
     }
   };
 
@@ -150,6 +171,13 @@ export default function ViewEstimate() {
             )}
             <button className="ve-btn ve-btn-secondary" onClick={handleSendEmail}>
               Send to Customer
+            </button>
+            <button
+              className="ve-btn ve-btn-success"
+              onClick={handleConvertToInvoice}
+              disabled={converting}
+            >
+              {converting ? "Converting..." : "Convert to Invoice"}
             </button>
             <button className="ve-btn ve-btn-danger" onClick={handleDelete}>
               Delete

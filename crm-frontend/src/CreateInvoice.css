@@ -1,0 +1,435 @@
+/* CreateInvoice Page */
+.ci-page {
+  min-height: 100vh;
+  background: var(--bg-primary);
+  padding: 24px;
+  animation: fadeIn 0.3s ease;
+}
+
+.ci-container {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.ci-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ci-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  text-decoration: none;
+}
+
+.ci-back:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.ci-title {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin: 0;
+  flex: 1;
+  min-width: 200px;
+}
+
+.ci-title-number {
+  color: var(--text-secondary);
+  font-size: 22px;
+}
+
+.ci-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Card pattern */
+.ci-card {
+  background: var(--bg-card-solid);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 20px;
+}
+
+.ci-card-header {
+  padding: 14px 20px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ci-card-body {
+  padding: 20px;
+}
+
+/* Grid */
+.ci-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.ci-grid-2 { grid-template-columns: 1fr 1fr; }
+.ci-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+.ci-grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+
+.ci-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ci-field-full {
+  grid-column: 1 / -1;
+}
+
+.ci-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ci-input,
+.ci-textarea,
+.ci-select {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-solid);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  transition: var(--transition-fast);
+}
+
+.ci-input:focus,
+.ci-textarea:focus,
+.ci-select:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+.ci-textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+/* Customer preview */
+.ci-customer-preview {
+  margin-top: 8px;
+  padding: 12px 16px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.ci-customer-preview strong {
+  color: var(--text-primary);
+}
+
+/* Customer dropdown */
+.ci-customer-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color-strong);
+  border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,0.15));
+  z-index: 50;
+}
+
+.ci-customer-option {
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.ci-customer-option:hover {
+  background: var(--bg-hover);
+}
+
+.ci-customer-option.muted {
+  color: var(--text-tertiary);
+  cursor: default;
+  font-size: 13px;
+}
+
+.ci-customer-option-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ci-customer-option-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* Line Items Editor */
+.ci-li-row {
+  display: grid;
+  grid-template-columns: 80px 1fr 120px 40px 40px 40px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.ci-li-header {
+  display: grid;
+  grid-template-columns: 80px 1fr 120px 40px 40px 40px;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 0 0 6px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ci-li-header span {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ci-li-input {
+  padding: 8px 10px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: 8px;
+  background: var(--bg-card-solid);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  transition: var(--transition-fast);
+  width: 100%;
+}
+
+.ci-li-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+.ci-li-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-card-solid);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  transition: var(--transition-fast);
+}
+
+.ci-li-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.ci-li-btn.danger:hover {
+  background: rgba(255, 59, 48, 0.1);
+  color: #ff3b30;
+}
+
+.ci-add-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px dashed var(--border-color-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent-blue);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  margin-top: 8px;
+}
+
+.ci-add-line:hover {
+  background: rgba(0, 113, 227, 0.06);
+  border-color: var(--accent-blue);
+}
+
+/* Totals */
+.ci-totals {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.ci-totals-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 14px;
+}
+
+.ci-totals-label {
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-width: 100px;
+  text-align: right;
+}
+
+.ci-totals-value {
+  font-weight: 700;
+  color: var(--text-primary);
+  min-width: 100px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ci-totals-row.grand .ci-totals-label {
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.ci-totals-row.grand .ci-totals-value {
+  font-size: 18px;
+  color: var(--accent-blue);
+}
+
+.ci-totals-input {
+  width: 80px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: 8px;
+  background: var(--bg-card-solid);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  text-align: right;
+}
+
+.ci-totals-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+}
+
+/* Buttons */
+.ci-btn {
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  border: none;
+}
+
+.ci-btn-primary {
+  background: var(--accent-blue);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 113, 227, 0.3);
+}
+
+.ci-btn-primary:hover {
+  background: var(--accent-blue-hover);
+  transform: translateY(-1px);
+}
+
+.ci-btn-secondary {
+  background: var(--bg-card-solid);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color-strong);
+}
+
+.ci-btn-secondary:hover {
+  background: var(--bg-hover);
+}
+
+.ci-btn-danger {
+  background: transparent;
+  color: var(--accent-red);
+  border: 1px solid var(--accent-red);
+}
+
+.ci-btn-danger:hover {
+  background: var(--accent-red);
+  color: #fff;
+}
+
+.ci-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Footer */
+.ci-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+@media (max-width: 768px) {
+  .ci-page { padding: 16px; }
+  .ci-title { font-size: 24px; }
+  .ci-grid-2,
+  .ci-grid-3,
+  .ci-grid-4 { grid-template-columns: 1fr; }
+  .ci-topbar { flex-direction: column; align-items: flex-start; }
+  .ci-actions { width: 100%; flex-wrap: wrap; }
+  .ci-li-row {
+    grid-template-columns: 60px 1fr 90px 32px 32px 32px;
+    gap: 4px;
+  }
+  .ci-li-header {
+    grid-template-columns: 60px 1fr 90px 32px 32px 32px;
+  }
+  .ci-footer {
+    flex-direction: column;
+  }
+  .ci-footer .ci-btn {
+    width: 100%;
+    text-align: center;
+  }
+}

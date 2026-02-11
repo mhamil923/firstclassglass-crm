@@ -1,0 +1,227 @@
+/* Invoices List Page */
+.inv-page {
+  min-height: 100vh;
+  background: var(--bg-primary);
+  padding: 24px;
+  animation: fadeIn 0.3s ease;
+}
+
+.inv-container {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.inv-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.inv-title {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.inv-subtitle {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.inv-outstanding {
+  color: var(--accent-red, #ff3b30);
+}
+
+.inv-outstanding strong {
+  font-weight: 700;
+}
+
+.inv-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* Search & Filter Bar */
+.inv-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.inv-search-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-solid);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  transition: var(--transition-fast);
+}
+
+.inv-search-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+.inv-search-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.inv-filter-select {
+  padding: 12px 16px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-solid);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  min-width: 140px;
+}
+
+/* Table */
+.inv-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.inv-table thead th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.inv-table tbody tr {
+  cursor: pointer;
+  transition: var(--transition-fast);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.inv-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.inv-table tbody td {
+  padding: 14px 16px;
+  font-size: 14px;
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.inv-number {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.inv-table .inv-customer-name {
+  font-weight: 600;
+  color: var(--accent-blue);
+}
+
+.inv-table .inv-total {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.inv-balance {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.inv-balance-due {
+  color: var(--accent-red, #ff3b30);
+  font-weight: 700;
+}
+
+/* Status badges */
+.inv-status-pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.inv-status-draft {
+  background: rgba(142, 142, 147, 0.12);
+  color: #8e8e93;
+}
+
+.inv-status-sent {
+  background: rgba(0, 113, 227, 0.1);
+  color: var(--accent-blue);
+}
+
+.inv-status-partial {
+  background: rgba(255, 159, 10, 0.12);
+  color: #ff9f0a;
+}
+
+.inv-status-paid {
+  background: rgba(52, 199, 89, 0.12);
+  color: #34c759;
+}
+
+.inv-status-overdue {
+  background: rgba(255, 59, 48, 0.12);
+  color: #ff3b30;
+}
+
+.inv-status-void {
+  background: rgba(142, 142, 147, 0.12);
+  color: #636366;
+  text-decoration: line-through;
+}
+
+.inv-empty {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 15px;
+}
+
+@media (max-width: 768px) {
+  .inv-page { padding: 16px; }
+  .inv-title { font-size: 26px; }
+  .inv-header { flex-direction: column; align-items: flex-start; }
+  .inv-toolbar { flex-direction: column; }
+  .inv-table thead { display: none; }
+  .inv-table tbody tr {
+    display: flex;
+    flex-direction: column;
+    padding: 12px 16px;
+    gap: 4px;
+  }
+  .inv-table tbody td {
+    padding: 2px 0;
+    font-size: 13px;
+  }
+  .inv-table tbody td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: block;
+  }
+}

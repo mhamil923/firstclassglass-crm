@@ -38,6 +38,8 @@ export default function ViewCustomer() {
   const [woLoading, setWoLoading] = useState(false);
   const [estimates, setEstimates] = useState([]);
   const [estLoading, setEstLoading] = useState(false);
+  const [invoices, setInvoices] = useState([]);
+  const [invLoading, setInvLoading] = useState(false);
 
   /* ---------- fetch customer ---------- */
   const fetchCustomer = useCallback(async () => {
@@ -83,11 +85,26 @@ export default function ViewCustomer() {
     }
   }, [id, isNew]);
 
+  /* ---------- fetch invoices ---------- */
+  const fetchInvoices = useCallback(async () => {
+    if (isNew) return;
+    setInvLoading(true);
+    try {
+      const res = await api.get("/invoices", { params: { customerId: id } });
+      setInvoices(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Error fetching customer invoices:", err);
+    } finally {
+      setInvLoading(false);
+    }
+  }, [id, isNew]);
+
   useEffect(() => {
     fetchCustomer();
     fetchWorkOrders();
     fetchEstimates();
-  }, [fetchCustomer, fetchWorkOrders, fetchEstimates]);
+    fetchInvoices();
+  }, [fetchCustomer, fetchWorkOrders, fetchEstimates, fetchInvoices]);
 
   /* ---------- form helpers ---------- */
   const handleChange = (e) => {
@@ -160,6 +177,16 @@ export default function ViewCustomer() {
     if (sl === "sent") return { background: "rgba(0,113,227,0.1)", color: "var(--accent-blue)" };
     if (sl === "accepted") return { background: "rgba(52,199,89,0.12)", color: "#34c759" };
     if (sl === "declined") return { background: "rgba(255,59,48,0.12)", color: "#ff3b30" };
+    return { background: "rgba(142,142,147,0.12)", color: "#8e8e93" };
+  };
+  const invStatusStyle = (s) => {
+    if (!s) return { background: "rgba(142,142,147,0.12)", color: "#8e8e93" };
+    const sl = s.toLowerCase();
+    if (sl === "sent") return { background: "rgba(0,113,227,0.1)", color: "var(--accent-blue)" };
+    if (sl === "partial") return { background: "rgba(255,159,10,0.12)", color: "#ff9f0a" };
+    if (sl === "paid") return { background: "rgba(52,199,89,0.12)", color: "#34c759" };
+    if (sl === "overdue") return { background: "rgba(255,59,48,0.12)", color: "#ff3b30" };
+    if (sl === "void") return { background: "rgba(142,142,147,0.12)", color: "#636366" };
     return { background: "rgba(142,142,147,0.12)", color: "#8e8e93" };
   };
   const statusColor = (s) => {
@@ -605,8 +632,54 @@ export default function ViewCustomer() {
             )}
 
             {activeTab === "invoices" && (
-              <div className="vc-empty">
-                Coming soon — Invoices will appear here.
+              <div className="vc-card-body" style={{ padding: 0 }}>
+                <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border-color)" }}>
+                  <Link
+                    to={`/invoices/new?customerId=${id}`}
+                    className="vc-btn vc-btn-primary"
+                    style={{ fontSize: 13, padding: "6px 14px", textDecoration: "none" }}
+                  >
+                    + Create Invoice
+                  </Link>
+                </div>
+                {invLoading ? (
+                  <div className="vc-loading">Loading invoices...</div>
+                ) : invoices.length === 0 ? (
+                  <div className="vc-empty">No invoices for this customer yet.</div>
+                ) : (
+                  <table className="vc-wo-table">
+                    <thead>
+                      <tr>
+                        <th>Invoice #</th>
+                        <th>Date</th>
+                        <th>Project</th>
+                        <th>Status</th>
+                        <th style={{ textAlign: "right" }}>Total</th>
+                        <th style={{ textAlign: "right" }}>Balance Due</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invoices.map((inv) => (
+                        <tr key={inv.id} onClick={() => navigate(`/invoices/${inv.id}`)}>
+                          <td style={{ fontWeight: 600 }}>{inv.invoiceNumber || "—"}</td>
+                          <td>{formatDate(inv.issueDate || inv.createdAt)}</td>
+                          <td>{inv.projectName || "—"}</td>
+                          <td>
+                            <span className="vc-status-pill" style={invStatusStyle(inv.status)}>
+                              {inv.status || "Draft"}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                            {fmtMoney(inv.total)}
+                          </td>
+                          <td style={{ textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums", color: Number(inv.balanceDue) > 0 ? "#ff3b30" : undefined }}>
+                            {fmtMoney(inv.balanceDue)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             )}
           </div>

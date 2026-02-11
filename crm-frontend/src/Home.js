@@ -11,6 +11,7 @@ const REFRESH_MS = 60_000; // auto-refresh orders every 60s
 export default function Home() {
   const [orders, setOrders] = useState([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [overdueSummary, setOverdueSummary] = useState({ count: 0, totalBalanceDue: 0 });
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -55,25 +56,35 @@ export default function Home() {
     }
   }, []);
 
+  const fetchOverdueSummary = useCallback(async () => {
+    try {
+      const res = await api.get("/invoices/overdue-summary");
+      setOverdueSummary(res.data || { count: 0, totalBalanceDue: 0 });
+    } catch (err) {
+      console.error("Error fetching overdue summary:", err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchOrders();
+    fetchOverdueSummary();
 
-    const onFocus = () => fetchOrders({ silent: true });
+    const onFocus = () => { fetchOrders({ silent: true }); fetchOverdueSummary(); };
     const onVisibility = () => {
-      if (document.visibilityState === "visible") fetchOrders({ silent: true });
+      if (document.visibilityState === "visible") { fetchOrders({ silent: true }); fetchOverdueSummary(); }
     };
 
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
 
-    const interval = setInterval(() => fetchOrders({ silent: true }), REFRESH_MS);
+    const interval = setInterval(() => { fetchOrders({ silent: true }); fetchOverdueSummary(); }, REFRESH_MS);
 
     return () => {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
       clearInterval(interval);
     };
-  }, [fetchOrders]);
+  }, [fetchOrders, fetchOverdueSummary]);
 
   /* =========================
      Agenda / Upcoming blocks
@@ -330,6 +341,22 @@ export default function Home() {
             <div className="kpi-value">{weeklyNotes.length}</div>
             <div className="kpi-hint">last 7 days</div>
           </div>
+
+          {overdueSummary.count > 0 && (
+            <div
+              className="kpi-tile"
+              onClick={() => navigate("/invoices?status=Overdue")}
+              role="button"
+              tabIndex={0}
+              style={{ borderColor: "#ff3b30", background: "rgba(255,59,48,0.06)" }}
+            >
+              <div className="kpi-label" style={{ color: "#ff3b30" }}>Overdue Invoices</div>
+              <div className="kpi-value" style={{ color: "#ff3b30" }}>{overdueSummary.count}</div>
+              <div className="kpi-hint" style={{ color: "#ff3b30" }}>
+                {"$" + (Number(overdueSummary.totalBalanceDue) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} outstanding
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Main grid */}
