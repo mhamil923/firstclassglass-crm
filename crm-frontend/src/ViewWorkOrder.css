@@ -529,6 +529,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Clip the top 40px of Chrome's built-in PDF toolbar */
+.tile-media iframe {
+  margin-top: -40px;
+  height: calc(100% + 40px);
 }
 
 .tile-img {
@@ -539,9 +547,9 @@
 
 .tile-iframe {
   width: 100%;
-  height: 100%;
   border: 0;
   background: var(--bg-card-solid);
+  pointer-events: none;
 }
 
 .tile-name {
@@ -597,11 +605,14 @@
   background: var(--bg-hover);
   border: 1px solid var(--border-color);
   cursor: pointer;
+  position: relative;
 }
 
+/* Clip the top 40px of Chrome's built-in PDF toolbar */
 .po-pdf-thumbnail iframe {
   width: 100%;
-  height: 100%;
+  height: calc(100% + 40px);
+  margin-top: -40px;
   border: 0;
   background: var(--bg-card-solid);
   pointer-events: none;

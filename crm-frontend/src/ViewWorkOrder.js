@@ -262,7 +262,7 @@ function FileTile({ kind, href, fileName, onDelete, onExpand, extraAction }) {
   return (
     <div className="tile">
       <div className="tile-media">
-        {isPdf ? <iframe title={fileName} src={`${href}#toolbar=0&navpanes=0&scrollbar=0`} className="tile-iframe" style={{ pointerEvents: "none" }} /> : <img src={href} alt={fileName} className="tile-img" />}
+        {isPdf ? <iframe title={fileName} src={href} className="tile-iframe" /> : <img src={href} alt={fileName} className="tile-img" />}
       </div>
 
       <div className="tile-name">
@@ -1891,7 +1891,7 @@ export default function ViewWorkOrder() {
             <div className="po-pdf-grid">
               <div className="po-pdf-card">
                 <div className="po-pdf-thumbnail">
-                  <iframe title="Estimate PDF" src={`${estimateHref}#toolbar=0&navpanes=0&scrollbar=0`} style={{ pointerEvents: "none" }} />
+                  <iframe title="Estimate PDF" src={estimateHref} />
                 </div>
                 <div className="po-pdf-label" title={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}>
                   {(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
@@ -1941,11 +1941,7 @@ export default function ViewWorkOrder() {
 
                     {href ? (
                       <div className="po-pdf-thumbnail" onClick={() => openLightbox("pdf", href, label)} role="button" tabIndex={0}>
-                        <iframe
-                          title={label}
-                          src={`${href}#toolbar=0&navpanes=0&scrollbar=0`}
-                          style={{ width: "100%", height: "100%", border: "none", pointerEvents: "none" }}
-                        />
+                        <iframe title={label} src={href} />
                       </div>
                     ) : (
                       <div className="po-pdf-no-file">No PDF</div>
