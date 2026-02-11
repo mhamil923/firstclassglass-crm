@@ -675,6 +675,101 @@ async function ensureEstimateTables() {
 
 ensureEstimateTables().catch(() => {});
 
+// ─── INVOICES / PAYMENTS / SETTINGS TABLES ──────────────────────────────────
+async function ensureInvoiceTables() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS settings (
+        settingKey   VARCHAR(100) PRIMARY KEY,
+        settingValue TEXT NULL,
+        updatedAt    DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await db.query("INSERT IGNORE INTO settings (settingKey, settingValue) VALUES ('nextInvoiceNumber', '1')");
+    await db.query("INSERT IGNORE INTO settings (settingKey, settingValue) VALUES ('defaultInvoiceTerms', ?)", [
+      'ALL PAYMENTS MUST BE MADE 45 DAYS AFTER INVOICE DATE OR A 15% LATE FEE WILL BE APPLIED'
+    ]);
+    console.log('[Invoices] settings table ready');
+  } catch (e) {
+    console.warn('[Invoices] Could not create settings table:', e.message);
+  }
+
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS invoices (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        invoiceNumber   VARCHAR(50) NOT NULL,
+        customerId      INT NOT NULL,
+        workOrderId     INT NULL,
+        estimateId      INT NULL,
+        status          VARCHAR(50) NOT NULL DEFAULT 'Draft',
+        issueDate       DATE DEFAULT (CURRENT_DATE),
+        dueDate         DATE NULL,
+        poNumber        VARCHAR(100) NULL,
+        projectName     VARCHAR(255) NULL,
+        shipToAddress   VARCHAR(255) NULL,
+        shipToCity      VARCHAR(100) NULL,
+        shipToState     VARCHAR(50) NULL,
+        shipToZip       VARCHAR(20) NULL,
+        subtotal        DECIMAL(10,2) DEFAULT 0,
+        taxRate         DECIMAL(5,2) DEFAULT 0,
+        taxAmount       DECIMAL(10,2) DEFAULT 0,
+        total           DECIMAL(10,2) DEFAULT 0,
+        amountPaid      DECIMAL(10,2) DEFAULT 0,
+        balanceDue      DECIMAL(10,2) DEFAULT 0,
+        notes           TEXT NULL,
+        terms           TEXT NULL,
+        pdfPath         VARCHAR(255) NULL,
+        sentAt          DATETIME NULL,
+        paidAt          DATETIME NULL,
+        createdAt       DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt       DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('[Invoices] invoices table ready');
+  } catch (e) {
+    console.warn('[Invoices] Could not create invoices table:', e.message);
+  }
+
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS invoice_line_items (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        invoiceId   INT NOT NULL,
+        sortOrder   INT DEFAULT 0,
+        description VARCHAR(500) NOT NULL,
+        quantity    DECIMAL(10,2) NULL,
+        amount      DECIMAL(10,2) NOT NULL,
+        createdAt   DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (invoiceId) REFERENCES invoices(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('[Invoices] invoice_line_items table ready');
+  } catch (e) {
+    console.warn('[Invoices] Could not create invoice_line_items table:', e.message);
+  }
+
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS payments (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        invoiceId       INT NOT NULL,
+        paymentDate     DATE NOT NULL,
+        amount          DECIMAL(10,2) NOT NULL,
+        paymentMethod   VARCHAR(50) NULL,
+        referenceNumber VARCHAR(100) NULL,
+        notes           TEXT NULL,
+        createdAt       DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (invoiceId) REFERENCES invoices(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('[Invoices] payments table ready');
+  } catch (e) {
+    console.warn('[Invoices] Could not create payments table:', e.message);
+  }
+}
+ensureInvoiceTables().catch(() => {});
+
 // ─── AUTO STATUS JOB ─────────────────────────────────────────────────────────
 function envOn(v, def = true) {
   if (v == null) return def;
@@ -1680,9 +1775,689 @@ app.post('/estimates/:id/send-email', authenticate, requireNumericParam('id'), a
   }
 });
 
-// POST /estimates/:id/convert-to-invoice (placeholder)
+// ─── INVOICES ───────────────────────────────────────────────────────────────
+
+async function getNextInvoiceNumber() {
+  const [[row]] = await db.query("SELECT settingValue FROM settings WHERE settingKey = 'nextInvoiceNumber'");
+  const current = Number(row?.settingValue) || 1;
+  await db.query("UPDATE settings SET settingValue = ?, updatedAt = NOW() WHERE settingKey = 'nextInvoiceNumber'", [String(current + 1)]);
+  return String(current);
+}
+
+async function recalcInvoiceTotals(invoiceId) {
+  const [[{ s }]] = await db.query(
+    'SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_line_items WHERE invoiceId = ?',
+    [invoiceId]
+  );
+  const subtotal = Number(s) || 0;
+  const [[inv]] = await db.query('SELECT taxRate, status FROM invoices WHERE id = ?', [invoiceId]);
+  const taxRate = Number(inv?.taxRate) || 0;
+  const taxAmount = Math.round(subtotal * taxRate) / 100;
+  const total = subtotal + taxAmount;
+  const [[{ paid }]] = await db.query(
+    'SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE invoiceId = ?',
+    [invoiceId]
+  );
+  const amountPaid = Number(paid) || 0;
+  const balanceDue = Math.round((total - amountPaid) * 100) / 100;
+
+  const sets = ['subtotal=?', 'taxAmount=?', 'total=?', 'amountPaid=?', 'balanceDue=?', 'updatedAt=NOW()'];
+  const params = [subtotal, taxAmount, total, amountPaid, balanceDue];
+
+  if (balanceDue <= 0 && amountPaid > 0 && inv?.status !== 'Draft' && inv?.status !== 'Void') {
+    sets.push("status='Paid'", 'paidAt=NOW()');
+  } else if (amountPaid > 0 && balanceDue > 0 && inv?.status !== 'Draft' && inv?.status !== 'Void') {
+    sets.push("status='Partial'");
+  }
+
+  await db.query(`UPDATE invoices SET ${sets.join(',')} WHERE id=?`, [...params, invoiceId]);
+}
+
+// --- Generate professional Invoice PDF matching QuickBooks format ---
+async function generateInvoicePdf(invoiceId) {
+  const [[invoice]] = await db.query(`
+    SELECT i.*, c.companyName, c.name AS custName, c.billingAddress, c.billingCity,
+           c.billingState, c.billingZip, c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail
+    FROM invoices i LEFT JOIN customers c ON i.customerId = c.id
+    WHERE i.id = ?
+  `, [invoiceId]);
+  if (!invoice) throw new Error('Invoice not found');
+
+  const [lineItems] = await db.query(
+    'SELECT * FROM invoice_line_items WHERE invoiceId = ? ORDER BY sortOrder ASC, id ASC',
+    [invoiceId]
+  );
+
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'LETTER', margins: { top: 40, bottom: 40, left: 50, right: 50 } });
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const pw = 612 - 100;
+    const leftCol = 50;
+    const rightCol = 320;
+
+    // --- HEADER ---
+    doc.font('Times-Bold').fontSize(11);
+    doc.text('First Class Glass & Mirror, Inc.', leftCol, 40);
+    doc.font('Times-Roman').fontSize(10);
+    doc.text('1513 Industrial Drive', leftCol, 55);
+    doc.text('Itasca, IL. 60143', leftCol, 67);
+    doc.text('630-250-9777', leftCol, 79);
+    doc.text('630-250-9727', leftCol, 91);
+
+    // "Invoice" title - right side
+    doc.font('Times-Bold').fontSize(24);
+    doc.text('Invoice', rightCol, 40, { width: pw - (rightCol - leftCol), align: 'right' });
+
+    // Date + Invoice #
+    const issueDateStr = invoice.issueDate
+      ? new Date(invoice.issueDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+      : new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    const dueDateStr = invoice.dueDate
+      ? new Date(invoice.dueDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+      : '';
+    doc.font('Times-Bold').fontSize(9);
+    doc.text('DATE', rightCol + 30, 72);
+    doc.text('INVOICE #', rightCol + 30, 86);
+    if (dueDateStr) doc.text('DUE DATE', rightCol + 30, 100);
+    doc.font('Times-Roman').fontSize(10);
+    doc.text(issueDateStr, rightCol + 30, 72, { width: pw - (rightCol + 30 - leftCol), align: 'right' });
+    doc.text(String(invoice.invoiceNumber), rightCol + 30, 86, { width: pw - (rightCol + 30 - leftCol), align: 'right' });
+    if (dueDateStr) doc.text(dueDateStr, rightCol + 30, 100, { width: pw - (rightCol + 30 - leftCol), align: 'right' });
+
+    // Horizontal line
+    const headerLine = dueDateStr ? 118 : 105;
+    doc.moveTo(leftCol, headerLine).lineTo(leftCol + pw, headerLine).lineWidth(0.5).stroke();
+
+    // --- BILL TO + SHIP TO ---
+    let y = headerLine + 10;
+    const custName = invoice.companyName || invoice.custName || '';
+    const billingParts = [invoice.billingAddress, invoice.billingCity, invoice.billingState, invoice.billingZip].filter(Boolean);
+    const billingLine = billingParts.length > 1
+      ? invoice.billingAddress + '\n' + [invoice.billingCity, invoice.billingState].filter(Boolean).join(', ') + (invoice.billingZip ? ' ' + invoice.billingZip : '')
+      : billingParts.join(', ');
+
+    doc.font('Times-Bold').fontSize(9);
+    doc.text('BILL TO', leftCol, y);
+    doc.font('Times-Roman').fontSize(10);
+    y += 14;
+    if (custName) { doc.text(custName, leftCol, y); y += 12; }
+    if (billingLine) {
+      const lines = billingLine.split('\n');
+      for (const l of lines) { doc.text(l, leftCol, y); y += 12; }
+    }
+    if (invoice.custPhone) { doc.text(invoice.custPhone, leftCol, y); y += 12; }
+    if (invoice.custFax) { doc.text('Fax: ' + invoice.custFax, leftCol, y); y += 12; }
+
+    // Ship To - right side
+    let yp = headerLine + 10;
+    doc.font('Times-Bold').fontSize(9);
+    doc.text('SHIP TO', rightCol, yp);
+    doc.font('Times-Roman').fontSize(10);
+    yp += 14;
+    if (invoice.projectName) { doc.text(invoice.projectName, rightCol, yp); yp += 12; }
+    if (invoice.shipToAddress) { doc.text(invoice.shipToAddress, rightCol, yp); yp += 12; }
+    const shipCityLine = [invoice.shipToCity, invoice.shipToState].filter(Boolean).join(', ') + (invoice.shipToZip ? ' ' + invoice.shipToZip : '');
+    if (shipCityLine.trim()) { doc.text(shipCityLine, rightCol, yp); yp += 12; }
+
+    // P.O. No.
+    yp += 6;
+    if (invoice.poNumber) {
+      doc.font('Times-Bold').fontSize(9);
+      doc.text('P.O. NO.', rightCol, yp);
+      doc.font('Times-Roman').fontSize(10);
+      doc.text(invoice.poNumber, rightCol + 55, yp);
+    }
+
+    // --- LINE ITEMS TABLE ---
+    const tableTop = Math.max(y, yp) + 20;
+    const colQty = leftCol;
+    const colDesc = leftCol + 60;
+    const colTotal = leftCol + pw - 80;
+    const colEnd = leftCol + pw;
+
+    doc.moveTo(leftCol, tableTop).lineTo(colEnd, tableTop).lineWidth(0.5).stroke();
+    doc.font('Times-Bold').fontSize(9);
+    doc.text('QUANTITY', colQty + 4, tableTop + 4, { width: 52, align: 'center' });
+    doc.text('DESCRIPTION', colDesc + 4, tableTop + 4);
+    doc.text('AMOUNT', colTotal + 4, tableTop + 4, { width: 76, align: 'right' });
+    const headerBottom = tableTop + 18;
+    doc.moveTo(leftCol, headerBottom).lineTo(colEnd, headerBottom).lineWidth(0.5).stroke();
+    doc.moveTo(colDesc, tableTop).lineTo(colDesc, headerBottom).stroke();
+    doc.moveTo(colTotal, tableTop).lineTo(colTotal, headerBottom).stroke();
+
+    let rowY = headerBottom;
+    doc.font('Times-Roman').fontSize(10);
+    for (const item of lineItems) {
+      rowY += 4;
+      if (item.quantity != null && Number(item.quantity) > 0) {
+        const qtyStr = Number(item.quantity) === Math.floor(Number(item.quantity))
+          ? String(Math.floor(Number(item.quantity)))
+          : Number(item.quantity).toFixed(2);
+        doc.text(qtyStr, colQty + 4, rowY, { width: 52, align: 'center' });
+      }
+      doc.text(item.description || '', colDesc + 4, rowY, { width: colTotal - colDesc - 8 });
+      doc.text(Number(item.amount).toFixed(2), colTotal + 4, rowY, { width: 76, align: 'right' });
+      rowY += 16;
+      doc.moveTo(leftCol, rowY).lineTo(colEnd, rowY).lineWidth(0.25).stroke();
+    }
+
+    rowY += 2;
+    doc.moveTo(leftCol, rowY).lineTo(colEnd, rowY).lineWidth(0.5).stroke();
+
+    // --- TOTALS ---
+    rowY += 16;
+    const amountPaid = Number(invoice.amountPaid) || 0;
+    const balanceDue = Number(invoice.balanceDue) || Number(invoice.total) || 0;
+
+    if (Number(invoice.taxRate) > 0) {
+      doc.font('Times-Roman').fontSize(10);
+      doc.text('Subtotal', colTotal - 60, rowY);
+      doc.text(fmtMoney(invoice.subtotal), colTotal + 4, rowY, { width: 76, align: 'right' });
+      rowY += 16;
+      doc.text('Tax (' + invoice.taxRate + '%)', colTotal - 60, rowY);
+      doc.text(fmtMoney(invoice.taxAmount), colTotal + 4, rowY, { width: 76, align: 'right' });
+      rowY += 16;
+    }
+
+    doc.font('Times-Bold').fontSize(12);
+    doc.text('TOTAL', colTotal - 60, rowY);
+    doc.text(fmtMoney(invoice.total), colTotal + 4, rowY, { width: 76, align: 'right' });
+
+    if (amountPaid > 0) {
+      rowY += 18;
+      doc.font('Times-Roman').fontSize(10);
+      doc.text('Amount Paid', colTotal - 60, rowY);
+      doc.text(fmtMoney(amountPaid), colTotal + 4, rowY, { width: 76, align: 'right' });
+      rowY += 16;
+      doc.font('Times-Bold').fontSize(12);
+      doc.text('BALANCE DUE', colTotal - 80, rowY);
+      doc.text(fmtMoney(balanceDue), colTotal + 4, rowY, { width: 76, align: 'right' });
+    }
+
+    // --- TERMS ---
+    if (invoice.terms) {
+      rowY += 30;
+      doc.font('Times-Roman').fontSize(8);
+      doc.text(invoice.terms, leftCol, rowY, { width: pw, lineGap: 2 });
+    }
+
+    doc.end();
+  });
+}
+
+// GET /invoices/overdue-summary (must be before :id route)
+app.get('/invoices/overdue-summary', authenticate, async (req, res) => {
+  try {
+    const [[row]] = await db.query(
+      "SELECT COUNT(*) AS cnt, COALESCE(SUM(balanceDue), 0) AS total FROM invoices WHERE status IN ('Sent','Overdue') AND dueDate < CURDATE() AND balanceDue > 0"
+    );
+    res.json({ count: row.cnt || 0, total: Number(row.total) || 0 });
+  } catch (err) {
+    console.error('Error fetching overdue summary:', err);
+    res.status(500).json({ error: 'Failed to fetch overdue summary.' });
+  }
+});
+
+// GET /invoices - list all invoices
+app.get('/invoices', authenticate, async (req, res) => {
+  try {
+    const { status, customerId, workOrderId, search } = req.query;
+    let sql = `
+      SELECT i.*, c.companyName, c.name AS custName, c.billingAddress, c.phone AS custPhone, c.email AS custEmail
+      FROM invoices i
+      LEFT JOIN customers c ON i.customerId = c.id
+    `;
+    const wheres = [];
+    const params = [];
+
+    if (status && status !== 'All') {
+      if (status === 'Overdue') {
+        wheres.push("(i.status IN ('Sent','Overdue') AND i.dueDate < CURDATE() AND i.balanceDue > 0)");
+      } else {
+        wheres.push('i.status = ?');
+        params.push(status);
+      }
+    }
+    if (customerId) { wheres.push('i.customerId = ?'); params.push(customerId); }
+    if (workOrderId) { wheres.push('i.workOrderId = ?'); params.push(workOrderId); }
+    if (search) {
+      wheres.push("(i.invoiceNumber LIKE ? OR c.companyName LIKE ? OR c.name LIKE ? OR i.projectName LIKE ? OR i.poNumber LIKE ?)");
+      const s = `%${search}%`;
+      params.push(s, s, s, s, s);
+    }
+    if (wheres.length) sql += ' WHERE ' + wheres.join(' AND ');
+    sql += ' ORDER BY i.createdAt DESC';
+
+    const [rows] = await db.query(sql, params);
+    // Auto-detect overdue
+    for (const r of rows) {
+      if (r.status === 'Sent' && r.dueDate && new Date(r.dueDate) < new Date() && Number(r.balanceDue) > 0) {
+        r.status = 'Overdue';
+      }
+    }
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching invoices:', err);
+    res.status(500).json({ error: 'Failed to fetch invoices.' });
+  }
+});
+
+// GET /invoices/:id - single invoice with line items and payments
+app.get('/invoices/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [[invoice]] = await db.query(`
+      SELECT i.*, c.companyName, c.name AS custName, c.billingAddress, c.billingCity,
+             c.billingState, c.billingZip, c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail
+      FROM invoices i LEFT JOIN customers c ON i.customerId = c.id
+      WHERE i.id = ?
+    `, [req.params.id]);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    // Auto-detect overdue
+    if (invoice.status === 'Sent' && invoice.dueDate && new Date(invoice.dueDate) < new Date() && Number(invoice.balanceDue) > 0) {
+      invoice.status = 'Overdue';
+    }
+
+    const [lineItems] = await db.query(
+      'SELECT * FROM invoice_line_items WHERE invoiceId = ? ORDER BY sortOrder ASC, id ASC',
+      [req.params.id]
+    );
+    const [payments] = await db.query(
+      'SELECT * FROM payments WHERE invoiceId = ? ORDER BY paymentDate DESC, id DESC',
+      [req.params.id]
+    );
+    invoice.lineItems = lineItems;
+    invoice.payments = payments;
+    res.json(invoice);
+  } catch (err) {
+    console.error('Error fetching invoice:', err);
+    res.status(500).json({ error: 'Failed to fetch invoice.' });
+  }
+});
+
+// POST /invoices - create invoice
+app.post('/invoices', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    if (!b.customerId) return res.status(400).json({ error: 'customerId is required' });
+
+    const invoiceNumber = await getNextInvoiceNumber();
+    const issueDate = b.issueDate || new Date().toISOString().split('T')[0];
+    const dueDate = b.dueDate || (() => { const d = new Date(issueDate); d.setDate(d.getDate() + 45); return d.toISOString().split('T')[0]; })();
+
+    // Get default terms from settings if not provided
+    let terms = b.terms;
+    if (terms === undefined || terms === null) {
+      const [[ts]] = await db.query("SELECT settingValue FROM settings WHERE settingKey = 'defaultInvoiceTerms'");
+      terms = ts?.settingValue || DEFAULT_TERMS;
+    }
+
+    const [result] = await db.query(
+      `INSERT INTO invoices (invoiceNumber, customerId, workOrderId, estimateId, status, issueDate, dueDate,
+        poNumber, projectName, shipToAddress, shipToCity, shipToState, shipToZip,
+        subtotal, taxRate, taxAmount, total, amountPaid, balanceDue, notes, terms)
+       VALUES (?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      [
+        invoiceNumber, b.customerId, b.workOrderId || null, b.estimateId || null,
+        issueDate, dueDate,
+        b.poNumber || null, b.projectName || null,
+        b.shipToAddress || null, b.shipToCity || null, b.shipToState || null, b.shipToZip || null,
+        Number(b.subtotal) || 0, Number(b.taxRate) || 0, Number(b.taxAmount) || 0, Number(b.total) || 0,
+        Number(b.total) || 0,
+        b.notes || null, terms
+      ]
+    );
+    const [[created]] = await db.query('SELECT * FROM invoices WHERE id = ?', [result.insertId]);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('Error creating invoice:', err);
+    res.status(500).json({ error: 'Failed to create invoice.' });
+  }
+});
+
+// PUT /invoices/:id - update invoice
+app.put('/invoices/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const fields = ['customerId', 'workOrderId', 'estimateId', 'issueDate', 'dueDate', 'poNumber', 'projectName',
+      'shipToAddress', 'shipToCity', 'shipToState', 'shipToZip', 'taxRate', 'notes', 'terms'];
+    const sets = [];
+    const params = [];
+    for (const f of fields) {
+      if (b[f] !== undefined) { sets.push(`${f}=?`); params.push(b[f]); }
+    }
+    if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
+    sets.push('updatedAt=NOW()');
+    params.push(req.params.id);
+    await db.query(`UPDATE invoices SET ${sets.join(',')} WHERE id=?`, params);
+
+    if (b.taxRate !== undefined) await recalcInvoiceTotals(req.params.id);
+
+    const [[updated]] = await db.query('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating invoice:', err);
+    res.status(500).json({ error: 'Failed to update invoice.' });
+  }
+});
+
+// DELETE /invoices/:id
+app.delete('/invoices/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [[inv]] = await db.query('SELECT status FROM invoices WHERE id = ?', [req.params.id]);
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+    if (inv.status !== 'Draft') return res.status(400).json({ error: 'Only draft invoices can be deleted.' });
+    await db.query('DELETE FROM invoices WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting invoice:', err);
+    res.status(500).json({ error: 'Failed to delete invoice.' });
+  }
+});
+
+// POST /invoices/:id/line-items
+app.post('/invoices/:id/line-items', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    await db.query(
+      'INSERT INTO invoice_line_items (invoiceId, description, quantity, amount, sortOrder) VALUES (?, ?, ?, ?, ?)',
+      [req.params.id, b.description || '', b.quantity != null ? b.quantity : null, Number(b.amount) || 0, Number(b.sortOrder) || 0]
+    );
+    await recalcInvoiceTotals(req.params.id);
+    const [[invoice]] = await db.query('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
+    const [lineItems] = await db.query('SELECT * FROM invoice_line_items WHERE invoiceId = ? ORDER BY sortOrder ASC, id ASC', [req.params.id]);
+    invoice.lineItems = lineItems;
+    res.json(invoice);
+  } catch (err) {
+    console.error('Error adding invoice line item:', err);
+    res.status(500).json({ error: 'Failed to add line item.' });
+  }
+});
+
+// PUT /invoices/:id/line-items/:itemId
+app.put('/invoices/:id/line-items/:itemId', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const sets = [];
+    const params = [];
+    if (b.description !== undefined) { sets.push('description=?'); params.push(b.description); }
+    if (b.quantity !== undefined) { sets.push('quantity=?'); params.push(b.quantity); }
+    if (b.amount !== undefined) { sets.push('amount=?'); params.push(Number(b.amount) || 0); }
+    if (b.sortOrder !== undefined) { sets.push('sortOrder=?'); params.push(Number(b.sortOrder) || 0); }
+    if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
+    params.push(req.params.itemId, req.params.id);
+    await db.query(`UPDATE invoice_line_items SET ${sets.join(',')} WHERE id=? AND invoiceId=?`, params);
+    await recalcInvoiceTotals(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error updating invoice line item:', err);
+    res.status(500).json({ error: 'Failed to update line item.' });
+  }
+});
+
+// DELETE /invoices/:id/line-items/:itemId
+app.delete('/invoices/:id/line-items/:itemId', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    await db.query('DELETE FROM invoice_line_items WHERE id = ? AND invoiceId = ?', [req.params.itemId, req.params.id]);
+    await recalcInvoiceTotals(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting invoice line item:', err);
+    res.status(500).json({ error: 'Failed to delete line item.' });
+  }
+});
+
+// PUT /invoices/:id/line-items/reorder
+app.put('/invoices/:id/line-items/reorder', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const { items } = coerceBody(req);
+    if (!Array.isArray(items)) return res.status(400).json({ error: 'items array required' });
+    for (const it of items) {
+      await db.query('UPDATE invoice_line_items SET sortOrder=? WHERE id=? AND invoiceId=?',
+        [Number(it.sortOrder) || 0, it.id, req.params.id]);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error reordering invoice line items:', err);
+    res.status(500).json({ error: 'Failed to reorder line items.' });
+  }
+});
+
+// PUT /invoices/:id/status
+app.put('/invoices/:id/status', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const { status } = coerceBody(req);
+    const valid = ['Draft', 'Sent', 'Partial', 'Paid', 'Overdue', 'Void'];
+    if (!valid.includes(status)) return res.status(400).json({ error: `Invalid status. Must be one of: ${valid.join(', ')}` });
+
+    const sets = ['status=?', 'updatedAt=NOW()'];
+    const params = [status];
+    if (status === 'Sent') sets.push('sentAt=NOW()');
+    if (status === 'Paid') sets.push('paidAt=NOW()');
+
+    params.push(req.params.id);
+    await db.query(`UPDATE invoices SET ${sets.join(',')} WHERE id=?`, params);
+    const [[updated]] = await db.query('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating invoice status:', err);
+    res.status(500).json({ error: 'Failed to update status.' });
+  }
+});
+
+// POST /invoices/:id/generate-pdf
+app.post('/invoices/:id/generate-pdf', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const pdfBuffer = await generateInvoicePdf(req.params.id);
+    const filename = `invoice_${req.params.id}_${Date.now()}.pdf`;
+    const localDir = path.resolve(__dirname, 'uploads');
+    if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+    const filePath = path.join(localDir, filename);
+    fs.writeFileSync(filePath, pdfBuffer);
+
+    const pdfPath = `uploads/${filename}`;
+    await db.query('UPDATE invoices SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, req.params.id]);
+    res.json({ pdfPath });
+  } catch (err) {
+    console.error('Error generating invoice PDF:', err);
+    res.status(500).json({ error: 'Failed to generate PDF.' });
+  }
+});
+
+// POST /invoices/:id/send-email (placeholder)
+app.post('/invoices/:id/send-email', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [[inv]] = await db.query('SELECT pdfPath FROM invoices WHERE id = ?', [req.params.id]);
+    if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+
+    let pdfPath = inv.pdfPath;
+    if (!pdfPath) {
+      const pdfBuffer = await generateInvoicePdf(req.params.id);
+      const filename = `invoice_${req.params.id}_${Date.now()}.pdf`;
+      const localDir = path.resolve(__dirname, 'uploads');
+      if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+      fs.writeFileSync(path.join(localDir, filename), pdfBuffer);
+      pdfPath = `uploads/${filename}`;
+      await db.query('UPDATE invoices SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, req.params.id]);
+    }
+
+    await db.query("UPDATE invoices SET status='Sent', sentAt=NOW(), updatedAt=NOW() WHERE id=?", [req.params.id]);
+    res.json({ message: 'Email sending will be configured soon. PDF has been generated.', pdfPath });
+  } catch (err) {
+    console.error('Error sending invoice email:', err);
+    res.status(500).json({ error: 'Failed to send invoice.' });
+  }
+});
+
+// POST /invoices/:id/payments - record a payment
+app.post('/invoices/:id/payments', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    if (!b.amount || Number(b.amount) <= 0) return res.status(400).json({ error: 'Payment amount is required and must be > 0' });
+
+    await db.query(
+      'INSERT INTO payments (invoiceId, paymentDate, amount, paymentMethod, referenceNumber, notes) VALUES (?, ?, ?, ?, ?, ?)',
+      [
+        req.params.id,
+        b.paymentDate || new Date().toISOString().split('T')[0],
+        Number(b.amount),
+        b.paymentMethod || null,
+        b.referenceNumber || null,
+        b.notes || null
+      ]
+    );
+    await recalcInvoiceTotals(req.params.id);
+
+    const [[invoice]] = await db.query('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
+    const [payments] = await db.query('SELECT * FROM payments WHERE invoiceId = ? ORDER BY paymentDate DESC, id DESC', [req.params.id]);
+    invoice.payments = payments;
+    res.json(invoice);
+  } catch (err) {
+    console.error('Error recording payment:', err);
+    res.status(500).json({ error: 'Failed to record payment.' });
+  }
+});
+
+// DELETE /invoices/:id/payments/:paymentId
+app.delete('/invoices/:id/payments/:paymentId', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    await db.query('DELETE FROM payments WHERE id = ? AND invoiceId = ?', [req.params.paymentId, req.params.id]);
+    await recalcInvoiceTotals(req.params.id);
+    const [[invoice]] = await db.query('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
+    res.json(invoice);
+  } catch (err) {
+    console.error('Error deleting payment:', err);
+    res.status(500).json({ error: 'Failed to delete payment.' });
+  }
+});
+
+// POST /invoices/:id/duplicate
+app.post('/invoices/:id/duplicate', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [[orig]] = await db.query('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
+    if (!orig) return res.status(404).json({ error: 'Invoice not found' });
+
+    const invoiceNumber = await getNextInvoiceNumber();
+    const issueDate = new Date().toISOString().split('T')[0];
+    const dueDate = (() => { const d = new Date(); d.setDate(d.getDate() + 45); return d.toISOString().split('T')[0]; })();
+
+    const [result] = await db.query(
+      `INSERT INTO invoices (invoiceNumber, customerId, workOrderId, estimateId, status, issueDate, dueDate,
+        poNumber, projectName, shipToAddress, shipToCity, shipToState, shipToZip,
+        taxRate, notes, terms)
+       VALUES (?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        invoiceNumber, orig.customerId, orig.workOrderId, orig.estimateId,
+        issueDate, dueDate,
+        orig.poNumber, orig.projectName, orig.shipToAddress, orig.shipToCity, orig.shipToState, orig.shipToZip,
+        orig.taxRate, orig.notes, orig.terms
+      ]
+    );
+    const newId = result.insertId;
+
+    const [origItems] = await db.query('SELECT * FROM invoice_line_items WHERE invoiceId = ? ORDER BY sortOrder ASC', [req.params.id]);
+    for (const li of origItems) {
+      await db.query(
+        'INSERT INTO invoice_line_items (invoiceId, sortOrder, description, quantity, amount) VALUES (?, ?, ?, ?, ?)',
+        [newId, li.sortOrder, li.description, li.quantity, li.amount]
+      );
+    }
+    await recalcInvoiceTotals(newId);
+
+    const [[created]] = await db.query('SELECT * FROM invoices WHERE id = ?', [newId]);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('Error duplicating invoice:', err);
+    res.status(500).json({ error: 'Failed to duplicate invoice.' });
+  }
+});
+
+// POST /estimates/:id/convert-to-invoice
 app.post('/estimates/:id/convert-to-invoice', authenticate, requireNumericParam('id'), async (req, res) => {
-  res.json({ message: 'Invoice module coming soon' });
+  try {
+    const [[estimate]] = await db.query(`
+      SELECT e.*, c.companyName, c.name AS custName
+      FROM estimates e LEFT JOIN customers c ON e.customerId = c.id
+      WHERE e.id = ?
+    `, [req.params.id]);
+    if (!estimate) return res.status(404).json({ error: 'Estimate not found' });
+
+    const invoiceNumber = await getNextInvoiceNumber();
+    const issueDate = new Date().toISOString().split('T')[0];
+    const dueDate = (() => { const d = new Date(); d.setDate(d.getDate() + 45); return d.toISOString().split('T')[0]; })();
+
+    const [result] = await db.query(
+      `INSERT INTO invoices (invoiceNumber, customerId, workOrderId, estimateId, status, issueDate, dueDate,
+        poNumber, projectName, shipToAddress, shipToCity, shipToState, shipToZip,
+        taxRate, notes, terms)
+       VALUES (?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        invoiceNumber, estimate.customerId, estimate.workOrderId || null, estimate.id,
+        issueDate, dueDate,
+        estimate.poNumber || null, estimate.projectName || null,
+        estimate.projectAddress || null, estimate.projectCity || null, estimate.projectState || null, estimate.projectZip || null,
+        estimate.taxRate || 0, estimate.notes || null, estimate.terms || DEFAULT_TERMS
+      ]
+    );
+    const newId = result.insertId;
+
+    const [estItems] = await db.query('SELECT * FROM estimate_line_items WHERE estimateId = ? ORDER BY sortOrder ASC', [req.params.id]);
+    for (const li of estItems) {
+      await db.query(
+        'INSERT INTO invoice_line_items (invoiceId, sortOrder, description, quantity, amount) VALUES (?, ?, ?, ?, ?)',
+        [newId, li.sortOrder, li.description, li.quantity, li.amount]
+      );
+    }
+    await recalcInvoiceTotals(newId);
+
+    // Update estimate status to Accepted if Draft or Sent
+    if (estimate.status === 'Draft' || estimate.status === 'Sent') {
+      await db.query("UPDATE estimates SET status='Accepted', acceptedAt=NOW(), updatedAt=NOW() WHERE id=?", [req.params.id]);
+    }
+
+    const [[created]] = await db.query('SELECT * FROM invoices WHERE id = ?', [newId]);
+    res.json({ invoiceId: newId, invoice: created });
+  } catch (err) {
+    console.error('Error converting estimate to invoice:', err);
+    res.status(500).json({ error: 'Failed to convert estimate to invoice.' });
+  }
+});
+
+// GET /settings
+app.get('/settings', authenticate, async (req, res) => {
+  try {
+    const [rows] = await db.query('SELECT settingKey, settingValue FROM settings');
+    const obj = {};
+    for (const r of rows) obj[r.settingKey] = r.settingValue;
+    res.json(obj);
+  } catch (err) {
+    console.error('Error fetching settings:', err);
+    res.status(500).json({ error: 'Failed to fetch settings.' });
+  }
+});
+
+// PUT /settings
+app.put('/settings', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    for (const [key, value] of Object.entries(b)) {
+      await db.query(
+        'INSERT INTO settings (settingKey, settingValue, updatedAt) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE settingValue=?, updatedAt=NOW()',
+        [key, String(value), String(value)]
+      );
+    }
+    const [rows] = await db.query('SELECT settingKey, settingValue FROM settings');
+    const obj = {};
+    for (const r of rows) obj[r.settingKey] = r.settingValue;
+    res.json(obj);
+  } catch (err) {
+    console.error('Error updating settings:', err);
+    res.status(500).json({ error: 'Failed to update settings.' });
+  }
 });
 
 // ─── WORK ORDERS HELPERS ────────────────────────────────────────────────────
