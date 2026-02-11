@@ -5,7 +5,7 @@ import api from "./api";
 import API_BASE_URL from "./config";
 import "./PurchaseOrders.css";
 
-const SUPPLIERS = ["All Suppliers", "Chicago Tempered", "CRL", "Oldcastle", "Casco"];
+const SUPPLIERS = ["All Suppliers", "All State Metal Fab", "Chicago Tempered", "CRL", "Oldcastle", "Casco"];
 const STATUSES = ["All Statuses", "On Order", "Picked Up"];
 const NEEDS_TO_BE_SCHEDULED = "Needs to be Scheduled";
 
@@ -34,6 +34,7 @@ function inferSupplierFromText(text) {
   if (s.includes("crl")) return "CRL";
   if (s.includes("oldcastle")) return "Oldcastle";
   if (s.includes("casco")) return "Casco";
+  if (s.includes("all state") || s.includes("allstate") || s.includes("all-state") || s.includes("metal fab")) return "All State Metal Fab";
 
   const hasCT =
     s.includes("/ct/") ||
