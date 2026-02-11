@@ -518,13 +518,29 @@ function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', l
     'NULL AS createdAt';
 
   return `
-    SELECT w.*, ${assignedSel}, ${createdSel}
+    SELECT w.*, ${assignedSel}, ${createdSel},
+           poAgg.allPoNumbers
       FROM work_orders w
       ${join}
+      LEFT JOIN (
+        SELECT workOrderId, GROUP_CONCAT(poNumber ORDER BY createdAt ASC) AS allPoNumbers
+        FROM work_order_pos
+        WHERE poNumber IS NOT NULL AND poNumber <> ''
+        GROUP BY workOrderId
+      ) poAgg ON poAgg.workOrderId = w.id
       ${whereSql}
       ${orderSql}
       ${limitSql}
   `;
+}
+
+/**
+ * Format a comma-separated list of PO numbers with # prefix.
+ * E.g. "485,486,498" → "#485, #486, #498"
+ */
+function formatPoNumberList(csv) {
+  if (!csv) return '';
+  return csv.split(',').filter(Boolean).map(n => `#${n.trim()}`).join(', ');
 }
 
 // ─── AUTO STATUS JOB ─────────────────────────────────────────────────────────
@@ -1048,7 +1064,7 @@ app.get('/debug/work-order/:id', authenticate, async (req, res) => {
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
     const [raw] = await db.execute(workOrdersSelectSQL({ orderSql: 'ORDER BY w.id DESC' }));
-    const rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status) }));
+    const rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status), allPoNumbersFormatted: formatPoNumberList(r.allPoNumbers) }));
 
     // DEBUG: Log count of "Waiting on Parts" work orders
     const waitingCount = rows.filter(r => r.status === 'Waiting on Parts').length;
@@ -1218,6 +1234,7 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
     row.status = (row.status && canonStatus(row.status))
       ? canonStatus(row.status)
       : displayStatusOrDefault(row.status);
+    row.allPoNumbersFormatted = formatPoNumberList(row.allPoNumbers);
 
     res.json(row);
   } catch (err) {
@@ -2166,9 +2183,16 @@ app.get('/purchase-orders', authenticate, async (req, res) => {
 
     const sql = `
       SELECT p.id AS poId, p.workOrderId, p.poNumber, p.poSupplier, p.poPdfPath, p.poPickedUp, p.createdAt AS poCreatedAt,
-             w.customer, w.siteLocation, w.siteAddress, w.workOrderNumber, w.status
+             w.customer, w.siteLocation, w.siteAddress, w.workOrderNumber, w.status,
+             poAgg.allPoNumbers
       FROM work_order_pos p
       JOIN work_orders w ON p.workOrderId = w.id
+      LEFT JOIN (
+        SELECT workOrderId, GROUP_CONCAT(poNumber ORDER BY createdAt ASC) AS allPoNumbers
+        FROM work_order_pos
+        WHERE poNumber IS NOT NULL AND poNumber <> ''
+        GROUP BY workOrderId
+      ) poAgg ON poAgg.workOrderId = p.workOrderId
       WHERE ${whereParts.join(' AND ')}
       ORDER BY p.poSupplier ASC, p.id DESC
     `;
@@ -2181,6 +2205,8 @@ app.get('/purchase-orders', authenticate, async (req, res) => {
       workOrderId: r.workOrderId,
       workOrderNumber: r.workOrderNumber || null,
       poNumber: r.poNumber || null,
+      allPoNumbers: r.allPoNumbers || null,
+      allPoNumbersFormatted: formatPoNumberList(r.allPoNumbers),
       supplier: r.poSupplier || '',
       customer: r.customer || '',
       siteLocation: r.siteLocation || '',
