@@ -23,6 +23,7 @@ const axios      = require('axios');
 
 // PO PDF vendor/number detection from PDF content (with OCR support)
 const { analyzePoPdf, detectSupplierFromText, detectPoNumberFromText, extractWorkOrderFields, extractTextSmart } = require('./utils/poVendorDetector');
+const PDFDocument = require('pdfkit');
 
 process.env.TZ = process.env.APP_TZ || 'America/Chicago';
 
@@ -368,6 +369,7 @@ async function ensureCols() {
     { name: 'workOrderNumber',   type: 'VARCHAR(64) NULL' },
     { name: 'siteAddress',       type: 'VARCHAR(255) NULL' },
     { name: 'assignedTo',        type: 'INT NULL' },
+    { name: 'customerId',        type: 'INT NULL' },
   ];
 
   try {
@@ -506,6 +508,79 @@ async function syncLegacyPoColumns(workOrderId) {
   }
 }
 
+// ─── CUSTOMERS TABLE SCHEMA ─────────────────────────────────────────────────
+async function ensureCustomerCols() {
+  const custCols = [
+    { name: 'companyName',  type: 'VARCHAR(255) NULL' },
+    { name: 'contactName',  type: 'VARCHAR(255) NULL' },
+    { name: 'email',        type: 'VARCHAR(255) NULL' },
+    { name: 'phone',        type: 'VARCHAR(50) NULL' },
+    { name: 'fax',          type: 'VARCHAR(50) NULL' },
+    { name: 'billingCity',  type: 'VARCHAR(100) NULL' },
+    { name: 'billingState', type: 'VARCHAR(50) NULL' },
+    { name: 'billingZip',   type: 'VARCHAR(20) NULL' },
+    { name: 'siteAddress',  type: 'VARCHAR(255) NULL' },
+    { name: 'siteCity',     type: 'VARCHAR(100) NULL' },
+    { name: 'siteState',    type: 'VARCHAR(50) NULL' },
+    { name: 'siteZip',      type: 'VARCHAR(20) NULL' },
+    { name: 'notes',        type: 'TEXT NULL' },
+    { name: 'isActive',     type: 'TINYINT(1) NOT NULL DEFAULT 1' },
+    { name: 'updatedAt',    type: 'DATETIME DEFAULT CURRENT_TIMESTAMP' },
+  ];
+
+  try {
+    for (const { name, type } of custCols) {
+      const [found] = await db.query(`SHOW COLUMNS FROM \`customers\` LIKE ?`, [name]);
+      if (!found.length) {
+        await db.query(`ALTER TABLE \`customers\` ADD COLUMN \`${name}\` ${type}`);
+        console.log(`[Customers] Added column ${name}`);
+      }
+    }
+  } catch (e) {
+    console.warn('[Customers] Schema ensure failed:', e.message);
+    return;
+  }
+
+  // One-time migration: copy name → companyName where companyName is null
+  try {
+    await db.query(`UPDATE customers SET companyName = name WHERE companyName IS NULL AND name IS NOT NULL`);
+  } catch (e) {
+    console.warn('[Customers] name→companyName migration failed:', e.message);
+  }
+
+  // Seed/update known customers with full details
+  const seeds = [
+    { name: 'Clear Vision',         companyName: 'Clear Vision',   billingCity: 'Newbury Park', billingState: 'CA', billingZip: '91320' },
+    { name: 'True Source',           companyName: 'True Source',    billingCity: 'Lincoln',      billingState: 'RI', billingZip: '02865-4415', phone: '800-556-6484', fax: '800-334-5277' },
+    { name: 'CLM',                   companyName: 'CLM Midwest',   billingCity: 'River Grove',  billingState: 'IL', billingZip: '60171' },
+    { name: 'KFM247',               companyName: 'KFM',           billingCity: 'Woodbine',     billingState: 'MD', billingZip: '21797' },
+    { name: '1st Time Fixed LLC',   companyName: '1st Time Fixed', billingCity: 'Bensenville',  billingState: 'IL', billingZip: '60106' },
+  ];
+
+  for (const s of seeds) {
+    try {
+      const sets = [];
+      const vals = [];
+      if (s.companyName)  { sets.push('companyName = ?');  vals.push(s.companyName); }
+      if (s.billingCity)  { sets.push('billingCity = ?');   vals.push(s.billingCity); }
+      if (s.billingState) { sets.push('billingState = ?');  vals.push(s.billingState); }
+      if (s.billingZip)   { sets.push('billingZip = ?');    vals.push(s.billingZip); }
+      if (s.phone)        { sets.push('phone = ?');         vals.push(s.phone); }
+      if (s.fax)          { sets.push('fax = ?');           vals.push(s.fax); }
+      if (sets.length) {
+        vals.push(s.name);
+        await db.query(`UPDATE customers SET ${sets.join(', ')} WHERE name = ? AND (billingCity IS NULL OR billingCity = '')`, vals);
+      }
+    } catch (e) {
+      // Seeded customer may not exist yet — that's fine
+    }
+  }
+
+  console.log('[Customers] Schema and seed data ready');
+}
+
+ensureCustomerCols().catch(() => {});
+
 // ─── SAFE SELECT BUILDER ────────────────────────────────────────────────────
 function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', limitSql = '' } = {}) {
   const hasA = !!SCHEMA.hasAssignedTo;
@@ -542,6 +617,63 @@ function formatPoNumberList(csv) {
   if (!csv) return '';
   return csv.split(',').filter(Boolean).map(n => `#${n.trim()}`).join(', ');
 }
+
+// ─── ESTIMATES TABLES ────────────────────────────────────────────────────────
+async function ensureEstimateTables() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS estimates (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        customerId      INT NOT NULL,
+        workOrderId     INT NULL,
+        status          VARCHAR(50) NOT NULL DEFAULT 'Draft',
+        issueDate       DATE DEFAULT (CURRENT_DATE),
+        expirationDate  DATE NULL,
+        poNumber        VARCHAR(100) NULL,
+        projectName     VARCHAR(255) NULL,
+        projectAddress  VARCHAR(255) NULL,
+        projectCity     VARCHAR(100) NULL,
+        projectState    VARCHAR(50) NULL,
+        projectZip      VARCHAR(20) NULL,
+        subtotal        DECIMAL(10,2) DEFAULT 0,
+        taxRate         DECIMAL(5,2) DEFAULT 0,
+        taxAmount       DECIMAL(10,2) DEFAULT 0,
+        total           DECIMAL(10,2) DEFAULT 0,
+        notes           TEXT NULL,
+        terms           TEXT NULL,
+        pdfPath         VARCHAR(255) NULL,
+        sentAt          DATETIME NULL,
+        acceptedAt      DATETIME NULL,
+        declinedAt      DATETIME NULL,
+        createdAt       DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt       DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('[Estimates] estimates table ready');
+  } catch (e) {
+    console.warn('[Estimates] Could not create estimates table:', e.message);
+  }
+
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS estimate_line_items (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        estimateId  INT NOT NULL,
+        sortOrder   INT DEFAULT 0,
+        description VARCHAR(500) NOT NULL,
+        quantity    DECIMAL(10,2) NULL,
+        amount      DECIMAL(10,2) NOT NULL,
+        createdAt   DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (estimateId) REFERENCES estimates(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('[Estimates] estimate_line_items table ready');
+  } catch (e) {
+    console.warn('[Estimates] Could not create estimate_line_items table:', e.message);
+  }
+}
+
+ensureEstimateTables().catch(() => {});
 
 // ─── AUTO STATUS JOB ─────────────────────────────────────────────────────────
 function envOn(v, def = true) {
@@ -914,9 +1046,33 @@ app.get('/users', authenticate, async (req, res) => {
 });
 
 // ─── CUSTOMERS ───────────────────────────────────────────────────────────────
+
+// GET /customers — list all customers (active by default)
 app.get('/customers', authenticate, async (req, res) => {
   try {
-    const [rows] = await db.execute('SELECT id, name, billingAddress, createdAt FROM customers');
+    const { search, includeInactive } = req.query;
+    let where = '(c.isActive = 1 OR c.isActive IS NULL)';
+    const params = [];
+
+    if (includeInactive === 'true') where = '1=1';
+
+    if (search && String(search).trim()) {
+      const term = `%${String(search).trim()}%`;
+      where += ` AND (c.companyName LIKE ? OR c.name LIKE ? OR c.contactName LIKE ? OR c.email LIKE ? OR c.phone LIKE ?)`;
+      params.push(term, term, term, term, term);
+    }
+
+    const sql = `
+      SELECT c.*,
+             COALESCE(wc.cnt, 0) AS woCount
+        FROM customers c
+        LEFT JOIN (
+          SELECT customerId, COUNT(*) AS cnt FROM work_orders WHERE customerId IS NOT NULL GROUP BY customerId
+        ) wc ON wc.customerId = c.id
+       WHERE ${where}
+       ORDER BY COALESCE(c.companyName, c.name) ASC
+    `;
+    const [rows] = await db.execute(sql, params);
     res.json(rows);
   } catch (err) {
     console.error('Customers list error:', err);
@@ -924,34 +1080,609 @@ app.get('/customers', authenticate, async (req, res) => {
   }
 });
 
+// GET /customers/:id — single customer with work order count
 app.get('/customers/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
-    const [rows] = await db.execute(
-      'SELECT id, name, billingAddress, createdAt FROM customers WHERE id = ?',
-      [Number(req.params.id)]
-    );
+    const id = Number(req.params.id);
+    const [rows] = await db.execute('SELECT * FROM customers WHERE id = ?', [id]);
     if (!rows.length) return res.status(404).json({ error: 'Customer not found.' });
-    res.json(rows[0]);
+
+    const cust = rows[0];
+    // Count WOs linked by customerId OR by name match
+    const [countRows] = await db.execute(
+      `SELECT COUNT(*) AS cnt FROM work_orders WHERE customerId = ? OR customer = ? OR customer = ?`,
+      [id, cust.companyName || '', cust.name || '']
+    );
+    cust.woCount = countRows[0]?.cnt || 0;
+
+    res.json(cust);
   } catch (err) {
     console.error('Customer get error:', err);
     res.status(500).json({ error: 'Failed to fetch customer.' });
   }
 });
 
+// POST /customers — create new customer
 app.post('/customers', authenticate, async (req, res) => {
-  const { name, billingAddress } = coerceBody(req);
-  if (!name || !billingAddress) return res.status(400).json({ error: 'name & billingAddress required' });
+  const body = coerceBody(req);
+  const companyName = body.companyName || body.name;
+  if (!companyName) return res.status(400).json({ error: 'companyName is required' });
 
   try {
+    const cols = ['name', 'companyName', 'billingAddress'];
+    const vals = [companyName, companyName, body.billingAddress || null];
+
+    const optFields = ['contactName','email','phone','fax','billingCity','billingState','billingZip',
+                       'siteAddress','siteCity','siteState','siteZip','notes'];
+    for (const f of optFields) {
+      if (body[f] !== undefined && body[f] !== null) {
+        cols.push(f);
+        vals.push(body[f]);
+      }
+    }
+
+    const placeholders = cols.map(() => '?').join(',');
     const [r] = await db.execute(
-      'INSERT INTO customers (name,billingAddress) VALUES (?,?)',
-      [name, billingAddress]
+      `INSERT INTO customers (${cols.join(',')}) VALUES (${placeholders})`,
+      vals
     );
-    res.status(201).json({ customerId: r.insertId });
+
+    const [[newCust]] = await db.execute('SELECT * FROM customers WHERE id = ?', [r.insertId]);
+    res.status(201).json(newCust);
   } catch (err) {
     console.error('Customer create error:', err);
     res.status(500).json({ error: 'Failed to create customer.' });
   }
+});
+
+// PUT /customers/:id — update customer
+app.put('/customers/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [[existing]] = await db.execute('SELECT id FROM customers WHERE id = ?', [id]);
+    if (!existing) return res.status(404).json({ error: 'Customer not found.' });
+
+    const body = coerceBody(req);
+    const allowed = ['companyName','contactName','email','phone','fax',
+                     'billingAddress','billingCity','billingState','billingZip',
+                     'siteAddress','siteCity','siteState','siteZip','notes','isActive'];
+    const sets = [];
+    const vals = [];
+
+    for (const f of allowed) {
+      if (body[f] !== undefined) {
+        sets.push(`\`${f}\` = ?`);
+        vals.push(body[f]);
+      }
+    }
+
+    // Keep name in sync with companyName
+    if (body.companyName) {
+      sets.push('`name` = ?');
+      vals.push(body.companyName);
+    }
+
+    sets.push('`updatedAt` = NOW()');
+
+    if (sets.length <= 1) return res.status(400).json({ error: 'No fields to update.' });
+
+    vals.push(id);
+    await db.execute(`UPDATE customers SET ${sets.join(', ')} WHERE id = ?`, vals);
+
+    const [[updated]] = await db.execute('SELECT * FROM customers WHERE id = ?', [id]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Customer update error:', err);
+    res.status(500).json({ error: 'Failed to update customer.' });
+  }
+});
+
+// DELETE /customers/:id — soft delete
+app.delete('/customers/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    await db.execute('UPDATE customers SET isActive = 0, updatedAt = NOW() WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Customer delete error:', err);
+    res.status(500).json({ error: 'Failed to deactivate customer.' });
+  }
+});
+
+// GET /customers/:id/work-orders — work orders for a customer
+app.get('/customers/:id/work-orders', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [[cust]] = await db.execute('SELECT companyName, name FROM customers WHERE id = ?', [id]);
+    if (!cust) return res.status(404).json({ error: 'Customer not found.' });
+
+    const [rows] = await db.execute(
+      workOrdersSelectSQL({
+        whereSql: 'WHERE w.customerId = ? OR w.customer = ? OR w.customer = ?',
+        orderSql: 'ORDER BY w.id DESC',
+      }),
+      [id, cust.companyName || '', cust.name || '']
+    );
+    const formatted = rows.map(r => ({
+      ...r,
+      status: displayStatusOrDefault(r.status),
+      allPoNumbersFormatted: formatPoNumberList(r.allPoNumbers),
+    }));
+    res.json(formatted);
+  } catch (err) {
+    console.error('Customer work-orders error:', err);
+    res.status(500).json({ error: 'Failed to fetch work orders for customer.' });
+  }
+});
+
+// ─── ESTIMATES ──────────────────────────────────────────────────────────────
+
+const DEFAULT_TERMS = 'ALL PAYMENTS MUST BE MADE 45 DAYS AFTER INVOICE DATE OR A 15% LATE FEE WILL BE APPLIED';
+
+async function recalcEstimateTotals(estimateId) {
+  const [[{ s }]] = await db.query(
+    'SELECT COALESCE(SUM(amount), 0) AS s FROM estimate_line_items WHERE estimateId = ?',
+    [estimateId]
+  );
+  const subtotal = Number(s) || 0;
+  const [[est]] = await db.query('SELECT taxRate FROM estimates WHERE id = ?', [estimateId]);
+  const taxRate = Number(est?.taxRate) || 0;
+  const taxAmount = Math.round(subtotal * taxRate) / 100;
+  const total = subtotal + taxAmount;
+  await db.query(
+    'UPDATE estimates SET subtotal=?, taxAmount=?, total=?, updatedAt=NOW() WHERE id=?',
+    [subtotal, taxAmount, total, estimateId]
+  );
+}
+
+// Format amount to $X,XXX.XX
+function fmtMoney(val) {
+  const n = Number(val) || 0;
+  return '$' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+// --- Generate professional PDF matching QuickBooks format ---
+async function generateEstimatePdf(estimateId) {
+  const [[estimate]] = await db.query(`
+    SELECT e.*, c.companyName, c.name AS custName, c.billingAddress, c.billingCity,
+           c.billingState, c.billingZip, c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail
+    FROM estimates e LEFT JOIN customers c ON e.customerId = c.id
+    WHERE e.id = ?
+  `, [estimateId]);
+  if (!estimate) throw new Error('Estimate not found');
+
+  const [lineItems] = await db.query(
+    'SELECT * FROM estimate_line_items WHERE estimateId = ? ORDER BY sortOrder ASC, id ASC',
+    [estimateId]
+  );
+
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'LETTER', margins: { top: 40, bottom: 40, left: 50, right: 50 } });
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const pw = 612 - 100; // page width minus margins (50+50)
+    const leftCol = 50;
+    const rightCol = 320;
+
+    // --- HEADER ---
+    doc.font('Times-Bold').fontSize(11);
+    doc.text('First Class Glass & Mirror, Inc.', leftCol, 40);
+    doc.font('Times-Roman').fontSize(10);
+    doc.text('1513 Industrial Drive', leftCol, 55);
+    doc.text('Itasca, IL. 60143', leftCol, 67);
+    doc.text('630-250-9777', leftCol, 79);
+    doc.text('630-250-9727', leftCol, 91);
+
+    // "Estimate" title - right side
+    doc.font('Times-Bold').fontSize(24);
+    doc.text('Estimate', rightCol, 40, { width: pw - (rightCol - leftCol), align: 'right' });
+
+    // Date
+    const issueDateStr = estimate.issueDate
+      ? new Date(estimate.issueDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+      : new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    doc.font('Times-Roman').fontSize(10);
+    doc.text('DATE', rightCol + 80, 75);
+    doc.text(issueDateStr, rightCol + 80, 87, { width: pw - (rightCol + 80 - leftCol), align: 'right' });
+
+    // Horizontal line
+    doc.moveTo(leftCol, 110).lineTo(leftCol + pw, 110).lineWidth(0.5).stroke();
+
+    // --- BILL TO + PROJECT ---
+    let y = 120;
+    const custName = estimate.companyName || estimate.custName || '';
+    const billingParts = [estimate.billingAddress, estimate.billingCity, estimate.billingState, estimate.billingZip].filter(Boolean);
+    const billingLine = billingParts.length > 1
+      ? estimate.billingAddress + '\n' + [estimate.billingCity, estimate.billingState].filter(Boolean).join(', ') + (estimate.billingZip ? ' ' + estimate.billingZip : '')
+      : billingParts.join(', ');
+
+    doc.font('Times-Bold').fontSize(9);
+    doc.text('BILL TO', leftCol, y);
+    doc.font('Times-Roman').fontSize(10);
+    y += 14;
+    if (custName) { doc.text(custName, leftCol, y); y += 12; }
+    if (billingLine) {
+      const lines = billingLine.split('\n');
+      for (const l of lines) { doc.text(l, leftCol, y); y += 12; }
+    }
+    if (estimate.custPhone) { doc.text(estimate.custPhone, leftCol, y); y += 12; }
+    if (estimate.custFax) { doc.text('Fax: ' + estimate.custFax, leftCol, y); y += 12; }
+
+    // Project info - right side
+    let yp = 120;
+    doc.font('Times-Bold').fontSize(9);
+    doc.text('PROJECT NAME/ADDRESS', rightCol, yp);
+    doc.font('Times-Roman').fontSize(10);
+    yp += 14;
+    if (estimate.projectName) { doc.text(estimate.projectName, rightCol, yp); yp += 12; }
+    if (estimate.projectAddress) { doc.text(estimate.projectAddress, rightCol, yp); yp += 12; }
+    const projCityLine = [estimate.projectCity, estimate.projectState].filter(Boolean).join(', ') + (estimate.projectZip ? ' ' + estimate.projectZip : '');
+    if (projCityLine.trim()) { doc.text(projCityLine, rightCol, yp); yp += 12; }
+
+    // P.O. No.
+    yp += 6;
+    if (estimate.poNumber) {
+      doc.font('Times-Bold').fontSize(9);
+      doc.text('P.O. No.', rightCol, yp);
+      doc.font('Times-Roman').fontSize(10);
+      doc.text(estimate.poNumber, rightCol + 50, yp);
+    }
+
+    // --- LINE ITEMS TABLE ---
+    const tableTop = Math.max(y, yp) + 20;
+    const colQty = leftCol;
+    const colDesc = leftCol + 60;
+    const colTotal = leftCol + pw - 80;
+    const colEnd = leftCol + pw;
+
+    // Table header
+    doc.moveTo(leftCol, tableTop).lineTo(colEnd, tableTop).lineWidth(0.5).stroke();
+    doc.font('Times-Bold').fontSize(9);
+    doc.text('QTY', colQty + 4, tableTop + 4, { width: 52, align: 'center' });
+    doc.text('DESCRIPTION', colDesc + 4, tableTop + 4);
+    doc.text('TOTAL', colTotal + 4, tableTop + 4, { width: 76, align: 'right' });
+    const headerBottom = tableTop + 18;
+    doc.moveTo(leftCol, headerBottom).lineTo(colEnd, headerBottom).lineWidth(0.5).stroke();
+
+    // Vertical lines for header
+    doc.moveTo(colDesc, tableTop).lineTo(colDesc, headerBottom).stroke();
+    doc.moveTo(colTotal, tableTop).lineTo(colTotal, headerBottom).stroke();
+
+    // Table rows
+    let rowY = headerBottom;
+    doc.font('Times-Roman').fontSize(10);
+    for (const item of lineItems) {
+      rowY += 4;
+      if (item.quantity != null && Number(item.quantity) > 0) {
+        const qtyStr = Number(item.quantity) === Math.floor(Number(item.quantity))
+          ? String(Math.floor(Number(item.quantity)))
+          : Number(item.quantity).toFixed(2);
+        doc.text(qtyStr, colQty + 4, rowY, { width: 52, align: 'center' });
+      }
+      doc.text(item.description || '', colDesc + 4, rowY, { width: colTotal - colDesc - 8 });
+      doc.text(Number(item.amount).toFixed(2), colTotal + 4, rowY, { width: 76, align: 'right' });
+      rowY += 16;
+      // Row separator line
+      doc.moveTo(leftCol, rowY).lineTo(colEnd, rowY).lineWidth(0.25).stroke();
+    }
+
+    // Bottom border of table
+    rowY += 2;
+    doc.moveTo(leftCol, rowY).lineTo(colEnd, rowY).lineWidth(0.5).stroke();
+
+    // --- TOTAL ---
+    rowY += 16;
+    doc.font('Times-Bold').fontSize(12);
+    doc.text('TOTAL', colTotal - 60, rowY);
+    doc.text(fmtMoney(estimate.total), colTotal + 4, rowY, { width: 76, align: 'right' });
+
+    // --- TERMS ---
+    if (estimate.terms) {
+      rowY += 30;
+      doc.font('Times-Roman').fontSize(8);
+      doc.text(estimate.terms, leftCol, rowY, { width: pw, lineGap: 2 });
+    }
+
+    doc.end();
+  });
+}
+
+// GET /estimates - list all estimates
+app.get('/estimates', authenticate, async (req, res) => {
+  try {
+    const { status, customerId, workOrderId, search } = req.query;
+    let sql = `
+      SELECT e.*, c.companyName, c.name AS custName, c.billingAddress, c.phone AS custPhone, c.email AS custEmail
+      FROM estimates e
+      LEFT JOIN customers c ON e.customerId = c.id
+    `;
+    const conditions = [];
+    const params = [];
+
+    if (status) { conditions.push('e.status = ?'); params.push(status); }
+    if (customerId) { conditions.push('e.customerId = ?'); params.push(Number(customerId)); }
+    if (workOrderId) { conditions.push('e.workOrderId = ?'); params.push(Number(workOrderId)); }
+    if (search) {
+      conditions.push('(c.companyName LIKE ? OR c.name LIKE ? OR e.projectName LIKE ? OR e.poNumber LIKE ?)');
+      const s = `%${search}%`;
+      params.push(s, s, s, s);
+    }
+
+    if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
+    sql += ' ORDER BY e.createdAt DESC';
+
+    const [rows] = await db.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching estimates:', err);
+    res.status(500).json({ error: 'Failed to fetch estimates.' });
+  }
+});
+
+// GET /estimates/:id - single estimate with line items
+app.get('/estimates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [[estimate]] = await db.query(`
+      SELECT e.*, c.companyName, c.name AS custName, c.billingAddress, c.billingCity,
+             c.billingState, c.billingZip, c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail
+      FROM estimates e LEFT JOIN customers c ON e.customerId = c.id
+      WHERE e.id = ?
+    `, [req.params.id]);
+    if (!estimate) return res.status(404).json({ error: 'Estimate not found.' });
+
+    const [lineItems] = await db.query(
+      'SELECT * FROM estimate_line_items WHERE estimateId = ? ORDER BY sortOrder ASC, id ASC',
+      [req.params.id]
+    );
+    estimate.lineItems = lineItems;
+    res.json(estimate);
+  } catch (err) {
+    console.error('Error fetching estimate:', err);
+    res.status(500).json({ error: 'Failed to fetch estimate.' });
+  }
+});
+
+// POST /estimates - create new estimate
+app.post('/estimates', authenticate, async (req, res) => {
+  try {
+    const body = coerceBody(req);
+    if (!body.customerId) return res.status(400).json({ error: 'customerId is required.' });
+
+    const cols = ['customerId'];
+    const vals = [Number(body.customerId)];
+    const fields = ['workOrderId','status','issueDate','expirationDate','poNumber','projectName',
+      'projectAddress','projectCity','projectState','projectZip','subtotal','taxRate','taxAmount',
+      'total','notes','pdfPath'];
+
+    for (const f of fields) {
+      if (body[f] !== undefined) {
+        cols.push(f);
+        vals.push(body[f]);
+      }
+    }
+
+    // Default terms
+    cols.push('terms');
+    vals.push(body.terms || DEFAULT_TERMS);
+
+    const placeholders = cols.map(() => '?').join(',');
+    const [result] = await db.query(
+      `INSERT INTO estimates (${cols.join(',')}) VALUES (${placeholders})`,
+      vals
+    );
+    const [[newEst]] = await db.query('SELECT * FROM estimates WHERE id = ?', [result.insertId]);
+    res.status(201).json(newEst);
+  } catch (err) {
+    console.error('Error creating estimate:', err);
+    res.status(500).json({ error: 'Failed to create estimate.' });
+  }
+});
+
+// PUT /estimates/:id - update estimate
+app.put('/estimates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const body = coerceBody(req);
+    const sets = [];
+    const params = [];
+    const fields = ['customerId','workOrderId','status','issueDate','expirationDate','poNumber',
+      'projectName','projectAddress','projectCity','projectState','projectZip','subtotal','taxRate',
+      'taxAmount','total','notes','terms','pdfPath'];
+
+    for (const f of fields) {
+      if (body[f] !== undefined) {
+        sets.push(`${f}=?`);
+        params.push(body[f]);
+      }
+    }
+
+    if (sets.length === 0) return res.status(400).json({ error: 'No fields to update.' });
+    sets.push('updatedAt=NOW()');
+    params.push(req.params.id);
+
+    await db.query(`UPDATE estimates SET ${sets.join(',')} WHERE id=?`, params);
+
+    // Recalculate if taxRate changed
+    if (body.taxRate !== undefined) await recalcEstimateTotals(req.params.id);
+
+    const [[updated]] = await db.query('SELECT * FROM estimates WHERE id = ?', [req.params.id]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating estimate:', err);
+    res.status(500).json({ error: 'Failed to update estimate.' });
+  }
+});
+
+// DELETE /estimates/:id
+app.delete('/estimates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    await db.query('DELETE FROM estimates WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting estimate:', err);
+    res.status(500).json({ error: 'Failed to delete estimate.' });
+  }
+});
+
+// POST /estimates/:id/line-items - add line item
+app.post('/estimates/:id/line-items', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const body = coerceBody(req);
+    if (!body.description) return res.status(400).json({ error: 'description is required.' });
+    if (body.amount === undefined) return res.status(400).json({ error: 'amount is required.' });
+
+    await db.query(
+      'INSERT INTO estimate_line_items (estimateId, description, quantity, amount, sortOrder) VALUES (?,?,?,?,?)',
+      [req.params.id, body.description, body.quantity ?? null, Number(body.amount), body.sortOrder || 0]
+    );
+    await recalcEstimateTotals(req.params.id);
+
+    const [[estimate]] = await db.query('SELECT * FROM estimates WHERE id = ?', [req.params.id]);
+    const [lineItems] = await db.query(
+      'SELECT * FROM estimate_line_items WHERE estimateId = ? ORDER BY sortOrder ASC, id ASC',
+      [req.params.id]
+    );
+    estimate.lineItems = lineItems;
+    res.status(201).json(estimate);
+  } catch (err) {
+    console.error('Error adding line item:', err);
+    res.status(500).json({ error: 'Failed to add line item.' });
+  }
+});
+
+// PUT /estimates/:id/line-items/:itemId - update line item
+app.put('/estimates/:id/line-items/:itemId', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const body = coerceBody(req);
+    const sets = [];
+    const params = [];
+
+    if (body.description !== undefined) { sets.push('description=?'); params.push(body.description); }
+    if (body.quantity !== undefined) { sets.push('quantity=?'); params.push(body.quantity); }
+    if (body.amount !== undefined) { sets.push('amount=?'); params.push(Number(body.amount)); }
+    if (body.sortOrder !== undefined) { sets.push('sortOrder=?'); params.push(Number(body.sortOrder)); }
+
+    if (sets.length === 0) return res.status(400).json({ error: 'No fields to update.' });
+    params.push(req.params.itemId, req.params.id);
+
+    await db.query(`UPDATE estimate_line_items SET ${sets.join(',')} WHERE id=? AND estimateId=?`, params);
+    await recalcEstimateTotals(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error updating line item:', err);
+    res.status(500).json({ error: 'Failed to update line item.' });
+  }
+});
+
+// DELETE /estimates/:id/line-items/:itemId
+app.delete('/estimates/:id/line-items/:itemId', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    await db.query('DELETE FROM estimate_line_items WHERE id=? AND estimateId=?', [req.params.itemId, req.params.id]);
+    await recalcEstimateTotals(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting line item:', err);
+    res.status(500).json({ error: 'Failed to delete line item.' });
+  }
+});
+
+// PUT /estimates/:id/line-items/reorder
+app.put('/estimates/:id/line-items/reorder', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const body = coerceBody(req);
+    const items = body.items || [];
+    for (const item of items) {
+      if (item.id && item.sortOrder !== undefined) {
+        await db.query('UPDATE estimate_line_items SET sortOrder=? WHERE id=? AND estimateId=?',
+          [Number(item.sortOrder), Number(item.id), req.params.id]);
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error reordering line items:', err);
+    res.status(500).json({ error: 'Failed to reorder line items.' });
+  }
+});
+
+// PUT /estimates/:id/status - update status
+app.put('/estimates/:id/status', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const body = coerceBody(req);
+    const { status } = body;
+    const valid = ['Draft', 'Sent', 'Accepted', 'Declined'];
+    if (!valid.includes(status)) return res.status(400).json({ error: `Invalid status. Must be one of: ${valid.join(', ')}` });
+
+    const sets = ['status=?', 'updatedAt=NOW()'];
+    const params = [status];
+
+    if (status === 'Sent') { sets.push('sentAt=NOW()'); }
+    if (status === 'Accepted') { sets.push('acceptedAt=NOW()'); }
+    if (status === 'Declined') { sets.push('declinedAt=NOW()'); }
+
+    params.push(req.params.id);
+    await db.query(`UPDATE estimates SET ${sets.join(',')} WHERE id=?`, params);
+
+    const [[updated]] = await db.query('SELECT * FROM estimates WHERE id = ?', [req.params.id]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating estimate status:', err);
+    res.status(500).json({ error: 'Failed to update status.' });
+  }
+});
+
+// POST /estimates/:id/generate-pdf
+app.post('/estimates/:id/generate-pdf', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const pdfBuffer = await generateEstimatePdf(req.params.id);
+    const filename = `estimate_${req.params.id}_${Date.now()}.pdf`;
+    const localDir = path.resolve(__dirname, 'uploads');
+    if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+    const filePath = path.join(localDir, filename);
+    fs.writeFileSync(filePath, pdfBuffer);
+
+    const pdfPath = `uploads/${filename}`;
+    await db.query('UPDATE estimates SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, req.params.id]);
+
+    res.json({ pdfPath });
+  } catch (err) {
+    console.error('Error generating estimate PDF:', err);
+    res.status(500).json({ error: 'Failed to generate PDF.' });
+  }
+});
+
+// POST /estimates/:id/send-email (placeholder)
+app.post('/estimates/:id/send-email', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    // Generate PDF if not already generated
+    const [[est]] = await db.query('SELECT pdfPath FROM estimates WHERE id = ?', [req.params.id]);
+    if (!est) return res.status(404).json({ error: 'Estimate not found.' });
+
+    let pdfPath = est.pdfPath;
+    if (!pdfPath) {
+      const pdfBuffer = await generateEstimatePdf(req.params.id);
+      const filename = `estimate_${req.params.id}_${Date.now()}.pdf`;
+      const localDir = path.resolve(__dirname, 'uploads');
+      if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+      fs.writeFileSync(path.join(localDir, filename), pdfBuffer);
+      pdfPath = `uploads/${filename}`;
+      await db.query('UPDATE estimates SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, req.params.id]);
+    }
+
+    // Update status to Sent
+    await db.query('UPDATE estimates SET status=?, sentAt=NOW(), updatedAt=NOW() WHERE id=?', ['Sent', req.params.id]);
+
+    res.json({ message: 'Email sending will be configured soon. PDF has been generated.', pdfPath });
+  } catch (err) {
+    console.error('Error sending estimate email:', err);
+    res.status(500).json({ error: 'Failed to send estimate.' });
+  }
+});
+
+// POST /estimates/:id/convert-to-invoice (placeholder)
+app.post('/estimates/:id/convert-to-invoice', authenticate, requireNumericParam('id'), async (req, res) => {
+  res.json({ message: 'Invoice module coming soon' });
 });
 
 // ─── WORK ORDERS HELPERS ────────────────────────────────────────────────────
@@ -1501,7 +2232,8 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
 
       scheduledDate: scheduledDateRaw = null,
       endTime = null,
-      timeWindow = null
+      timeWindow = null,
+      customerId = null,
     } = req.body;
 
     if (!customer || !billingAddress || !problemDescription) {
@@ -1569,6 +2301,11 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       const assignedToVal = Number.isFinite(Number(assignedTo)) ? Number(assignedTo) : null;
       cols.push('assignedTo');
       vals.push(assignedToVal);
+    }
+
+    if (customerId && Number.isFinite(Number(customerId))) {
+      cols.push('customerId');
+      vals.push(Number(customerId));
     }
 
     const placeholders = cols.map(() => '?').join(',');
@@ -1869,6 +2606,13 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     if (SCHEMA.hasAssignedTo) {
       sql += `, assignedTo=?`;
       params.push((assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo));
+    }
+
+    // customerId linking
+    if (req.body.customerId !== undefined) {
+      sql += `, customerId=?`;
+      const cid = req.body.customerId;
+      params.push(cid && Number.isFinite(Number(cid)) ? Number(cid) : null);
     }
 
     sql += ` WHERE id=?`;
