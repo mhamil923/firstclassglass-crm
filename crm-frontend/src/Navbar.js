@@ -168,6 +168,12 @@ export default function Navbar() {
               History
             </NavLink>
           </li>
+
+          <li className="nav-item">
+            <NavLink className="nav-link" to="/reports" onClick={closeNavbar}>
+              Reports
+            </NavLink>
+          </li>
         </ul>
 
         <div className="navbar-right">

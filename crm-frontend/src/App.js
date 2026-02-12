@@ -25,6 +25,7 @@ import ViewEstimate from "./ViewEstimate";
 import Invoices from "./Invoices";
 import CreateInvoice from "./CreateInvoice";
 import ViewInvoice from "./ViewInvoice";
+import Reports from "./Reports";
 // Note: Bootstrap is imported in index.js before our custom styles
 
 // A wrapper for protecting routes
@@ -195,6 +196,16 @@ export default function App() {
               element={
                 <PrivateRoute>
                   <PurchaseOrders />
+                </PrivateRoute>
+              }
+            />
+
+            {/* Reports */}
+            <Route
+              path="/reports"
+              element={
+                <PrivateRoute>
+                  <Reports />
                 </PrivateRoute>
               }
             />
