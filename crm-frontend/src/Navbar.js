@@ -170,6 +170,12 @@ export default function Navbar() {
           </li>
 
           <li className="nav-item">
+            <NavLink className="nav-link" to="/route-builder" onClick={closeNavbar}>
+              Route Builder
+            </NavLink>
+          </li>
+
+          <li className="nav-item">
             <NavLink className="nav-link" to="/reports" onClick={closeNavbar}>
               Reports
             </NavLink>
