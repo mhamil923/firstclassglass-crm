@@ -2460,6 +2460,419 @@ app.put('/settings', authenticate, async (req, res) => {
   }
 });
 
+// ─── REPORTS ENDPOINTS ──────────────────────────────────────────────────────
+
+// GET /reports/dashboard — single call for Home page dashboard
+app.get('/reports/dashboard', authenticate, async (req, res) => {
+  try {
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curMonth = now.getMonth() + 1;
+    const prevMonth = curMonth === 1 ? 12 : curMonth - 1;
+    const prevYear = curMonth === 1 ? curYear - 1 : curYear;
+
+    // Current month revenue (paid invoices)
+    const [[cmRev]] = await db.query(
+      "SELECT COALESCE(SUM(total), 0) AS rev FROM invoices WHERE status = 'Paid' AND YEAR(paidAt) = ? AND MONTH(paidAt) = ?",
+      [curYear, curMonth]
+    );
+    const currentMonthRevenue = Number(cmRev.rev) || 0;
+
+    // Last month revenue
+    const [[lmRev]] = await db.query(
+      "SELECT COALESCE(SUM(total), 0) AS rev FROM invoices WHERE status = 'Paid' AND YEAR(paidAt) = ? AND MONTH(paidAt) = ?",
+      [prevYear, prevMonth]
+    );
+    const lastMonthRevenue = Number(lmRev.rev) || 0;
+
+    // Revenue by month (last 6 months for sparkline)
+    const [revByMonth] = await db.query(
+      `SELECT DATE_FORMAT(paidAt, '%Y-%m') AS month, COALESCE(SUM(total), 0) AS revenue
+       FROM invoices WHERE status = 'Paid' AND paidAt >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+       GROUP BY month ORDER BY month`
+    );
+    const revenueByMonth = revByMonth.map(r => ({ month: r.month, revenue: Number(r.revenue) || 0 }));
+
+    // Outstanding totals
+    const [[outst]] = await db.query(
+      "SELECT COUNT(*) AS cnt, COALESCE(SUM(balanceDue), 0) AS total FROM invoices WHERE balanceDue > 0 AND status NOT IN ('Void','Paid','Draft')"
+    );
+    const outstandingTotal = Number(outst.total) || 0;
+    const unpaidCount = Number(outst.cnt) || 0;
+
+    // Overdue
+    const [[ovrd]] = await db.query(
+      "SELECT COUNT(*) AS cnt, COALESCE(SUM(balanceDue), 0) AS total FROM invoices WHERE status IN ('Sent','Overdue') AND dueDate < CURDATE() AND balanceDue > 0"
+    );
+    const overdueCount = Number(ovrd.cnt) || 0;
+    const overdueTotal = Number(ovrd.total) || 0;
+    const hasOverdue = overdueCount > 0;
+
+    // Overdue invoice list (max 10)
+    const [overdueInvoices] = await db.query(
+      `SELECT i.id, i.invoiceNumber, c.companyName AS customerName, i.total, i.balanceDue, i.dueDate
+       FROM invoices i LEFT JOIN customers c ON c.id = i.customerId
+       WHERE i.status IN ('Sent','Overdue') AND i.dueDate < CURDATE() AND i.balanceDue > 0
+       ORDER BY i.dueDate ASC LIMIT 10`
+    );
+
+    // Estimates pipeline
+    const [[estPipe]] = await db.query(
+      "SELECT COUNT(*) AS cnt, COALESCE(SUM(total), 0) AS val FROM estimates WHERE status = 'Sent'"
+    );
+    const estimatesPendingCount = Number(estPipe.cnt) || 0;
+    const estimatesPendingValue = Number(estPipe.val) || 0;
+
+    const [[estConv]] = await db.query(
+      "SELECT COUNT(CASE WHEN status='Accepted' THEN 1 END) AS accepted, COUNT(CASE WHEN status='Declined' THEN 1 END) AS declined FROM estimates WHERE status IN ('Accepted','Declined')"
+    );
+    const accepted = Number(estConv.accepted) || 0;
+    const declined = Number(estConv.declined) || 0;
+    const estimatesConversionRate = (accepted + declined) > 0 ? Math.round((accepted / (accepted + declined)) * 1000) / 10 : 0;
+
+    // Work orders
+    const [[woActive]] = await db.query(
+      "SELECT COUNT(*) AS cnt FROM work_orders WHERE status NOT IN ('Completed')"
+    );
+    const [[woWaiting]] = await db.query(
+      "SELECT COUNT(*) AS cnt FROM work_orders WHERE status = 'Waiting on Parts'"
+    );
+    const [[woCompleted]] = await db.query(
+      "SELECT COUNT(*) AS cnt FROM work_orders WHERE status = 'Completed' AND YEAR(COALESCE(updatedAt, createdAt, created_at)) = ? AND MONTH(COALESCE(updatedAt, createdAt, created_at)) = ?",
+      [curYear, curMonth]
+    );
+
+    // Expiring estimates (within 7 days)
+    const [expiringEstimates] = await db.query(
+      `SELECT e.id, e.projectName, c.companyName AS customerName, e.total, e.expirationDate
+       FROM estimates e LEFT JOIN customers c ON c.id = e.customerId
+       WHERE e.status = 'Sent' AND e.expirationDate IS NOT NULL
+       AND e.expirationDate BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+       ORDER BY e.expirationDate ASC`
+    );
+
+    // Monthly revenue (last 12 months for bar chart)
+    const [monthlyRevenue] = await db.query(
+      `SELECT DATE_FORMAT(paidAt, '%Y-%m') AS month, COALESCE(SUM(total), 0) AS revenue
+       FROM invoices WHERE status = 'Paid' AND paidAt >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+       GROUP BY month ORDER BY month`
+    );
+    const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const monthlyRevenueData = monthlyRevenue.map(r => {
+      const [y, m] = r.month.split('-');
+      return { month: r.month, label: monthLabels[parseInt(m, 10) - 1] + ' ' + y, revenue: Number(r.revenue) || 0 };
+    });
+
+    // Invoice status breakdown
+    const [statusBreak] = await db.query(
+      `SELECT
+         CASE WHEN status IN ('Sent') AND dueDate < CURDATE() AND balanceDue > 0 THEN 'Overdue' ELSE status END AS displayStatus,
+         COUNT(*) AS count, COALESCE(SUM(total), 0) AS total
+       FROM invoices GROUP BY displayStatus`
+    );
+    const invoiceStatusBreakdown = statusBreak.map(r => ({ status: r.displayStatus, count: Number(r.count), total: Number(r.total) || 0 }));
+
+    // Recent invoices
+    const [recentInvoices] = await db.query(
+      `SELECT i.id, i.invoiceNumber, c.companyName AS customerName, i.total, i.balanceDue, i.status, i.issueDate, i.dueDate
+       FROM invoices i LEFT JOIN customers c ON c.id = i.customerId
+       ORDER BY i.updatedAt DESC LIMIT 5`
+    );
+
+    // Recent estimates
+    const [recentEstimates] = await db.query(
+      `SELECT e.id, e.projectName, c.companyName AS customerName, e.total, e.status, e.issueDate
+       FROM estimates e LEFT JOIN customers c ON c.id = e.customerId
+       ORDER BY e.updatedAt DESC LIMIT 5`
+    );
+
+    res.json({
+      currentMonthRevenue, lastMonthRevenue, revenueByMonth,
+      outstandingTotal, unpaidCount, hasOverdue, overdueCount, overdueTotal, overdueInvoices,
+      estimatesPendingCount, estimatesPendingValue, estimatesConversionRate,
+      activeWorkOrders: Number(woActive.cnt) || 0,
+      waitingOnParts: Number(woWaiting.cnt) || 0,
+      completedThisMonth: Number(woCompleted.cnt) || 0,
+      expiringEstimates,
+      monthlyRevenue: monthlyRevenueData,
+      invoiceStatusBreakdown,
+      recentInvoices, recentEstimates,
+    });
+  } catch (err) {
+    console.error('Error fetching dashboard:', err);
+    res.status(500).json({ error: 'Failed to fetch dashboard data.' });
+  }
+});
+
+// GET /reports/revenue — monthly revenue breakdown for date range
+app.get('/reports/revenue', authenticate, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const params = [];
+    let where = '1=1';
+    if (from) { where += ' AND i.issueDate >= ?'; params.push(from); }
+    if (to) { where += ' AND i.issueDate <= ?'; params.push(to); }
+
+    const [rows] = await db.query(
+      `SELECT DATE_FORMAT(i.issueDate, '%Y-%m') AS month,
+        COUNT(*) AS totalInvoices,
+        COUNT(CASE WHEN i.status IN ('Sent','Overdue') THEN 1 END) AS invoicesSent,
+        COUNT(CASE WHEN i.status = 'Paid' THEN 1 END) AS invoicesPaid,
+        COALESCE(SUM(CASE WHEN i.status = 'Paid' THEN i.total ELSE 0 END), 0) AS revenue,
+        COALESCE(SUM(CASE WHEN i.status NOT IN ('Paid','Void','Draft') THEN i.balanceDue ELSE 0 END), 0) AS outstanding
+       FROM invoices i WHERE ${where}
+       GROUP BY DATE_FORMAT(i.issueDate, '%Y-%m')
+       ORDER BY month`, params
+    );
+
+    const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const months = rows.map(r => {
+      const rev = Number(r.revenue) || 0;
+      const out = Number(r.outstanding) || 0;
+      const [y, m] = r.month.split('-');
+      return {
+        month: r.month,
+        label: monthLabels[parseInt(m, 10) - 1] + ' ' + y,
+        totalInvoices: Number(r.totalInvoices) || 0,
+        invoicesSent: Number(r.invoicesSent) || 0,
+        invoicesPaid: Number(r.invoicesPaid) || 0,
+        revenue: rev,
+        outstanding: out,
+        collectionRate: (rev + out) > 0 ? Math.round((rev / (rev + out)) * 1000) / 10 : 0,
+      };
+    });
+
+    const totals = months.reduce((acc, m) => {
+      acc.totalInvoices += m.totalInvoices;
+      acc.invoicesSent += m.invoicesSent;
+      acc.invoicesPaid += m.invoicesPaid;
+      acc.revenue += m.revenue;
+      acc.outstanding += m.outstanding;
+      return acc;
+    }, { totalInvoices: 0, invoicesSent: 0, invoicesPaid: 0, revenue: 0, outstanding: 0 });
+    totals.collectionRate = (totals.revenue + totals.outstanding) > 0
+      ? Math.round((totals.revenue / (totals.revenue + totals.outstanding)) * 1000) / 10 : 0;
+
+    res.json({ months, totals });
+  } catch (err) {
+    console.error('Error fetching revenue report:', err);
+    res.status(500).json({ error: 'Failed to fetch revenue report.' });
+  }
+});
+
+// GET /reports/aging — accounts receivable aging
+app.get('/reports/aging', authenticate, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT i.id, i.invoiceNumber, c.companyName AS customerName,
+        i.issueDate, i.dueDate, i.total, i.balanceDue,
+        DATEDIFF(CURDATE(), i.dueDate) AS daysOverdue
+       FROM invoices i LEFT JOIN customers c ON c.id = i.customerId
+       WHERE i.balanceDue > 0 AND i.status NOT IN ('Void','Draft','Paid')
+       ORDER BY i.dueDate ASC`
+    );
+
+    const buckets = [
+      { label: 'Current', min: -999999, max: 0, count: 0, total: 0, invoices: [] },
+      { label: '1-30 Days', min: 1, max: 30, count: 0, total: 0, invoices: [] },
+      { label: '31-60 Days', min: 31, max: 60, count: 0, total: 0, invoices: [] },
+      { label: '61-90 Days', min: 61, max: 90, count: 0, total: 0, invoices: [] },
+      { label: '90+ Days', min: 91, max: 999999, count: 0, total: 0, invoices: [] },
+    ];
+
+    for (const inv of rows) {
+      const days = Number(inv.daysOverdue) || 0;
+      const bal = Number(inv.balanceDue) || 0;
+      for (const b of buckets) {
+        if (days >= b.min && days <= b.max) {
+          b.count++;
+          b.total += bal;
+          b.invoices.push({
+            id: inv.id, invoiceNumber: inv.invoiceNumber, customerName: inv.customerName,
+            issueDate: inv.issueDate, dueDate: inv.dueDate, total: Number(inv.total) || 0, balanceDue: bal,
+            daysOverdue: days
+          });
+          break;
+        }
+      }
+    }
+
+    // Clean up min/max from response
+    const result = buckets.map(({ min, max, ...rest }) => rest);
+    res.json({ buckets: result, totalOutstanding: rows.reduce((s, r) => s + (Number(r.balanceDue) || 0), 0) });
+  } catch (err) {
+    console.error('Error fetching aging report:', err);
+    res.status(500).json({ error: 'Failed to fetch aging report.' });
+  }
+});
+
+// GET /reports/customers — customer revenue breakdown
+app.get('/reports/customers', authenticate, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const params = [];
+    let invoiceDateFilter = '';
+    if (from && to) {
+      invoiceDateFilter = 'AND i.issueDate BETWEEN ? AND ?';
+      params.push(from, to);
+    } else if (from) {
+      invoiceDateFilter = 'AND i.issueDate >= ?';
+      params.push(from);
+    } else if (to) {
+      invoiceDateFilter = 'AND i.issueDate <= ?';
+      params.push(to);
+    }
+
+    const [rows] = await db.query(
+      `SELECT c.id, c.companyName AS customerName,
+        COUNT(DISTINCT i.id) AS invoiceCount,
+        COALESCE(SUM(i.total), 0) AS totalInvoiced,
+        COALESCE(SUM(i.amountPaid), 0) AS totalPaid,
+        COALESCE(SUM(i.balanceDue), 0) AS outstanding,
+        (SELECT COUNT(*) FROM work_orders wo WHERE wo.customerId = c.id) AS workOrderCount
+       FROM customers c
+       LEFT JOIN invoices i ON i.customerId = c.id ${invoiceDateFilter}
+       WHERE c.isActive = 1
+       GROUP BY c.id
+       HAVING invoiceCount > 0
+       ORDER BY totalInvoiced DESC`, params
+    );
+
+    const customers = rows.map(r => ({
+      id: r.id, customerName: r.customerName,
+      invoiceCount: Number(r.invoiceCount) || 0,
+      totalInvoiced: Number(r.totalInvoiced) || 0,
+      totalPaid: Number(r.totalPaid) || 0,
+      outstanding: Number(r.outstanding) || 0,
+      workOrderCount: Number(r.workOrderCount) || 0,
+    }));
+
+    res.json({ customers });
+  } catch (err) {
+    console.error('Error fetching customer report:', err);
+    res.status(500).json({ error: 'Failed to fetch customer report.' });
+  }
+});
+
+// GET /reports/estimates — estimate statistics
+app.get('/reports/estimates', authenticate, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const params = [];
+    let where = '1=1';
+    if (from) { where += ' AND e.issueDate >= ?'; params.push(from); }
+    if (to) { where += ' AND e.issueDate <= ?'; params.push(to); }
+
+    const [rows] = await db.query(
+      `SELECT e.id, e.projectName, c.companyName AS customerName, e.total, e.status, e.issueDate,
+        e.acceptedAt, e.declinedAt, e.sentAt
+       FROM estimates e LEFT JOIN customers c ON c.id = e.customerId
+       WHERE ${where}
+       ORDER BY e.issueDate DESC`, params
+    );
+
+    const totalCount = rows.length;
+    const totalValue = rows.reduce((s, r) => s + (Number(r.total) || 0), 0);
+    const byStatus = {};
+    for (const r of rows) {
+      const st = r.status || 'Draft';
+      if (!byStatus[st]) byStatus[st] = { status: st, count: 0, value: 0 };
+      byStatus[st].count++;
+      byStatus[st].value += Number(r.total) || 0;
+    }
+
+    const accepted = (byStatus['Accepted'] || {}).count || 0;
+    const declined = (byStatus['Declined'] || {}).count || 0;
+    const conversionRate = (accepted + declined) > 0 ? Math.round((accepted / (accepted + declined)) * 1000) / 10 : 0;
+    const avgValue = totalCount > 0 ? Math.round(totalValue / totalCount * 100) / 100 : 0;
+
+    res.json({
+      totalCount, totalValue, avgValue, conversionRate,
+      byStatus: Object.values(byStatus),
+      estimates: rows.map(r => ({
+        id: r.id, projectName: r.projectName, customerName: r.customerName,
+        total: Number(r.total) || 0, status: r.status || 'Draft', issueDate: r.issueDate,
+      })),
+    });
+  } catch (err) {
+    console.error('Error fetching estimates report:', err);
+    res.status(500).json({ error: 'Failed to fetch estimates report.' });
+  }
+});
+
+// GET /reports/work-orders — work order statistics
+app.get('/reports/work-orders', authenticate, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const params = [];
+    let where = '1=1';
+    if (from) { where += ' AND COALESCE(wo.createdAt, wo.created_at) >= ?'; params.push(from); }
+    if (to) { where += ' AND COALESCE(wo.createdAt, wo.created_at) <= ?'; params.push(to); }
+
+    const [rows] = await db.query(
+      `SELECT wo.status, COUNT(*) AS cnt FROM work_orders wo WHERE ${where} GROUP BY wo.status`, params
+    );
+
+    const totalCount = rows.reduce((s, r) => s + (Number(r.cnt) || 0), 0);
+    const byStatus = rows.map(r => ({ status: r.status || 'Unknown', count: Number(r.cnt) || 0 }));
+    const completedCount = byStatus.find(b => b.status === 'Completed')?.count || 0;
+
+    // Average completion days for completed work orders
+    const completedParams = [...params];
+    const [[avgRow]] = await db.query(
+      `SELECT AVG(DATEDIFF(COALESCE(wo.updatedAt, wo.createdAt, wo.created_at), COALESCE(wo.createdAt, wo.created_at))) AS avgDays
+       FROM work_orders wo WHERE wo.status = 'Completed' AND ${where}`, completedParams
+    );
+    const avgCompletionDays = Math.round(Number(avgRow?.avgDays) || 0);
+
+    // PO counts
+    const [[withPOsRow]] = await db.query(
+      `SELECT COUNT(DISTINCT wop.workOrderId) AS cnt FROM work_order_pos wop
+       JOIN work_orders wo ON wo.id = wop.workOrderId WHERE ${where}`, params
+    );
+    const withPOs = Number(withPOsRow?.cnt) || 0;
+    const withoutPOs = totalCount - withPOs;
+
+    res.json({ totalCount, byStatus, completedCount, avgCompletionDays, withPOs, withoutPOs });
+  } catch (err) {
+    console.error('Error fetching work orders report:', err);
+    res.status(500).json({ error: 'Failed to fetch work orders report.' });
+  }
+});
+
+// GET /reports/profit-loss — simple P&L (revenue only)
+app.get('/reports/profit-loss', authenticate, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const params = [];
+    let where = "i.status = 'Paid'";
+    if (from) { where += ' AND i.paidAt >= ?'; params.push(from); }
+    if (to) { where += ' AND i.paidAt <= ?'; params.push(to); }
+
+    const [rows] = await db.query(
+      `SELECT DATE_FORMAT(i.paidAt, '%Y-%m') AS month, COALESCE(SUM(i.total), 0) AS revenue
+       FROM invoices i WHERE ${where} AND i.paidAt IS NOT NULL
+       GROUP BY month ORDER BY month`, params
+    );
+
+    const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const months = rows.map(r => {
+      const [y, m] = r.month.split('-');
+      return { month: r.month, label: monthLabels[parseInt(m, 10) - 1] + ' ' + y, revenue: Number(r.revenue) || 0 };
+    });
+
+    const totalRevenue = months.reduce((s, m) => s + m.revenue, 0);
+
+    res.json({
+      months, totalRevenue,
+      note: 'Cost tracking is not yet available. This report shows revenue only.',
+    });
+  } catch (err) {
+    console.error('Error fetching P&L report:', err);
+    res.status(500).json({ error: 'Failed to fetch P&L report.' });
+  }
+});
+
 // ─── WORK ORDERS HELPERS ────────────────────────────────────────────────────
 function pickPdfKeyFromRow(r) {
   if (r?.pdfPath && /\.pdf$/i.test(r.pdfPath)) return r.pdfPath;
