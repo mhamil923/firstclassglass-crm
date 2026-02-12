@@ -4852,6 +4852,196 @@ app.get('/routes/test-google-api', authenticate, async (req, res) => {
   }
 });
 
+// ─── ROUTE BUILDER / DAY PLANNER ────────────────────────────────────────────
+
+// POST /route-builder/find-nearby — find unscheduled WOs near an anchor
+app.post('/route-builder/find-nearby', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const anchorId = b.anchorWorkOrderId ? Number(b.anchorWorkOrderId) : null;
+    const maxMinutes = Math.min(Number(b.maxDriveMinutes) || 60, 120);
+    let anchorAddress = '';
+    let anchorInfo = {};
+
+    // Resolve anchor address
+    if (anchorId) {
+      const [[row]] = await db.execute(
+        'SELECT id, workOrderNumber, customer, siteAddress, siteLocation FROM work_orders WHERE id = ?',
+        [anchorId]
+      );
+      if (!row) return res.status(404).json({ error: 'Anchor work order not found.' });
+      anchorAddress = cleanAddr(row.siteAddress || row.siteLocation || '');
+      anchorInfo = { workOrderId: row.id, workOrderNumber: row.workOrderNumber, customer: row.customer, address: anchorAddress };
+    } else if (b.anchorAddress) {
+      anchorAddress = cleanAddr(b.anchorAddress);
+      anchorInfo = { workOrderId: null, address: anchorAddress };
+    }
+
+    if (!anchorAddress) {
+      return res.status(400).json({ error: 'No valid anchor address provided.' });
+    }
+
+    // Get all unscheduled WOs
+    const [candidates] = await db.execute(
+      `SELECT id, workOrderNumber, poNumber, customer, siteLocation, siteAddress, problemDescription
+       FROM work_orders WHERE status = 'Needs to be Scheduled' ORDER BY id DESC`
+    );
+
+    // Filter to those with valid addresses, excluding anchor itself
+    const anchorLower = anchorAddress.toLowerCase();
+    const withAddr = [];
+    let skippedNoAddress = 0;
+    for (const c of candidates) {
+      const addr = cleanAddr(c.siteAddress || c.siteLocation || '');
+      if (!addr) { skippedNoAddress++; continue; }
+      if (addr.toLowerCase() === anchorLower) continue;
+      if (anchorId && c.id === anchorId) continue;
+      withAddr.push({ ...c, _addr: addr });
+    }
+
+    if (withAddr.length === 0) {
+      return res.json({
+        ok: true, anchor: anchorInfo,
+        tiers: { closest: [], near: [], moderate: [], further: [] },
+        totalCandidates: 0, skippedNoAddress, maxDriveMinutes: maxMinutes,
+      });
+    }
+
+    // Calculate drive times
+    const results = [];
+
+    if (GOOGLE_MAPS_API_KEY) {
+      // Batch Distance Matrix API calls (max 25 destinations per request)
+      const BATCH = 25;
+      for (let i = 0; i < withAddr.length; i += BATCH) {
+        const batch = withAddr.slice(i, i + BATCH);
+        const destinations = batch.map(c => c._addr).join('|');
+        const url = `https://maps.googleapis.com/maps/api/distancematrix/json`
+          + `?origins=${encodeURIComponent(anchorAddress)}`
+          + `&destinations=${encodeURIComponent(destinations)}`
+          + `&mode=driving&units=imperial`
+          + `&key=${GOOGLE_MAPS_API_KEY}`;
+
+        try {
+          const resp = await axios.get(url, { timeout: Number(ROUTE_TIMEOUT_MS) || 20000 });
+          const data = resp?.data;
+          if (data?.status === 'OK' && data.rows?.[0]?.elements) {
+            const elements = data.rows[0].elements;
+            for (let j = 0; j < batch.length; j++) {
+              const el = elements[j];
+              if (el?.status === 'OK') {
+                const mins = Math.round((el.duration?.value || 0) / 60);
+                results.push({
+                  id: batch[j].id, workOrderNumber: batch[j].workOrderNumber,
+                  poNumber: batch[j].poNumber, customer: batch[j].customer,
+                  siteAddress: batch[j].siteAddress, siteLocation: batch[j].siteLocation,
+                  problemDescription: batch[j].problemDescription,
+                  driveMinutes: mins,
+                  driveDistanceMeters: el.distance?.value || 0,
+                  driveDistanceText: el.distance?.text || '',
+                  driveDurationText: el.duration?.text || '',
+                });
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[ROUTE-BUILDER] Distance Matrix batch failed:', e?.message);
+        }
+      }
+    } else {
+      // Fallback: haversine estimate at ~30 mph average
+      const anchorCoords = await geocodeAddress(anchorAddress);
+      if (anchorCoords) {
+        for (const c of withAddr) {
+          const coords = await geocodeAddress(c._addr);
+          if (coords) {
+            const miles = haversineDistance(anchorCoords.lat, anchorCoords.lng, coords.lat, coords.lng);
+            const mins = Math.round((miles / 30) * 60);
+            results.push({
+              id: c.id, workOrderNumber: c.workOrderNumber, poNumber: c.poNumber,
+              customer: c.customer, siteAddress: c.siteAddress, siteLocation: c.siteLocation,
+              problemDescription: c.problemDescription,
+              driveMinutes: mins, driveDistanceMeters: Math.round(miles * 1609.34),
+              driveDistanceText: miles.toFixed(1) + ' mi', driveDurationText: mins + ' mins',
+            });
+          }
+        }
+      }
+    }
+
+    // Group into tiers
+    const tiers = { closest: [], near: [], moderate: [], further: [] };
+    for (const r of results) {
+      if (r.driveMinutes > maxMinutes) continue;
+      if (r.driveMinutes < 15) tiers.closest.push(r);
+      else if (r.driveMinutes < 30) tiers.near.push(r);
+      else if (r.driveMinutes < 45) tiers.moderate.push(r);
+      else tiers.further.push(r);
+    }
+    for (const key of Object.keys(tiers)) {
+      tiers[key].sort((a, b) => a.driveMinutes - b.driveMinutes);
+    }
+
+    res.json({
+      ok: true, anchor: anchorInfo, tiers,
+      totalCandidates: withAddr.length, skippedNoAddress,
+      maxDriveMinutes: maxMinutes,
+      warning: GOOGLE_MAPS_API_KEY ? undefined : 'Using straight-line distance estimate (no Google API key). Actual drive times may differ.',
+    });
+  } catch (err) {
+    console.error('Error in find-nearby:', err);
+    res.status(500).json({ error: 'Failed to find nearby work orders.' });
+  }
+});
+
+// POST /route-builder/confirm-route — bulk schedule work orders
+app.post('/route-builder/confirm-route', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const ids = Array.isArray(b.workOrderIds) ? b.workOrderIds.map(Number).filter(n => n > 0) : [];
+    if (ids.length === 0) return res.status(400).json({ error: 'No work order IDs provided.' });
+
+    const rawDate = String(b.scheduledDate || '').trim();
+    if (!rawDate) return res.status(400).json({ error: 'scheduledDate is required.' });
+
+    const scheduledDate = parseDateTimeFlexible(rawDate);
+    if (!scheduledDate) return res.status(400).json({ error: 'Invalid scheduledDate format.' });
+
+    const scheduledEnd = addMinutesToSql(scheduledDate, DEFAULT_WINDOW);
+    const assignedTo = b.assignedTo ? Number(b.assignedTo) : null;
+
+    const updated = [];
+    const skipped = [];
+
+    for (const id of ids) {
+      const [[current]] = await db.execute('SELECT id, status FROM work_orders WHERE id = ?', [id]);
+      if (!current) { skipped.push({ id, reason: 'not found' }); continue; }
+
+      await db.execute(
+        `UPDATE work_orders SET status = 'Scheduled', scheduledDate = ?, scheduledEnd = ?, assignedTo = ? WHERE id = ?`,
+        [scheduledDate, scheduledEnd, assignedTo, id]
+      );
+      updated.push(id);
+    }
+
+    // Fetch updated rows
+    let workOrders = [];
+    if (updated.length > 0) {
+      const placeholders = updated.map(() => '?').join(',');
+      const [rows] = await db.execute(
+        `SELECT id, workOrderNumber, customer, siteAddress, siteLocation, status, scheduledDate, assignedTo
+         FROM work_orders WHERE id IN (${placeholders})`, updated
+      );
+      workOrders = rows;
+    }
+
+    res.json({ ok: true, updated: updated.length, skipped, scheduledDate, assignedTo, workOrders });
+  } catch (err) {
+    console.error('Error in confirm-route:', err);
+    res.status(500).json({ error: 'Failed to confirm route.' });
+  }
+});
+
 // ─── KEY NORMALIZATION / FIXERS ──────────────────────────────────────────────
 function logFiles(...args){ if (FILES_VERBOSE === '1') console.log('[files]', ...args); }
 
