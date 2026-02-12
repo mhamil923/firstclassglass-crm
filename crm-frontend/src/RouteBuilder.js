@@ -156,7 +156,7 @@ export default function RouteBuilder() {
       });
       const d = res.data;
       setTiers(d.tiers || { closest: [], near: [], moderate: [], further: [] });
-      setNearbyMeta({ totalCandidates: d.totalCandidates, skippedNoAddress: d.skippedNoAddress, warning: d.warning });
+      setNearbyMeta({ totalCandidates: d.totalCandidates, skippedNoAddress: d.skippedNoAddress, warning: d.warning, method: d.method });
     } catch (err) {
       setNearbyError(err?.response?.data?.error || "Failed to find nearby work orders.");
     } finally {
@@ -311,7 +311,7 @@ export default function RouteBuilder() {
                 {wo.customer ? ` \u2022 ${wo.customer}` : ""}
               </div>
               <div className="rb-wo-detail">
-                {wo.siteLocation || ""}{wo.siteLocation && wo.siteAddress ? " \u2014 " : ""}{wo.siteAddress || ""}
+                {wo.siteAddress || wo.siteLocation || ""}
               </div>
               {wo.problemDescription && (
                 <div className="rb-wo-problem">{wo.problemDescription}</div>
@@ -450,7 +450,14 @@ export default function RouteBuilder() {
                   {renderTier("Further (45\u201360 min)", tiers.further, "rb-tier-red")}
 
                   {allTiersEmpty && !nearbyLoading && (
-                    <div className="rb-empty">No nearby work orders found within 60 minutes.</div>
+                    <div className="rb-empty">
+                      No nearby work orders found within 60 minutes.
+                      {nearbyMeta?.totalCandidates === 0 && nearbyMeta?.skippedNoAddress === 0 && (
+                        <div style={{ fontSize: 13, marginTop: 6, color: "var(--text-tertiary)" }}>
+                          No work orders have "Needs to be Scheduled" status.
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {nearbyMeta?.skippedNoAddress > 0 && (

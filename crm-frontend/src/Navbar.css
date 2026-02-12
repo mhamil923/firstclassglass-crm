@@ -21,6 +21,8 @@
   letter-spacing: -0.02em;
   margin-right: 32px;
   transition: var(--transition-fast);
+  text-decoration: none;
+  white-space: nowrap;
 }
 
 .navbar-brand:hover {
@@ -50,6 +52,7 @@
   border-radius: var(--radius-sm);
   transition: var(--transition-fast);
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .nav-link:hover {
@@ -66,7 +69,77 @@
   background: rgba(10, 132, 255, 0.15);
 }
 
-/* Right side container for theme toggle and logout */
+/* ===== DROPDOWN TOGGLE ===== */
+.nav-dropdown-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  gap: 2px;
+}
+
+.nav-dropdown-arrow {
+  font-size: 10px;
+  margin-left: 4px;
+  opacity: 0.6;
+  transition: transform 0.2s ease;
+}
+
+/* ===== DROPDOWN MENU (Apple glassmorphism) ===== */
+.nav-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 8px 0;
+  min-width: 180px;
+  z-index: 1100;
+  animation: dropdownFadeIn 0.15s ease;
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.nav-dropdown-item {
+  display: block;
+  padding: 10px 20px;
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 400;
+  transition: background 0.15s ease;
+  cursor: pointer;
+}
+
+.nav-dropdown-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.nav-dropdown-item.active {
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+
+/* ===== MOBILE ACCORDION (hidden on desktop) ===== */
+.nav-dropdown-accordion {
+  display: none;
+}
+
+/* ===== RIGHT SIDE (settings, theme, logout) ===== */
 .navbar-right {
   display: flex;
   align-items: center;
@@ -96,7 +169,7 @@
   transform: scale(0.98);
 }
 
-/* Mobile responsive */
+/* ===== HAMBURGER TOGGLE ===== */
 .navbar-toggler {
   display: none;
   background: var(--bg-hover);
@@ -116,7 +189,7 @@
 
 .navbar-toggler-icon::before,
 .navbar-toggler-icon::after {
-  content: '';
+  content: "";
   position: absolute;
   width: 20px;
   height: 2px;
@@ -132,7 +205,8 @@
   top: 6px;
 }
 
-@media (max-width: 992px) {
+/* ===== RESPONSIVE: ≤1024px ===== */
+@media (max-width: 1024px) {
   .navbar {
     flex-wrap: wrap;
     height: auto;
@@ -164,6 +238,44 @@
     padding: 12px 16px;
   }
 
+  /* Hide the floating dropdown on mobile */
+  .nav-dropdown-menu {
+    display: none !important;
+  }
+
+  /* Show the accordion on mobile */
+  .nav-dropdown-accordion {
+    display: block;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+  }
+
+  .nav-dropdown-accordion.open {
+    max-height: 200px;
+  }
+
+  .nav-dropdown-accordion-item {
+    display: block;
+    padding: 10px 16px 10px 40px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 400;
+    transition: var(--transition-fast);
+    border-radius: var(--radius-sm);
+  }
+
+  .nav-dropdown-accordion-item:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+  }
+
+  .nav-dropdown-accordion-item.active {
+    color: var(--accent-blue);
+    font-weight: 600;
+  }
+
   .navbar-right {
     width: 100%;
     justify-content: flex-end;
@@ -173,7 +285,7 @@
   }
 }
 
-/* Override any Bootstrap navbar styles */
+/* Override Bootstrap navbar styles */
 .navbar.navbar-expand-lg {
   padding: 0 24px;
 }
@@ -182,7 +294,7 @@
   flex-direction: row;
 }
 
-@media (max-width: 992px) {
+@media (max-width: 1024px) {
   .navbar.navbar-expand-lg {
     padding: 12px 16px;
   }
@@ -192,7 +304,7 @@
   }
 }
 
-/* ===== Settings Gear Button ===== */
+/* ===== SETTINGS GEAR BUTTON ===== */
 .settings-gear-btn {
   display: inline-flex;
   align-items: center;
@@ -212,7 +324,7 @@
   background: var(--bg-hover);
 }
 
-/* ===== Settings Modal ===== */
+/* ===== SETTINGS MODAL ===== */
 .settings-overlay {
   position: fixed;
   inset: 0;
@@ -225,6 +337,11 @@
   animation: fadeIn 0.2s ease;
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .settings-modal {
   background: var(--bg-card-solid);
   border-radius: var(--radius-md);
@@ -233,6 +350,8 @@
   padding: 28px;
   width: 90%;
   max-width: 480px;
+  max-height: 85vh;
+  overflow-y: auto;
 }
 
 .settings-modal-title {
@@ -254,6 +373,44 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 6px;
+}
+
+.settings-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.settings-label-row .settings-label {
+  margin-bottom: 0;
+}
+
+.settings-reset-link {
+  background: none;
+  border: none;
+  color: var(--accent-blue);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  transition: var(--transition-fast);
+}
+
+.settings-reset-link:hover {
+  opacity: 0.8;
+}
+
+.settings-hint {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  margin: 0 0 12px 0;
+}
+
+.settings-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 24px 0;
 }
 
 .settings-input {
@@ -321,4 +478,56 @@
 .settings-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ===== SETTINGS: NAV ORDER (DnD) ===== */
+.settings-nav-order {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-nav-order-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: default;
+  transition: var(--transition-fast);
+  user-select: none;
+}
+
+.settings-nav-order-item:hover {
+  border-color: var(--border-color-strong);
+}
+
+.settings-nav-order-item.dragging {
+  opacity: 0.4;
+  border-color: var(--accent-blue);
+  background: rgba(0, 113, 227, 0.06);
+}
+
+[data-theme="dark"] .settings-nav-order-item.dragging {
+  background: rgba(10, 132, 255, 0.1);
+}
+
+.settings-nav-order-grip {
+  color: var(--text-tertiary);
+  font-size: 18px;
+  cursor: grab;
+  line-height: 1;
+  padding: 2px;
+}
+
+.settings-nav-order-grip:active {
+  cursor: grabbing;
+}
+
+.settings-nav-order-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
 }

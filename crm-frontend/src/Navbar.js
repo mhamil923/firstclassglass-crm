@@ -1,17 +1,116 @@
 // File: src/Navbar.js
 
-import React, { useState, useEffect, useCallback } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { Link, NavLink, useNavigate, useLocation } from "react-router-dom";
+import { DndProvider, useDrag, useDrop } from "react-dnd";
+import { HTML5Backend } from "react-dnd-html5-backend";
 import api from "./api";
 import ThemeToggle from "./components/ThemeToggle";
 import "./Navbar.css";
 
+/* ========== NAV CONFIG ========== */
+const NAV_ITEMS = [
+  { id: "home", label: "Home", to: "/" },
+  { id: "work-orders", label: "Work Orders", to: "/work-orders" },
+  { id: "estimates", label: "Estimates", to: "/estimates" },
+  { id: "invoices", label: "Invoices", to: "/invoices" },
+  { id: "purchase-orders", label: "Purchase Orders", to: "/purchase-orders" },
+  {
+    id: "planning",
+    label: "Planning",
+    children: [
+      { label: "Calendar", to: "/calendar" },
+      { label: "Route Builder", to: "/route-builder" },
+    ],
+  },
+  {
+    id: "records",
+    label: "Records",
+    children: [
+      { label: "Customers", to: "/customers" },
+      { label: "History", to: "/history" },
+      { label: "Reports", to: "/reports" },
+    ],
+  },
+];
+
+const NAV_ITEMS_MAP = new Map(NAV_ITEMS.map((i) => [i.id, i]));
+const DEFAULT_ORDER = NAV_ITEMS.map((i) => i.id);
+const STORAGE_KEY = "navbar-order";
+
+function loadNavOrder() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_ORDER;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length !== DEFAULT_ORDER.length) return DEFAULT_ORDER;
+    // Validate all IDs exist
+    const valid = parsed.every((id) => NAV_ITEMS_MAP.has(id));
+    return valid ? parsed : DEFAULT_ORDER;
+  } catch {
+    return DEFAULT_ORDER;
+  }
+}
+
+function saveNavOrder(order) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(order));
+}
+
+/* ========== Sortable Nav Item (DnD) ========== */
+const DND_TYPE = "nav-order-item";
+
+function SortableNavItem({ id, label, index, moveItem }) {
+  const ref = useRef(null);
+
+  const [{ isDragging }, drag, preview] = useDrag({
+    type: DND_TYPE,
+    item: { id, index },
+    collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+  });
+
+  const [, drop] = useDrop({
+    accept: DND_TYPE,
+    hover(item, monitor) {
+      if (!ref.current) return;
+      const dragIndex = item.index;
+      const hoverIndex = index;
+      if (dragIndex === hoverIndex) return;
+
+      const hoverBoundingRect = ref.current.getBoundingClientRect();
+      const hoverMiddleY = (hoverBoundingRect.bottom - hoverBoundingRect.top) / 2;
+      const clientOffset = monitor.getClientOffset();
+      const hoverClientY = clientOffset.y - hoverBoundingRect.top;
+
+      if (dragIndex < hoverIndex && hoverClientY < hoverMiddleY) return;
+      if (dragIndex > hoverIndex && hoverClientY > hoverMiddleY) return;
+
+      moveItem(dragIndex, hoverIndex);
+      item.index = hoverIndex;
+    },
+  });
+
+  preview(drop(ref));
+
+  return (
+    <div
+      ref={ref}
+      className={`settings-nav-order-item${isDragging ? " dragging" : ""}`}
+    >
+      <span ref={drag} className="settings-nav-order-grip" title="Drag to reorder">
+        ⠿
+      </span>
+      <span className="settings-nav-order-label">{label}</span>
+    </div>
+  );
+}
+
 /* ========== Settings Modal ========== */
-function SettingsModal({ onClose }) {
+function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
   const [nextInvoiceNumber, setNextInvoiceNumber] = useState("");
   const [defaultInvoiceTerms, setDefaultInvoiceTerms] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [localOrder, setLocalOrder] = useState(navOrder);
 
   const fetchSettings = useCallback(async () => {
     setLoading(true);
@@ -27,12 +126,29 @@ function SettingsModal({ onClose }) {
     }
   }, []);
 
-  useEffect(() => { fetchSettings(); }, [fetchSettings]);
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  const moveItem = useCallback((fromIndex, toIndex) => {
+    setLocalOrder((prev) => {
+      const updated = [...prev];
+      const [moved] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, moved);
+      return updated;
+    });
+  }, []);
+
+  const handleResetOrder = () => {
+    setLocalOrder(DEFAULT_ORDER);
+  };
 
   const handleSave = async () => {
     setSaving(true);
     try {
       await api.put("/settings", { nextInvoiceNumber, defaultInvoiceTerms });
+      saveNavOrder(localOrder);
+      onNavOrderChange(localOrder);
       onClose();
     } catch (err) {
       console.error("Error saving settings:", err);
@@ -70,11 +186,52 @@ function SettingsModal({ onClose }) {
               />
             </div>
 
+            <div className="settings-divider" />
+
+            <div className="settings-field">
+              <div className="settings-label-row">
+                <label className="settings-label">Navbar Order</label>
+                <button
+                  type="button"
+                  className="settings-reset-link"
+                  onClick={handleResetOrder}
+                >
+                  Reset to Default
+                </button>
+              </div>
+              <p className="settings-hint">Drag items to reorder the navigation bar.</p>
+              <DndProvider backend={HTML5Backend}>
+                <div className="settings-nav-order">
+                  {localOrder.map((id, index) => {
+                    const item = NAV_ITEMS_MAP.get(id);
+                    if (!item) return null;
+                    return (
+                      <SortableNavItem
+                        key={id}
+                        id={id}
+                        label={item.label}
+                        index={index}
+                        moveItem={moveItem}
+                      />
+                    );
+                  })}
+                </div>
+              </DndProvider>
+            </div>
+
             <div className="settings-actions">
-              <button className="settings-btn settings-btn-secondary" onClick={onClose} disabled={saving}>
+              <button
+                className="settings-btn settings-btn-secondary"
+                onClick={onClose}
+                disabled={saving}
+              >
                 Cancel
               </button>
-              <button className="settings-btn settings-btn-primary" onClick={handleSave} disabled={saving}>
+              <button
+                className="settings-btn settings-btn-primary"
+                onClick={handleSave}
+                disabled={saving}
+              >
                 {saving ? "Saving..." : "Save"}
               </button>
             </div>
@@ -85,10 +242,34 @@ function SettingsModal({ onClose }) {
   );
 }
 
+/* ========== Main Navbar ========== */
 export default function Navbar() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState(null);
+  const [navOrder, setNavOrder] = useState(loadNavOrder);
+  const navRef = useRef(null);
+
+  const currentPath = location.pathname;
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    if (!openDropdown) return;
+    const handleClick = (e) => {
+      if (navRef.current && !navRef.current.contains(e.target)) {
+        setOpenDropdown(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [openDropdown]);
+
+  // Close dropdown on route change
+  useEffect(() => {
+    setOpenDropdown(null);
+  }, [currentPath]);
 
   const handleLogout = () => {
     localStorage.removeItem("jwt");
@@ -99,13 +280,32 @@ export default function Navbar() {
     setIsOpen(!isOpen);
   };
 
-  // Close navbar when a link is clicked (mobile)
   const closeNavbar = () => {
     setIsOpen(false);
+    setOpenDropdown(null);
   };
 
+  const toggleDropdown = (id) => {
+    setOpenDropdown((prev) => (prev === id ? null : id));
+  };
+
+  const orderedItems = useMemo(
+    () => navOrder.map((id) => NAV_ITEMS_MAP.get(id)).filter(Boolean),
+    [navOrder]
+  );
+
+  const isDropdownActive = useCallback(
+    (item) => {
+      if (!item.children) return false;
+      return item.children.some(
+        (c) => c.to === currentPath || (c.to !== "/" && currentPath.startsWith(c.to))
+      );
+    },
+    [currentPath]
+  );
+
   return (
-    <nav className="navbar navbar-expand-lg">
+    <nav className="navbar navbar-expand-lg" ref={navRef}>
       <Link className="navbar-brand" to="/">
         First Class Glass CRM
       </Link>
@@ -121,65 +321,69 @@ export default function Navbar() {
 
       <div className={`navbar-collapse ${isOpen ? "show" : ""}`}>
         <ul className="navbar-nav">
-          <li className="nav-item">
-            <NavLink className="nav-link" to="/" end onClick={closeNavbar}>
-              Home
-            </NavLink>
-          </li>
-
-          <li className="nav-item">
-            <NavLink className="nav-link" to="/work-orders" onClick={closeNavbar}>
-              Work Orders
-            </NavLink>
-          </li>
-
-          <li className="nav-item">
-            <NavLink className="nav-link" to="/customers" onClick={closeNavbar}>
-              Customers
-            </NavLink>
-          </li>
-
-          <li className="nav-item">
-            <NavLink className="nav-link" to="/estimates" onClick={closeNavbar}>
-              Estimates
-            </NavLink>
-          </li>
-
-          <li className="nav-item">
-            <NavLink className="nav-link" to="/invoices" onClick={closeNavbar}>
-              Invoices
-            </NavLink>
-          </li>
-
-          <li className="nav-item">
-            <NavLink className="nav-link" to="/calendar" onClick={closeNavbar}>
-              Calendar
-            </NavLink>
-          </li>
-
-          <li className="nav-item">
-            <NavLink className="nav-link" to="/purchase-orders" onClick={closeNavbar}>
-              Purchase Orders
-            </NavLink>
-          </li>
-
-          <li className="nav-item">
-            <NavLink className="nav-link" to="/history" onClick={closeNavbar}>
-              History
-            </NavLink>
-          </li>
-
-          <li className="nav-item">
-            <NavLink className="nav-link" to="/route-builder" onClick={closeNavbar}>
-              Route Builder
-            </NavLink>
-          </li>
-
-          <li className="nav-item">
-            <NavLink className="nav-link" to="/reports" onClick={closeNavbar}>
-              Reports
-            </NavLink>
-          </li>
+          {orderedItems.map((item) =>
+            item.children ? (
+              <li key={item.id} className="nav-item nav-dropdown">
+                <button
+                  className={`nav-link nav-dropdown-toggle${
+                    isDropdownActive(item) ? " active" : ""
+                  }`}
+                  onClick={() => toggleDropdown(item.id)}
+                >
+                  {item.label}
+                  <span className="nav-dropdown-arrow">▾</span>
+                </button>
+                {openDropdown === item.id && (
+                  <div className="nav-dropdown-menu">
+                    {item.children.map((child) => (
+                      <NavLink
+                        key={child.to}
+                        to={child.to}
+                        className={({ isActive }) =>
+                          `nav-dropdown-item${isActive ? " active" : ""}`
+                        }
+                        onClick={closeNavbar}
+                        end={child.to === "/"}
+                      >
+                        {child.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+                {/* Mobile accordion: always render, toggled via CSS + state */}
+                <div
+                  className={`nav-dropdown-accordion${
+                    openDropdown === item.id ? " open" : ""
+                  }`}
+                >
+                  {item.children.map((child) => (
+                    <NavLink
+                      key={child.to}
+                      to={child.to}
+                      className={({ isActive }) =>
+                        `nav-dropdown-accordion-item${isActive ? " active" : ""}`
+                      }
+                      onClick={closeNavbar}
+                      end={child.to === "/"}
+                    >
+                      {child.label}
+                    </NavLink>
+                  ))}
+                </div>
+              </li>
+            ) : (
+              <li key={item.id} className="nav-item">
+                <NavLink
+                  className="nav-link"
+                  to={item.to}
+                  end={item.to === "/"}
+                  onClick={closeNavbar}
+                >
+                  {item.label}
+                </NavLink>
+              </li>
+            )
+          )}
         </ul>
 
         <div className="navbar-right">
@@ -189,7 +393,11 @@ export default function Navbar() {
             title="Settings"
           >
             <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+              <path
+                fillRule="evenodd"
+                d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"
+                clipRule="evenodd"
+              />
             </svg>
           </button>
           <ThemeToggle />
@@ -199,7 +407,13 @@ export default function Navbar() {
         </div>
       </div>
 
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          navOrder={navOrder}
+          onNavOrderChange={setNavOrder}
+        />
+      )}
     </nav>
   );
 }
