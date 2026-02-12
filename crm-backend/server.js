@@ -4857,49 +4857,99 @@ app.get('/routes/test-google-api', authenticate, async (req, res) => {
 // POST /route-builder/find-nearby — find unscheduled WOs near an anchor
 app.post('/route-builder/find-nearby', authenticate, async (req, res) => {
   try {
+    console.log('[Route Builder] ===== Find Nearby Started =====');
     const b = coerceBody(req);
     const anchorId = b.anchorWorkOrderId ? Number(b.anchorWorkOrderId) : null;
     const maxMinutes = Math.min(Number(b.maxDriveMinutes) || 60, 120);
     let anchorAddress = '';
     let anchorInfo = {};
 
-    // Resolve anchor address
+    console.log('[Route Builder] Anchor work order ID:', anchorId);
+    console.log('[Route Builder] Max drive minutes:', maxMinutes);
+
+    // Resolve anchor address — also pull customer address fields as fallback
     if (anchorId) {
       const [[row]] = await db.execute(
-        'SELECT id, workOrderNumber, customer, siteAddress, siteLocation FROM work_orders WHERE id = ?',
+        `SELECT w.id, w.workOrderNumber, w.customer, w.siteAddress, w.siteLocation, w.customerId,
+                c.siteAddress AS custSiteAddress, c.siteCity AS custSiteCity,
+                c.siteState AS custSiteState, c.siteZip AS custSiteZip
+           FROM work_orders w
+           LEFT JOIN customers c ON w.customerId = c.id
+          WHERE w.id = ?`,
         [anchorId]
       );
       if (!row) return res.status(404).json({ error: 'Anchor work order not found.' });
+
+      // Build best address: prefer WO siteAddress, then siteLocation, then customer fields
       anchorAddress = cleanAddr(row.siteAddress || row.siteLocation || '');
+      if (!anchorAddress || anchorAddress.length < 5) {
+        const custFull = [row.custSiteAddress, row.custSiteCity, row.custSiteState, row.custSiteZip].filter(Boolean).join(', ');
+        if (custFull) anchorAddress = cleanAddr(custFull);
+      }
       anchorInfo = { workOrderId: row.id, workOrderNumber: row.workOrderNumber, customer: row.customer, address: anchorAddress };
+      console.log('[Route Builder] Anchor WO:', row.workOrderNumber, '| siteAddress:', row.siteAddress, '| siteLocation:', row.siteLocation);
+      console.log('[Route Builder] Resolved anchor address:', anchorAddress);
     } else if (b.anchorAddress) {
       anchorAddress = cleanAddr(b.anchorAddress);
       anchorInfo = { workOrderId: null, address: anchorAddress };
+      console.log('[Route Builder] Using provided anchor address:', anchorAddress);
     }
 
     if (!anchorAddress) {
+      console.log('[Route Builder] ERROR: No valid anchor address');
       return res.status(400).json({ error: 'No valid anchor address provided.' });
     }
 
-    // Get all unscheduled WOs
-    const [candidates] = await db.execute(
-      `SELECT id, workOrderNumber, poNumber, customer, siteLocation, siteAddress, problemDescription
-       FROM work_orders WHERE status = 'Needs to be Scheduled' ORDER BY id DESC`
+    // FIX: Fetch ALL work orders (not just exact status match) then filter using canonStatus()
+    // The DB may store status variants like "Parts In", "NS", "needs to be scheduled", etc.
+    const [allWOs] = await db.execute(
+      `SELECT w.id, w.workOrderNumber, w.poNumber, w.customer, w.siteLocation, w.siteAddress,
+              w.problemDescription, w.status, w.customerId,
+              c.siteAddress AS custSiteAddress, c.siteCity AS custSiteCity,
+              c.siteState AS custSiteState, c.siteZip AS custSiteZip
+         FROM work_orders w
+         LEFT JOIN customers c ON w.customerId = c.id
+        ORDER BY w.id DESC`
     );
 
-    // Filter to those with valid addresses, excluding anchor itself
+    // Filter to "Needs to be Scheduled" using canonical status normalization
+    const candidates = allWOs.filter(r => {
+      const canon = canonStatus(r.status);
+      return canon === 'Needs to be Scheduled';
+    });
+
+    console.log('[Route Builder] Total work orders in DB:', allWOs.length);
+    console.log('[Route Builder] Distinct raw statuses:', [...new Set(allWOs.map(r => r.status))].join(', '));
+    console.log('[Route Builder] "Needs to be Scheduled" (after canonStatus):', candidates.length);
+    if (candidates.length > 0 && candidates.length <= 5) {
+      candidates.forEach(c => console.log(`[Route Builder]   WO #${c.workOrderNumber || c.id}: siteAddr="${c.siteAddress}", siteLoc="${c.siteLocation}", custAddr="${c.custSiteAddress}, ${c.custSiteCity}, ${c.custSiteState}"`));
+    } else if (candidates.length > 5) {
+      candidates.slice(0, 5).forEach(c => console.log(`[Route Builder]   WO #${c.workOrderNumber || c.id}: siteAddr="${c.siteAddress}", siteLoc="${c.siteLocation}", custAddr="${c.custSiteAddress}, ${c.custSiteCity}, ${c.custSiteState}"`));
+      console.log(`[Route Builder]   ... and ${candidates.length - 5} more`);
+    }
+
+    // Build full address for each candidate, using customer fields as fallback
     const anchorLower = anchorAddress.toLowerCase();
     const withAddr = [];
     let skippedNoAddress = 0;
     for (const c of candidates) {
-      const addr = cleanAddr(c.siteAddress || c.siteLocation || '');
-      if (!addr) { skippedNoAddress++; continue; }
+      // Try WO fields first, then build from customer address fields
+      let addr = cleanAddr(c.siteAddress || c.siteLocation || '');
+      if (!addr || addr.length < 5) {
+        const custFull = [c.custSiteAddress, c.custSiteCity, c.custSiteState, c.custSiteZip].filter(Boolean).join(', ');
+        if (custFull) addr = cleanAddr(custFull);
+      }
+      if (!addr || addr.length < 5) { skippedNoAddress++; continue; }
       if (addr.toLowerCase() === anchorLower) continue;
       if (anchorId && c.id === anchorId) continue;
       withAddr.push({ ...c, _addr: addr });
     }
 
+    console.log('[Route Builder] Candidates with valid addresses:', withAddr.length);
+    console.log('[Route Builder] Skipped (no address):', skippedNoAddress);
+
     if (withAddr.length === 0) {
+      console.log('[Route Builder] No candidates with addresses — returning empty tiers');
       return res.json({
         ok: true, anchor: anchorInfo,
         tiers: { closest: [], near: [], moderate: [], further: [] },
@@ -4907,11 +4957,14 @@ app.post('/route-builder/find-nearby', authenticate, async (req, res) => {
       });
     }
 
-    // Calculate drive times
+    // Calculate drive times — try Distance Matrix first, fallback to haversine
     const results = [];
+    let method = 'none';
+    let distanceMatrixFailed = false;
 
     if (GOOGLE_MAPS_API_KEY) {
-      // Batch Distance Matrix API calls (max 25 destinations per request)
+      console.log('[Route Builder] API Key exists: true, length:', GOOGLE_MAPS_API_KEY.length);
+      console.log('[Route Builder] Attempting Distance Matrix API...');
       const BATCH = 25;
       for (let i = 0; i < withAddr.length; i += BATCH) {
         const batch = withAddr.slice(i, i + BATCH);
@@ -4922,52 +4975,105 @@ app.post('/route-builder/find-nearby', authenticate, async (req, res) => {
           + `&mode=driving&units=imperial`
           + `&key=${GOOGLE_MAPS_API_KEY}`;
 
+        console.log(`[Route Builder] Distance Matrix batch ${Math.floor(i / BATCH) + 1}: ${batch.length} destinations`);
+        console.log('[Route Builder]   Origin:', anchorAddress);
+        if (batch.length <= 3) {
+          batch.forEach(c => console.log(`[Route Builder]   Dest: "${c._addr}"`));
+        }
+
         try {
           const resp = await axios.get(url, { timeout: Number(ROUTE_TIMEOUT_MS) || 20000 });
           const data = resp?.data;
+          console.log('[Route Builder]   API response status:', data?.status);
+
           if (data?.status === 'OK' && data.rows?.[0]?.elements) {
+            method = 'distance_matrix';
             const elements = data.rows[0].elements;
+            let okCount = 0, failCount = 0;
             for (let j = 0; j < batch.length; j++) {
               const el = elements[j];
               if (el?.status === 'OK') {
+                okCount++;
                 const mins = Math.round((el.duration?.value || 0) / 60);
                 results.push({
                   id: batch[j].id, workOrderNumber: batch[j].workOrderNumber,
                   poNumber: batch[j].poNumber, customer: batch[j].customer,
-                  siteAddress: batch[j].siteAddress, siteLocation: batch[j].siteLocation,
+                  siteAddress: batch[j]._addr, siteLocation: batch[j].siteLocation,
                   problemDescription: batch[j].problemDescription,
                   driveMinutes: mins,
                   driveDistanceMeters: el.distance?.value || 0,
                   driveDistanceText: el.distance?.text || '',
                   driveDurationText: el.duration?.text || '',
                 });
+              } else {
+                failCount++;
+                console.log(`[Route Builder]   Element ${j} status: ${el?.status} for "${batch[j]._addr}"`);
               }
             }
+            console.log(`[Route Builder]   Batch results: ${okCount} OK, ${failCount} failed`);
+          } else {
+            console.warn(`[Route Builder]   API returned non-OK status: ${data?.status}, error: ${data?.error_message || 'none'}`);
+            distanceMatrixFailed = true;
           }
         } catch (e) {
-          console.warn('[ROUTE-BUILDER] Distance Matrix batch failed:', e?.message);
-        }
-      }
-    } else {
-      // Fallback: haversine estimate at ~30 mph average
-      const anchorCoords = await geocodeAddress(anchorAddress);
-      if (anchorCoords) {
-        for (const c of withAddr) {
-          const coords = await geocodeAddress(c._addr);
-          if (coords) {
-            const miles = haversineDistance(anchorCoords.lat, anchorCoords.lng, coords.lat, coords.lng);
-            const mins = Math.round((miles / 30) * 60);
-            results.push({
-              id: c.id, workOrderNumber: c.workOrderNumber, poNumber: c.poNumber,
-              customer: c.customer, siteAddress: c.siteAddress, siteLocation: c.siteLocation,
-              problemDescription: c.problemDescription,
-              driveMinutes: mins, driveDistanceMeters: Math.round(miles * 1609.34),
-              driveDistanceText: miles.toFixed(1) + ' mi', driveDurationText: mins + ' mins',
-            });
-          }
+          console.warn(`[Route Builder]   Distance Matrix batch error: ${e?.message}`);
+          distanceMatrixFailed = true;
         }
       }
     }
+
+    // Fallback: haversine estimate if no API key OR Distance Matrix failed with no results
+    if (results.length === 0) {
+      console.log('[Route Builder] Distance Matrix produced 0 results — falling back to haversine estimate');
+      if (GOOGLE_MAPS_API_KEY) {
+        // Try geocoding + haversine with 1.4x multiplier for road distance
+        const anchorCoords = await geocodeAddress(anchorAddress);
+        console.log('[Route Builder] Anchor geocode:', anchorCoords ? `${anchorCoords.lat},${anchorCoords.lng}` : 'FAILED');
+        if (anchorCoords) {
+          method = 'haversine_estimate';
+          for (const c of withAddr) {
+            const coords = await geocodeAddress(c._addr);
+            if (coords) {
+              const straightMiles = haversineDistance(anchorCoords.lat, anchorCoords.lng, coords.lat, coords.lng);
+              const estMiles = straightMiles * 1.4; // road distance ~1.4x straight-line
+              const mins = Math.round((estMiles / 30) * 60);
+              results.push({
+                id: c.id, workOrderNumber: c.workOrderNumber, poNumber: c.poNumber,
+                customer: c.customer, siteAddress: c._addr, siteLocation: c.siteLocation,
+                problemDescription: c.problemDescription,
+                driveMinutes: mins, driveDistanceMeters: Math.round(estMiles * 1609.34),
+                driveDistanceText: estMiles.toFixed(1) + ' mi', driveDurationText: mins + ' mins',
+              });
+            }
+          }
+          console.log('[Route Builder] Haversine results:', results.length);
+        }
+      } else {
+        console.log('[Route Builder] No API key — trying geocode fallback');
+        const anchorCoords = await geocodeAddress(anchorAddress);
+        if (anchorCoords) {
+          method = 'haversine_estimate';
+          for (const c of withAddr) {
+            const coords = await geocodeAddress(c._addr);
+            if (coords) {
+              const straightMiles = haversineDistance(anchorCoords.lat, anchorCoords.lng, coords.lat, coords.lng);
+              const estMiles = straightMiles * 1.4;
+              const mins = Math.round((estMiles / 30) * 60);
+              results.push({
+                id: c.id, workOrderNumber: c.workOrderNumber, poNumber: c.poNumber,
+                customer: c.customer, siteAddress: c._addr, siteLocation: c.siteLocation,
+                problemDescription: c.problemDescription,
+                driveMinutes: mins, driveDistanceMeters: Math.round(estMiles * 1609.34),
+                driveDistanceText: estMiles.toFixed(1) + ' mi', driveDurationText: mins + ' mins',
+              });
+            }
+          }
+          console.log('[Route Builder] Haversine results:', results.length);
+        }
+      }
+    }
+
+    console.log('[Route Builder] Total results with drive times:', results.length, '| method:', method);
 
     // Group into tiers
     const tiers = { closest: [], near: [], moderate: [], further: [] };
@@ -4982,14 +5088,27 @@ app.post('/route-builder/find-nearby', authenticate, async (req, res) => {
       tiers[key].sort((a, b) => a.driveMinutes - b.driveMinutes);
     }
 
+    const totalInTiers = tiers.closest.length + tiers.near.length + tiers.moderate.length + tiers.further.length;
+    const beyondMax = results.length - totalInTiers;
+    console.log(`[Route Builder] Tiers: closest=${tiers.closest.length}, near=${tiers.near.length}, moderate=${tiers.moderate.length}, further=${tiers.further.length}`);
+    if (beyondMax > 0) console.log(`[Route Builder] ${beyondMax} results beyond ${maxMinutes} min max`);
+    console.log('[Route Builder] ===== Find Nearby Complete =====');
+
+    let warning;
+    if (method === 'haversine_estimate') {
+      warning = 'Using estimated drive times (straight-line distance). Actual drive times may differ.';
+    } else if (distanceMatrixFailed && results.length > 0) {
+      warning = 'Some Distance Matrix API calls failed. Results may be incomplete.';
+    }
+
     res.json({
       ok: true, anchor: anchorInfo, tiers,
       totalCandidates: withAddr.length, skippedNoAddress,
-      maxDriveMinutes: maxMinutes,
-      warning: GOOGLE_MAPS_API_KEY ? undefined : 'Using straight-line distance estimate (no Google API key). Actual drive times may differ.',
+      maxDriveMinutes: maxMinutes, method,
+      warning,
     });
   } catch (err) {
-    console.error('Error in find-nearby:', err);
+    console.error('[Route Builder] Error in find-nearby:', err);
     res.status(500).json({ error: 'Failed to find nearby work orders.' });
   }
 });
