@@ -6,6 +6,15 @@ import "./Estimates.css";
 
 const STATUS_OPTIONS = ["All", "Draft", "Sent", "Accepted", "Declined"];
 
+/* ─── Chevron SVG for collapsible ─── */
+function ChevronDown({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 function statusClass(s) {
   if (!s) return "est-status-draft";
   const sl = s.toLowerCase();
@@ -40,6 +49,23 @@ export default function Estimates() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const debounceRef = useRef(null);
+
+  // Ready to Quote state
+  const [rtqOrders, setRtqOrders] = useState([]);
+  const [rtqOpen, setRtqOpen] = useState(true);
+
+  const fetchReadyToQuote = useCallback(async () => {
+    try {
+      const res = await api.get("/work-orders/by-status/Needs to be Quoted");
+      setRtqOrders(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Error fetching ready-to-quote WOs:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchReadyToQuote();
+  }, [fetchReadyToQuote]);
 
   const fetchEstimates = useCallback(async (q, status) => {
     setLoading(true);
@@ -89,6 +115,55 @@ export default function Estimates() {
             </Link>
           </div>
         </div>
+
+        {/* ─── Ready to Quote Section ─── */}
+        {rtqOrders.length > 0 && (
+          <div className="est-rtq-section">
+            <div className="est-rtq-header" onClick={() => setRtqOpen(!rtqOpen)}>
+              <div className="est-rtq-header-left">
+                <h3>Ready to Quote</h3>
+                <span className="est-rtq-count">{rtqOrders.length}</span>
+              </div>
+              <ChevronDown className={`est-rtq-chevron${rtqOpen ? " open" : ""}`} />
+            </div>
+            {rtqOpen && (
+              <div className="est-rtq-body">
+                <div className="est-rtq-grid">
+                  {rtqOrders.map((wo) => (
+                    <div key={wo.id} className="est-rtq-card">
+                      <div className="est-rtq-card-top">
+                        <div className="est-rtq-card-info">
+                          <p className="est-rtq-customer">{wo.customer || "—"}</p>
+                          <p className="est-rtq-detail">
+                            {wo.siteLocation || wo.siteAddress || "No site location"}
+                          </p>
+                          {wo.allPoNumbersFormatted && (
+                            <p className="est-rtq-detail">PO: {wo.allPoNumbersFormatted}</p>
+                          )}
+                        </div>
+                        <Link
+                          to={`/view-work-order/${wo.id}`}
+                          className="est-rtq-wo-link"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          WO #{wo.workOrderNumber || wo.id}
+                        </Link>
+                      </div>
+                      <div className="est-rtq-card-actions">
+                        <Link
+                          to={`/estimates/new?workOrderId=${wo.id}`}
+                          className="est-rtq-create-btn"
+                        >
+                          + Create Estimate
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="cust-section-card">
           <div className="cust-section-body">

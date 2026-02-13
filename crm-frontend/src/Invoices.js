@@ -6,6 +6,15 @@ import "./Invoices.css";
 
 const STATUS_OPTIONS = ["All", "Draft", "Sent", "Partial", "Paid", "Overdue", "Void"];
 
+/* ─── Chevron SVG for collapsible ─── */
+function ChevronDown({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 function statusClass(s) {
   if (!s) return "inv-status-draft";
   const sl = s.toLowerCase();
@@ -43,6 +52,23 @@ export default function Invoices() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "All");
   const debounceRef = useRef(null);
+
+  // Ready to Invoice state
+  const [rtiOrders, setRtiOrders] = useState([]);
+  const [rtiOpen, setRtiOpen] = useState(true);
+
+  const fetchReadyToInvoice = useCallback(async () => {
+    try {
+      const res = await api.get("/work-orders/by-status/Needs to be Invoiced");
+      setRtiOrders(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Error fetching ready-to-invoice WOs:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchReadyToInvoice();
+  }, [fetchReadyToInvoice]);
 
   const fetchInvoices = useCallback(async (q, status) => {
     setLoading(true);
@@ -102,6 +128,73 @@ export default function Invoices() {
             </Link>
           </div>
         </div>
+
+        {/* ─── Ready to Invoice Section ─── */}
+        {rtiOrders.length > 0 && (
+          <div className="inv-rti-section">
+            <div className="inv-rti-header" onClick={() => setRtiOpen(!rtiOpen)}>
+              <div className="inv-rti-header-left">
+                <h3>Ready to Invoice</h3>
+                <span className="inv-rti-count">{rtiOrders.length}</span>
+              </div>
+              <ChevronDown className={`inv-rti-chevron${rtiOpen ? " open" : ""}`} />
+            </div>
+            {rtiOpen && (
+              <div className="inv-rti-body">
+                <div className="inv-rti-grid">
+                  {rtiOrders.map((wo) => {
+                    const accepted = wo.acceptedEstimate;
+                    const estTotal = accepted ? Number(accepted.total) || 0 : null;
+                    return (
+                      <div key={wo.id} className="inv-rti-card">
+                        <div className="inv-rti-card-top">
+                          <div className="inv-rti-card-info">
+                            <p className="inv-rti-customer">{wo.customer || "—"}</p>
+                            <p className="inv-rti-detail">
+                              {wo.siteLocation || wo.siteAddress || "No site location"}
+                            </p>
+                            {wo.allPoNumbersFormatted && (
+                              <p className="inv-rti-detail">PO: {wo.allPoNumbersFormatted}</p>
+                            )}
+                            {accepted && (
+                              <span className="inv-rti-estimate-tag">
+                                Accepted Estimate: ${estTotal.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
+                              </span>
+                            )}
+                          </div>
+                          <Link
+                            to={`/view-work-order/${wo.id}`}
+                            className="inv-rti-wo-link"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            WO #{wo.workOrderNumber || wo.id}
+                          </Link>
+                        </div>
+                        <div className="inv-rti-card-actions">
+                          {accepted ? (
+                            <Link
+                              to={`/invoices/new?estimateId=${accepted.id}`}
+                              className="inv-rti-create-btn"
+                            >
+                              + Create from Estimate
+                            </Link>
+                          ) : (
+                            <Link
+                              to={`/invoices/new?workOrderId=${wo.id}`}
+                              className="inv-rti-create-btn"
+                            >
+                              + Create Invoice
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="cust-section-card">
           <div className="cust-section-body">
