@@ -326,8 +326,11 @@ export default function ViewInvoice() {
               </div>
               <div className="vi-field">
                 <div className="vi-label">Billing Address</div>
-                <div className={`vi-value${inv.billingAddress ? "" : " muted"}`}>
-                  {[inv.billingAddress, inv.billingCity, inv.billingState, inv.billingZip]
+                <div className={`vi-value${(inv.effectiveBillingAddress || inv.billingAddress) ? "" : " muted"}`}>
+                  {[inv.effectiveBillingAddress || inv.billingAddress,
+                    inv.effectiveBillingCity || inv.billingCity,
+                    inv.effectiveBillingState || inv.billingState,
+                    inv.effectiveBillingZip || inv.billingZip]
                     .filter(Boolean).join(", ") || "—"}
                 </div>
               </div>

@@ -251,8 +251,11 @@ export default function ViewEstimate() {
               </div>
               <div className="ve-field">
                 <div className="ve-label">Billing Address</div>
-                <div className={`ve-value${e.billingAddress ? "" : " muted"}`}>
-                  {[e.billingAddress, e.billingCity, e.billingState, e.billingZip]
+                <div className={`ve-value${(e.effectiveBillingAddress || e.billingAddress) ? "" : " muted"}`}>
+                  {[e.effectiveBillingAddress || e.billingAddress,
+                    e.effectiveBillingCity || e.billingCity,
+                    e.effectiveBillingState || e.billingState,
+                    e.effectiveBillingZip || e.billingZip]
                     .filter(Boolean).join(", ") || "—"}
                 </div>
               </div>

@@ -33,6 +33,10 @@ export default function CreateEstimate() {
     projectCity: "",
     projectState: "",
     projectZip: "",
+    billingAddress: "",
+    billingCity: "",
+    billingState: "",
+    billingZip: "",
     issueDate: todayISO(),
     expirationDate: "",
     notes: "",
@@ -79,6 +83,10 @@ export default function CreateEstimate() {
         projectCity: e.projectCity || "",
         projectState: e.projectState || "",
         projectZip: e.projectZip || "",
+        billingAddress: e.billingAddress || e.custBillingAddress || "",
+        billingCity: e.billingCity || e.custBillingCity || "",
+        billingState: e.billingState || e.custBillingState || "",
+        billingZip: e.billingZip || e.custBillingZip || "",
         issueDate: e.issueDate ? e.issueDate.split("T")[0] : todayISO(),
         expirationDate: e.expirationDate ? e.expirationDate.split("T")[0] : "",
         notes: e.notes || "",
@@ -140,6 +148,10 @@ export default function CreateEstimate() {
               ...prev,
               customerId: cRes.data.id,
               customerSearch: cRes.data.companyName || cRes.data.name || "",
+              billingAddress: cRes.data.billingAddress || "",
+              billingCity: cRes.data.billingCity || "",
+              billingState: cRes.data.billingState || "",
+              billingZip: cRes.data.billingZip || "",
             }));
           }).catch(() => {});
         }
@@ -152,6 +164,10 @@ export default function CreateEstimate() {
           ...prev,
           customerId: c.id,
           customerSearch: c.companyName || c.name || "",
+          billingAddress: c.billingAddress || "",
+          billingCity: c.billingCity || "",
+          billingState: c.billingState || "",
+          billingZip: c.billingZip || "",
         }));
       }).catch(() => {});
     }
@@ -174,6 +190,10 @@ export default function CreateEstimate() {
       ...prev,
       customerId: c.id,
       customerSearch: c.companyName || c.name || "",
+      billingAddress: c.billingAddress || "",
+      billingCity: c.billingCity || "",
+      billingState: c.billingState || "",
+      billingZip: c.billingZip || "",
     }));
     setShowCustomerDropdown(false);
   };
@@ -261,6 +281,10 @@ export default function CreateEstimate() {
         projectCity: estimate.projectCity,
         projectState: estimate.projectState,
         projectZip: estimate.projectZip,
+        billingAddress: estimate.billingAddress || null,
+        billingCity: estimate.billingCity || null,
+        billingState: estimate.billingState || null,
+        billingZip: estimate.billingZip || null,
         issueDate: estimate.issueDate || todayISO(),
         expirationDate: estimate.expirationDate || null,
         notes: estimate.notes,
@@ -413,15 +437,51 @@ export default function CreateEstimate() {
 
               {selectedCustomer && (
                 <div className="ce-field">
-                  <div className="ce-label">Billing Info</div>
-                  <div className="ce-customer-preview">
-                    <strong>{selectedCustomer.companyName || selectedCustomer.name}</strong>
-                    <br />
-                    {[selectedCustomer.billingAddress, selectedCustomer.billingCity,
-                      selectedCustomer.billingState, selectedCustomer.billingZip]
-                      .filter(Boolean).join(", ") || "No billing address"}
-                    {selectedCustomer.phone && <><br />{selectedCustomer.phone}</>}
-                    {selectedCustomer.email && <><br />{selectedCustomer.email}</>}
+                  <div className="ce-label" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span>Billing Address</span>
+                    <button
+                      type="button"
+                      style={{ background: "none", border: "none", color: "var(--accent-blue)", fontSize: 12, fontWeight: 500, cursor: "pointer", padding: 0 }}
+                      onClick={() => setEstimate((prev) => ({
+                        ...prev,
+                        billingAddress: selectedCustomer.billingAddress || "",
+                        billingCity: selectedCustomer.billingCity || "",
+                        billingState: selectedCustomer.billingState || "",
+                        billingZip: selectedCustomer.billingZip || "",
+                      }))}
+                    >
+                      Reset to Customer Default
+                    </button>
+                  </div>
+                  <input
+                    name="billingAddress"
+                    value={estimate.billingAddress}
+                    onChange={handleChange}
+                    className="ce-input"
+                    placeholder="Billing street address"
+                  />
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 8, marginTop: 8 }}>
+                    <input
+                      name="billingCity"
+                      value={estimate.billingCity}
+                      onChange={handleChange}
+                      className="ce-input"
+                      placeholder="City"
+                    />
+                    <input
+                      name="billingState"
+                      value={estimate.billingState}
+                      onChange={handleChange}
+                      className="ce-input"
+                      placeholder="ST"
+                    />
+                    <input
+                      name="billingZip"
+                      value={estimate.billingZip}
+                      onChange={handleChange}
+                      className="ce-input"
+                      placeholder="ZIP"
+                    />
                   </div>
                 </div>
               )}

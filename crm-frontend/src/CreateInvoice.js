@@ -36,6 +36,10 @@ export default function CreateInvoice() {
     shipToCity: "",
     shipToState: "",
     shipToZip: "",
+    billingAddress: "",
+    billingCity: "",
+    billingState: "",
+    billingZip: "",
     issueDate: todayISO(),
     dueDate: addDays(todayISO(), 45),
     notes: "",
@@ -89,6 +93,10 @@ export default function CreateInvoice() {
         shipToCity: inv.shipToCity || "",
         shipToState: inv.shipToState || "",
         shipToZip: inv.shipToZip || "",
+        billingAddress: inv.billingAddress || inv.custBillingAddress || "",
+        billingCity: inv.billingCity || inv.custBillingCity || "",
+        billingState: inv.billingState || inv.custBillingState || "",
+        billingZip: inv.billingZip || inv.custBillingZip || "",
         issueDate: inv.issueDate ? inv.issueDate.split("T")[0] : todayISO(),
         dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : addDays(todayISO(), 45),
         notes: inv.notes || "",
@@ -148,6 +156,10 @@ export default function CreateInvoice() {
           shipToCity: e.projectCity || "",
           shipToState: e.projectState || "",
           shipToZip: e.projectZip || "",
+          billingAddress: e.effectiveBillingAddress || e.billingAddress || "",
+          billingCity: e.effectiveBillingCity || e.billingCity || "",
+          billingState: e.effectiveBillingState || e.billingState || "",
+          billingZip: e.effectiveBillingZip || e.billingZip || "",
           taxRate: Number(e.taxRate) || 0,
           notes: e.notes || "",
           terms: e.terms || prev.terms,
@@ -189,6 +201,10 @@ export default function CreateInvoice() {
               ...prev,
               customerId: cRes.data.id,
               customerSearch: cRes.data.companyName || cRes.data.name || "",
+              billingAddress: cRes.data.billingAddress || "",
+              billingCity: cRes.data.billingCity || "",
+              billingState: cRes.data.billingState || "",
+              billingZip: cRes.data.billingZip || "",
             }));
           }).catch(() => {});
         }
@@ -201,6 +217,10 @@ export default function CreateInvoice() {
           ...prev,
           customerId: c.id,
           customerSearch: c.companyName || c.name || "",
+          billingAddress: c.billingAddress || "",
+          billingCity: c.billingCity || "",
+          billingState: c.billingState || "",
+          billingZip: c.billingZip || "",
         }));
       }).catch(() => {});
     }
@@ -223,6 +243,10 @@ export default function CreateInvoice() {
       ...prev,
       customerId: c.id,
       customerSearch: c.companyName || c.name || "",
+      billingAddress: c.billingAddress || "",
+      billingCity: c.billingCity || "",
+      billingState: c.billingState || "",
+      billingZip: c.billingZip || "",
     }));
     setShowCustomerDropdown(false);
   };
@@ -316,6 +340,10 @@ export default function CreateInvoice() {
         shipToCity: invoice.shipToCity,
         shipToState: invoice.shipToState,
         shipToZip: invoice.shipToZip,
+        billingAddress: invoice.billingAddress || null,
+        billingCity: invoice.billingCity || null,
+        billingState: invoice.billingState || null,
+        billingZip: invoice.billingZip || null,
         issueDate: invoice.issueDate || todayISO(),
         dueDate: invoice.dueDate || addDays(invoice.issueDate || todayISO(), 45),
         notes: invoice.notes,
@@ -467,15 +495,51 @@ export default function CreateInvoice() {
 
               {selectedCustomer && (
                 <div className="ci-field">
-                  <div className="ci-label">Billing Info</div>
-                  <div className="ci-customer-preview">
-                    <strong>{selectedCustomer.companyName || selectedCustomer.name}</strong>
-                    <br />
-                    {[selectedCustomer.billingAddress, selectedCustomer.billingCity,
-                      selectedCustomer.billingState, selectedCustomer.billingZip]
-                      .filter(Boolean).join(", ") || "No billing address"}
-                    {selectedCustomer.phone && <><br />{selectedCustomer.phone}</>}
-                    {selectedCustomer.email && <><br />{selectedCustomer.email}</>}
+                  <div className="ci-label" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span>Billing Address</span>
+                    <button
+                      type="button"
+                      style={{ background: "none", border: "none", color: "var(--accent-blue)", fontSize: 12, fontWeight: 500, cursor: "pointer", padding: 0 }}
+                      onClick={() => setInvoice((prev) => ({
+                        ...prev,
+                        billingAddress: selectedCustomer.billingAddress || "",
+                        billingCity: selectedCustomer.billingCity || "",
+                        billingState: selectedCustomer.billingState || "",
+                        billingZip: selectedCustomer.billingZip || "",
+                      }))}
+                    >
+                      Reset to Customer Default
+                    </button>
+                  </div>
+                  <input
+                    name="billingAddress"
+                    value={invoice.billingAddress}
+                    onChange={handleChange}
+                    className="ci-input"
+                    placeholder="Billing street address"
+                  />
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 8, marginTop: 8 }}>
+                    <input
+                      name="billingCity"
+                      value={invoice.billingCity}
+                      onChange={handleChange}
+                      className="ci-input"
+                      placeholder="City"
+                    />
+                    <input
+                      name="billingState"
+                      value={invoice.billingState}
+                      onChange={handleChange}
+                      className="ci-input"
+                      placeholder="ST"
+                    />
+                    <input
+                      name="billingZip"
+                      value={invoice.billingZip}
+                      onChange={handleChange}
+                      className="ci-input"
+                      placeholder="ZIP"
+                    />
                   </div>
                 </div>
               )}
