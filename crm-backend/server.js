@@ -1424,134 +1424,224 @@ async function generateEstimatePdf(estimateId) {
   );
 
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'LETTER', margins: { top: 40, bottom: 40, left: 50, right: 50 } });
+    const doc = new PDFDocument({ size: 'LETTER', margins: { top: 50, bottom: 50, left: 50, right: 50 } });
     const chunks = [];
     doc.on('data', c => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const pw = 612 - 100; // page width minus margins (50+50)
-    const leftCol = 50;
-    const rightCol = 320;
+    const U = s => (s || '').toUpperCase();
+    const pageW = 612;
+    const leftM = 50;
+    const rightM = 50;
+    const pw = pageW - leftM - rightM; // 512
+    const pageH = 792;
+    const stroke = 0.75;
 
-    // --- HEADER ---
-    doc.font('Times-Bold').fontSize(11);
-    doc.text('First Class Glass & Mirror, Inc.', leftCol, 40);
-    doc.font('Times-Roman').fontSize(10);
-    doc.text('1513 Industrial Drive', leftCol, 55);
-    doc.text('Itasca, IL. 60143', leftCol, 67);
-    doc.text('630-250-9777', leftCol, 79);
-    doc.text('630-250-9727', leftCol, 91);
+    // --- COMPANY HEADER (top-left) ---
+    doc.font('Helvetica-Bold').fontSize(12);
+    doc.text('First Class Glass & Mirror, Inc.', leftM, 50);
+    doc.font('Helvetica').fontSize(10);
+    doc.text('1513 Industrial Drive', leftM, 66);
+    doc.text('Itasca, IL. 60143', leftM, 78);
+    doc.text('630-250-9777', leftM, 90);
+    doc.text('630-250-9727', leftM, 102);
 
-    // "Estimate" title - right side
-    doc.font('Times-Bold').fontSize(24);
-    doc.text('Estimate', rightCol, 40, { width: pw - (rightCol - leftCol), align: 'right' });
+    // --- "Estimate" title (top-right) ---
+    doc.font('Helvetica-Bold').fontSize(24);
+    doc.text('Estimate', leftM, 50, { width: pw, align: 'right' });
 
-    // Date
+    // --- DATE box (right side, below title) ---
+    const dateBoxX = pageW - rightM - 140;
+    const dateBoxY = 80;
+    const dateBoxW = 140;
+    const dateBoxH1 = 18;
+    const dateBoxH2 = 18;
     const issueDateStr = estimate.issueDate
-      ? new Date(estimate.issueDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
-      : new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-    doc.font('Times-Roman').fontSize(10);
-    doc.text('DATE', rightCol + 80, 75);
-    doc.text(issueDateStr, rightCol + 80, 87, { width: pw - (rightCol + 80 - leftCol), align: 'right' });
+      ? new Date(estimate.issueDate).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })
+      : new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
 
-    // Horizontal line
-    doc.moveTo(leftCol, 110).lineTo(leftCol + pw, 110).lineWidth(0.5).stroke();
+    doc.lineWidth(stroke);
+    doc.rect(dateBoxX, dateBoxY, dateBoxW, dateBoxH1).stroke();
+    doc.font('Helvetica-Bold').fontSize(8);
+    doc.text('DATE', dateBoxX + 4, dateBoxY + 5, { width: dateBoxW - 8, align: 'center' });
 
-    // --- BILL TO + PROJECT ---
-    let y = 120;
-    const custName = estimate.companyName || estimate.custName || '';
-    const billingParts = [estimate.billingAddress, estimate.billingCity, estimate.billingState, estimate.billingZip].filter(Boolean);
-    const billingLine = billingParts.length > 1
-      ? estimate.billingAddress + '\n' + [estimate.billingCity, estimate.billingState].filter(Boolean).join(', ') + (estimate.billingZip ? ' ' + estimate.billingZip : '')
-      : billingParts.join(', ');
+    doc.rect(dateBoxX, dateBoxY + dateBoxH1, dateBoxW, dateBoxH2).stroke();
+    doc.font('Helvetica').fontSize(9);
+    doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dateBoxH1 + 5, { width: dateBoxW - 8, align: 'center' });
 
-    doc.font('Times-Bold').fontSize(9);
-    doc.text('BILL TO', leftCol, y);
-    doc.font('Times-Roman').fontSize(10);
-    y += 14;
-    if (custName) { doc.text(custName, leftCol, y); y += 12; }
-    if (billingLine) {
-      const lines = billingLine.split('\n');
-      for (const l of lines) { doc.text(l, leftCol, y); y += 12; }
+    // --- BILL TO box (left) + PROJECT NAME/ADDRESS box (right) ---
+    const boxTop = 128;
+    const billBoxW = Math.floor(pw * 0.48);
+    const projBoxX = leftM + billBoxW + 14;
+    const projBoxW = pw - billBoxW - 14;
+
+    // Build BILL TO content lines
+    const custName = U(estimate.companyName || estimate.custName || '');
+    const billLines = [];
+    if (custName) billLines.push(custName);
+    // Build street address — avoid duplicating city/state/zip
+    const rawAddr = (estimate.billingAddress || '').trim();
+    const bCity = (estimate.billingCity || '').trim();
+    const bState = (estimate.billingState || '').trim();
+    const bZip = (estimate.billingZip || '').trim();
+    const cityStateZip = [bCity, bState].filter(Boolean).join(', ') + (bZip ? ' ' + bZip : '');
+    if (rawAddr) {
+      // Check if raw address already contains city/state/zip — if so, just use rawAddr as-is
+      const addrUpper = rawAddr.toUpperCase();
+      const cszUpper = cityStateZip.toUpperCase();
+      if (cszUpper && addrUpper.includes(bCity.toUpperCase()) && addrUpper.includes(bZip)) {
+        // Address already has city/state/zip embedded — use it directly
+        billLines.push(U(rawAddr));
+      } else {
+        billLines.push(U(rawAddr));
+        if (cityStateZip) billLines.push(U(cityStateZip));
+      }
+    } else if (cityStateZip) {
+      billLines.push(U(cityStateZip));
     }
-    if (estimate.custPhone) { doc.text(estimate.custPhone, leftCol, y); y += 12; }
-    if (estimate.custFax) { doc.text('Fax: ' + estimate.custFax, leftCol, y); y += 12; }
+    if (estimate.custPhone) billLines.push(estimate.custPhone);
+    if (estimate.custFax) billLines.push('FAX# ' + estimate.custFax);
 
-    // Project info - right side
-    let yp = 120;
-    doc.font('Times-Bold').fontSize(9);
-    doc.text('PROJECT NAME/ADDRESS', rightCol, yp);
-    doc.font('Times-Roman').fontSize(10);
-    yp += 14;
-    if (estimate.projectName) { doc.text(estimate.projectName, rightCol, yp); yp += 12; }
-    if (estimate.projectAddress) { doc.text(estimate.projectAddress, rightCol, yp); yp += 12; }
-    const projCityLine = [estimate.projectCity, estimate.projectState].filter(Boolean).join(', ') + (estimate.projectZip ? ' ' + estimate.projectZip : '');
-    if (projCityLine.trim()) { doc.text(projCityLine, rightCol, yp); yp += 12; }
+    // Build PROJECT content lines
+    const projLines = [];
+    if (estimate.projectName) projLines.push(U(estimate.projectName));
+    if (estimate.projectAddress) projLines.push(U(estimate.projectAddress));
+    const projCSZ = [estimate.projectCity, estimate.projectState].filter(Boolean).join(' ') + (estimate.projectZip ? ' ' + estimate.projectZip : '');
+    if (projCSZ.trim()) projLines.push(U(projCSZ));
 
-    // P.O. No.
-    yp += 6;
+    const lineH = 13;
+    const headerH = 16;
+    const billContentH = Math.max(billLines.length * lineH + 6, 40);
+    const projContentH = Math.max(projLines.length * lineH + 6, 40);
+    const billBoxH = headerH + billContentH;
+    const projBoxH = headerH + projContentH;
+    const maxBoxH = Math.max(billBoxH, projBoxH);
+
+    // Draw BILL TO box
+    doc.lineWidth(stroke);
+    doc.rect(leftM, boxTop, billBoxW, maxBoxH).stroke();
+    doc.font('Helvetica-Bold').fontSize(8);
+    doc.text('BILL TO', leftM + 5, boxTop + 4);
+    doc.moveTo(leftM, boxTop + headerH).lineTo(leftM + billBoxW, boxTop + headerH).lineWidth(0.5).stroke();
+    doc.font('Helvetica').fontSize(9);
+    let by = boxTop + headerH + 4;
+    for (const line of billLines) {
+      doc.text(line, leftM + 5, by, { width: billBoxW - 10 });
+      by += lineH;
+    }
+
+    // Draw PROJECT NAME/ADDRESS box
+    doc.lineWidth(stroke);
+    doc.rect(projBoxX, boxTop, projBoxW, maxBoxH).stroke();
+    doc.font('Helvetica-Bold').fontSize(8);
+    doc.text('PROJECT NAME/ADDRESS', projBoxX + 5, boxTop + 4);
+    doc.moveTo(projBoxX, boxTop + headerH).lineTo(projBoxX + projBoxW, boxTop + headerH).lineWidth(0.5).stroke();
+    doc.font('Helvetica').fontSize(9);
+    let py = boxTop + headerH + 4;
+    for (const line of projLines) {
+      doc.text(line, projBoxX + 5, py, { width: projBoxW - 10 });
+      py += lineH;
+    }
+
+    // --- P.O. NUMBER box (below project box, right side) ---
+    let poBoxBottom = boxTop + maxBoxH;
     if (estimate.poNumber) {
-      doc.font('Times-Bold').fontSize(9);
-      doc.text('P.O. No.', rightCol, yp);
-      doc.font('Times-Roman').fontSize(10);
-      doc.text(estimate.poNumber, rightCol + 50, yp);
+      const poBoxY = boxTop + maxBoxH + 4;
+      const poBoxW = projBoxW;
+      const poBoxH = headerH + lineH + 6;
+      doc.lineWidth(stroke);
+      doc.rect(projBoxX, poBoxY, poBoxW, poBoxH).stroke();
+      doc.font('Helvetica-Bold').fontSize(8);
+      doc.text('P.O. No.', projBoxX + 5, poBoxY + 4);
+      doc.moveTo(projBoxX, poBoxY + headerH).lineTo(projBoxX + poBoxW, poBoxY + headerH).lineWidth(0.5).stroke();
+      doc.font('Helvetica').fontSize(9);
+      doc.text(U(estimate.poNumber), projBoxX + 5, poBoxY + headerH + 4);
+      poBoxBottom = poBoxY + poBoxH;
     }
 
     // --- LINE ITEMS TABLE ---
-    const tableTop = Math.max(y, yp) + 20;
-    const colQty = leftCol;
-    const colDesc = leftCol + 60;
-    const colTotal = leftCol + pw - 80;
-    const colEnd = leftCol + pw;
+    const tableTop = Math.max(boxTop + maxBoxH, poBoxBottom) + 14;
+    const colQty = leftM;
+    const colDesc = leftM + 55;
+    const colTotal = leftM + pw - 80;
+    const colEnd = leftM + pw;
+    const tHeaderH = 20;
 
-    // Table header
-    doc.moveTo(leftCol, tableTop).lineTo(colEnd, tableTop).lineWidth(0.5).stroke();
-    doc.font('Times-Bold').fontSize(9);
-    doc.text('QTY', colQty + 4, tableTop + 4, { width: 52, align: 'center' });
-    doc.text('DESCRIPTION', colDesc + 4, tableTop + 4);
-    doc.text('TOTAL', colTotal + 4, tableTop + 4, { width: 76, align: 'right' });
-    const headerBottom = tableTop + 18;
-    doc.moveTo(leftCol, headerBottom).lineTo(colEnd, headerBottom).lineWidth(0.5).stroke();
+    // Header row with gray background
+    doc.lineWidth(stroke);
+    doc.save();
+    doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).fill('#E0E0E0');
+    doc.restore();
+    doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).stroke();
+    doc.moveTo(colDesc, tableTop).lineTo(colDesc, tableTop + tHeaderH).stroke();
+    doc.moveTo(colTotal, tableTop).lineTo(colTotal, tableTop + tHeaderH).stroke();
 
-    // Vertical lines for header
-    doc.moveTo(colDesc, tableTop).lineTo(colDesc, headerBottom).stroke();
-    doc.moveTo(colTotal, tableTop).lineTo(colTotal, headerBottom).stroke();
+    doc.font('Helvetica-Bold').fontSize(8);
+    doc.fillColor('#000000');
+    doc.text('Qty', colQty + 2, tableTop + 6, { width: colDesc - colQty - 4, align: 'center' });
+    doc.text('DESCRIPTION', colDesc + 5, tableTop + 6);
+    doc.text('TOTAL', colTotal + 4, tableTop + 6, { width: colEnd - colTotal - 8, align: 'right' });
 
-    // Table rows
-    let rowY = headerBottom;
-    doc.font('Times-Roman').fontSize(10);
+    // Table body rows
+    let rowY = tableTop + tHeaderH;
+    doc.font('Helvetica').fontSize(9);
     for (const item of lineItems) {
-      rowY += 4;
+      const desc = U(item.description || '');
+      const descH = doc.heightOfString(desc, { width: colTotal - colDesc - 10 });
+      const cellH = Math.max(descH + 8, 18);
+
+      // Cell borders
+      doc.lineWidth(0.5);
+      doc.rect(colQty, rowY, colDesc - colQty, cellH).stroke();
+      doc.rect(colDesc, rowY, colTotal - colDesc, cellH).stroke();
+      doc.rect(colTotal, rowY, colEnd - colTotal, cellH).stroke();
+
+      // Qty
       if (item.quantity != null && Number(item.quantity) > 0) {
         const qtyStr = Number(item.quantity) === Math.floor(Number(item.quantity))
           ? String(Math.floor(Number(item.quantity)))
           : Number(item.quantity).toFixed(2);
-        doc.text(qtyStr, colQty + 4, rowY, { width: 52, align: 'center' });
+        doc.text(qtyStr, colQty + 2, rowY + 4, { width: colDesc - colQty - 4, align: 'center' });
       }
-      doc.text(item.description || '', colDesc + 4, rowY, { width: colTotal - colDesc - 8 });
-      doc.text(Number(item.amount).toFixed(2), colTotal + 4, rowY, { width: 76, align: 'right' });
-      rowY += 16;
-      // Row separator line
-      doc.moveTo(leftCol, rowY).lineTo(colEnd, rowY).lineWidth(0.25).stroke();
+      // Description
+      doc.text(desc, colDesc + 5, rowY + 4, { width: colTotal - colDesc - 10 });
+      // Amount (no $ sign)
+      const amt = Number(item.amount) || 0;
+      if (amt > 0) {
+        doc.text(amt.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), colTotal + 4, rowY + 4, { width: colEnd - colTotal - 8, align: 'right' });
+      }
+
+      rowY += cellH;
     }
 
-    // Bottom border of table
-    rowY += 2;
-    doc.moveTo(leftCol, rowY).lineTo(colEnd, rowY).lineWidth(0.5).stroke();
+    // --- FOOTER: Terms (left) + Total (right) in bordered row at bottom ---
+    const footerH = 50;
+    const footerY = pageH - 50 - footerH;
+    const termsColW = colTotal - leftM;
+    const totalLabelW = 60;
+    const totalValW = colEnd - colTotal - totalLabelW;
 
-    // --- TOTAL ---
-    rowY += 16;
-    doc.font('Times-Bold').fontSize(12);
-    doc.text('TOTAL', colTotal - 60, rowY);
-    doc.text(fmtMoney(estimate.total), colTotal + 4, rowY, { width: 76, align: 'right' });
+    doc.lineWidth(stroke);
+    // Terms cell
+    doc.rect(leftM, footerY, termsColW, footerH).stroke();
+    // Total label cell
+    doc.rect(colTotal, footerY, totalLabelW, footerH).stroke();
+    // Total value cell
+    doc.rect(colTotal + totalLabelW, footerY, colEnd - colTotal - totalLabelW, footerH).stroke();
 
-    // --- TERMS ---
-    if (estimate.terms) {
-      rowY += 30;
-      doc.font('Times-Roman').fontSize(8);
-      doc.text(estimate.terms, leftCol, rowY, { width: pw, lineGap: 2 });
+    // Terms text
+    const termsText = (estimate.terms || '').toUpperCase();
+    if (termsText) {
+      doc.font('Helvetica').fontSize(7);
+      doc.text(termsText, leftM + 5, footerY + 6, { width: termsColW - 10, lineGap: 2 });
     }
+
+    // Total label + value
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('TOTAL', colTotal + 4, footerY + 18, { width: totalLabelW - 8, align: 'center' });
+    const totalStr = '$' + (Number(estimate.total) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    doc.text(totalStr, colTotal + totalLabelW + 4, footerY + 18, { width: colEnd - colTotal - totalLabelW - 8, align: 'center' });
 
     doc.end();
   });
@@ -1651,6 +1741,16 @@ app.post('/estimates', authenticate, async (req, res) => {
       vals
     );
     const [[newEst]] = await db.query('SELECT * FROM estimates WHERE id = ?', [result.insertId]);
+
+    // Auto-update linked work order status to "Waiting for Approval"
+    if (body.workOrderId) {
+      try {
+        await db.query("UPDATE work_orders SET status='Waiting for Approval', updatedAt=NOW() WHERE id=?", [Number(body.workOrderId)]);
+      } catch (woErr) {
+        console.error('Failed to update WO status on estimate create:', woErr.message);
+      }
+    }
+
     res.status(201).json(newEst);
   } catch (err) {
     console.error('Error creating estimate:', err);
@@ -1933,161 +2033,218 @@ async function generateInvoicePdf(invoiceId) {
   );
 
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'LETTER', margins: { top: 40, bottom: 40, left: 50, right: 50 } });
+    const doc = new PDFDocument({ size: 'LETTER', margins: { top: 50, bottom: 50, left: 50, right: 50 } });
     const chunks = [];
     doc.on('data', c => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const pw = 612 - 100;
-    const leftCol = 50;
-    const rightCol = 320;
+    const U = s => (s || '').toUpperCase();
+    const pageW = 612;
+    const leftM = 50;
+    const rightM = 50;
+    const pw = pageW - leftM - rightM; // 512
+    const pageH = 792;
+    const stroke = 0.75;
 
-    // --- HEADER ---
-    doc.font('Times-Bold').fontSize(11);
-    doc.text('First Class Glass & Mirror, Inc.', leftCol, 40);
-    doc.font('Times-Roman').fontSize(10);
-    doc.text('1513 Industrial Drive', leftCol, 55);
-    doc.text('Itasca, IL. 60143', leftCol, 67);
-    doc.text('630-250-9777', leftCol, 79);
-    doc.text('630-250-9727', leftCol, 91);
+    // --- COMPANY HEADER (top-left) ---
+    doc.font('Helvetica-Bold').fontSize(12);
+    doc.text('First Class Glass & Mirror, Inc.', leftM, 50);
+    doc.font('Helvetica').fontSize(10);
+    doc.text('1513 Industrial Drive', leftM, 66);
+    doc.text('Itasca, IL. 60143', leftM, 78);
+    doc.text('630-250-9777', leftM, 90);
+    doc.text('630-250-9727', leftM, 102);
 
-    // "Invoice" title - right side
-    doc.font('Times-Bold').fontSize(24);
-    doc.text('Invoice', rightCol, 40, { width: pw - (rightCol - leftCol), align: 'right' });
+    // --- "Invoice" title (top-right) ---
+    doc.font('Helvetica-Bold').fontSize(24);
+    doc.text('Invoice', leftM, 50, { width: pw, align: 'right' });
 
-    // Date + Invoice #
+    // --- DATE / INVOICE # box (right side, below title) ---
+    const dateBoxX = pageW - rightM - 200;
+    const dateBoxY = 80;
+    const dateColW = 100;
+    const invColW = 100;
+    const dateBoxH1 = 18;
+    const dateBoxH2 = 18;
     const issueDateStr = invoice.issueDate
-      ? new Date(invoice.issueDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
-      : new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-    const dueDateStr = invoice.dueDate
-      ? new Date(invoice.dueDate).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
-      : '';
-    doc.font('Times-Bold').fontSize(9);
-    doc.text('DATE', rightCol + 30, 72);
-    doc.text('INVOICE #', rightCol + 30, 86);
-    if (dueDateStr) doc.text('DUE DATE', rightCol + 30, 100);
-    doc.font('Times-Roman').fontSize(10);
-    doc.text(issueDateStr, rightCol + 30, 72, { width: pw - (rightCol + 30 - leftCol), align: 'right' });
-    doc.text(String(invoice.invoiceNumber), rightCol + 30, 86, { width: pw - (rightCol + 30 - leftCol), align: 'right' });
-    if (dueDateStr) doc.text(dueDateStr, rightCol + 30, 100, { width: pw - (rightCol + 30 - leftCol), align: 'right' });
+      ? new Date(invoice.issueDate).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })
+      : new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
 
-    // Horizontal line
-    const headerLine = dueDateStr ? 118 : 105;
-    doc.moveTo(leftCol, headerLine).lineTo(leftCol + pw, headerLine).lineWidth(0.5).stroke();
+    doc.lineWidth(stroke);
+    // Header row: DATE | INVOICE #
+    doc.rect(dateBoxX, dateBoxY, dateColW, dateBoxH1).stroke();
+    doc.rect(dateBoxX + dateColW, dateBoxY, invColW, dateBoxH1).stroke();
+    doc.font('Helvetica-Bold').fontSize(8);
+    doc.text('DATE', dateBoxX + 4, dateBoxY + 5, { width: dateColW - 8, align: 'center' });
+    doc.text('INVOICE #', dateBoxX + dateColW + 4, dateBoxY + 5, { width: invColW - 8, align: 'center' });
 
-    // --- BILL TO + SHIP TO ---
-    let y = headerLine + 10;
-    const custName = invoice.companyName || invoice.custName || '';
-    const billingParts = [invoice.billingAddress, invoice.billingCity, invoice.billingState, invoice.billingZip].filter(Boolean);
-    const billingLine = billingParts.length > 1
-      ? invoice.billingAddress + '\n' + [invoice.billingCity, invoice.billingState].filter(Boolean).join(', ') + (invoice.billingZip ? ' ' + invoice.billingZip : '')
-      : billingParts.join(', ');
+    // Value row
+    doc.rect(dateBoxX, dateBoxY + dateBoxH1, dateColW, dateBoxH2).stroke();
+    doc.rect(dateBoxX + dateColW, dateBoxY + dateBoxH1, invColW, dateBoxH2).stroke();
+    doc.font('Helvetica').fontSize(9);
+    doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dateBoxH1 + 5, { width: dateColW - 8, align: 'center' });
+    doc.text(String(invoice.invoiceNumber || ''), dateBoxX + dateColW + 4, dateBoxY + dateBoxH1 + 5, { width: invColW - 8, align: 'center' });
 
-    doc.font('Times-Bold').fontSize(9);
-    doc.text('BILL TO', leftCol, y);
-    doc.font('Times-Roman').fontSize(10);
-    y += 14;
-    if (custName) { doc.text(custName, leftCol, y); y += 12; }
-    if (billingLine) {
-      const lines = billingLine.split('\n');
-      for (const l of lines) { doc.text(l, leftCol, y); y += 12; }
+    // --- BILL TO box (left) + SHIP TO box (right) ---
+    const boxTop = 128;
+    const billBoxW = Math.floor(pw * 0.48);
+    const shipBoxX = leftM + billBoxW + 14;
+    const shipBoxW = pw - billBoxW - 14;
+
+    // Build BILL TO content lines
+    const custName = U(invoice.companyName || invoice.custName || '');
+    const billLines = [];
+    if (custName) billLines.push(custName);
+    const rawAddr = (invoice.billingAddress || '').trim();
+    const bCity = (invoice.billingCity || '').trim();
+    const bState = (invoice.billingState || '').trim();
+    const bZip = (invoice.billingZip || '').trim();
+    const cityStateZip = [bCity, bState].filter(Boolean).join(', ') + (bZip ? ' ' + bZip : '');
+    if (rawAddr) {
+      const addrUpper = rawAddr.toUpperCase();
+      if (cityStateZip && bCity && addrUpper.includes(bCity.toUpperCase()) && bZip && addrUpper.includes(bZip)) {
+        billLines.push(U(rawAddr));
+      } else {
+        billLines.push(U(rawAddr));
+        if (cityStateZip) billLines.push(U(cityStateZip));
+      }
+    } else if (cityStateZip) {
+      billLines.push(U(cityStateZip));
     }
-    if (invoice.custPhone) { doc.text(invoice.custPhone, leftCol, y); y += 12; }
-    if (invoice.custFax) { doc.text('Fax: ' + invoice.custFax, leftCol, y); y += 12; }
+    if (invoice.custPhone) billLines.push(invoice.custPhone);
+    if (invoice.custFax) billLines.push('FAX# ' + invoice.custFax);
 
-    // Ship To - right side
-    let yp = headerLine + 10;
-    doc.font('Times-Bold').fontSize(9);
-    doc.text('SHIP TO', rightCol, yp);
-    doc.font('Times-Roman').fontSize(10);
-    yp += 14;
-    if (invoice.projectName) { doc.text(invoice.projectName, rightCol, yp); yp += 12; }
-    if (invoice.shipToAddress) { doc.text(invoice.shipToAddress, rightCol, yp); yp += 12; }
-    const shipCityLine = [invoice.shipToCity, invoice.shipToState].filter(Boolean).join(', ') + (invoice.shipToZip ? ' ' + invoice.shipToZip : '');
-    if (shipCityLine.trim()) { doc.text(shipCityLine, rightCol, yp); yp += 12; }
+    // Build SHIP TO content lines
+    const shipLines = [];
+    if (invoice.projectName) shipLines.push(U(invoice.projectName));
+    if (invoice.shipToAddress) shipLines.push(U(invoice.shipToAddress));
+    const shipCSZ = [invoice.shipToCity, invoice.shipToState].filter(Boolean).join(' ') + (invoice.shipToZip ? ' ' + invoice.shipToZip : '');
+    if (shipCSZ.trim()) shipLines.push(U(shipCSZ));
 
-    // P.O. No.
-    yp += 6;
+    const lineH = 13;
+    const headerH = 16;
+    const billContentH = Math.max(billLines.length * lineH + 6, 40);
+    const shipContentH = Math.max(shipLines.length * lineH + 6, 40);
+    const billBoxH = headerH + billContentH;
+    const shipBoxH = headerH + shipContentH;
+    const maxBoxH = Math.max(billBoxH, shipBoxH);
+
+    // Draw BILL TO box
+    doc.lineWidth(stroke);
+    doc.rect(leftM, boxTop, billBoxW, maxBoxH).stroke();
+    doc.font('Helvetica-Bold').fontSize(8);
+    doc.text('BILL TO', leftM + 5, boxTop + 4);
+    doc.moveTo(leftM, boxTop + headerH).lineTo(leftM + billBoxW, boxTop + headerH).lineWidth(0.5).stroke();
+    doc.font('Helvetica').fontSize(9);
+    let by = boxTop + headerH + 4;
+    for (const line of billLines) {
+      doc.text(line, leftM + 5, by, { width: billBoxW - 10 });
+      by += lineH;
+    }
+
+    // Draw SHIP TO box
+    doc.lineWidth(stroke);
+    doc.rect(shipBoxX, boxTop, shipBoxW, maxBoxH).stroke();
+    doc.font('Helvetica-Bold').fontSize(8);
+    doc.text('SHIP TO', shipBoxX + 5, boxTop + 4);
+    doc.moveTo(shipBoxX, boxTop + headerH).lineTo(shipBoxX + shipBoxW, boxTop + headerH).lineWidth(0.5).stroke();
+    doc.font('Helvetica').fontSize(9);
+    let sy = boxTop + headerH + 4;
+    for (const line of shipLines) {
+      doc.text(line, shipBoxX + 5, sy, { width: shipBoxW - 10 });
+      sy += lineH;
+    }
+
+    // --- P.O. NUMBER box (below ship to box, right side) ---
+    let poBoxBottom = boxTop + maxBoxH;
     if (invoice.poNumber) {
-      doc.font('Times-Bold').fontSize(9);
-      doc.text('P.O. NO.', rightCol, yp);
-      doc.font('Times-Roman').fontSize(10);
-      doc.text(invoice.poNumber, rightCol + 55, yp);
+      const poBoxY = boxTop + maxBoxH + 4;
+      const poBoxW = shipBoxW;
+      const poBoxH = headerH + lineH + 6;
+      doc.lineWidth(stroke);
+      doc.rect(shipBoxX, poBoxY, poBoxW, poBoxH).stroke();
+      doc.font('Helvetica-Bold').fontSize(8);
+      doc.text('P.O. No.', shipBoxX + 5, poBoxY + 4);
+      doc.moveTo(shipBoxX, poBoxY + headerH).lineTo(shipBoxX + poBoxW, poBoxY + headerH).lineWidth(0.5).stroke();
+      doc.font('Helvetica').fontSize(9);
+      doc.text(U(invoice.poNumber), shipBoxX + 5, poBoxY + headerH + 4);
+      poBoxBottom = poBoxY + poBoxH;
     }
 
     // --- LINE ITEMS TABLE ---
-    const tableTop = Math.max(y, yp) + 20;
-    const colQty = leftCol;
-    const colDesc = leftCol + 60;
-    const colTotal = leftCol + pw - 80;
-    const colEnd = leftCol + pw;
+    const tableTop = Math.max(boxTop + maxBoxH, poBoxBottom) + 14;
+    const colQty = leftM;
+    const colDesc = leftM + 55;
+    const colTotal = leftM + pw - 80;
+    const colEnd = leftM + pw;
+    const tHeaderH = 20;
 
-    doc.moveTo(leftCol, tableTop).lineTo(colEnd, tableTop).lineWidth(0.5).stroke();
-    doc.font('Times-Bold').fontSize(9);
-    doc.text('QUANTITY', colQty + 4, tableTop + 4, { width: 52, align: 'center' });
-    doc.text('DESCRIPTION', colDesc + 4, tableTop + 4);
-    doc.text('AMOUNT', colTotal + 4, tableTop + 4, { width: 76, align: 'right' });
-    const headerBottom = tableTop + 18;
-    doc.moveTo(leftCol, headerBottom).lineTo(colEnd, headerBottom).lineWidth(0.5).stroke();
-    doc.moveTo(colDesc, tableTop).lineTo(colDesc, headerBottom).stroke();
-    doc.moveTo(colTotal, tableTop).lineTo(colTotal, headerBottom).stroke();
+    // Header row with gray background
+    doc.lineWidth(stroke);
+    doc.save();
+    doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).fill('#E0E0E0');
+    doc.restore();
+    doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).stroke();
+    doc.moveTo(colDesc, tableTop).lineTo(colDesc, tableTop + tHeaderH).stroke();
+    doc.moveTo(colTotal, tableTop).lineTo(colTotal, tableTop + tHeaderH).stroke();
 
-    let rowY = headerBottom;
-    doc.font('Times-Roman').fontSize(10);
+    doc.font('Helvetica-Bold').fontSize(8);
+    doc.fillColor('#000000');
+    doc.text('QUANTITY', colQty + 2, tableTop + 6, { width: colDesc - colQty - 4, align: 'center' });
+    doc.text('DESCRIPTION', colDesc + 5, tableTop + 6);
+    doc.text('AMOUNT', colTotal + 4, tableTop + 6, { width: colEnd - colTotal - 8, align: 'right' });
+
+    // Table body rows
+    let rowY = tableTop + tHeaderH;
+    doc.font('Helvetica').fontSize(9);
     for (const item of lineItems) {
-      rowY += 4;
+      const desc = U(item.description || '');
+      const descH = doc.heightOfString(desc, { width: colTotal - colDesc - 10 });
+      const cellH = Math.max(descH + 8, 18);
+
+      doc.lineWidth(0.5);
+      doc.rect(colQty, rowY, colDesc - colQty, cellH).stroke();
+      doc.rect(colDesc, rowY, colTotal - colDesc, cellH).stroke();
+      doc.rect(colTotal, rowY, colEnd - colTotal, cellH).stroke();
+
       if (item.quantity != null && Number(item.quantity) > 0) {
         const qtyStr = Number(item.quantity) === Math.floor(Number(item.quantity))
           ? String(Math.floor(Number(item.quantity)))
           : Number(item.quantity).toFixed(2);
-        doc.text(qtyStr, colQty + 4, rowY, { width: 52, align: 'center' });
+        doc.text(qtyStr, colQty + 2, rowY + 4, { width: colDesc - colQty - 4, align: 'center' });
       }
-      doc.text(item.description || '', colDesc + 4, rowY, { width: colTotal - colDesc - 8 });
-      doc.text(Number(item.amount).toFixed(2), colTotal + 4, rowY, { width: 76, align: 'right' });
-      rowY += 16;
-      doc.moveTo(leftCol, rowY).lineTo(colEnd, rowY).lineWidth(0.25).stroke();
+      doc.text(desc, colDesc + 5, rowY + 4, { width: colTotal - colDesc - 10 });
+      const amt = Number(item.amount) || 0;
+      if (amt > 0) {
+        doc.text(amt.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), colTotal + 4, rowY + 4, { width: colEnd - colTotal - 8, align: 'right' });
+      }
+
+      rowY += cellH;
     }
 
-    rowY += 2;
-    doc.moveTo(leftCol, rowY).lineTo(colEnd, rowY).lineWidth(0.5).stroke();
+    // --- FOOTER: Terms (left) + Total (right) in bordered row at bottom ---
+    const footerH = 50;
+    const footerY = pageH - 50 - footerH;
+    const termsColW = colTotal - leftM;
+    const totalLabelW = 60;
+    const totalValW = colEnd - colTotal - totalLabelW;
 
-    // --- TOTALS ---
-    rowY += 16;
-    const amountPaid = Number(invoice.amountPaid) || 0;
-    const balanceDue = Number(invoice.balanceDue) || Number(invoice.total) || 0;
+    doc.lineWidth(stroke);
+    doc.rect(leftM, footerY, termsColW, footerH).stroke();
+    doc.rect(colTotal, footerY, totalLabelW, footerH).stroke();
+    doc.rect(colTotal + totalLabelW, footerY, colEnd - colTotal - totalLabelW, footerH).stroke();
 
-    if (Number(invoice.taxRate) > 0) {
-      doc.font('Times-Roman').fontSize(10);
-      doc.text('Subtotal', colTotal - 60, rowY);
-      doc.text(fmtMoney(invoice.subtotal), colTotal + 4, rowY, { width: 76, align: 'right' });
-      rowY += 16;
-      doc.text('Tax (' + invoice.taxRate + '%)', colTotal - 60, rowY);
-      doc.text(fmtMoney(invoice.taxAmount), colTotal + 4, rowY, { width: 76, align: 'right' });
-      rowY += 16;
+    const termsText = (invoice.terms || '').toUpperCase();
+    if (termsText) {
+      doc.font('Helvetica').fontSize(7);
+      doc.text(termsText, leftM + 5, footerY + 6, { width: termsColW - 10, lineGap: 2 });
     }
 
-    doc.font('Times-Bold').fontSize(12);
-    doc.text('TOTAL', colTotal - 60, rowY);
-    doc.text(fmtMoney(invoice.total), colTotal + 4, rowY, { width: 76, align: 'right' });
-
-    if (amountPaid > 0) {
-      rowY += 18;
-      doc.font('Times-Roman').fontSize(10);
-      doc.text('Amount Paid', colTotal - 60, rowY);
-      doc.text(fmtMoney(amountPaid), colTotal + 4, rowY, { width: 76, align: 'right' });
-      rowY += 16;
-      doc.font('Times-Bold').fontSize(12);
-      doc.text('BALANCE DUE', colTotal - 80, rowY);
-      doc.text(fmtMoney(balanceDue), colTotal + 4, rowY, { width: 76, align: 'right' });
-    }
-
-    // --- TERMS ---
-    if (invoice.terms) {
-      rowY += 30;
-      doc.font('Times-Roman').fontSize(8);
-      doc.text(invoice.terms, leftCol, rowY, { width: pw, lineGap: 2 });
-    }
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('Total', colTotal + 4, footerY + 18, { width: totalLabelW - 8, align: 'center' });
+    const totalStr = '$' + (Number(invoice.total) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    doc.text(totalStr, colTotal + totalLabelW + 4, footerY + 18, { width: colEnd - colTotal - totalLabelW - 8, align: 'center' });
 
     doc.end();
   });
@@ -3122,6 +3279,45 @@ app.get('/work-orders', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Work-orders list error:', err);
     res.status(500).json({ error: 'Failed to fetch work orders.' });
+  }
+});
+
+// Work orders filtered by canonical status (used by Ready-to-Quote / Ready-to-Invoice)
+app.get('/work-orders/by-status/:status', authenticate, async (req, res) => {
+  try {
+    const target = canonStatus(req.params.status);
+    if (!target) return res.status(400).json({ error: 'Unknown status.' });
+
+    // Get all work orders, filter by canonical status
+    const [raw] = await db.execute(workOrdersSelectSQL({ orderSql: 'ORDER BY w.id DESC' }));
+    const rows = raw
+      .map(r => ({ ...r, status: displayStatusOrDefault(r.status), allPoNumbersFormatted: formatPoNumberList(r.allPoNumbers) }))
+      .filter(r => r.status === target);
+
+    // For "Needs to be Invoiced", attach linked accepted estimate info
+    if (target === 'Needs to be Invoiced' && rows.length > 0) {
+      const woIds = rows.map(r => r.id);
+      const [estimates] = await db.query(
+        `SELECT e.id, e.workOrderId, e.status, e.total, e.projectName
+         FROM estimates e WHERE e.workOrderId IN (${woIds.map(() => '?').join(',')})`,
+        woIds
+      );
+      const estMap = {};
+      for (const e of estimates) {
+        if (!estMap[e.workOrderId]) estMap[e.workOrderId] = [];
+        estMap[e.workOrderId].push(e);
+      }
+      for (const r of rows) {
+        r.linkedEstimates = estMap[r.id] || [];
+        const accepted = r.linkedEstimates.find(e => e.status === 'Accepted');
+        r.acceptedEstimate = accepted || null;
+      }
+    }
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Work-orders by-status error:', err);
+    res.status(500).json({ error: 'Failed to fetch work orders by status.' });
   }
 });
 
