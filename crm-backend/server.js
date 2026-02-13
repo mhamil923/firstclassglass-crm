@@ -641,6 +641,10 @@ async function ensureEstimateTables() {
         total           DECIMAL(10,2) DEFAULT 0,
         notes           TEXT NULL,
         terms           TEXT NULL,
+        billingAddress  VARCHAR(255) NULL,
+        billingCity     VARCHAR(100) NULL,
+        billingState    VARCHAR(50) NULL,
+        billingZip      VARCHAR(20) NULL,
         pdfPath         VARCHAR(255) NULL,
         sentAt          DATETIME NULL,
         acceptedAt      DATETIME NULL,
@@ -652,6 +656,25 @@ async function ensureEstimateTables() {
     console.log('[Estimates] estimates table ready');
   } catch (e) {
     console.warn('[Estimates] Could not create estimates table:', e.message);
+  }
+
+  // Ensure billing address columns exist (for existing installs)
+  try {
+    const billingCols = [
+      { name: 'billingAddress', type: 'VARCHAR(255) NULL' },
+      { name: 'billingCity',    type: 'VARCHAR(100) NULL' },
+      { name: 'billingState',   type: 'VARCHAR(50) NULL' },
+      { name: 'billingZip',     type: 'VARCHAR(20) NULL' },
+    ];
+    for (const { name, type } of billingCols) {
+      const [found] = await db.query(`SHOW COLUMNS FROM \`estimates\` LIKE ?`, [name]);
+      if (!found.length) {
+        await db.query(`ALTER TABLE \`estimates\` ADD COLUMN \`${name}\` ${type}`);
+        console.log(`[Estimates] Added column ${name}`);
+      }
+    }
+  } catch (e) {
+    console.warn('[Estimates] Could not ensure billing columns:', e.message);
   }
 
   try {
@@ -711,6 +734,10 @@ async function ensureInvoiceTables() {
         shipToCity      VARCHAR(100) NULL,
         shipToState     VARCHAR(50) NULL,
         shipToZip       VARCHAR(20) NULL,
+        billingAddress  VARCHAR(255) NULL,
+        billingCity     VARCHAR(100) NULL,
+        billingState    VARCHAR(50) NULL,
+        billingZip      VARCHAR(20) NULL,
         subtotal        DECIMAL(10,2) DEFAULT 0,
         taxRate         DECIMAL(5,2) DEFAULT 0,
         taxAmount       DECIMAL(10,2) DEFAULT 0,
@@ -729,6 +756,25 @@ async function ensureInvoiceTables() {
     console.log('[Invoices] invoices table ready');
   } catch (e) {
     console.warn('[Invoices] Could not create invoices table:', e.message);
+  }
+
+  // Ensure billing address columns exist (for existing installs)
+  try {
+    const billingCols = [
+      { name: 'billingAddress', type: 'VARCHAR(255) NULL' },
+      { name: 'billingCity',    type: 'VARCHAR(100) NULL' },
+      { name: 'billingState',   type: 'VARCHAR(50) NULL' },
+      { name: 'billingZip',     type: 'VARCHAR(20) NULL' },
+    ];
+    for (const { name, type } of billingCols) {
+      const [found] = await db.query(`SHOW COLUMNS FROM \`invoices\` LIKE ?`, [name]);
+      if (!found.length) {
+        await db.query(`ALTER TABLE \`invoices\` ADD COLUMN \`${name}\` ${type}`);
+        console.log(`[Invoices] Added column ${name}`);
+      }
+    }
+  } catch (e) {
+    console.warn('[Invoices] Could not ensure billing columns:', e.message);
   }
 
   try {
@@ -1314,6 +1360,23 @@ app.get('/customers/:id/work-orders', authenticate, requireNumericParam('id'), a
 
 const DEFAULT_TERMS = 'ALL PAYMENTS MUST BE MADE 45 DAYS AFTER INVOICE DATE OR A 15% LATE FEE WILL BE APPLIED';
 
+// Upload a local file to S3 if S3_BUCKET is configured (used for generated PDFs)
+async function uploadToS3IfConfigured(localFilePath, s3Key) {
+  if (!S3_BUCKET) return;
+  try {
+    const fileBuffer = fs.readFileSync(localFilePath);
+    await s3.putObject({
+      Bucket: S3_BUCKET,
+      Key: s3Key,
+      Body: fileBuffer,
+      ContentType: 'application/pdf',
+    }).promise();
+    console.log(`Uploaded PDF to S3: ${s3Key}`);
+  } catch (err) {
+    console.error(`Failed to upload PDF to S3 (${s3Key}):`, err.message);
+  }
+}
+
 async function recalcEstimateTotals(estimateId) {
   const [[{ s }]] = await db.query(
     'SELECT COALESCE(SUM(amount), 0) AS s FROM estimate_line_items WHERE estimateId = ?',
@@ -1339,12 +1402,21 @@ function fmtMoney(val) {
 // --- Generate professional PDF matching QuickBooks format ---
 async function generateEstimatePdf(estimateId) {
   const [[estimate]] = await db.query(`
-    SELECT e.*, c.companyName, c.name AS custName, c.billingAddress, c.billingCity,
-           c.billingState, c.billingZip, c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail
+    SELECT e.*,
+           c.companyName, c.name AS custName,
+           c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail,
+           c.billingAddress AS custBillingAddress, c.billingCity AS custBillingCity,
+           c.billingState AS custBillingState, c.billingZip AS custBillingZip
     FROM estimates e LEFT JOIN customers c ON e.customerId = c.id
     WHERE e.id = ?
   `, [estimateId]);
   if (!estimate) throw new Error('Estimate not found');
+
+  // Use estimate billing override if set, else customer's
+  estimate.billingAddress = estimate.billingAddress || estimate.custBillingAddress;
+  estimate.billingCity = estimate.billingCity || estimate.custBillingCity;
+  estimate.billingState = estimate.billingState || estimate.custBillingState;
+  estimate.billingZip = estimate.billingZip || estimate.custBillingZip;
 
   const [lineItems] = await db.query(
     'SELECT * FROM estimate_line_items WHERE estimateId = ? ORDER BY sortOrder ASC, id ASC',
@@ -1490,7 +1562,7 @@ app.get('/estimates', authenticate, async (req, res) => {
   try {
     const { status, customerId, workOrderId, search } = req.query;
     let sql = `
-      SELECT e.*, c.companyName, c.name AS custName, c.billingAddress, c.phone AS custPhone, c.email AS custEmail
+      SELECT e.*, c.companyName, c.name AS custName, c.phone AS custPhone, c.email AS custEmail
       FROM estimates e
       LEFT JOIN customers c ON e.customerId = c.id
     `;
@@ -1521,12 +1593,21 @@ app.get('/estimates', authenticate, async (req, res) => {
 app.get('/estimates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const [[estimate]] = await db.query(`
-      SELECT e.*, c.companyName, c.name AS custName, c.billingAddress, c.billingCity,
-             c.billingState, c.billingZip, c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail
+      SELECT e.*,
+             c.companyName, c.name AS custName,
+             c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail,
+             c.billingAddress AS custBillingAddress, c.billingCity AS custBillingCity,
+             c.billingState AS custBillingState, c.billingZip AS custBillingZip
       FROM estimates e LEFT JOIN customers c ON e.customerId = c.id
       WHERE e.id = ?
     `, [req.params.id]);
     if (!estimate) return res.status(404).json({ error: 'Estimate not found.' });
+
+    // Effective billing: use estimate override if set, else customer's
+    estimate.effectiveBillingAddress = estimate.billingAddress || estimate.custBillingAddress;
+    estimate.effectiveBillingCity = estimate.billingCity || estimate.custBillingCity;
+    estimate.effectiveBillingState = estimate.billingState || estimate.custBillingState;
+    estimate.effectiveBillingZip = estimate.billingZip || estimate.custBillingZip;
 
     const [lineItems] = await db.query(
       'SELECT * FROM estimate_line_items WHERE estimateId = ? ORDER BY sortOrder ASC, id ASC',
@@ -1549,8 +1630,9 @@ app.post('/estimates', authenticate, async (req, res) => {
     const cols = ['customerId'];
     const vals = [Number(body.customerId)];
     const fields = ['workOrderId','status','issueDate','expirationDate','poNumber','projectName',
-      'projectAddress','projectCity','projectState','projectZip','subtotal','taxRate','taxAmount',
-      'total','notes','pdfPath'];
+      'projectAddress','projectCity','projectState','projectZip',
+      'billingAddress','billingCity','billingState','billingZip',
+      'subtotal','taxRate','taxAmount','total','notes','pdfPath'];
 
     for (const f of fields) {
       if (body[f] !== undefined) {
@@ -1583,8 +1665,9 @@ app.put('/estimates/:id', authenticate, requireNumericParam('id'), async (req, r
     const sets = [];
     const params = [];
     const fields = ['customerId','workOrderId','status','issueDate','expirationDate','poNumber',
-      'projectName','projectAddress','projectCity','projectState','projectZip','subtotal','taxRate',
-      'taxAmount','total','notes','terms','pdfPath'];
+      'projectName','projectAddress','projectCity','projectState','projectZip',
+      'billingAddress','billingCity','billingState','billingZip',
+      'subtotal','taxRate','taxAmount','total','notes','terms','pdfPath'];
 
     for (const f of fields) {
       if (body[f] !== undefined) {
@@ -1719,6 +1802,15 @@ app.put('/estimates/:id/status', authenticate, requireNumericParam('id'), async 
     params.push(req.params.id);
     await db.query(`UPDATE estimates SET ${sets.join(',')} WHERE id=?`, params);
 
+    // Sync status to linked work order
+    if (status === 'Accepted' || status === 'Declined') {
+      const [[est]] = await db.query('SELECT workOrderId FROM estimates WHERE id=?', [req.params.id]);
+      if (est?.workOrderId) {
+        const woStatus = status === 'Accepted' ? 'Estimate Accepted' : 'Estimate Declined';
+        await db.query('UPDATE work_orders SET status=?, updatedAt=NOW() WHERE id=?', [woStatus, est.workOrderId]);
+      }
+    }
+
     const [[updated]] = await db.query('SELECT * FROM estimates WHERE id = ?', [req.params.id]);
     res.json(updated);
   } catch (err) {
@@ -1739,6 +1831,7 @@ app.post('/estimates/:id/generate-pdf', authenticate, requireNumericParam('id'),
 
     const pdfPath = `uploads/${filename}`;
     await db.query('UPDATE estimates SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, req.params.id]);
+    await uploadToS3IfConfigured(filePath, pdfPath);
 
     res.json({ pdfPath });
   } catch (err) {
@@ -1760,9 +1853,11 @@ app.post('/estimates/:id/send-email', authenticate, requireNumericParam('id'), a
       const filename = `estimate_${req.params.id}_${Date.now()}.pdf`;
       const localDir = path.resolve(__dirname, 'uploads');
       if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
-      fs.writeFileSync(path.join(localDir, filename), pdfBuffer);
+      const localPath = path.join(localDir, filename);
+      fs.writeFileSync(localPath, pdfBuffer);
       pdfPath = `uploads/${filename}`;
       await db.query('UPDATE estimates SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, req.params.id]);
+      await uploadToS3IfConfigured(localPath, pdfPath);
     }
 
     // Update status to Sent
@@ -1816,12 +1911,21 @@ async function recalcInvoiceTotals(invoiceId) {
 // --- Generate professional Invoice PDF matching QuickBooks format ---
 async function generateInvoicePdf(invoiceId) {
   const [[invoice]] = await db.query(`
-    SELECT i.*, c.companyName, c.name AS custName, c.billingAddress, c.billingCity,
-           c.billingState, c.billingZip, c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail
+    SELECT i.*,
+           c.companyName, c.name AS custName,
+           c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail,
+           c.billingAddress AS custBillingAddress, c.billingCity AS custBillingCity,
+           c.billingState AS custBillingState, c.billingZip AS custBillingZip
     FROM invoices i LEFT JOIN customers c ON i.customerId = c.id
     WHERE i.id = ?
   `, [invoiceId]);
   if (!invoice) throw new Error('Invoice not found');
+
+  // Use invoice billing override if set, else customer's
+  invoice.billingAddress = invoice.billingAddress || invoice.custBillingAddress;
+  invoice.billingCity = invoice.billingCity || invoice.custBillingCity;
+  invoice.billingState = invoice.billingState || invoice.custBillingState;
+  invoice.billingZip = invoice.billingZip || invoice.custBillingZip;
 
   const [lineItems] = await db.query(
     'SELECT * FROM invoice_line_items WHERE invoiceId = ? ORDER BY sortOrder ASC, id ASC',
@@ -2050,12 +2154,21 @@ app.get('/invoices', authenticate, async (req, res) => {
 app.get('/invoices/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const [[invoice]] = await db.query(`
-      SELECT i.*, c.companyName, c.name AS custName, c.billingAddress, c.billingCity,
-             c.billingState, c.billingZip, c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail
+      SELECT i.*,
+             c.companyName, c.name AS custName,
+             c.phone AS custPhone, c.fax AS custFax, c.email AS custEmail,
+             c.billingAddress AS custBillingAddress, c.billingCity AS custBillingCity,
+             c.billingState AS custBillingState, c.billingZip AS custBillingZip
       FROM invoices i LEFT JOIN customers c ON i.customerId = c.id
       WHERE i.id = ?
     `, [req.params.id]);
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    // Effective billing: use invoice override if set, else customer's
+    invoice.effectiveBillingAddress = invoice.billingAddress || invoice.custBillingAddress;
+    invoice.effectiveBillingCity = invoice.billingCity || invoice.custBillingCity;
+    invoice.effectiveBillingState = invoice.billingState || invoice.custBillingState;
+    invoice.effectiveBillingZip = invoice.billingZip || invoice.custBillingZip;
 
     // Auto-detect overdue
     if (invoice.status === 'Sent' && invoice.dueDate && new Date(invoice.dueDate) < new Date() && Number(invoice.balanceDue) > 0) {
@@ -2099,13 +2212,15 @@ app.post('/invoices', authenticate, async (req, res) => {
     const [result] = await db.query(
       `INSERT INTO invoices (invoiceNumber, customerId, workOrderId, estimateId, status, issueDate, dueDate,
         poNumber, projectName, shipToAddress, shipToCity, shipToState, shipToZip,
+        billingAddress, billingCity, billingState, billingZip,
         subtotal, taxRate, taxAmount, total, amountPaid, balanceDue, notes, terms)
-       VALUES (?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
       [
         invoiceNumber, b.customerId, b.workOrderId || null, b.estimateId || null,
         issueDate, dueDate,
         b.poNumber || null, b.projectName || null,
         b.shipToAddress || null, b.shipToCity || null, b.shipToState || null, b.shipToZip || null,
+        b.billingAddress || null, b.billingCity || null, b.billingState || null, b.billingZip || null,
         Number(b.subtotal) || 0, Number(b.taxRate) || 0, Number(b.taxAmount) || 0, Number(b.total) || 0,
         Number(b.total) || 0,
         b.notes || null, terms
@@ -2124,7 +2239,9 @@ app.put('/invoices/:id', authenticate, requireNumericParam('id'), async (req, re
   try {
     const b = coerceBody(req);
     const fields = ['customerId', 'workOrderId', 'estimateId', 'issueDate', 'dueDate', 'poNumber', 'projectName',
-      'shipToAddress', 'shipToCity', 'shipToState', 'shipToZip', 'taxRate', 'notes', 'terms'];
+      'shipToAddress', 'shipToCity', 'shipToState', 'shipToZip',
+      'billingAddress', 'billingCity', 'billingState', 'billingZip',
+      'taxRate', 'notes', 'terms'];
     const sets = [];
     const params = [];
     for (const f of fields) {
@@ -2261,6 +2378,7 @@ app.post('/invoices/:id/generate-pdf', authenticate, requireNumericParam('id'), 
 
     const pdfPath = `uploads/${filename}`;
     await db.query('UPDATE invoices SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, req.params.id]);
+    await uploadToS3IfConfigured(filePath, pdfPath);
     res.json({ pdfPath });
   } catch (err) {
     console.error('Error generating invoice PDF:', err);
@@ -2280,9 +2398,11 @@ app.post('/invoices/:id/send-email', authenticate, requireNumericParam('id'), as
       const filename = `invoice_${req.params.id}_${Date.now()}.pdf`;
       const localDir = path.resolve(__dirname, 'uploads');
       if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
-      fs.writeFileSync(path.join(localDir, filename), pdfBuffer);
+      const localPath = path.join(localDir, filename);
+      fs.writeFileSync(localPath, pdfBuffer);
       pdfPath = `uploads/${filename}`;
       await db.query('UPDATE invoices SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, req.params.id]);
+      await uploadToS3IfConfigured(localPath, pdfPath);
     }
 
     await db.query("UPDATE invoices SET status='Sent', sentAt=NOW(), updatedAt=NOW() WHERE id=?", [req.params.id]);
@@ -2417,6 +2537,11 @@ app.post('/estimates/:id/convert-to-invoice', authenticate, requireNumericParam(
     // Update estimate status to Accepted if Draft or Sent
     if (estimate.status === 'Draft' || estimate.status === 'Sent') {
       await db.query("UPDATE estimates SET status='Accepted', acceptedAt=NOW(), updatedAt=NOW() WHERE id=?", [req.params.id]);
+    }
+
+    // Sync status to linked work order
+    if (estimate.workOrderId) {
+      await db.query("UPDATE work_orders SET status='Estimate Accepted', updatedAt=NOW() WHERE id=?", [estimate.workOrderId]);
     }
 
     const [[created]] = await db.query('SELECT * FROM invoices WHERE id = ?', [newId]);
