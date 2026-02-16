@@ -516,7 +516,7 @@ export default function CreateEstimate() {
               </div>
             </div>
 
-            <div className="ce-grid ce-grid-4" style={{ marginTop: 18 }}>
+            <div style={{ marginTop: 18 }}>
               <div className="ce-field">
                 <div className="ce-label">Project Address</div>
                 <input
@@ -524,37 +524,7 @@ export default function CreateEstimate() {
                   value={estimate.projectAddress}
                   onChange={handleChange}
                   className="ce-input"
-                  placeholder="Street address"
-                />
-              </div>
-              <div className="ce-field">
-                <div className="ce-label">City</div>
-                <input
-                  name="projectCity"
-                  value={estimate.projectCity}
-                  onChange={handleChange}
-                  className="ce-input"
-                  placeholder="City"
-                />
-              </div>
-              <div className="ce-field">
-                <div className="ce-label">State</div>
-                <input
-                  name="projectState"
-                  value={estimate.projectState}
-                  onChange={handleChange}
-                  className="ce-input"
-                  placeholder="ST"
-                />
-              </div>
-              <div className="ce-field">
-                <div className="ce-label">Zip</div>
-                <input
-                  name="projectZip"
-                  value={estimate.projectZip}
-                  onChange={handleChange}
-                  className="ce-input"
-                  placeholder="ZIP"
+                  placeholder="Full address, e.g. 1113 N Harvard Ave, Arlington Heights, IL 60004"
                 />
               </div>
             </div>

@@ -602,45 +602,15 @@ export default function CreateInvoice() {
                 />
               </div>
             </div>
-            <div className="ci-grid ci-grid-4" style={{ marginTop: 18 }}>
+            <div style={{ marginTop: 18 }}>
               <div className="ci-field">
-                <div className="ci-label">Address</div>
+                <div className="ci-label">Ship To Address</div>
                 <input
                   name="shipToAddress"
                   value={invoice.shipToAddress}
                   onChange={handleChange}
                   className="ci-input"
-                  placeholder="Street address"
-                />
-              </div>
-              <div className="ci-field">
-                <div className="ci-label">City</div>
-                <input
-                  name="shipToCity"
-                  value={invoice.shipToCity}
-                  onChange={handleChange}
-                  className="ci-input"
-                  placeholder="City"
-                />
-              </div>
-              <div className="ci-field">
-                <div className="ci-label">State</div>
-                <input
-                  name="shipToState"
-                  value={invoice.shipToState}
-                  onChange={handleChange}
-                  className="ci-input"
-                  placeholder="ST"
-                />
-              </div>
-              <div className="ci-field">
-                <div className="ci-label">Zip</div>
-                <input
-                  name="shipToZip"
-                  value={invoice.shipToZip}
-                  onChange={handleChange}
-                  className="ci-input"
-                  placeholder="ZIP"
+                  placeholder="Full address, e.g. 1739 E Golf Rd, Schaumburg, IL 60159"
                 />
               </div>
             </div>
