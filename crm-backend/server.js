@@ -22,7 +22,7 @@ const jwt        = require('jsonwebtoken');
 const axios      = require('axios');
 
 // PO PDF vendor/number detection from PDF content (with OCR support)
-const { analyzePoPdf, detectSupplierFromText, detectPoNumberFromText, extractWorkOrderFields, extractTextSmart } = require('./utils/poVendorDetector');
+const { analyzePoPdf, detectSupplierFromText, detectPoNumberFromText, extractWorkOrderFields, extractTextSmart, extractTextFromPdf, extractTextFromScannedPdf } = require('./utils/poVendorDetector');
 const PDFDocument = require('pdfkit');
 
 process.env.TZ = process.env.APP_TZ || 'America/Chicago';
@@ -1444,19 +1444,18 @@ async function generateEstimatePdf(estimateId) {
 
     const headerY = 40;
 
-    // --- LOGO (top-left, small) + COMPANY INFO (beside logo) ---
-    const textX = hasLogo ? leftM + 68 : leftM;
-    if (hasLogo) {
-      doc.image(logoPath, leftM, headerY, { width: 60, height: 60 });
-    }
-
+    // --- COMPANY INFO (far left) + LOGO (right of company text) ---
     doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('First Class Glass & Mirror, Inc.', textX, headerY);
+    doc.text('First Class Glass & Mirror, Inc.', leftM, headerY);
     doc.font('Helvetica').fontSize(9);
-    doc.text('1513 Industrial Drive', textX, headerY + 14);
-    doc.text('Itasca, IL. 60143', textX, headerY + 25);
-    doc.text('630-250-9777', textX, headerY + 36);
-    doc.text('630-250-9727', textX, headerY + 47);
+    doc.text('1513 Industrial Drive', leftM, headerY + 14);
+    doc.text('Itasca, IL. 60143', leftM, headerY + 25);
+    doc.text('630-250-9777', leftM, headerY + 36);
+    doc.text('630-250-9727', leftM, headerY + 47);
+
+    if (hasLogo) {
+      doc.image(logoPath, 280, headerY, { width: 60, height: 60 });
+    }
 
     // --- "Estimate" title (top-right) ---
     doc.font('Helvetica-Bold').fontSize(22);
@@ -2063,19 +2062,18 @@ async function generateInvoicePdf(invoiceId) {
 
     const headerY = 40;
 
-    // --- LOGO (top-left, small) + COMPANY INFO (beside logo) ---
-    const textX = hasLogo ? leftM + 68 : leftM;
-    if (hasLogo) {
-      doc.image(logoPath, leftM, headerY, { width: 60, height: 60 });
-    }
-
+    // --- COMPANY INFO (far left) + LOGO (right of company text) ---
     doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('First Class Glass & Mirror, Inc.', textX, headerY);
+    doc.text('First Class Glass & Mirror, Inc.', leftM, headerY);
     doc.font('Helvetica').fontSize(9);
-    doc.text('1513 Industrial Drive', textX, headerY + 14);
-    doc.text('Itasca, IL. 60143', textX, headerY + 25);
-    doc.text('630-250-9777', textX, headerY + 36);
-    doc.text('630-250-9727', textX, headerY + 47);
+    doc.text('1513 Industrial Drive', leftM, headerY + 14);
+    doc.text('Itasca, IL. 60143', leftM, headerY + 25);
+    doc.text('630-250-9777', leftM, headerY + 36);
+    doc.text('630-250-9727', leftM, headerY + 47);
+
+    if (hasLogo) {
+      doc.image(logoPath, 280, headerY, { width: 60, height: 60 });
+    }
 
     // --- "Invoice" title (top-right) ---
     doc.font('Helvetica-Bold').fontSize(22);
@@ -3647,6 +3645,92 @@ app.post('/work-orders/extract-pdf', authenticate, extractUploader.single('pdf')
       success: false,
       error: 'Failed to extract PDF content: ' + err.message
     });
+  }
+});
+
+// DEBUG ENDPOINT: Full raw text extraction + field detection for debugging
+app.post('/api/debug-extract-pdf', authenticate, extractUploader.single('pdf'), async (req, res) => {
+  console.log("\n" + "=".repeat(60));
+  console.log("=== DEBUG PDF EXTRACTION ===");
+  console.log("=".repeat(60));
+
+  let filePath = null;
+
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No PDF file uploaded. Use field name "pdf".' });
+    }
+
+    filePath = req.file.path;
+    console.log("[DEBUG-PDF] File:", req.file.originalname, "Size:", req.file.size);
+
+    // Step 1: Try digital extraction first
+    let digitalText = "";
+    let ocrText = "";
+    let extractionMethod = "none";
+
+    try {
+      digitalText = await extractTextFromPdf(filePath);
+      console.log("[DEBUG-PDF] Digital extraction: " + digitalText.length + " chars");
+    } catch (err) {
+      console.log("[DEBUG-PDF] Digital extraction FAILED:", err.message);
+    }
+
+    if (digitalText.length < 50) {
+      console.log("[DEBUG-PDF] Digital text too short, trying OCR...");
+      try {
+        ocrText = await extractTextFromScannedPdf(filePath);
+        console.log("[DEBUG-PDF] OCR extraction: " + ocrText.length + " chars");
+      } catch (err) {
+        console.log("[DEBUG-PDF] OCR extraction FAILED:", err.message);
+      }
+      extractionMethod = ocrText.length > digitalText.length ? "ocr" : "digital";
+    } else {
+      extractionMethod = "digital";
+    }
+
+    const finalText = extractionMethod === "ocr" ? ocrText : digitalText;
+
+    // Step 2: Run field extraction
+    const extracted = extractWorkOrderFields(finalText);
+
+    // Step 3: Clean up
+    try { fs.unlinkSync(filePath); filePath = null; } catch (e) {}
+
+    // Return FULL raw text (not truncated)
+    res.json({
+      success: true,
+      extractionMethod,
+      digitalTextLength: digitalText.length,
+      ocrTextLength: ocrText.length,
+      finalTextLength: finalText.length,
+      rawText: finalText,
+      rawTextFirst2000: finalText.substring(0, 2000),
+      detectedCustomer: extracted.customer,
+      detectedCustomerProfile: extracted.detectedCustomerProfile,
+      extractedFields: {
+        customer: extracted.customer,
+        billingAddress: extracted.billingAddress,
+        workOrderNumber: extracted.workOrderNumber,
+        poNumber: extracted.poNumber,
+        siteLocation: extracted.siteLocation,
+        siteAddress: extracted.siteAddress,
+        problemDescription: extracted.problemDescription,
+      },
+      // Show character codes for first 500 chars (helps debug hidden chars)
+      charCodes: finalText.substring(0, 500).split('').map((c, i) => ({
+        pos: i,
+        char: c === '\n' ? '\\n' : c === '\r' ? '\\r' : c === '\t' ? '\\t' : c,
+        code: c.charCodeAt(0)
+      }))
+    });
+
+  } catch (err) {
+    console.error("[DEBUG-PDF] Error:", err.message);
+    if (filePath && fs.existsSync(filePath)) {
+      try { fs.unlinkSync(filePath); } catch (e) {}
+    }
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
