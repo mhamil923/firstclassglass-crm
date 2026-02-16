@@ -126,34 +126,45 @@ async function extractTextSmart(filePath) {
   console.log(`[PDF] Attempting text extraction from: ${path.basename(filePath)}`);
 
   // First try digital PDF extraction (fast)
-  let text = "";
+  let digitalText = "";
   try {
-    text = await extractTextFromPdf(filePath);
-    console.log(`[PDF] Digital extraction got ${text.length} chars`);
+    digitalText = await extractTextFromPdf(filePath);
+    console.log(`[PDF] Digital extraction got ${digitalText.length} chars`);
   } catch (err) {
     console.warn(`[PDF] Digital extraction failed: ${err.message}`);
   }
 
-  // If we got minimal text, it's probably a scanned PDF - try OCR
+  // If we got minimal text, it's probably a scanned PDF - use OCR instead
   const MIN_TEXT_LENGTH = 50;
-  if (text.length < MIN_TEXT_LENGTH) {
-    console.log(`[PDF] Text too short (${text.length} chars), trying OCR...`);
+  if (digitalText.length < MIN_TEXT_LENGTH) {
+    console.log(`[PDF] Text too short (${digitalText.length} chars), trying OCR...`);
     try {
       const ocrText = await extractTextFromScannedPdf(filePath);
-      if (ocrText.length > text.length) {
+      if (ocrText.length > digitalText.length) {
         console.log(`[PDF] OCR extracted ${ocrText.length} chars (using OCR result)`);
-        text = ocrText;
-      } else {
-        console.log(`[PDF] OCR got ${ocrText.length} chars (keeping digital result)`);
+        return ocrText;
       }
     } catch (err) {
       console.error(`[PDF] OCR extraction failed: ${err.message}`);
     }
-  } else {
-    console.log(`[PDF] Using digital extraction result (${text.length} chars)`);
+    return digitalText;
   }
 
-  return text;
+  // Digital text is substantial, but some PDFs have image-only headers (e.g. KFM).
+  // Also run OCR and combine both so we capture everything.
+  console.log(`[PDF] Digital text OK (${digitalText.length} chars), also running OCR to capture image-only areas...`);
+  try {
+    const ocrText = await extractTextFromScannedPdf(filePath);
+    if (ocrText.length > 50) {
+      console.log(`[PDF] OCR extracted ${ocrText.length} chars, combining digital + OCR`);
+      return digitalText + '\n' + ocrText;
+    }
+  } catch (err) {
+    console.log(`[PDF] OCR supplement failed (non-critical): ${err.message}`);
+  }
+
+  console.log(`[PDF] Using digital extraction result only`);
+  return digitalText;
 }
 
 /**
