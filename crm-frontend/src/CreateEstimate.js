@@ -54,6 +54,7 @@ export default function CreateEstimate() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
   const customerDropdownRef = useRef(null);
+  const needsCustomerResolve = useRef(false);
 
   // UI state
   const [loading, setLoading] = useState(isEdit);
@@ -66,6 +67,31 @@ export default function CreateEstimate() {
       setCustomers(Array.isArray(res.data) ? res.data : []);
     }).catch((err) => console.error("Error loading customers:", err));
   }, []);
+
+  // --- Auto-resolve customer when pre-filled from WO without customerId ---
+  useEffect(() => {
+    if (!needsCustomerResolve.current) return;
+    if (customers.length === 0) return;
+    if (estimate.customerId) return;
+    const search = (estimate.customerSearch || "").toLowerCase().trim();
+    if (!search) return;
+    const match = customers.find(
+      (c) => (c.companyName || c.name || "").toLowerCase() === search
+    );
+    if (match) {
+      needsCustomerResolve.current = false;
+      setSelectedCustomer(match);
+      setEstimate((prev) => ({
+        ...prev,
+        customerId: match.id,
+        customerSearch: match.companyName || match.name || "",
+        billingAddress: match.billingAddress || "",
+        billingCity: match.billingCity || "",
+        billingState: match.billingState || "",
+        billingZip: match.billingZip || "",
+      }));
+    }
+  }, [customers, estimate.customerSearch, estimate.customerId]);
 
   // --- Load existing estimate if editing ---
   const loadEstimate = useCallback(async () => {
@@ -154,6 +180,8 @@ export default function CreateEstimate() {
               billingZip: cRes.data.billingZip || "",
             }));
           }).catch(() => {});
+        } else if (wo.customer) {
+          needsCustomerResolve.current = true;
         }
       }).catch((err) => console.error("Error loading work order:", err));
     } else if (custId && !isEdit) {

@@ -68,15 +68,16 @@
   background: var(--bg-card-solid);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
-  overflow: hidden;
   box-shadow: var(--shadow-sm);
   margin-bottom: 20px;
+  position: relative;
 }
 
 .ci-card-header {
   padding: 14px 20px;
   background: var(--bg-hover);
   border-bottom: 1px solid var(--border-color);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
@@ -172,7 +173,7 @@
   border-top: none;
   border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,0.15));
-  z-index: 50;
+  z-index: 9999;
 }
 
 .ci-customer-option {
