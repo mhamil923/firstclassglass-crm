@@ -1442,31 +1442,27 @@ async function generateEstimatePdf(estimateId) {
     const bottomLimit = pageH - 40;
     const stroke = 0.75;
 
-    let curY = 40;
+    const headerY = 40;
 
-    // --- LOGO centered at top ---
+    // --- LOGO (top-left, small) + COMPANY INFO (beside logo) ---
+    const textX = hasLogo ? leftM + 68 : leftM;
     if (hasLogo) {
-      const logoW = 110;
-      const logoH = 110;
-      const logoX = (pageW - logoW) / 2;
-      doc.image(logoPath, logoX, curY, { width: logoW, height: logoH });
-      curY += logoH + 6;
+      doc.image(logoPath, leftM, headerY, { width: 60, height: 60 });
     }
 
-    // --- COMPANY HEADER (left) + "Estimate" title (right) ---
-    const headerY = curY;
     doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('First Class Glass & Mirror, Inc.', leftM, headerY);
+    doc.text('First Class Glass & Mirror, Inc.', textX, headerY);
     doc.font('Helvetica').fontSize(9);
-    doc.text('1513 Industrial Drive', leftM, headerY + 14);
-    doc.text('Itasca, IL. 60143', leftM, headerY + 25);
-    doc.text('630-250-9777', leftM, headerY + 36);
-    doc.text('630-250-9727', leftM, headerY + 47);
+    doc.text('1513 Industrial Drive', textX, headerY + 14);
+    doc.text('Itasca, IL. 60143', textX, headerY + 25);
+    doc.text('630-250-9777', textX, headerY + 36);
+    doc.text('630-250-9727', textX, headerY + 47);
 
+    // --- "Estimate" title (top-right) ---
     doc.font('Helvetica-Bold').fontSize(22);
     doc.text('Estimate', leftM, headerY, { width: pw, align: 'right' });
 
-    // --- DATE box (right side) ---
+    // --- DATE box (right side, below title) ---
     const dateBoxX = pageW - 50 - 130;
     const dateBoxY = headerY + 28;
     const dateBoxW = 130;
@@ -1483,7 +1479,7 @@ async function generateEstimatePdf(estimateId) {
     doc.font('Helvetica').fontSize(8);
     doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dbH + 4, { width: dateBoxW - 8, align: 'center' });
 
-    curY = headerY + 62;
+    let curY = headerY + 68;
 
     // --- BILL TO (left) + PROJECT NAME/ADDRESS (right) ---
     const boxTop = curY;
@@ -1632,26 +1628,30 @@ async function generateEstimatePdf(estimateId) {
     }
 
     // --- FOOTER: Terms (left) + TOTAL label + TOTAL value (right) ---
+    const totalAmountW = 100;
+    const totalLabelW = 60;
+    const termsColW = pw - totalLabelW - totalAmountW;
+    const totalLabelX = leftM + termsColW;
+    const totalAmountX = totalLabelX + totalLabelW;
+
     const footerY = Math.min(rowY + footerGap, maxTableBottom);
-    const termsColW = colTotal - leftM;
-    const totalLabelW = 55;
 
     doc.lineWidth(stroke);
     doc.rect(leftM, footerY, termsColW, footerH).stroke();
-    doc.rect(colTotal, footerY, totalLabelW, footerH).stroke();
-    doc.rect(colTotal + totalLabelW, footerY, colEnd - colTotal - totalLabelW, footerH).stroke();
+    doc.rect(totalLabelX, footerY, totalLabelW, footerH).stroke();
+    doc.rect(totalAmountX, footerY, totalAmountW, footerH).stroke();
 
     const termsText = (estimate.terms || '').toUpperCase();
     if (termsText) {
-      doc.font('Helvetica').fontSize(6.5);
+      doc.font('Helvetica').fontSize(7);
       doc.text(termsText, leftM + 4, footerY + 5, { width: termsColW - 8, lineGap: 1.5 });
     }
 
     const totalStr = fmtMoney(estimate.total);
-    doc.font('Helvetica-Bold').fontSize(9);
-    doc.text('TOTAL', colTotal + 3, footerY + (footerH / 2) - 5, { width: totalLabelW - 6, align: 'center' });
-    doc.fontSize(10);
-    doc.text(totalStr, colTotal + totalLabelW + 3, footerY + (footerH / 2) - 6, { width: colEnd - colTotal - totalLabelW - 6, align: 'center' });
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('TOTAL', totalLabelX + 4, footerY + (footerH / 2) - 6, { width: totalLabelW - 8, align: 'center' });
+    doc.fontSize(11);
+    doc.text(totalStr, totalAmountX + 4, footerY + (footerH / 2) - 6, { width: totalAmountW - 8, align: 'right' });
 
     doc.end();
   });
@@ -2061,31 +2061,27 @@ async function generateInvoicePdf(invoiceId) {
     const bottomLimit = pageH - 40;
     const stroke = 0.75;
 
-    let curY = 40;
+    const headerY = 40;
 
-    // --- LOGO centered at top ---
+    // --- LOGO (top-left, small) + COMPANY INFO (beside logo) ---
+    const textX = hasLogo ? leftM + 68 : leftM;
     if (hasLogo) {
-      const logoW = 110;
-      const logoH = 110;
-      const logoX = (pageW - logoW) / 2;
-      doc.image(logoPath, logoX, curY, { width: logoW, height: logoH });
-      curY += logoH + 6;
+      doc.image(logoPath, leftM, headerY, { width: 60, height: 60 });
     }
 
-    // --- COMPANY HEADER (left) + "Invoice" title (right) ---
-    const headerY = curY;
     doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('First Class Glass & Mirror, Inc.', leftM, headerY);
+    doc.text('First Class Glass & Mirror, Inc.', textX, headerY);
     doc.font('Helvetica').fontSize(9);
-    doc.text('1513 Industrial Drive', leftM, headerY + 14);
-    doc.text('Itasca, IL. 60143', leftM, headerY + 25);
-    doc.text('630-250-9777', leftM, headerY + 36);
-    doc.text('630-250-9727', leftM, headerY + 47);
+    doc.text('1513 Industrial Drive', textX, headerY + 14);
+    doc.text('Itasca, IL. 60143', textX, headerY + 25);
+    doc.text('630-250-9777', textX, headerY + 36);
+    doc.text('630-250-9727', textX, headerY + 47);
 
+    // --- "Invoice" title (top-right) ---
     doc.font('Helvetica-Bold').fontSize(22);
     doc.text('Invoice', leftM, headerY, { width: pw, align: 'right' });
 
-    // --- DATE / INVOICE # box (right side) ---
+    // --- DATE / INVOICE # box (right side, below title) ---
     const dateBoxX = pageW - 50 - 190;
     const dateBoxY = headerY + 28;
     const dateColW = 95;
@@ -2108,7 +2104,7 @@ async function generateInvoicePdf(invoiceId) {
     doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dbH + 4, { width: dateColW - 8, align: 'center' });
     doc.text(String(invoice.invoiceNumber || ''), dateBoxX + dateColW + 4, dateBoxY + dbH + 4, { width: invColW - 8, align: 'center' });
 
-    curY = headerY + 62;
+    let curY = headerY + 68;
 
     // --- BILL TO (left) + SHIP TO (right) ---
     const boxTop = curY;
@@ -2257,26 +2253,30 @@ async function generateInvoicePdf(invoiceId) {
     }
 
     // --- FOOTER: Terms (left) + TOTAL label + TOTAL value (right) ---
+    const totalAmountW = 100;
+    const totalLabelW = 60;
+    const termsColW = pw - totalLabelW - totalAmountW;
+    const totalLabelX = leftM + termsColW;
+    const totalAmountX = totalLabelX + totalLabelW;
+
     const footerY = Math.min(rowY + footerGap, maxTableBottom);
-    const termsColW = colTotal - leftM;
-    const totalLabelW = 55;
 
     doc.lineWidth(stroke);
     doc.rect(leftM, footerY, termsColW, footerH).stroke();
-    doc.rect(colTotal, footerY, totalLabelW, footerH).stroke();
-    doc.rect(colTotal + totalLabelW, footerY, colEnd - colTotal - totalLabelW, footerH).stroke();
+    doc.rect(totalLabelX, footerY, totalLabelW, footerH).stroke();
+    doc.rect(totalAmountX, footerY, totalAmountW, footerH).stroke();
 
     const termsText = (invoice.terms || '').toUpperCase();
     if (termsText) {
-      doc.font('Helvetica').fontSize(6.5);
+      doc.font('Helvetica').fontSize(7);
       doc.text(termsText, leftM + 4, footerY + 5, { width: termsColW - 8, lineGap: 1.5 });
     }
 
     const totalStr = fmtMoney(invoice.total);
-    doc.font('Helvetica-Bold').fontSize(9);
-    doc.text('TOTAL', colTotal + 3, footerY + (footerH / 2) - 5, { width: totalLabelW - 6, align: 'center' });
-    doc.fontSize(10);
-    doc.text(totalStr, colTotal + totalLabelW + 3, footerY + (footerH / 2) - 6, { width: colEnd - colTotal - totalLabelW - 6, align: 'center' });
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text('TOTAL', totalLabelX + 4, footerY + (footerH / 2) - 6, { width: totalLabelW - 8, align: 'center' });
+    doc.fontSize(11);
+    doc.text(totalStr, totalAmountX + 4, footerY + (footerH / 2) - 6, { width: totalAmountW - 8, align: 'right' });
 
     doc.end();
   });

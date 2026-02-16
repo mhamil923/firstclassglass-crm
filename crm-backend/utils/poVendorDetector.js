@@ -1074,6 +1074,145 @@ function extractFirstTimeFixedFields(text) {
   return result;
 }
 
+/**
+ * KFM dedicated extraction
+ *
+ * PDF layout (typical):
+ *   Work Order Number #1073774
+ *   Trip Number #494958
+ *   Original ETA  |  Current ETA  |  Repair Type
+ *   Description from Client
+ *   VS front doors, next to revolving doors, swing very hard ...
+ *   Service Location
+ *   Location    Victoria's Secret / VSS-405
+ *   Mall Name   Oakbrook Center
+ *   Location Phone   +1 630-954-1830
+ *   Manager
+ *   Address   52 OAKBROOK CTR, SPACE 52 , 60523, Oak Brook, Illinois, United States
+ *   Service Requested
+ *   Client Tracking Number #5116700
+ */
+function extractKFMFields(text) {
+  console.log('[KFM] === KFM Extraction Debug ===');
+  console.log('[KFM] Text length:', text.length);
+  console.log('[KFM] First 2000 chars:', text.substring(0, 2000));
+
+  const result = {
+    workOrderNumber: null,
+    siteLocation: null,
+    siteAddress: null,
+    problemDescription: null,
+  };
+
+  // ── Work Order # ──
+  // "Work Order Number #1073774" or "Work Order Number#1073774" or split across lines
+  const woMatch = text.match(/Work\s*Order\s*Number\s*#?\s*(\d+)/i)
+    || text.match(/Work\s*Order\s*Number\s*\n\s*#?\s*(\d+)/i)
+    || text.match(/W\.?O\.?\s*(?:#|Number)\s*:?\s*(\d+)/i);
+  console.log('[KFM] WO# regex match:', woMatch ? woMatch[1] : 'no match');
+  if (woMatch) {
+    result.workOrderNumber = woMatch[1];
+  }
+
+  // ── Site Location ──
+  // Need to find "Location" NOT preceded by "Service" and NOT followed by "Phone"
+  // Target line: "Location    Victoria's Secret / VSS-405"
+  // Avoid: "Service Location" (section header) and "Location Phone" (phone field)
+  //
+  // Strategy: look for line starting with "Location" (after newline + optional whitespace)
+  // that is NOT followed by "Phone"
+  let locMatch = text.match(/(?:^|\n)[ \t]*Location[ \t]+(?!Phone)([^\n]+)/im);
+  console.log('[KFM] Location regex match (pattern A):', locMatch ? locMatch[1] : 'no match');
+
+  // Fallback: look between "Service Location" section and "Location Phone"
+  if (!locMatch) {
+    const blockMatch = text.match(/Service\s+Location\s*\n([\s\S]*?)(?:Location\s+Phone|Mall\s+Name)/i);
+    if (blockMatch) {
+      // Inside this block, find the "Location" line
+      const inner = blockMatch[1];
+      const innerMatch = inner.match(/Location\s+([^\n]+)/i);
+      if (innerMatch) {
+        locMatch = innerMatch;
+        console.log('[KFM] Location regex match (pattern B - block):', locMatch[1]);
+      }
+    }
+  }
+
+  // Fallback: look for a line with store name pattern (Name / Code) in the Service Location section
+  if (!locMatch) {
+    const storeMatch = text.match(/Service\s+Location[\s\S]*?(?:^|\n)[ \t]*([A-Za-z][\w\s']+\/\s*[A-Z0-9\-]+)[ \t]*(?:\n|$)/im);
+    if (storeMatch) {
+      locMatch = storeMatch;
+      console.log('[KFM] Location regex match (pattern C - store name):', locMatch[1]);
+    }
+  }
+
+  if (locMatch && locMatch[1]) {
+    result.siteLocation = locMatch[1].trim();
+  }
+
+  // ── Site Address ──
+  // "Address   52 OAKBROOK CTR, SPACE 52 , 60523, Oak Brook, Illinois, United States"
+  // Must match "Address" that is followed by a street number (digit), not other "Address" labels
+  let addrMatch = text.match(/(?:^|\n)[ \t]*Address[ \t]+([\d][\s\S]*?)(?:\n[ \t]*(?:Service|Client|RT-|IVR|Location|Mall|Manager|Dispatch|Action)|United\s+States|$)/im);
+  console.log('[KFM] Address regex match (pattern A):', addrMatch ? addrMatch[1].substring(0, 100) : 'no match');
+
+  // Fallback: broader address match — look for "Address" followed by content until next section
+  if (!addrMatch) {
+    addrMatch = text.match(/Address\s+([\d][^\n]+)/i);
+    console.log('[KFM] Address regex match (pattern B):', addrMatch ? addrMatch[1].substring(0, 100) : 'no match');
+  }
+
+  if (addrMatch && addrMatch[1]) {
+    let addr = addrMatch[1].trim();
+    // Remove "United States" suffix
+    addr = addr.replace(/,?\s*United\s+States\s*$/i, '').trim();
+    // Collapse newlines into commas
+    addr = addr.replace(/\n+/g, ', ');
+    // Clean up extra spaces around commas, multiple spaces
+    addr = addr.replace(/\s*,\s*/g, ', ').replace(/\s+/g, ' ').trim();
+    // Remove trailing comma
+    addr = addr.replace(/,\s*$/, '').trim();
+    result.siteAddress = addr;
+  }
+
+  // ── Problem Description ──
+  // "Description from Client" followed by description text until next section
+  // Sections that can follow: "Service Location", "Service Requested", "Location", "Trade", "Repair Type"
+  let descMatch = text.match(/Description\s+from\s+Client\s*\n([\s\S]*?)(?=\n[ \t]*(?:Service\s+Location|Service\s+Requested|Repair\s+Type|Trade\s|Action\s+Taken))/i);
+  console.log('[KFM] Description regex match (pattern A):', descMatch ? descMatch[1].substring(0, 100) : 'no match');
+
+  // Fallback: more lenient — stop at "Service" or "Location" as a standalone word on a line
+  if (!descMatch) {
+    descMatch = text.match(/Description\s+from\s+Client\s*\n?([\s\S]*?)(?:\nService\s|\nLocation\s|\nTrade\s|\nRepair\s+Type)/i);
+    console.log('[KFM] Description regex match (pattern B):', descMatch ? descMatch[1].substring(0, 100) : 'no match');
+  }
+
+  // Last resort: grab everything after "Description from Client" up to 1000 chars
+  if (!descMatch) {
+    descMatch = text.match(/Description\s+from\s+Client\s*\n?([\s\S]{10,1000}?)(?:\n\n|\s*$)/i);
+    console.log('[KFM] Description regex match (pattern C):', descMatch ? descMatch[1].substring(0, 100) : 'no match');
+  }
+
+  if (descMatch && descMatch[1]) {
+    let desc = descMatch[1].trim();
+    // Collapse newlines and whitespace
+    desc = desc.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+    // Limit length
+    if (desc.length > 1000) desc = desc.substring(0, 1000).trim();
+    result.problemDescription = desc || null;
+  }
+
+  console.log('[KFM] Final extracted data:', JSON.stringify({
+    workOrderNumber: result.workOrderNumber,
+    siteLocation: result.siteLocation,
+    siteAddress: result.siteAddress,
+    problemDescription: result.problemDescription ? result.problemDescription.substring(0, 100) + '...' : null,
+  }, null, 2));
+
+  return result;
+}
+
 const CUSTOMER_PROFILES = {
   CLEAR_VISION: {
     names: ["CLEAR VISION", "CLEARVISION", "CLEAR VISION FACILITIES"],
@@ -1107,12 +1246,7 @@ const CUSTOMER_PROFILES = {
     names: ["KFM", "KFM247", "KFM 247"],
     displayName: "KFM",
     billingAddress: "15947 Frederick Road, Woodbine, MD 21797",
-    patterns: {
-      workOrderNumber: /Work Order Number #?(\d+)/i,  // 1073774
-      siteLocation: /Location\s+([\s\S]*?)(?:\nMall|\nLocation Phone|\nAddress)/i,
-      siteAddress: /Address\s+([\s\S]*?)(?:\nRT-|IVR|Location Phone|$)/i,
-      problemDescription: /Description from Client\s*([\s\S]*?)(?:Service Requested|Location|Trade|$)/i
-    }
+    customExtract: extractKFMFields,
   }
 };
 
