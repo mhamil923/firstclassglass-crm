@@ -1455,7 +1455,7 @@ async function generateEstimatePdf(estimateId) {
 
     // --- LOGO (between company info and title) ---
     if (hasLogo) {
-      doc.image(logoPath, 320, headerY, { width: 80, height: 80 });
+      doc.image(logoPath, 250, 40, { width: 60, height: 60 });
     }
 
     // --- "Estimate" title (top-right) ---
@@ -2074,7 +2074,7 @@ async function generateInvoicePdf(invoiceId) {
 
     // --- LOGO (between company info and title) ---
     if (hasLogo) {
-      doc.image(logoPath, 320, headerY, { width: 80, height: 80 });
+      doc.image(logoPath, 250, 40, { width: 60, height: 60 });
     }
 
     // --- "Invoice" title (top-right) ---
