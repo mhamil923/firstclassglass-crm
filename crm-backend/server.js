@@ -1276,6 +1276,43 @@ app.post('/customers', authenticate, async (req, res) => {
   }
 });
 
+// --- Helper: find existing customer by name (case-insensitive) or create one ---
+async function findOrCreateCustomer(customerName, billingInfo = {}) {
+  const trimmed = (customerName || '').trim();
+  if (!trimmed) throw new Error('customerName is required');
+
+  // 1. Find existing (case-insensitive)
+  const [existing] = await db.execute(
+    'SELECT * FROM customers WHERE LOWER(name) = LOWER(?) OR LOWER(companyName) = LOWER(?) LIMIT 1',
+    [trimmed, trimmed]
+  );
+  if (existing.length) return existing[0];
+
+  // 2. Create new
+  const cols = ['name', 'companyName'];
+  const vals = [trimmed, trimmed];
+  for (const [col, val] of Object.entries(billingInfo)) {
+    if (val != null && String(val).trim()) {
+      cols.push(col);
+      vals.push(String(val).trim());
+    }
+  }
+
+  try {
+    const [r] = await db.execute(
+      `INSERT INTO customers (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`, vals
+    );
+    const [[newCust]] = await db.execute('SELECT * FROM customers WHERE id = ?', [r.insertId]);
+    return newCust;
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      const [retry] = await db.execute('SELECT * FROM customers WHERE LOWER(name) = LOWER(?) LIMIT 1', [trimmed]);
+      if (retry.length) return retry[0];
+    }
+    throw err;
+  }
+}
+
 // PUT /customers/:id — update customer
 app.put('/customers/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
@@ -1725,10 +1762,23 @@ app.get('/estimates/:id', authenticate, requireNumericParam('id'), async (req, r
 app.post('/estimates', authenticate, async (req, res) => {
   try {
     const body = coerceBody(req);
-    if (!body.customerId) return res.status(400).json({ error: 'customerId is required.' });
+
+    // Resolve customerId: use provided ID, or find/create by name
+    let resolvedCustomerId = body.customerId ? Number(body.customerId) : null;
+    if (!resolvedCustomerId) {
+      const customerName = body.customerName || body.customerSearch;
+      if (!customerName || !String(customerName).trim()) {
+        return res.status(400).json({ error: 'customerId or customerName is required.' });
+      }
+      const cust = await findOrCreateCustomer(customerName, {
+        billingAddress: body.billingAddress, billingCity: body.billingCity,
+        billingState: body.billingState, billingZip: body.billingZip,
+      });
+      resolvedCustomerId = cust.id;
+    }
 
     const cols = ['customerId'];
-    const vals = [Number(body.customerId)];
+    const vals = [resolvedCustomerId];
     const fields = ['workOrderId','status','issueDate','expirationDate','poNumber','projectName',
       'projectAddress','projectCity','projectState','projectZip',
       'billingAddress','billingCity','billingState','billingZip',
@@ -2385,7 +2435,20 @@ app.get('/invoices/:id', authenticate, requireNumericParam('id'), async (req, re
 app.post('/invoices', authenticate, async (req, res) => {
   try {
     const b = coerceBody(req);
-    if (!b.customerId) return res.status(400).json({ error: 'customerId is required' });
+
+    // Resolve customerId: use provided ID, or find/create by name
+    let resolvedCustomerId = b.customerId ? Number(b.customerId) : null;
+    if (!resolvedCustomerId) {
+      const customerName = b.customerName || b.customerSearch;
+      if (!customerName || !String(customerName).trim()) {
+        return res.status(400).json({ error: 'customerId or customerName is required.' });
+      }
+      const cust = await findOrCreateCustomer(customerName, {
+        billingAddress: b.billingAddress, billingCity: b.billingCity,
+        billingState: b.billingState, billingZip: b.billingZip,
+      });
+      resolvedCustomerId = cust.id;
+    }
 
     const invoiceNumber = await getNextInvoiceNumber();
     const issueDate = b.issueDate || new Date().toISOString().split('T')[0];
@@ -2405,7 +2468,7 @@ app.post('/invoices', authenticate, async (req, res) => {
         subtotal, taxRate, taxAmount, total, amountPaid, balanceDue, notes, terms)
        VALUES (?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
       [
-        invoiceNumber, b.customerId, b.workOrderId || null, b.estimateId || null,
+        invoiceNumber, resolvedCustomerId, b.workOrderId || null, b.estimateId || null,
         issueDate, dueDate,
         b.poNumber || null, b.projectName || null,
         b.shipToAddress || null, b.shipToCity || null, b.shipToState || null, b.shipToZip || null,
@@ -3953,6 +4016,18 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       );
     }
 
+    // Auto-create customer and link to work order if no customerId was provided
+    if (!customerId || !Number.isFinite(Number(customerId))) {
+      try {
+        const cust = await findOrCreateCustomer(customer, {
+          billingAddress, phone: customerPhone, email: customerEmail,
+        });
+        await db.execute('UPDATE work_orders SET customerId = ? WHERE id = ?', [cust.id, r.insertId]);
+      } catch (autoErr) {
+        console.warn('[POST /work-orders] Auto-create customer failed:', autoErr.message);
+      }
+    }
+
     res.status(201).json({ workOrderId: r.insertId });
   } catch (err) {
     console.error('Work-order create error:', err);
@@ -4240,6 +4315,17 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       sql += `, customerId=?`;
       const cid = req.body.customerId;
       params.push(cid && Number.isFinite(Number(cid)) ? Number(cid) : null);
+    } else if (customer) {
+      // Auto-create customer if no customerId was explicitly provided
+      try {
+        const cust = await findOrCreateCustomer(customer, {
+          billingAddress, phone: customerPhone, email: customerEmail,
+        });
+        sql += `, customerId=?`;
+        params.push(cust.id);
+      } catch (autoErr) {
+        console.warn('[PUT /work-orders] Auto-create customer failed:', autoErr.message);
+      }
     }
 
     sql += ` WHERE id=?`;
