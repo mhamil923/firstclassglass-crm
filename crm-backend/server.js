@@ -1444,12 +1444,6 @@ async function generateEstimatePdf(estimateId) {
 
     const headerY = 40;
 
-    // --- LOGO (centered horizontally, same Y as company text) ---
-    if (hasLogo) {
-      const logoX = (pageW - 60) / 2;
-      doc.image(logoPath, logoX, headerY, { width: 60, height: 60 });
-    }
-
     // --- COMPANY INFO (far left) ---
     doc.font('Helvetica-Bold').fontSize(11);
     doc.text('First Class Glass & Mirror, Inc.', leftM, headerY);
@@ -1458,6 +1452,11 @@ async function generateEstimatePdf(estimateId) {
     doc.text('Itasca, IL. 60143', leftM, headerY + 25);
     doc.text('630-250-9777', leftM, headerY + 36);
     doc.text('630-250-9727', leftM, headerY + 47);
+
+    // --- LOGO (between company info and title) ---
+    if (hasLogo) {
+      doc.image(logoPath, 320, headerY, { width: 80, height: 80 });
+    }
 
     // --- "Estimate" title (top-right) ---
     doc.font('Helvetica-Bold').fontSize(22);
@@ -2064,12 +2063,6 @@ async function generateInvoicePdf(invoiceId) {
 
     const headerY = 40;
 
-    // --- LOGO (centered horizontally, same Y as company text) ---
-    if (hasLogo) {
-      const logoX = (pageW - 60) / 2;
-      doc.image(logoPath, logoX, headerY, { width: 60, height: 60 });
-    }
-
     // --- COMPANY INFO (far left) ---
     doc.font('Helvetica-Bold').fontSize(11);
     doc.text('First Class Glass & Mirror, Inc.', leftM, headerY);
@@ -2078,6 +2071,11 @@ async function generateInvoicePdf(invoiceId) {
     doc.text('Itasca, IL. 60143', leftM, headerY + 25);
     doc.text('630-250-9777', leftM, headerY + 36);
     doc.text('630-250-9727', leftM, headerY + 47);
+
+    // --- LOGO (between company info and title) ---
+    if (hasLogo) {
+      doc.image(logoPath, 320, headerY, { width: 80, height: 80 });
+    }
 
     // --- "Invoice" title (top-right) ---
     doc.font('Helvetica-Bold').fontSize(22);
