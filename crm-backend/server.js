@@ -1444,32 +1444,28 @@ async function generateEstimatePdf(estimateId) {
 
     const headerY = 40;
 
-    // --- LOGO (centered, above company info) ---
-    const logoH = 60;
-    const logoGap = 8;
-    let textStartY = headerY;
+    // --- LOGO (centered horizontally, same Y as company text) ---
     if (hasLogo) {
       const logoX = (pageW - 60) / 2;
-      doc.image(logoPath, logoX, headerY, { width: 60, height: logoH });
-      textStartY = headerY + logoH + logoGap;
+      doc.image(logoPath, logoX, headerY, { width: 60, height: 60 });
     }
 
     // --- COMPANY INFO (far left) ---
     doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('First Class Glass & Mirror, Inc.', leftM, textStartY);
+    doc.text('First Class Glass & Mirror, Inc.', leftM, headerY);
     doc.font('Helvetica').fontSize(9);
-    doc.text('1513 Industrial Drive', leftM, textStartY + 14);
-    doc.text('Itasca, IL. 60143', leftM, textStartY + 25);
-    doc.text('630-250-9777', leftM, textStartY + 36);
-    doc.text('630-250-9727', leftM, textStartY + 47);
+    doc.text('1513 Industrial Drive', leftM, headerY + 14);
+    doc.text('Itasca, IL. 60143', leftM, headerY + 25);
+    doc.text('630-250-9777', leftM, headerY + 36);
+    doc.text('630-250-9727', leftM, headerY + 47);
 
     // --- "Estimate" title (top-right) ---
     doc.font('Helvetica-Bold').fontSize(22);
-    doc.text('Estimate', leftM, textStartY, { width: pw, align: 'right' });
+    doc.text('Estimate', leftM, headerY, { width: pw, align: 'right' });
 
     // --- DATE box (right side, below title) ---
     const dateBoxX = pageW - 50 - 130;
-    const dateBoxY = textStartY + 28;
+    const dateBoxY = headerY + 28;
     const dateBoxW = 130;
     const dbH = 16;
     const issueDateStr = estimate.issueDate
@@ -1484,7 +1480,7 @@ async function generateEstimatePdf(estimateId) {
     doc.font('Helvetica').fontSize(8);
     doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dbH + 4, { width: dateBoxW - 8, align: 'center' });
 
-    let curY = textStartY + 68;
+    let curY = headerY + 68;
 
     // --- BILL TO (left) + PROJECT NAME/ADDRESS (right) ---
     const boxTop = curY;
@@ -2068,32 +2064,28 @@ async function generateInvoicePdf(invoiceId) {
 
     const headerY = 40;
 
-    // --- LOGO (centered, above company info) ---
-    const logoH = 60;
-    const logoGap = 8;
-    let textStartY = headerY;
+    // --- LOGO (centered horizontally, same Y as company text) ---
     if (hasLogo) {
       const logoX = (pageW - 60) / 2;
-      doc.image(logoPath, logoX, headerY, { width: 60, height: logoH });
-      textStartY = headerY + logoH + logoGap;
+      doc.image(logoPath, logoX, headerY, { width: 60, height: 60 });
     }
 
     // --- COMPANY INFO (far left) ---
     doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('First Class Glass & Mirror, Inc.', leftM, textStartY);
+    doc.text('First Class Glass & Mirror, Inc.', leftM, headerY);
     doc.font('Helvetica').fontSize(9);
-    doc.text('1513 Industrial Drive', leftM, textStartY + 14);
-    doc.text('Itasca, IL. 60143', leftM, textStartY + 25);
-    doc.text('630-250-9777', leftM, textStartY + 36);
-    doc.text('630-250-9727', leftM, textStartY + 47);
+    doc.text('1513 Industrial Drive', leftM, headerY + 14);
+    doc.text('Itasca, IL. 60143', leftM, headerY + 25);
+    doc.text('630-250-9777', leftM, headerY + 36);
+    doc.text('630-250-9727', leftM, headerY + 47);
 
     // --- "Invoice" title (top-right) ---
     doc.font('Helvetica-Bold').fontSize(22);
-    doc.text('Invoice', leftM, textStartY, { width: pw, align: 'right' });
+    doc.text('Invoice', leftM, headerY, { width: pw, align: 'right' });
 
     // --- DATE / INVOICE # box (right side, below title) ---
     const dateBoxX = pageW - 50 - 190;
-    const dateBoxY = textStartY + 28;
+    const dateBoxY = headerY + 28;
     const dateColW = 95;
     const invColW = 95;
     const dbH = 16;
@@ -2114,7 +2106,7 @@ async function generateInvoicePdf(invoiceId) {
     doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dbH + 4, { width: dateColW - 8, align: 'center' });
     doc.text(String(invoice.invoiceNumber || ''), dateBoxX + dateColW + 4, dateBoxY + dbH + 4, { width: invColW - 8, align: 'center' });
 
-    let curY = textStartY + 68;
+    let curY = headerY + 68;
 
     // --- BILL TO (left) + SHIP TO (right) ---
     const boxTop = curY;
