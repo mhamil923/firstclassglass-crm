@@ -293,15 +293,16 @@ export default function CreateEstimate() {
 
   // --- Save ---
   const handleSave = async (andGeneratePdf = false) => {
-    if (!estimate.customerId) {
-      alert("Please select a customer.");
+    if (!estimate.customerId && !estimate.customerSearch.trim()) {
+      alert("Please enter a customer name.");
       return null;
     }
 
     setSaving(true);
     try {
       const payload = {
-        customerId: estimate.customerId,
+        customerId: estimate.customerId || undefined,
+        customerName: !estimate.customerId ? estimate.customerSearch.trim() : undefined,
         workOrderId: estimate.workOrderId || null,
         projectName: estimate.projectName,
         poNumber: estimate.poNumber,
@@ -457,16 +458,16 @@ export default function CreateEstimate() {
                       </div>
                     ))}
                     {filteredCustomers.length === 0 && (
-                      <div className="ce-customer-option muted">No matching customers</div>
+                      <div className="ce-customer-option muted">No match found — "{estimate.customerSearch}" will be created as a new customer</div>
                     )}
                   </div>
                 )}
               </div>
 
-              {selectedCustomer && (
-                <div className="ce-field">
+              <div className="ce-field">
                   <div className="ce-label" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <span>Billing Address</span>
+                    {selectedCustomer && (
                     <button
                       type="button"
                       style={{ background: "none", border: "none", color: "var(--accent-blue)", fontSize: 12, fontWeight: 500, cursor: "pointer", padding: 0 }}
@@ -480,6 +481,7 @@ export default function CreateEstimate() {
                     >
                       Reset to Customer Default
                     </button>
+                    )}
                   </div>
                   <input
                     name="billingAddress"
@@ -512,7 +514,6 @@ export default function CreateEstimate() {
                     />
                   </div>
                 </div>
-              )}
             </div>
           </div>
         </div>

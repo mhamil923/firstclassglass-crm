@@ -351,15 +351,16 @@ export default function CreateInvoice() {
 
   // Save
   const handleSave = async (andGeneratePdf = false) => {
-    if (!invoice.customerId) {
-      alert("Please select a customer.");
+    if (!invoice.customerId && !invoice.customerSearch.trim()) {
+      alert("Please enter a customer name.");
       return null;
     }
 
     setSaving(true);
     try {
       const payload = {
-        customerId: invoice.customerId,
+        customerId: invoice.customerId || undefined,
+        customerName: !invoice.customerId ? invoice.customerSearch.trim() : undefined,
         workOrderId: invoice.workOrderId || null,
         estimateId: invoice.estimateId || null,
         projectName: invoice.projectName,
@@ -515,16 +516,16 @@ export default function CreateInvoice() {
                       </div>
                     ))}
                     {filteredCustomers.length === 0 && (
-                      <div className="ci-customer-option muted">No matching customers</div>
+                      <div className="ci-customer-option muted">No match found — "{invoice.customerSearch}" will be created as a new customer</div>
                     )}
                   </div>
                 )}
               </div>
 
-              {selectedCustomer && (
-                <div className="ci-field">
+              <div className="ci-field">
                   <div className="ci-label" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <span>Billing Address</span>
+                    {selectedCustomer && (
                     <button
                       type="button"
                       style={{ background: "none", border: "none", color: "var(--accent-blue)", fontSize: 12, fontWeight: 500, cursor: "pointer", padding: 0 }}
@@ -538,6 +539,7 @@ export default function CreateInvoice() {
                     >
                       Reset to Customer Default
                     </button>
+                    )}
                   </div>
                   <input
                     name="billingAddress"
@@ -570,7 +572,6 @@ export default function CreateInvoice() {
                     />
                   </div>
                 </div>
-              )}
             </div>
           </div>
         </div>

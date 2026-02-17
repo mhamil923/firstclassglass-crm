@@ -688,7 +688,7 @@ export default function AddWorkOrder() {
                       ))}
                       {filteredCustomers.length === 0 && (
                         <div className="awo-customer-option muted">
-                          No matching customers — name will be saved as-is
+                          No match found — "{workOrder.customer}" will be saved as a new customer
                         </div>
                       )}
                     </div>
