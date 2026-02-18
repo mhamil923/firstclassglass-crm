@@ -20,7 +20,7 @@ const STATUS_OPTIONS = [
 ];
 
 // Only show these techs in ViewWorkOrder tech dropdown
-const ALLOWED_TECH_USERNAMES = new Set(["Jeff", "jeffsr", "Adin"]);
+const ALLOWED_TECH_USERNAMES = new Set(["Jeff", "jeffsr", "Adin", "Mikey"]);
 
 /* ---------- auth header (match WorkOrders.js) ---------- */
 const authHeaders = () => {

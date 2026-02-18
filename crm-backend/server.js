@@ -37,7 +37,7 @@ const {
   JWT_SECRET  = 'supersecretjwtkey',
   S3_BUCKET,
   AWS_REGION  = 'us-east-2',
-  ASSIGNEE_EXTRA_USERNAMES = 'Jeff,tech1',
+  ASSIGNEE_EXTRA_USERNAMES = 'Jeff,tech1,Mikey',
   DEFAULT_WINDOW_MINUTES = '120',
   FILES_VERBOSE = process.env.FILES_VERBOSE || '0',
 
