@@ -581,6 +581,28 @@ async function ensureCustomerCols() {
 
 ensureCustomerCols().catch(() => {});
 
+// ─── ENSURE TECH USERS ──────────────────────────────────────────────────────
+async function ensureTechUsers() {
+  const requiredTechs = [
+    { username: 'Mikey', password: 'Mikey123!', role: 'tech' },
+  ];
+
+  for (const t of requiredTechs) {
+    try {
+      const [existing] = await db.execute('SELECT id FROM users WHERE username = ?', [t.username]);
+      if (existing.length === 0) {
+        const hash = await bcrypt.hash(t.password, 10);
+        await db.execute('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)', [t.username, hash, t.role]);
+        console.log(`[Users] Created tech user: ${t.username}`);
+      }
+    } catch (e) {
+      console.warn(`[Users] Failed to ensure tech user ${t.username}:`, e.message);
+    }
+  }
+}
+
+ensureTechUsers().catch(() => {});
+
 // ─── SAFE SELECT BUILDER ────────────────────────────────────────────────────
 function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', limitSql = '' } = {}) {
   const hasA = !!SCHEMA.hasAssignedTo;
