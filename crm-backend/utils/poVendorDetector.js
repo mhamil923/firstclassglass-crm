@@ -202,7 +202,19 @@ function detectSupplierFromPOLayout(text) {
     console.log('[PO Layout] Captured vendor text:', JSON.stringify(vendorMatch[1].trim()));
 
     if (vendorLine.includes('chicago') && vendorLine.includes('temper'))  return 'Chicago Tempered';
-    if (vendorLine.includes('oldcastle') || vendorLine.includes('old castle')) return 'Oldcastle';
+    if (vendorLine.includes('oldcastle') || vendorLine.includes('old castle')) {
+      // Grab the vendor address block (lines following the vendor name) to distinguish locations
+      const vendorBlockMatch = text.match(/vendor[:\s]*\n\s*[^\n]+\n([\s\S]{0,300}?)(?:\n\s*\n|ship\s*to|p\.?\s*o\.?\s*no|date|$)/i);
+      const vendorBlock = vendorBlockMatch ? vendorBlockMatch[1].toLowerCase() : '';
+      console.log('[PO Layout] Oldcastle vendor block:', JSON.stringify(vendorBlock.substring(0, 200)));
+      if (/elk\s*grove/i.test(vendorBlock)) {
+        return 'Oldcastle Elk Grove';
+      }
+      if (/60007|60008|60009/.test(vendorBlock)) { // Elk Grove Village zip codes
+        return 'Oldcastle Elk Grove';
+      }
+      return 'Oldcastle Chicago';
+    }
     if (vendorLine.includes('laurence') || vendorLine.includes('crl') || vendorLine.includes('c.r.')) return 'CRL';
     if (vendorLine.includes('casco'))                                     return 'Casco';
     if (vendorLine.includes('all state') || vendorLine.includes('allstate') || vendorLine.includes('all-state')) return 'All State Metal Fab';
@@ -269,7 +281,7 @@ function detectSupplierFromText(text) {
       /\bctg\b/i,
       /chicago.*tempered\s*glass/i,
     ],
-    'Oldcastle': [
+    'Oldcastle Chicago': [
       /[o0]ld\s*castle/i,             // OCR: o→0, optional space
       /[o0]ldcastle/i,                // No space variant
       /[o0]ld\s*cast[l1]e/i,          // OCR: l→1
@@ -305,6 +317,13 @@ function detectSupplierFromText(text) {
     for (const pattern of patterns) {
       if (pattern.test(t)) {
         console.log('[PO Vendor] MATCHED vendor:', vendor, 'with pattern:', pattern.toString());
+        // Refine Oldcastle: check full text for Elk Grove address
+        if (vendor === 'Oldcastle Chicago') {
+          if (/elk\s*grove/i.test(t) || /60007|60008|60009/.test(t)) {
+            console.log('[PO Vendor] Refined to Oldcastle Elk Grove based on address in text');
+            return 'Oldcastle Elk Grove';
+          }
+        }
         return vendor;
       }
     }
