@@ -2936,8 +2936,9 @@ app.get('/reports/dashboard', authenticate, async (req, res) => {
     const [[woWaiting]] = await db.query(
       "SELECT COUNT(*) AS cnt FROM work_orders WHERE status = 'Waiting on Parts'"
     );
+    const dateCol = SCHEMA.createdAtCol || 'created_at';
     const [[woCompleted]] = await db.query(
-      "SELECT COUNT(*) AS cnt FROM work_orders WHERE status = 'Completed' AND YEAR(COALESCE(updatedAt, createdAt, created_at)) = ? AND MONTH(COALESCE(updatedAt, createdAt, created_at)) = ?",
+      `SELECT COUNT(*) AS cnt FROM work_orders WHERE status = 'Completed' AND YEAR(${dateCol}) = ? AND MONTH(${dateCol}) = ?`,
       [curYear, curMonth]
     );
 
