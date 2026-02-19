@@ -89,20 +89,20 @@ app.use(bodyParser.urlencoded({ extended: true, limit: '20mb' }));
 // Also accept text/plain bodies
 app.use(bodyParser.text({ type: 'text/plain', limit: '1mb' }));
 
-// Block known vulnerability scanners by IP
+// Block known vulnerability scanners by IP (return 200 to avoid EB 4xx health penalty)
 app.use((req, res, next) => {
   const blockedIPs = ['217.76.55.57'];
   const clientIP = req.headers['x-forwarded-for'] || req.ip || '';
   if (blockedIPs.some(ip => clientIP.includes(ip))) {
-    return res.status(403).end();
+    return res.status(200).end();
   }
   next();
 });
 
-// Block common bot scanner paths (WordPress probes, etc.)
+// Block common bot scanner paths (return 200 to avoid EB 4xx health penalty)
 app.use((req, res, next) => {
   if (/wp-config|wp-admin|wp-login|\.env$|phpmyadmin|xmlrpc/i.test(req.path)) {
-    return res.status(403).end();
+    return res.status(200).end();
   }
   next();
 });
