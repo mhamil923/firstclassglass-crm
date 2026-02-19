@@ -5,7 +5,7 @@ import api from "./api";
 import API_BASE_URL from "./config";
 import "./PurchaseOrders.css";
 
-const SUPPLIERS = ["All Suppliers", "All State Metal Fab", "Chicago Tempered", "CRL", "Oldcastle", "Casco"];
+const SUPPLIERS = ["All Suppliers", "All State Metal Fab", "Casco", "Chicago Tempered", "CRL", "Oldcastle Chicago", "Oldcastle Elk Grove"];
 const STATUSES = ["All Statuses", "On Order", "Picked Up"];
 const NEEDS_TO_BE_SCHEDULED = "Needs to be Scheduled";
 
@@ -32,7 +32,9 @@ function inferSupplierFromText(text) {
     return "Chicago Tempered";
   }
   if (s.includes("crl")) return "CRL";
-  if (s.includes("oldcastle")) return "Oldcastle";
+  if (s.includes("oldcastle elk grove")) return "Oldcastle Elk Grove";
+  if (s.includes("oldcastle chicago")) return "Oldcastle Chicago";
+  if (s.includes("oldcastle")) return "Oldcastle Chicago";
   if (s.includes("casco")) return "Casco";
   if (s.includes("all state") || s.includes("allstate") || s.includes("all-state") || s.includes("metal fab")) return "All State Metal Fab";
 
