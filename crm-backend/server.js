@@ -1845,7 +1845,7 @@ app.post('/estimates', authenticate, async (req, res) => {
     // Auto-update linked work order status to "Waiting for Approval"
     if (body.workOrderId) {
       try {
-        await db.query("UPDATE work_orders SET status='Waiting for Approval', updatedAt=NOW() WHERE id=?", [Number(body.workOrderId)]);
+        await db.query("UPDATE work_orders SET status='Waiting for Approval' WHERE id=?", [Number(body.workOrderId)]);
       } catch (woErr) {
         console.error('Failed to update WO status on estimate create:', woErr.message);
       }
@@ -2006,8 +2006,12 @@ app.put('/estimates/:id/status', authenticate, requireNumericParam('id'), async 
     if (status === 'Accepted' || status === 'Declined') {
       const [[est]] = await db.query('SELECT workOrderId FROM estimates WHERE id=?', [req.params.id]);
       if (est?.workOrderId) {
-        const woStatus = status === 'Accepted' ? 'Estimate Accepted' : 'Estimate Declined';
-        await db.query('UPDATE work_orders SET status=?, updatedAt=NOW() WHERE id=?', [woStatus, est.workOrderId]);
+        try {
+          const woStatus = status === 'Accepted' ? 'Approved' : 'Needs to be Quoted';
+          await db.query('UPDATE work_orders SET status=? WHERE id=?', [woStatus, est.workOrderId]);
+        } catch (woErr) {
+          console.warn('[PUT /estimates] Failed to sync WO status:', woErr.message);
+        }
       }
     }
 
@@ -2833,7 +2837,11 @@ app.post('/estimates/:id/convert-to-invoice', authenticate, requireNumericParam(
 
     // Sync status to linked work order
     if (estimate.workOrderId) {
-      await db.query("UPDATE work_orders SET status='Estimate Accepted', updatedAt=NOW() WHERE id=?", [estimate.workOrderId]);
+      try {
+        await db.query("UPDATE work_orders SET status='Needs to be Invoiced' WHERE id=?", [estimate.workOrderId]);
+      } catch (woErr) {
+        console.warn('[convert-to-invoice] Failed to sync WO status:', woErr.message);
+      }
     }
 
     const [[created]] = await db.query('SELECT * FROM invoices WHERE id = ?', [newId]);
