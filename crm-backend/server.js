@@ -2002,13 +2002,13 @@ app.put('/estimates/:id/status', authenticate, requireNumericParam('id'), async 
     params.push(req.params.id);
     await db.query(`UPDATE estimates SET ${sets.join(',')} WHERE id=?`, params);
 
-    // Sync status to linked work order
-    if (status === 'Accepted' || status === 'Declined') {
+    // Sync status to linked work order (only on Accept)
+    if (status === 'Accepted') {
       const [[est]] = await db.query('SELECT workOrderId FROM estimates WHERE id=?', [req.params.id]);
       if (est?.workOrderId) {
         try {
-          const woStatus = status === 'Accepted' ? 'Approved' : 'Needs to be Quoted';
-          await db.query('UPDATE work_orders SET status=? WHERE id=?', [woStatus, est.workOrderId]);
+          await db.query("UPDATE work_orders SET status='Approved' WHERE id=?", [est.workOrderId]);
+          console.log('[Estimate] Accepted - Updated WO #' + est.workOrderId + ' status to Approved');
         } catch (woErr) {
           console.warn('[PUT /estimates] Failed to sync WO status:', woErr.message);
         }
@@ -2835,16 +2835,10 @@ app.post('/estimates/:id/convert-to-invoice', authenticate, requireNumericParam(
       await db.query("UPDATE estimates SET status='Accepted', acceptedAt=NOW(), updatedAt=NOW() WHERE id=?", [req.params.id]);
     }
 
-    // Sync status to linked work order
-    if (estimate.workOrderId) {
-      try {
-        await db.query("UPDATE work_orders SET status='Needs to be Invoiced' WHERE id=?", [estimate.workOrderId]);
-      } catch (woErr) {
-        console.warn('[convert-to-invoice] Failed to sync WO status:', woErr.message);
-      }
-    }
+    // Work order status is NOT changed here — user controls WO status progression manually
 
     const [[created]] = await db.query('SELECT * FROM invoices WHERE id = ?', [newId]);
+    console.log('[Estimate] Converted estimate #' + req.params.id + ' to invoice #' + newId);
     res.json({ invoiceId: newId, invoice: created });
   } catch (err) {
     console.error('Error converting estimate to invoice:', err);

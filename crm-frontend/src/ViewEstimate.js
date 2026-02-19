@@ -63,6 +63,11 @@ export default function ViewEstimate() {
     try {
       await api.put(`/estimates/${id}/status`, { status: newStatus });
       await fetchEstimate();
+      if (newStatus === 'Accepted') {
+        alert("Estimate accepted. Work order status updated to Approved.");
+      } else if (newStatus === 'Declined') {
+        alert("Estimate marked as Declined.");
+      }
     } catch (err) {
       console.error("Error updating status:", err);
       alert("Failed to update status.");
@@ -84,14 +89,17 @@ export default function ViewEstimate() {
     }
   };
 
-  const handleSendEmail = async () => {
+  const handleSendToCustomer = async () => {
+    setStatusUpdating(true);
     try {
-      const res = await api.post(`/estimates/${id}/send-email`);
-      alert(res.data.message || "Email sent.");
+      await api.post(`/estimates/${id}/send-email`);
       await fetchEstimate();
+      alert("Estimate marked as Sent to Customer.");
     } catch (err) {
-      console.error("Error sending email:", err);
-      alert("Failed to send email.");
+      console.error("Error sending to customer:", err);
+      alert("Failed to send to customer.");
+    } finally {
+      setStatusUpdating(false);
     }
   };
 
@@ -149,16 +157,21 @@ export default function ViewEstimate() {
             </span>
           </div>
           <div className="ve-actions">
-            <Link to={`/estimates/${id}/edit`} className="ve-btn ve-btn-secondary">
-              Edit
-            </Link>
-            <button
-              className="ve-btn ve-btn-primary"
-              onClick={handleGeneratePdf}
-              disabled={generatingPdf}
-            >
-              {generatingPdf ? "Generating..." : pdfUrl ? "Regenerate PDF" : "Generate PDF"}
-            </button>
+            {/* Draft: [Edit] [Generate PDF] [Download PDF] [Send to Customer] [Delete] */}
+            {(e.status === "Draft" || e.status === "Declined") && (
+              <Link to={`/estimates/${id}/edit`} className="ve-btn ve-btn-secondary">
+                Edit
+              </Link>
+            )}
+            {e.status === "Draft" && (
+              <button
+                className="ve-btn ve-btn-primary"
+                onClick={handleGeneratePdf}
+                disabled={generatingPdf}
+              >
+                {generatingPdf ? "Generating..." : pdfUrl ? "Regenerate PDF" : "Generate PDF"}
+              </button>
+            )}
             {pdfUrl && (
               <a
                 href={pdfUrl}
@@ -169,58 +182,52 @@ export default function ViewEstimate() {
                 Download PDF
               </a>
             )}
-            <button className="ve-btn ve-btn-secondary" onClick={handleSendEmail}>
-              Send to Customer
-            </button>
-            <button
-              className="ve-btn ve-btn-success"
-              onClick={handleConvertToInvoice}
-              disabled={converting}
-            >
-              {converting ? "Converting..." : "Convert to Invoice"}
-            </button>
-            <button className="ve-btn ve-btn-danger" onClick={handleDelete}>
-              Delete
-            </button>
+            {e.status === "Draft" && (
+              <button
+                className="ve-btn ve-btn-primary"
+                onClick={handleSendToCustomer}
+                disabled={statusUpdating}
+              >
+                {statusUpdating ? "Sending..." : "Send to Customer"}
+              </button>
+            )}
+            {/* Sent: [Download PDF] [Mark as Accepted] [Mark as Declined] */}
+            {e.status === "Sent" && (
+              <>
+                <button
+                  className="ve-btn ve-btn-success"
+                  onClick={() => handleStatusChange("Accepted")}
+                  disabled={statusUpdating}
+                >
+                  {statusUpdating ? "Updating..." : "Mark as Accepted"}
+                </button>
+                <button
+                  className="ve-btn ve-btn-danger"
+                  onClick={() => handleStatusChange("Declined")}
+                  disabled={statusUpdating}
+                >
+                  Mark as Declined
+                </button>
+              </>
+            )}
+            {/* Accepted: [Download PDF] [Convert to Invoice] */}
+            {e.status === "Accepted" && (
+              <button
+                className="ve-btn ve-btn-success"
+                onClick={handleConvertToInvoice}
+                disabled={converting}
+              >
+                {converting ? "Converting..." : "Convert to Invoice"}
+              </button>
+            )}
+            {/* Draft + Declined: [Delete] */}
+            {(e.status === "Draft" || e.status === "Declined") && (
+              <button className="ve-btn ve-btn-danger" onClick={handleDelete}>
+                Delete
+              </button>
+            )}
           </div>
         </div>
-
-        {/* Status Controls */}
-        {e.status !== "Accepted" && e.status !== "Declined" && (
-          <div className="ve-card">
-            <div className="ve-card-body">
-              <div className="ve-status-controls">
-                {e.status === "Draft" && (
-                  <button
-                    className="ve-btn ve-btn-primary"
-                    onClick={() => handleStatusChange("Sent")}
-                    disabled={statusUpdating}
-                  >
-                    Mark as Sent
-                  </button>
-                )}
-                {e.status === "Sent" && (
-                  <>
-                    <button
-                      className="ve-btn ve-btn-success"
-                      onClick={() => handleStatusChange("Accepted")}
-                      disabled={statusUpdating}
-                    >
-                      Mark Accepted
-                    </button>
-                    <button
-                      className="ve-btn ve-btn-danger"
-                      onClick={() => handleStatusChange("Declined")}
-                      disabled={statusUpdating}
-                    >
-                      Mark Declined
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Customer Info */}
         <div className="ve-card">
