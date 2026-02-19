@@ -584,7 +584,7 @@ ensureCustomerCols().catch(() => {});
 // ─── ENSURE TECH USERS ──────────────────────────────────────────────────────
 async function ensureTechUsers() {
   const requiredTechs = [
-    { username: 'Mikey', password: 'Mikey123!', role: 'tech' },
+    { username: 'Mikey', password: '1234!', role: 'dispatcher' },
   ];
 
   for (const t of requiredTechs) {
