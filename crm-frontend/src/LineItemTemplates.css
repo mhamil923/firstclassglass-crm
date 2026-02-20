@@ -1,0 +1,227 @@
+/* Line Item Templates Page */
+.lit-page {
+  min-height: 100vh;
+  background: var(--bg-primary);
+  padding: 24px;
+  animation: fadeIn 0.3s ease;
+}
+
+.lit-container {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.lit-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.lit-title {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.lit-subtitle {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.lit-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* Card */
+.lit-card {
+  background: var(--bg-card-solid);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.lit-card-body {
+  padding: 20px;
+}
+
+/* Search */
+.lit-search-wrap {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 0;
+}
+
+.lit-search-input {
+  flex: 1;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-solid);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  transition: var(--transition-fast);
+}
+
+.lit-search-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+.lit-search-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Table */
+.lit-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.lit-table thead th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.lit-table tbody tr {
+  transition: var(--transition-fast);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.lit-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.lit-table tbody td {
+  padding: 14px 16px;
+  font-size: 14px;
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.lit-desc {
+  font-weight: 600;
+}
+
+.lit-category {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.lit-empty {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 15px;
+}
+
+/* Inline edit inputs */
+.lit-inline-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-solid);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  transition: var(--transition-fast);
+  box-sizing: border-box;
+}
+
+.lit-inline-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+.lit-edit-row {
+  background: rgba(0, 113, 227, 0.03);
+}
+
+[data-theme="dark"] .lit-edit-row {
+  background: rgba(10, 132, 255, 0.05);
+}
+
+/* Row actions */
+.lit-row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.lit-action-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-solid);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-fast);
+  white-space: nowrap;
+}
+
+.lit-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.lit-action-btn.save {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+
+.lit-action-btn.save:hover {
+  background: var(--accent-blue-hover);
+}
+
+.lit-action-btn.danger:hover {
+  background: rgba(255, 59, 48, 0.1);
+  color: #ff3b30;
+  border-color: rgba(255, 59, 48, 0.3);
+}
+
+@media (max-width: 768px) {
+  .lit-page { padding: 16px; }
+  .lit-title { font-size: 26px; }
+  .lit-header { flex-direction: column; align-items: flex-start; }
+  .lit-table thead { display: none; }
+  .lit-table tbody tr {
+    display: flex;
+    flex-direction: column;
+    padding: 12px 16px;
+    gap: 4px;
+  }
+  .lit-table tbody td {
+    padding: 2px 0;
+    font-size: 13px;
+  }
+  .lit-table tbody td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: block;
+  }
+}

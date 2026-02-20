@@ -89,3 +89,21 @@
 .li-template-match {
   font-weight: 700;
 }
+
+/* Footer row: Add Line Item + Manage Templates */
+.li-footer-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.li-manage-link {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  text-decoration: none;
+  transition: var(--transition-fast);
+}
+
+.li-manage-link:hover {
+  color: var(--accent-blue);
+}

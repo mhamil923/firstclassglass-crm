@@ -3,6 +3,7 @@
 // Used by both CreateEstimate.js and CreateInvoice.js.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import api from "./api";
 import "./LineItemEditor.css";
 
@@ -21,6 +22,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
   const [dropdownIndex, setDropdownIndex] = useState(-1);
 
   // Refs for focus management — keyed by tempId
+  const qtyRefs = useRef({});
   const descRefs = useRef({});
   const amtRefs = useRef({});
   const rowRefs = useRef({});
@@ -33,13 +35,13 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
       .catch(() => {});
   }, []);
 
-  // Focus new row's description after state update
+  // Focus new row's quantity field after state update
   useEffect(() => {
     if (pendingFocus.current != null) {
       const tid = pendingFocus.current;
       pendingFocus.current = null;
       setTimeout(() => {
-        if (descRefs.current[tid]) descRefs.current[tid].focus();
+        if (qtyRefs.current[tid]) qtyRefs.current[tid].focus();
       }, 0);
     }
   }, [lineItems]);
@@ -247,6 +249,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
               onChange={(e) => updateLineItem(li.tempId, "quantity", e.target.value)}
               className={`${p}-li-input`}
               placeholder="Qty"
+              ref={(el) => { qtyRefs.current[li.tempId] = el; }}
             />
 
             {/* Description with autocomplete */}
@@ -356,9 +359,14 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
         );
       })}
 
-      <button type="button" className={`${p}-add-line`} onClick={addLineItem}>
-        + Add Line Item
-      </button>
+      <div className="li-footer-row">
+        <button type="button" className={`${p}-add-line`} onClick={addLineItem}>
+          + Add Line Item
+        </button>
+        <Link to="/line-item-templates" className="li-manage-link">
+          Manage Templates
+        </Link>
+      </div>
     </>
   );
 }
