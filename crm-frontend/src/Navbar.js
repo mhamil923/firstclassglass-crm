@@ -112,13 +112,24 @@ function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
   const [saving, setSaving] = useState(false);
   const [localOrder, setLocalOrder] = useState(navOrder);
 
+  // Line item templates
+  const [templates, setTemplates] = useState([]);
+  const [editingTpl, setEditingTpl] = useState(null); // id of template being edited
+  const [editForm, setEditForm] = useState({});
+  const [addingTpl, setAddingTpl] = useState(false);
+  const [newTpl, setNewTpl] = useState({ description: "", defaultQuantity: "1", defaultAmount: "", category: "" });
+
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get("/settings");
-      const s = res.data || {};
+      const [settingsRes, tplRes] = await Promise.all([
+        api.get("/settings"),
+        api.get("/line-item-templates"),
+      ]);
+      const s = settingsRes.data || {};
       setNextInvoiceNumber(s.nextInvoiceNumber || "1");
       setDefaultInvoiceTerms(s.defaultInvoiceTerms || "");
+      setTemplates(tplRes.data || []);
     } catch (err) {
       console.error("Error fetching settings:", err);
     } finally {
@@ -129,6 +140,59 @@ function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
   useEffect(() => {
     fetchSettings();
   }, [fetchSettings]);
+
+  const handleEditTpl = (tpl) => {
+    setEditingTpl(tpl.id);
+    setEditForm({
+      description: tpl.description,
+      defaultQuantity: tpl.defaultQuantity != null ? String(tpl.defaultQuantity) : "",
+      defaultAmount: tpl.defaultAmount != null ? String(tpl.defaultAmount) : "",
+      category: tpl.category || "",
+    });
+  };
+
+  const handleSaveTpl = async (id) => {
+    try {
+      await api.put(`/line-item-templates/${id}`, {
+        description: editForm.description,
+        defaultQuantity: editForm.defaultQuantity ? Number(editForm.defaultQuantity) : null,
+        defaultAmount: editForm.defaultAmount ? Number(editForm.defaultAmount) : null,
+        category: editForm.category || null,
+      });
+      setEditingTpl(null);
+      const res = await api.get("/line-item-templates");
+      setTemplates(res.data || []);
+    } catch (err) {
+      console.error("Error saving template:", err);
+    }
+  };
+
+  const handleDeleteTpl = async (id) => {
+    if (!window.confirm("Delete this template?")) return;
+    try {
+      await api.delete(`/line-item-templates/${id}`);
+      setTemplates((prev) => prev.filter((t) => t.id !== id));
+    } catch (err) {
+      console.error("Error deleting template:", err);
+    }
+  };
+
+  const handleAddTpl = async () => {
+    if (!newTpl.description.trim()) return;
+    try {
+      const res = await api.post("/line-item-templates", {
+        description: newTpl.description.trim(),
+        defaultQuantity: newTpl.defaultQuantity ? Number(newTpl.defaultQuantity) : 1,
+        defaultAmount: newTpl.defaultAmount ? Number(newTpl.defaultAmount) : null,
+        category: newTpl.category.trim() || null,
+      });
+      setTemplates((prev) => [...prev, res.data]);
+      setNewTpl({ description: "", defaultQuantity: "1", defaultAmount: "", category: "" });
+      setAddingTpl(false);
+    } catch (err) {
+      console.error("Error adding template:", err);
+    }
+  };
 
   const moveItem = useCallback((fromIndex, toIndex) => {
     setLocalOrder((prev) => {
@@ -184,6 +248,71 @@ function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
                 onChange={(e) => setDefaultInvoiceTerms(e.target.value)}
                 rows={4}
               />
+            </div>
+
+            <div className="settings-divider" />
+
+            {/* Line Item Templates */}
+            <div className="settings-field">
+              <label className="settings-label">Line Item Templates</label>
+              <p className="settings-hint">Saved templates appear as autocomplete suggestions when adding line items.</p>
+              <div className="settings-tpl-table">
+                <div className="settings-tpl-header">
+                  <span>Description</span>
+                  <span>Qty</span>
+                  <span>Amount</span>
+                  <span>Category</span>
+                  <span></span>
+                </div>
+                {templates.map((tpl) => (
+                  <div className="settings-tpl-row" key={tpl.id}>
+                    {editingTpl === tpl.id ? (
+                      <>
+                        <input className="settings-input settings-tpl-input" value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
+                        <input className="settings-input settings-tpl-input" type="number" value={editForm.defaultQuantity} onChange={(e) => setEditForm({ ...editForm, defaultQuantity: e.target.value })} />
+                        <input className="settings-input settings-tpl-input" type="number" step="0.01" value={editForm.defaultAmount} onChange={(e) => setEditForm({ ...editForm, defaultAmount: e.target.value })} />
+                        <input className="settings-input settings-tpl-input" value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })} />
+                        <div className="settings-tpl-actions">
+                          <button type="button" className="settings-tpl-action-btn" onClick={() => handleSaveTpl(tpl.id)} title="Save">Save</button>
+                          <button type="button" className="settings-tpl-action-btn" onClick={() => setEditingTpl(null)} title="Cancel">Cancel</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <span className="settings-tpl-desc">{tpl.description}</span>
+                        <span className="settings-tpl-qty">{tpl.defaultQuantity != null ? tpl.defaultQuantity : "—"}</span>
+                        <span className="settings-tpl-amt">{tpl.defaultAmount != null ? "$" + Number(tpl.defaultAmount).toFixed(2) : "—"}</span>
+                        <span className="settings-tpl-cat">{tpl.category || "—"}</span>
+                        <div className="settings-tpl-actions">
+                          <button type="button" className="settings-tpl-action-btn" onClick={() => handleEditTpl(tpl)} title="Edit">Edit</button>
+                          <button type="button" className="settings-tpl-action-btn danger" onClick={() => handleDeleteTpl(tpl.id)} title="Delete">Del</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+
+                {addingTpl ? (
+                  <div className="settings-tpl-row">
+                    <input className="settings-input settings-tpl-input" placeholder="Description" value={newTpl.description} onChange={(e) => setNewTpl({ ...newTpl, description: e.target.value })} />
+                    <input className="settings-input settings-tpl-input" type="number" placeholder="Qty" value={newTpl.defaultQuantity} onChange={(e) => setNewTpl({ ...newTpl, defaultQuantity: e.target.value })} />
+                    <input className="settings-input settings-tpl-input" type="number" step="0.01" placeholder="Amount" value={newTpl.defaultAmount} onChange={(e) => setNewTpl({ ...newTpl, defaultAmount: e.target.value })} />
+                    <input className="settings-input settings-tpl-input" placeholder="Category" value={newTpl.category} onChange={(e) => setNewTpl({ ...newTpl, category: e.target.value })} />
+                    <div className="settings-tpl-actions">
+                      <button type="button" className="settings-tpl-action-btn" onClick={handleAddTpl}>Add</button>
+                      <button type="button" className="settings-tpl-action-btn" onClick={() => setAddingTpl(false)}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="settings-tpl-add-btn"
+                    onClick={() => setAddingTpl(true)}
+                  >
+                    + Add Template
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="settings-divider" />

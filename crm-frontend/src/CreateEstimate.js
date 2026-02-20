@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import api from "./api";
+import LineItemEditor from "./LineItemEditor";
 import "./CreateEstimate.css";
 
 const DEFAULT_TERMS =
@@ -235,34 +236,6 @@ export default function CreateEstimate() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
-
-  // --- Line items management ---
-  const addLineItem = () => {
-    setLineItems((prev) => [
-      ...prev,
-      { tempId: nextTempId.current++, description: "", quantity: "", amount: "", sortOrder: prev.length },
-    ]);
-  };
-
-  const updateLineItem = (tempId, field, value) => {
-    setLineItems((prev) =>
-      prev.map((li) => (li.tempId === tempId ? { ...li, [field]: value } : li))
-    );
-  };
-
-  const removeLineItem = (tempId) => {
-    setLineItems((prev) => prev.filter((li) => li.tempId !== tempId));
-  };
-
-  const moveLineItem = (index, direction) => {
-    setLineItems((prev) => {
-      const arr = [...prev];
-      const newIndex = index + direction;
-      if (newIndex < 0 || newIndex >= arr.length) return prev;
-      [arr[index], arr[newIndex]] = [arr[newIndex], arr[index]];
-      return arr;
-    });
-  };
 
   // --- Computed totals ---
   const subtotal = useMemo(() => {
@@ -587,77 +560,12 @@ export default function CreateEstimate() {
         <div className="ce-card">
           <div className="ce-card-header">Line Items</div>
           <div className="ce-card-body">
-            {lineItems.length > 0 && (
-              <div className="ce-li-header">
-                <span>Qty</span>
-                <span>Description</span>
-                <span style={{ textAlign: "right" }}>Amount ($)</span>
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-            )}
-
-            {lineItems.map((li, idx) => (
-              <div className="ce-li-row" key={li.tempId}>
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  value={li.quantity}
-                  onChange={(e) => updateLineItem(li.tempId, "quantity", e.target.value)}
-                  className="ce-li-input"
-                  placeholder="Qty"
-                />
-                <input
-                  type="text"
-                  value={li.description}
-                  onChange={(e) => updateLineItem(li.tempId, "description", e.target.value)}
-                  className="ce-li-input"
-                  placeholder="Description"
-                />
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={li.amount}
-                  onChange={(e) => updateLineItem(li.tempId, "amount", e.target.value)}
-                  className="ce-li-input"
-                  placeholder="0.00"
-                  style={{ textAlign: "right" }}
-                />
-                <button
-                  type="button"
-                  className="ce-li-btn"
-                  onClick={() => moveLineItem(idx, -1)}
-                  disabled={idx === 0}
-                  title="Move up"
-                >
-                  &#x25B2;
-                </button>
-                <button
-                  type="button"
-                  className="ce-li-btn"
-                  onClick={() => moveLineItem(idx, 1)}
-                  disabled={idx === lineItems.length - 1}
-                  title="Move down"
-                >
-                  &#x25BC;
-                </button>
-                <button
-                  type="button"
-                  className="ce-li-btn danger"
-                  onClick={() => removeLineItem(li.tempId)}
-                  title="Remove"
-                >
-                  &times;
-                </button>
-              </div>
-            ))}
-
-            <button type="button" className="ce-add-line" onClick={addLineItem}>
-              + Add Line Item
-            </button>
+            <LineItemEditor
+              lineItems={lineItems}
+              setLineItems={setLineItems}
+              nextTempId={nextTempId}
+              cssPrefix="ce"
+            />
 
             {/* Totals */}
             <div className="ce-totals">

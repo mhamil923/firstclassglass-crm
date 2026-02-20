@@ -856,6 +856,45 @@ async function ensureInvoiceTables() {
 }
 ensureInvoiceTables().catch(() => {});
 
+// ─── LINE ITEM TEMPLATES TABLE ──────────────────────────────────────────────
+async function ensureLineItemTemplateTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS line_item_templates (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        description     VARCHAR(500) NOT NULL,
+        defaultQuantity DECIMAL(10,2) DEFAULT 1,
+        defaultAmount   DECIMAL(10,2) NULL,
+        category        VARCHAR(100) NULL,
+        sortOrder       INT DEFAULT 0,
+        isActive        TINYINT(1) DEFAULT 1,
+        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('[Templates] line_item_templates table ready');
+
+    const [[{ cnt }]] = await db.query('SELECT COUNT(*) AS cnt FROM line_item_templates');
+    if (cnt === 0) {
+      const seeds = [
+        ['INITIAL SERVICE CALL', 1, 150.00, 'Service Calls', 1],
+        ['EMERGENCY SERVICE CALL', 1, 250.00, 'Service Calls', 2],
+        ['RETURN TRIP', 1, 75.00, 'Service Calls', 3],
+        ['LABOR', null, null, 'Labor', 4],
+      ];
+      for (const [desc, qty, amt, cat, ord] of seeds) {
+        await db.query(
+          'INSERT INTO line_item_templates (description, defaultQuantity, defaultAmount, category, sortOrder) VALUES (?,?,?,?,?)',
+          [desc, qty, amt, cat, ord]
+        );
+      }
+      console.log('[Templates] Seeded 4 default templates');
+    }
+  } catch (e) {
+    console.warn('[Templates] Could not create line_item_templates:', e.message);
+  }
+}
+ensureLineItemTemplateTable().catch(() => {});
+
 // ─── AUTO STATUS JOB ─────────────────────────────────────────────────────────
 function envOn(v, def = true) {
   if (v == null) return def;
@@ -2876,6 +2915,76 @@ app.put('/settings', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error updating settings:', err);
     res.status(500).json({ error: 'Failed to update settings.' });
+  }
+});
+
+// ─── LINE ITEM TEMPLATE ENDPOINTS ───────────────────────────────────────────
+
+// GET /line-item-templates
+app.get('/line-item-templates', authenticate, async (req, res) => {
+  try {
+    const { search } = req.query;
+    let sql = 'SELECT * FROM line_item_templates WHERE isActive = 1';
+    const params = [];
+    if (search) {
+      sql += ' AND description LIKE ?';
+      params.push(`%${search}%`);
+    }
+    sql += ' ORDER BY category ASC, sortOrder ASC, description ASC';
+    const [rows] = await db.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching line item templates:', err);
+    res.status(500).json({ error: 'Failed to fetch templates.' });
+  }
+});
+
+// POST /line-item-templates
+app.post('/line-item-templates', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    if (!b.description || !String(b.description).trim()) {
+      return res.status(400).json({ error: 'description is required' });
+    }
+    const [r] = await db.query(
+      'INSERT INTO line_item_templates (description, defaultQuantity, defaultAmount, category) VALUES (?,?,?,?)',
+      [String(b.description).trim(), b.defaultQuantity ?? 1, b.defaultAmount ?? null, b.category ? String(b.category).trim() : null]
+    );
+    const [[created]] = await db.query('SELECT * FROM line_item_templates WHERE id = ?', [r.insertId]);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('Error creating line item template:', err);
+    res.status(500).json({ error: 'Failed to create template.' });
+  }
+});
+
+// PUT /line-item-templates/:id
+app.put('/line-item-templates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const sets = [], params = [];
+    for (const f of ['description', 'defaultQuantity', 'defaultAmount', 'category', 'sortOrder']) {
+      if (b[f] !== undefined) { sets.push(`${f}=?`); params.push(b[f]); }
+    }
+    if (!sets.length) return res.status(400).json({ error: 'No fields to update.' });
+    params.push(req.params.id);
+    await db.query(`UPDATE line_item_templates SET ${sets.join(',')} WHERE id=?`, params);
+    const [[updated]] = await db.query('SELECT * FROM line_item_templates WHERE id = ?', [req.params.id]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating line item template:', err);
+    res.status(500).json({ error: 'Failed to update template.' });
+  }
+});
+
+// DELETE /line-item-templates/:id (soft delete)
+app.delete('/line-item-templates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    await db.query('UPDATE line_item_templates SET isActive = 0 WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting line item template:', err);
+    res.status(500).json({ error: 'Failed to delete template.' });
   }
 });
 

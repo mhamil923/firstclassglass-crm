@@ -1,0 +1,91 @@
+/* LineItemEditor.css — shared styles for template autocomplete */
+
+/* Description field wrapper (input + save icon) */
+.li-desc-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.li-desc-wrapper input {
+  flex: 1;
+  padding-right: 32px !important;
+}
+
+/* Save as template button */
+.li-save-template-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-card-solid);
+  color: var(--accent-blue);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  line-height: 1;
+  padding: 0;
+}
+
+.li-save-template-btn:hover {
+  background: rgba(0, 113, 227, 0.1);
+  border-color: var(--accent-blue);
+}
+
+/* Template autocomplete dropdown */
+.li-template-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color-strong);
+  border-top: none;
+  border-radius: 0 0 var(--radius-sm, 8px) var(--radius-sm, 8px);
+  box-shadow: var(--shadow-md, 0 8px 24px rgba(0,0,0,0.15));
+  z-index: 9999;
+}
+
+.li-template-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  gap: 12px;
+}
+
+.li-template-option:hover,
+.li-template-option.highlighted {
+  background: var(--bg-hover);
+}
+
+.li-template-option-desc {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.li-template-option-amount {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.li-template-match {
+  font-weight: 700;
+}

@@ -349,7 +349,7 @@
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   padding: 28px;
   width: 90%;
-  max-width: 480px;
+  max-width: 640px;
   max-height: 85vh;
   overflow-y: auto;
 }
@@ -478,6 +478,116 @@
 .settings-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ===== SETTINGS: LINE ITEM TEMPLATES ===== */
+.settings-tpl-table {
+  margin-top: 8px;
+}
+
+.settings-tpl-header {
+  display: grid;
+  grid-template-columns: 1fr 60px 80px 100px 90px;
+  gap: 6px;
+  padding: 0 0 6px 0;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 6px;
+}
+
+.settings-tpl-header span {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.settings-tpl-row {
+  display: grid;
+  grid-template-columns: 1fr 60px 80px 100px 90px;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.settings-tpl-row:last-child {
+  border-bottom: none;
+}
+
+.settings-tpl-desc,
+.settings-tpl-qty,
+.settings-tpl-amt,
+.settings-tpl-cat {
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-tpl-qty,
+.settings-tpl-amt {
+  color: var(--text-secondary);
+}
+
+.settings-tpl-cat {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.settings-tpl-input {
+  padding: 4px 6px !important;
+  font-size: 12px !important;
+  border-radius: 4px !important;
+}
+
+.settings-tpl-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.settings-tpl-action-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-card-solid);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.settings-tpl-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-tpl-action-btn.danger:hover {
+  background: rgba(255, 59, 48, 0.1);
+  color: #ff3b30;
+}
+
+.settings-tpl-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  margin-top: 8px;
+  border: 1px dashed var(--border-color-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent-blue);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.settings-tpl-add-btn:hover {
+  background: rgba(0, 113, 227, 0.06);
+  border-color: var(--accent-blue);
 }
 
 /* ===== SETTINGS: NAV ORDER (DnD) ===== */
