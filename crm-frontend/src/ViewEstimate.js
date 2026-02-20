@@ -157,21 +157,19 @@ export default function ViewEstimate() {
             </span>
           </div>
           <div className="ve-actions">
-            {/* Draft: [Edit] [Generate PDF] [Download PDF] [Send to Customer] [Delete] */}
-            {(e.status === "Draft" || e.status === "Declined") && (
-              <Link to={`/estimates/${id}/edit`} className="ve-btn ve-btn-secondary">
-                Edit
-              </Link>
-            )}
-            {e.status === "Draft" && (
-              <button
-                className="ve-btn ve-btn-primary"
-                onClick={handleGeneratePdf}
-                disabled={generatingPdf}
-              >
-                {generatingPdf ? "Generating..." : pdfUrl ? "Regenerate PDF" : "Generate PDF"}
-              </button>
-            )}
+            {/* Edit — all statuses */}
+            <Link to={`/estimates/${id}/edit`} className="ve-btn ve-btn-secondary">
+              Edit
+            </Link>
+            {/* Regenerate / Generate PDF — all statuses */}
+            <button
+              className="ve-btn ve-btn-primary"
+              onClick={handleGeneratePdf}
+              disabled={generatingPdf}
+            >
+              {generatingPdf ? "Generating..." : pdfUrl ? "Regenerate PDF" : "Generate PDF"}
+            </button>
+            {/* Download PDF — all statuses (if PDF exists) */}
             {pdfUrl && (
               <a
                 href={pdfUrl}
@@ -182,7 +180,8 @@ export default function ViewEstimate() {
                 Download PDF
               </a>
             )}
-            {e.status === "Draft" && (
+            {/* Send to Customer — Draft and Declined */}
+            {(e.status === "Draft" || e.status === "Declined") && (
               <button
                 className="ve-btn ve-btn-primary"
                 onClick={handleSendToCustomer}
@@ -191,7 +190,7 @@ export default function ViewEstimate() {
                 {statusUpdating ? "Sending..." : "Send to Customer"}
               </button>
             )}
-            {/* Sent: [Download PDF] [Mark as Accepted] [Mark as Declined] */}
+            {/* Mark as Accepted / Declined — Sent only */}
             {e.status === "Sent" && (
               <>
                 <button
@@ -210,7 +209,7 @@ export default function ViewEstimate() {
                 </button>
               </>
             )}
-            {/* Accepted: [Download PDF] [Convert to Invoice] */}
+            {/* Convert to Invoice — Accepted only */}
             {e.status === "Accepted" && (
               <button
                 className="ve-btn ve-btn-success"
@@ -220,12 +219,10 @@ export default function ViewEstimate() {
                 {converting ? "Converting..." : "Convert to Invoice"}
               </button>
             )}
-            {/* Draft + Declined: [Delete] */}
-            {(e.status === "Draft" || e.status === "Declined") && (
-              <button className="ve-btn ve-btn-danger" onClick={handleDelete}>
-                Delete
-              </button>
-            )}
+            {/* Delete — all statuses */}
+            <button className="ve-btn ve-btn-danger" onClick={handleDelete}>
+              Delete
+            </button>
           </div>
         </div>
 
