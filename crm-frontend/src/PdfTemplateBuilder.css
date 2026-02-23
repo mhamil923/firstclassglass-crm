@@ -513,63 +513,42 @@
   opacity: 0.08;
 }
 
-/* ─── Drag & Drop / Block Selection ──────────────────────── */
-.ptb-block {
-  cursor: grab;
+/* ─── Canvas Blocks (freeform absolute positioning) ──────── */
+.ptb-canvas-block {
   border: 2px solid transparent;
   border-radius: 3px;
-  transition: border-color 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
-  position: relative;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  box-sizing: border-box;
+  user-select: none;
 }
 
-.ptb-block:hover {
+.ptb-canvas-block:hover {
   border-color: rgba(0, 113, 227, 0.3);
 }
 
-.ptb-block:active {
-  cursor: grabbing;
-}
-
-.ptb-block-selected {
+.ptb-canvas-block-selected {
   border-color: var(--accent-blue, #0071e3) !important;
   border-style: dashed;
   box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.12);
 }
 
-.ptb-block-dragging {
-  opacity: 0.4;
+.ptb-canvas-block-dragging {
+  opacity: 0.5;
 }
 
-.ptb-block-info {
-  width: 100%;
+/* Resize Handles */
+.ptb-resize-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: var(--accent-blue, #007AFF);
+  border: 1px solid #fff;
+  border-radius: 2px;
+  z-index: 100;
+  box-sizing: border-box;
 }
 
-/* Drop Zones */
-.ptb-drop-zone {
-  min-width: 40px;
-  min-height: 40px;
-  border: 2px dashed transparent;
-  border-radius: 4px;
-  transition: border-color 0.15s ease, background 0.15s ease;
-  display: flex;
-  align-items: flex-start;
-}
-
-.ptb-drop-zone-over {
-  border-color: var(--accent-blue, #0071e3) !important;
-  background: rgba(0, 113, 227, 0.04);
-}
-
-.ptb-drop-zone-center {
-  justify-content: center;
-  align-items: center;
-}
-
-.ptb-drop-zone-info {
-  flex: 1;
-}
-
-/* Logo Placeholder (when image fails to load) */
+/* Logo Placeholder */
 .ptb-pv-logo-placeholder {
   background: #eee;
   border: 1px solid #ccc;
@@ -583,7 +562,7 @@
   height: 100%;
 }
 
-/* Selected section highlight in settings panel */
+/* Selected section highlight */
 .ptb-section-selected {
   border-color: var(--accent-blue, #0071e3) !important;
   box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.15);
@@ -591,6 +570,71 @@
 
 .ptb-section-selected > .ptb-section-header {
   background: rgba(0, 113, 227, 0.06);
+}
+
+/* Position controls */
+.ptb-pos-controls {
+  padding: 6px 0 4px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 8px;
+}
+
+/* Alignment buttons */
+.ptb-align-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ptb-align-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.ptb-align-btn {
+  padding: 4px 10px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: inherit;
+  transition: var(--transition-fast);
+  line-height: 1;
+}
+
+.ptb-align-btn:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.ptb-align-btn.active {
+  background: var(--accent-blue, #007AFF);
+  border-color: var(--accent-blue, #007AFF);
+  color: #fff;
+}
+
+/* Quick toolbar at top of settings panel */
+.ptb-quick-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: rgba(0, 113, 227, 0.06);
+  border: 1px solid rgba(0, 113, 227, 0.2);
+  border-radius: var(--radius-sm);
+}
+
+.ptb-quick-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-blue, #0071e3);
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {
