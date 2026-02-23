@@ -24,13 +24,19 @@ const NAV_ITEMS = [
     ],
   },
   {
+    id: "templates",
+    label: "Templates",
+    children: [
+      { label: "Line Item Templates", to: "/line-item-templates" },
+      { label: "PDF Templates", to: "/pdf-templates" },
+      { label: "Email Templates", to: "/email-templates" },
+    ],
+  },
+  {
     id: "records",
     label: "Records",
     children: [
       { label: "Customers", to: "/customers" },
-      { label: "Line Item Templates", to: "/line-item-templates" },
-      { label: "PDF Templates", to: "/pdf-templates" },
-      { label: "Email Templates", to: "/email-templates" },
       { label: "History", to: "/history" },
       { label: "Reports", to: "/reports" },
     ],
