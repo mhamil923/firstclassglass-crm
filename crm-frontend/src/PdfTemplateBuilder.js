@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "./api";
-import { API_BASE_URL } from "./config";
+import API_BASE_URL from "./config";
 import "./PdfTemplateBuilder.css";
 
 const DEFAULT_CONFIG = {
