@@ -582,19 +582,30 @@ export default function RouteBuilder() {
                 <div className="rb-skipped">{routeData.warning}</div>
               )}
 
-              {/* Tech assignment */}
+              {/* Tech assignment + Schedule date */}
               <div className="rb-assign-row">
-                <label className="rb-label" style={{ marginTop: 0 }}>Assign Technician (optional)</label>
-                <select
-                  className="rb-select"
-                  value={selectedTech}
-                  onChange={e => setSelectedTech(e.target.value)}
-                >
-                  <option value="">-- Unassigned --</option>
-                  {assignees.map(u => (
-                    <option key={u.id} value={u.id}>{u.username}</option>
-                  ))}
-                </select>
+                <div className="rb-assign-field">
+                  <label className="rb-label">Assign Technician (optional)</label>
+                  <select
+                    className="rb-select"
+                    value={selectedTech}
+                    onChange={e => setSelectedTech(e.target.value)}
+                  >
+                    <option value="">-- Unassigned --</option>
+                    {assignees.map(u => (
+                      <option key={u.id} value={u.id}>{u.username}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="rb-assign-field">
+                  <label className="rb-label">Schedule Date</label>
+                  <input
+                    type="date"
+                    className="rb-date-input"
+                    value={routeDate}
+                    onChange={e => setRouteDate(e.target.value)}
+                  />
+                </div>
               </div>
 
               {/* Action buttons */}
