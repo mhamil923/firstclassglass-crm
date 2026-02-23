@@ -41,6 +41,8 @@ export default function ViewEstimate() {
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [pdfTemplates, setPdfTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
 
   const fetchEstimate = useCallback(async () => {
     setLoading(true);
@@ -57,6 +59,12 @@ export default function ViewEstimate() {
   useEffect(() => {
     fetchEstimate();
   }, [fetchEstimate]);
+
+  useEffect(() => {
+    api.get("/pdf-templates?type=estimate").then((res) => {
+      setPdfTemplates(Array.isArray(res.data) ? res.data : []);
+    }).catch(() => {});
+  }, []);
 
   const handleStatusChange = async (newStatus) => {
     setStatusUpdating(true);
@@ -79,7 +87,7 @@ export default function ViewEstimate() {
   const handleGeneratePdf = async () => {
     setGeneratingPdf(true);
     try {
-      await api.post(`/estimates/${id}/generate-pdf`);
+      await api.post(`/estimates/${id}/generate-pdf`, selectedTemplateId ? { templateId: selectedTemplateId } : {});
       await fetchEstimate();
     } catch (err) {
       console.error("Error generating PDF:", err);
@@ -161,7 +169,20 @@ export default function ViewEstimate() {
             <Link to={`/estimates/${id}/edit`} className="ve-btn ve-btn-secondary">
               Edit
             </Link>
-            {/* Regenerate / Generate PDF — all statuses */}
+            {/* PDF Template selector + Generate */}
+            {pdfTemplates.length > 1 && (
+              <select
+                className="ve-btn ve-btn-secondary"
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
+                style={{ cursor: "pointer", minWidth: 130 }}
+              >
+                <option value="">Default Template</option>
+                {pdfTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            )}
             <button
               className="ve-btn ve-btn-primary"
               onClick={handleGeneratePdf}

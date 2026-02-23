@@ -46,7 +46,8 @@ export default function ViewInvoice() {
   const [loading, setLoading] = useState(true);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
-
+  const [pdfTemplates, setPdfTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
 
   // Payment modal
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -75,6 +76,12 @@ export default function ViewInvoice() {
     fetchInvoice();
   }, [fetchInvoice]);
 
+  useEffect(() => {
+    api.get("/pdf-templates?type=invoice").then((res) => {
+      setPdfTemplates(Array.isArray(res.data) ? res.data : []);
+    }).catch(() => {});
+  }, []);
+
   const handleStatusChange = async (newStatus) => {
     if (newStatus === "Void" && !window.confirm("Mark this invoice as void? This cannot be undone.")) return;
     setStatusUpdating(true);
@@ -92,7 +99,7 @@ export default function ViewInvoice() {
   const handleGeneratePdf = async () => {
     setGeneratingPdf(true);
     try {
-      await api.post(`/invoices/${id}/generate-pdf`);
+      await api.post(`/invoices/${id}/generate-pdf`, selectedTemplateId ? { templateId: selectedTemplateId } : {});
       await fetchInvoice();
     } catch (err) {
       console.error("Error generating PDF:", err);
@@ -201,6 +208,19 @@ export default function ViewInvoice() {
               <Link to={`/invoices/${id}/edit`} className="vi-btn vi-btn-secondary">
                 Edit
               </Link>
+            )}
+            {pdfTemplates.length > 1 && (
+              <select
+                className="vi-btn vi-btn-secondary"
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
+                style={{ cursor: "pointer", minWidth: 130 }}
+              >
+                <option value="">Default Template</option>
+                {pdfTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
             )}
             <button
               className="vi-btn vi-btn-primary"

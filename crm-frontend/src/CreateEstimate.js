@@ -61,6 +61,15 @@ export default function CreateEstimate() {
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [pdfTemplates, setPdfTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+
+  // --- Load PDF templates ---
+  useEffect(() => {
+    api.get("/pdf-templates?type=estimate").then((res) => {
+      setPdfTemplates(Array.isArray(res.data) ? res.data : []);
+    }).catch(() => {});
+  }, []);
 
   // --- Load customers ---
   useEffect(() => {
@@ -346,7 +355,7 @@ export default function CreateEstimate() {
       if (andGeneratePdf) {
         setGeneratingPdf(true);
         try {
-          await api.post(`/estimates/${estimateId}/generate-pdf`);
+          await api.post(`/estimates/${estimateId}/generate-pdf`, selectedTemplateId ? { templateId: selectedTemplateId } : {});
         } catch (pdfErr) {
           console.error("PDF generation error:", pdfErr);
           alert("Estimate saved but PDF generation failed.");
@@ -647,6 +656,19 @@ export default function CreateEstimate() {
           >
             {saving ? "Saving..." : "Save as Draft"}
           </button>
+          {pdfTemplates.length > 1 && (
+            <select
+              className="ce-input"
+              value={selectedTemplateId}
+              onChange={(e) => setSelectedTemplateId(e.target.value)}
+              style={{ width: "auto", minWidth: 140, padding: "8px 12px", fontSize: 13 }}
+            >
+              <option value="">Default Template</option>
+              {pdfTemplates.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
           <button
             className="ce-btn ce-btn-primary"
             onClick={() => handleSave(true)}

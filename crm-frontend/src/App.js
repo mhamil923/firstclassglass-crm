@@ -28,6 +28,8 @@ import ViewInvoice from "./ViewInvoice";
 import Reports from "./Reports";
 import RouteBuilder from "./RouteBuilder";
 import LineItemTemplates from "./LineItemTemplates";
+import PdfTemplates from "./PdfTemplates";
+import PdfTemplateBuilder from "./PdfTemplateBuilder";
 // Note: Bootstrap is imported in index.js before our custom styles
 
 // A wrapper for protecting routes
@@ -208,6 +210,32 @@ export default function App() {
               element={
                 <PrivateRoute>
                   <LineItemTemplates />
+                </PrivateRoute>
+              }
+            />
+
+            {/* PDF Templates */}
+            <Route
+              path="/pdf-templates"
+              element={
+                <PrivateRoute>
+                  <PdfTemplates />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/pdf-templates/new"
+              element={
+                <PrivateRoute>
+                  <PdfTemplateBuilder />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/pdf-templates/:id"
+              element={
+                <PrivateRoute>
+                  <PdfTemplateBuilder />
                 </PrivateRoute>
               }
             />

@@ -895,6 +895,91 @@ async function ensureLineItemTemplateTable() {
 }
 ensureLineItemTemplateTable().catch(() => {});
 
+// ─── PDF TEMPLATES TABLE ────────────────────────────────────────────────────
+const DEFAULT_TEMPLATE_CONFIG = {
+  pageSize: 'LETTER',
+  margins: { top: 40, bottom: 40, left: 50, right: 50 },
+  companyInfo: {
+    show: true,
+    name: 'First Class Glass & Mirror, Inc.',
+    line1: '1513 Industrial Drive',
+    line2: 'Itasca, IL. 60143',
+    phone: '630-250-9777',
+    fax: '630-250-9727',
+    fontSize: 11,
+    linesFontSize: 9
+  },
+  logo: { show: true, x: 250, y: 40, width: 60, height: 60 },
+  title: { show: true, fontSize: 22, align: 'right' },
+  dateBox: { show: true, width: 130, position: 'right' },
+  billTo: { show: true, label: 'BILL TO', widthPercent: 48 },
+  projectBox: { show: true, estimateLabel: 'PROJECT NAME/ADDRESS', invoiceLabel: 'SHIP TO' },
+  poNumber: { show: true, label: 'P.O. No.' },
+  lineItems: {
+    show: true,
+    headerBgColor: '#E0E0E0',
+    headerFontSize: 7,
+    bodyFontSize: 8,
+    qtyColumnWidth: 50,
+    totalColumnWidth: 75,
+    estimateHeaders: { qty: 'Qty', description: 'DESCRIPTION', total: 'TOTAL' },
+    invoiceHeaders: { qty: 'QUANTITY', description: 'DESCRIPTION', total: 'AMOUNT' }
+  },
+  footer: {
+    show: true,
+    showTerms: true,
+    height: 46,
+    totalLabelWidth: 60,
+    totalAmountWidth: 100,
+    totalFontSize: 10,
+    totalAmountFontSize: 11
+  },
+  fonts: { body: 'Helvetica', bold: 'Helvetica-Bold' },
+  colors: { text: '#000000', headerBg: '#E0E0E0', lineStroke: '#000000' }
+};
+
+function deepMerge(target, source) {
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key]) && target[key] && typeof target[key] === 'object') {
+      result[key] = deepMerge(target[key], source[key]);
+    } else {
+      result[key] = source[key];
+    }
+  }
+  return result;
+}
+
+async function ensurePdfTemplateTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS pdf_templates (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        name        VARCHAR(200) NOT NULL,
+        type        ENUM('estimate','invoice','both') DEFAULT 'both',
+        config      TEXT NOT NULL,
+        isDefault   TINYINT(1) DEFAULT 0,
+        isActive    TINYINT(1) DEFAULT 1,
+        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('[PdfTemplates] pdf_templates table ready');
+
+    const [[{ cnt }]] = await db.query('SELECT COUNT(*) AS cnt FROM pdf_templates');
+    if (cnt === 0) {
+      await db.query(
+        'INSERT INTO pdf_templates (name, type, config, isDefault) VALUES (?, ?, ?, 1)',
+        ['Standard', 'both', JSON.stringify(DEFAULT_TEMPLATE_CONFIG)]
+      );
+      console.log('[PdfTemplates] Seeded default Standard template');
+    }
+  } catch (e) {
+    console.warn('[PdfTemplates] Could not create pdf_templates:', e.message);
+  }
+}
+ensurePdfTemplateTable().catch(() => {});
+
 // ─── AUTO STATUS JOB ─────────────────────────────────────────────────────────
 function envOn(v, def = true) {
   if (v == null) return def;
@@ -1515,8 +1600,340 @@ function fmtMoney(val) {
   return '$' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+// --- Shared PDF generation with template config ---
+async function loadTemplateConfig(templateId, docType) {
+  let tplConfig = JSON.parse(JSON.stringify(DEFAULT_TEMPLATE_CONFIG));
+  try {
+    if (templateId) {
+      const [[tpl]] = await db.query('SELECT config FROM pdf_templates WHERE id = ? AND isActive = 1', [templateId]);
+      if (tpl) tplConfig = deepMerge(DEFAULT_TEMPLATE_CONFIG, JSON.parse(tpl.config));
+    } else {
+      const [[defTpl]] = await db.query(
+        'SELECT config FROM pdf_templates WHERE isDefault = 1 AND isActive = 1 AND type IN (?, "both") LIMIT 1',
+        [docType]
+      );
+      if (defTpl) tplConfig = deepMerge(DEFAULT_TEMPLATE_CONFIG, JSON.parse(defTpl.config));
+    }
+  } catch (e) {
+    console.warn('[PdfTemplates] Error loading template config, using defaults:', e.message);
+  }
+  return tplConfig;
+}
+
+function generatePdfWithConfig(data, lineItems, cfg, docType) {
+  const logoPath = path.resolve(__dirname, 'assets', 'logo.png');
+  const hasLogo = fs.existsSync(logoPath);
+
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: cfg.pageSize || 'LETTER',
+      margins: {
+        top: cfg.margins?.top ?? 40,
+        bottom: cfg.margins?.bottom ?? 40,
+        left: cfg.margins?.left ?? 50,
+        right: cfg.margins?.right ?? 50
+      }
+    });
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const U = s => (s || '').toUpperCase();
+    const fmtMoney = v => '$' + (Number(v) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const leftM = cfg.margins?.left ?? 50;
+    const rightM = cfg.margins?.right ?? 50;
+    const pageW = cfg.pageSize === 'LEGAL' ? 612 : 612;
+    const pw = pageW - leftM - rightM;
+    const pageH = cfg.pageSize === 'LEGAL' ? 1008 : 792;
+    const bottomLimit = pageH - (cfg.margins?.bottom ?? 40);
+    const stroke = 0.75;
+    const bodyFont = cfg.fonts?.body || 'Helvetica';
+    const boldFont = cfg.fonts?.bold || 'Helvetica-Bold';
+    const textColor = cfg.colors?.text || '#000000';
+
+    const headerY = cfg.margins?.top ?? 40;
+
+    // --- COMPANY INFO (far left) ---
+    if (cfg.companyInfo?.show !== false) {
+      doc.font(boldFont).fontSize(cfg.companyInfo?.fontSize || 11).fillColor(textColor);
+      doc.text(cfg.companyInfo?.name || 'First Class Glass & Mirror, Inc.', leftM, headerY);
+      doc.font(bodyFont).fontSize(cfg.companyInfo?.linesFontSize || 9);
+      doc.text(cfg.companyInfo?.line1 || '1513 Industrial Drive', leftM, headerY + 14);
+      doc.text(cfg.companyInfo?.line2 || 'Itasca, IL. 60143', leftM, headerY + 25);
+      doc.text(cfg.companyInfo?.phone || '630-250-9777', leftM, headerY + 36);
+      doc.text(cfg.companyInfo?.fax || '630-250-9727', leftM, headerY + 47);
+    }
+
+    // --- LOGO ---
+    if (cfg.logo?.show !== false && hasLogo) {
+      doc.image(logoPath, cfg.logo?.x ?? 250, cfg.logo?.y ?? 40, {
+        width: cfg.logo?.width ?? 60,
+        height: cfg.logo?.height ?? 60
+      });
+    }
+
+    // --- Title ---
+    if (cfg.title?.show !== false) {
+      doc.font(boldFont).fontSize(cfg.title?.fontSize || 22).fillColor(textColor);
+      const titleText = docType === 'invoice' ? 'Invoice' : 'Estimate';
+      doc.text(titleText, leftM, headerY, { width: pw, align: cfg.title?.align || 'right' });
+    }
+
+    // --- DATE box ---
+    if (cfg.dateBox?.show !== false) {
+      const isInvoice = docType === 'invoice';
+      const issueDateStr = data.issueDate
+        ? new Date(data.issueDate).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })
+        : new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
+
+      if (isInvoice) {
+        const dateBoxW = 190;
+        const dateBoxX = pageW - rightM - dateBoxW;
+        const dateBoxY = headerY + 28;
+        const dateColW = 95;
+        const invColW = 95;
+        const dbH = 16;
+        doc.lineWidth(stroke);
+        doc.rect(dateBoxX, dateBoxY, dateColW, dbH).stroke();
+        doc.rect(dateBoxX + dateColW, dateBoxY, invColW, dbH).stroke();
+        doc.font(boldFont).fontSize(7).fillColor(textColor);
+        doc.text('DATE', dateBoxX + 4, dateBoxY + 4, { width: dateColW - 8, align: 'center' });
+        doc.text('INVOICE #', dateBoxX + dateColW + 4, dateBoxY + 4, { width: invColW - 8, align: 'center' });
+        doc.rect(dateBoxX, dateBoxY + dbH, dateColW, dbH).stroke();
+        doc.rect(dateBoxX + dateColW, dateBoxY + dbH, invColW, dbH).stroke();
+        doc.font(bodyFont).fontSize(8);
+        doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dbH + 4, { width: dateColW - 8, align: 'center' });
+        doc.text(String(data.invoiceNumber || ''), dateBoxX + dateColW + 4, dateBoxY + dbH + 4, { width: invColW - 8, align: 'center' });
+      } else {
+        const dateBoxW = cfg.dateBox?.width || 130;
+        const dateBoxX = pageW - rightM - dateBoxW;
+        const dateBoxY = headerY + 28;
+        const dbH = 16;
+        doc.lineWidth(stroke);
+        doc.rect(dateBoxX, dateBoxY, dateBoxW, dbH).stroke();
+        doc.font(boldFont).fontSize(7).fillColor(textColor);
+        doc.text('DATE', dateBoxX + 4, dateBoxY + 4, { width: dateBoxW - 8, align: 'center' });
+        doc.rect(dateBoxX, dateBoxY + dbH, dateBoxW, dbH).stroke();
+        doc.font(bodyFont).fontSize(8);
+        doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dbH + 4, { width: dateBoxW - 8, align: 'center' });
+      }
+    }
+
+    let curY = headerY + 68;
+
+    // --- BILL TO + PROJECT/SHIP TO ---
+    const billToShow = cfg.billTo?.show !== false;
+    const projShow = cfg.projectBox?.show !== false;
+    if (billToShow || projShow) {
+      const boxTop = curY;
+      const billBoxW = billToShow ? Math.floor(pw * ((cfg.billTo?.widthPercent || 48) / 100)) : 0;
+      const gap = billToShow && projShow ? 10 : 0;
+      const projBoxX = leftM + billBoxW + gap;
+      const projBoxW = billToShow ? pw - billBoxW - gap : pw;
+
+      const custName = U(data.companyName || data.custName || '');
+      const billLines = [];
+      if (custName) billLines.push(custName);
+      const rawAddr = (data.billingAddress || '').trim();
+      const bCity = (data.billingCity || '').trim();
+      const bState = (data.billingState || '').trim();
+      const bZip = (data.billingZip || '').trim();
+      const cityStateZip = [bCity, bState].filter(Boolean).join(', ') + (bZip ? ' ' + bZip : '');
+      if (rawAddr) {
+        const addrUpper = rawAddr.toUpperCase();
+        if (cityStateZip && bCity && addrUpper.includes(bCity.toUpperCase()) && bZip && addrUpper.includes(bZip)) {
+          billLines.push(U(rawAddr));
+        } else {
+          billLines.push(U(rawAddr));
+          if (cityStateZip) billLines.push(U(cityStateZip));
+        }
+      } else if (cityStateZip) {
+        billLines.push(U(cityStateZip));
+      }
+      if (data.custPhone) billLines.push(data.custPhone);
+      if (data.custFax) billLines.push('FAX# ' + data.custFax);
+
+      const projLabel = docType === 'invoice'
+        ? (cfg.projectBox?.invoiceLabel || 'SHIP TO')
+        : (cfg.projectBox?.estimateLabel || 'PROJECT NAME/ADDRESS');
+      const projLines = [];
+      if (docType === 'invoice') {
+        if (data.projectName) projLines.push(U(data.projectName));
+        if (data.shipToAddress) projLines.push(U(data.shipToAddress));
+        const shipCSZ = [data.shipToCity, data.shipToState].filter(Boolean).join(' ') + (data.shipToZip ? ' ' + data.shipToZip : '');
+        if (shipCSZ.trim()) projLines.push(U(shipCSZ));
+      } else {
+        if (data.projectName) projLines.push(U(data.projectName));
+        if (data.projectAddress) projLines.push(U(data.projectAddress));
+        const projCSZ = [data.projectCity, data.projectState].filter(Boolean).join(' ') + (data.projectZip ? ' ' + data.projectZip : '');
+        if (projCSZ.trim()) projLines.push(U(projCSZ));
+      }
+
+      const lineH = 12;
+      const hdrH = 15;
+      const billContentH = Math.max(billLines.length * lineH + 6, 36);
+      const projContentH = Math.max(projLines.length * lineH + 6, 36);
+      const maxBoxH = Math.max(hdrH + billContentH, hdrH + projContentH);
+
+      if (billToShow) {
+        doc.lineWidth(stroke);
+        doc.rect(leftM, boxTop, billBoxW, maxBoxH).stroke();
+        doc.font(boldFont).fontSize(7).fillColor(textColor);
+        doc.text(cfg.billTo?.label || 'BILL TO', leftM + 4, boxTop + 4);
+        doc.moveTo(leftM, boxTop + hdrH).lineTo(leftM + billBoxW, boxTop + hdrH).lineWidth(0.5).stroke();
+        doc.font(bodyFont).fontSize(8);
+        let bY = boxTop + hdrH + 3;
+        for (const line of billLines) { doc.text(line, leftM + 4, bY, { width: billBoxW - 8 }); bY += lineH; }
+      }
+
+      if (projShow) {
+        doc.lineWidth(stroke);
+        doc.rect(projBoxX, boxTop, projBoxW, maxBoxH).stroke();
+        doc.font(boldFont).fontSize(7).fillColor(textColor);
+        doc.text(projLabel, projBoxX + 4, boxTop + 4);
+        doc.moveTo(projBoxX, boxTop + hdrH).lineTo(projBoxX + projBoxW, boxTop + hdrH).lineWidth(0.5).stroke();
+        doc.font(bodyFont).fontSize(8);
+        let pY = boxTop + hdrH + 3;
+        for (const line of projLines) { doc.text(line, projBoxX + 4, pY, { width: projBoxW - 8 }); pY += lineH; }
+      }
+
+      curY = boxTop + maxBoxH;
+
+      // --- P.O. NUMBER box ---
+      if (cfg.poNumber?.show !== false && data.poNumber) {
+        const lineH2 = 12;
+        const hdrH2 = 15;
+        const poY = curY + 3;
+        const poH = hdrH2 + lineH2 + 4;
+        const poBoxX = projShow ? projBoxX : leftM;
+        const poBoxW = projShow ? projBoxW : pw;
+        doc.lineWidth(stroke);
+        doc.rect(poBoxX, poY, poBoxW, poH).stroke();
+        doc.font(boldFont).fontSize(7).fillColor(textColor);
+        doc.text(cfg.poNumber?.label || 'P.O. No.', poBoxX + 4, poY + 4);
+        doc.moveTo(poBoxX, poY + hdrH2).lineTo(poBoxX + poBoxW, poY + hdrH2).lineWidth(0.5).stroke();
+        doc.font(bodyFont).fontSize(8);
+        doc.text(U(data.poNumber), poBoxX + 4, poY + hdrH2 + 3);
+        curY = poY + poH;
+      }
+    }
+
+    // --- LINE ITEMS TABLE ---
+    if (cfg.lineItems?.show !== false) {
+      const tableTop = curY + 10;
+      const colQty = leftM;
+      const qtyW = cfg.lineItems?.qtyColumnWidth || 50;
+      const totalW = cfg.lineItems?.totalColumnWidth || 75;
+      const colDesc = leftM + qtyW;
+      const colTotal = leftM + pw - totalW;
+      const colEnd = leftM + pw;
+      const tHeaderH = 18;
+
+      const footerH = cfg.footer?.height || 46;
+      const footerGap = 8;
+      const maxTableBottom = bottomLimit - footerH - footerGap;
+
+      const bodyFontSize = cfg.lineItems?.bodyFontSize || 8;
+      doc.font(bodyFont).fontSize(bodyFontSize);
+      const itemHeights = lineItems.map(item => {
+        const desc = U(item.description || '');
+        const descH = doc.heightOfString(desc, { width: colTotal - colDesc - 8 });
+        return Math.max(descH + 6, 16);
+      });
+      const totalItemsH = itemHeights.reduce((s, h) => s + h, 0);
+      const neededH = tHeaderH + totalItemsH;
+      const availH = maxTableBottom - tableTop;
+
+      let scale = 1;
+      if (neededH > availH && totalItemsH > 0) {
+        const targetItemsH = availH - tHeaderH;
+        scale = Math.max(targetItemsH / totalItemsH, 0.6);
+      }
+
+      // Gray header row
+      const headerBg = cfg.lineItems?.headerBgColor || cfg.colors?.headerBg || '#E0E0E0';
+      doc.lineWidth(stroke);
+      doc.save();
+      doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).fill(headerBg);
+      doc.restore();
+      doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).stroke();
+      doc.moveTo(colDesc, tableTop).lineTo(colDesc, tableTop + tHeaderH).stroke();
+      doc.moveTo(colTotal, tableTop).lineTo(colTotal, tableTop + tHeaderH).stroke();
+
+      const headers = docType === 'invoice'
+        ? (cfg.lineItems?.invoiceHeaders || { qty: 'QUANTITY', description: 'DESCRIPTION', total: 'AMOUNT' })
+        : (cfg.lineItems?.estimateHeaders || { qty: 'Qty', description: 'DESCRIPTION', total: 'TOTAL' });
+
+      doc.font(boldFont).fontSize(cfg.lineItems?.headerFontSize || 7).fillColor(textColor);
+      doc.text(headers.qty, colQty + 2, tableTop + 5, { width: colDesc - colQty - 4, align: 'center' });
+      doc.text(headers.description, colDesc + 4, tableTop + 5);
+      doc.text(headers.total, colTotal + 4, tableTop + 5, { width: colEnd - colTotal - 8, align: 'right' });
+
+      // Table body rows
+      let rowY = tableTop + tHeaderH;
+      doc.font(bodyFont).fontSize(bodyFontSize);
+      for (let i = 0; i < lineItems.length; i++) {
+        const item = lineItems[i];
+        const cellH = Math.max(itemHeights[i] * scale, 14);
+        const desc = U(item.description || '');
+
+        doc.lineWidth(0.5);
+        doc.rect(colQty, rowY, colDesc - colQty, cellH).stroke();
+        doc.rect(colDesc, rowY, colTotal - colDesc, cellH).stroke();
+        doc.rect(colTotal, rowY, colEnd - colTotal, cellH).stroke();
+
+        if (item.quantity != null && Number(item.quantity) > 0) {
+          const qtyStr = Number(item.quantity) === Math.floor(Number(item.quantity))
+            ? String(Math.floor(Number(item.quantity)))
+            : Number(item.quantity).toFixed(2);
+          doc.text(qtyStr, colQty + 2, rowY + 3, { width: colDesc - colQty - 4, align: 'center' });
+        }
+        doc.text(desc, colDesc + 4, rowY + 3, { width: colTotal - colDesc - 8 });
+        const amt = Number(item.amount) || 0;
+        if (amt > 0) {
+          doc.text(amt.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), colTotal + 4, rowY + 3, { width: colEnd - colTotal - 8, align: 'right' });
+        }
+        rowY += cellH;
+      }
+
+      // --- FOOTER: Terms (left) + TOTAL label + TOTAL value (right) ---
+      if (cfg.footer?.show !== false) {
+        const totalAmountW = cfg.footer?.totalAmountWidth || 100;
+        const totalLabelW = cfg.footer?.totalLabelWidth || 60;
+        const termsColW = pw - totalLabelW - totalAmountW;
+        const totalLabelX = leftM + termsColW;
+        const totalAmountX = totalLabelX + totalLabelW;
+
+        const footerY2 = Math.min(rowY + footerGap, maxTableBottom);
+
+        doc.lineWidth(stroke);
+        doc.rect(leftM, footerY2, termsColW, footerH).stroke();
+        doc.rect(totalLabelX, footerY2, totalLabelW, footerH).stroke();
+        doc.rect(totalAmountX, footerY2, totalAmountW, footerH).stroke();
+
+        if (cfg.footer?.showTerms !== false) {
+          const termsText = (data.terms || '').toUpperCase();
+          if (termsText) {
+            doc.font(bodyFont).fontSize(7);
+            doc.text(termsText, leftM + 4, footerY2 + 5, { width: termsColW - 8, lineGap: 1.5 });
+          }
+        }
+
+        const totalStr = fmtMoney(data.total);
+        doc.font(boldFont).fontSize(cfg.footer?.totalFontSize || 10).fillColor(textColor);
+        doc.text('TOTAL', totalLabelX + 4, footerY2 + (footerH / 2) - 6, { width: totalLabelW - 8, align: 'center' });
+        doc.fontSize(cfg.footer?.totalAmountFontSize || 11);
+        doc.text(totalStr, totalAmountX + 4, footerY2 + (footerH / 2) - 6, { width: totalAmountW - 8, align: 'right' });
+      }
+    }
+
+    doc.end();
+  });
+}
+
 // --- Generate professional PDF matching QuickBooks format ---
-async function generateEstimatePdf(estimateId) {
+async function generateEstimatePdf(estimateId, templateId = null) {
   const [[estimate]] = await db.query(`
     SELECT e.*,
            c.companyName, c.name AS custName,
@@ -1538,239 +1955,8 @@ async function generateEstimatePdf(estimateId) {
     [estimateId]
   );
 
-  // Load logo
-  const logoPath = path.resolve(__dirname, 'assets', 'logo.png');
-  const hasLogo = fs.existsSync(logoPath);
-
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'LETTER', margins: { top: 40, bottom: 40, left: 50, right: 50 } });
-    const chunks = [];
-    doc.on('data', c => chunks.push(c));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-
-    const U = s => (s || '').toUpperCase();
-    const fmtMoney = v => '$' + (Number(v) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    const pageW = 612;
-    const leftM = 50;
-    const pw = pageW - leftM - 50; // 512
-    const pageH = 792;
-    const bottomLimit = pageH - 40;
-    const stroke = 0.75;
-
-    const headerY = 40;
-
-    // --- COMPANY INFO (far left) ---
-    doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('First Class Glass & Mirror, Inc.', leftM, headerY);
-    doc.font('Helvetica').fontSize(9);
-    doc.text('1513 Industrial Drive', leftM, headerY + 14);
-    doc.text('Itasca, IL. 60143', leftM, headerY + 25);
-    doc.text('630-250-9777', leftM, headerY + 36);
-    doc.text('630-250-9727', leftM, headerY + 47);
-
-    // --- LOGO (between company info and title) ---
-    if (hasLogo) {
-      doc.image(logoPath, 250, 40, { width: 60, height: 60 });
-    }
-
-    // --- "Estimate" title (top-right) ---
-    doc.font('Helvetica-Bold').fontSize(22);
-    doc.text('Estimate', leftM, headerY, { width: pw, align: 'right' });
-
-    // --- DATE box (right side, below title) ---
-    const dateBoxX = pageW - 50 - 130;
-    const dateBoxY = headerY + 28;
-    const dateBoxW = 130;
-    const dbH = 16;
-    const issueDateStr = estimate.issueDate
-      ? new Date(estimate.issueDate).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })
-      : new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
-
-    doc.lineWidth(stroke);
-    doc.rect(dateBoxX, dateBoxY, dateBoxW, dbH).stroke();
-    doc.font('Helvetica-Bold').fontSize(7);
-    doc.text('DATE', dateBoxX + 4, dateBoxY + 4, { width: dateBoxW - 8, align: 'center' });
-    doc.rect(dateBoxX, dateBoxY + dbH, dateBoxW, dbH).stroke();
-    doc.font('Helvetica').fontSize(8);
-    doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dbH + 4, { width: dateBoxW - 8, align: 'center' });
-
-    let curY = headerY + 68;
-
-    // --- BILL TO (left) + PROJECT NAME/ADDRESS (right) ---
-    const boxTop = curY;
-    const billBoxW = Math.floor(pw * 0.48);
-    const projBoxX = leftM + billBoxW + 10;
-    const projBoxW = pw - billBoxW - 10;
-
-    const custName = U(estimate.companyName || estimate.custName || '');
-    const billLines = [];
-    if (custName) billLines.push(custName);
-    const rawAddr = (estimate.billingAddress || '').trim();
-    const bCity = (estimate.billingCity || '').trim();
-    const bState = (estimate.billingState || '').trim();
-    const bZip = (estimate.billingZip || '').trim();
-    const cityStateZip = [bCity, bState].filter(Boolean).join(', ') + (bZip ? ' ' + bZip : '');
-    if (rawAddr) {
-      const addrUpper = rawAddr.toUpperCase();
-      if (cityStateZip && bCity && addrUpper.includes(bCity.toUpperCase()) && bZip && addrUpper.includes(bZip)) {
-        billLines.push(U(rawAddr));
-      } else {
-        billLines.push(U(rawAddr));
-        if (cityStateZip) billLines.push(U(cityStateZip));
-      }
-    } else if (cityStateZip) {
-      billLines.push(U(cityStateZip));
-    }
-    if (estimate.custPhone) billLines.push(estimate.custPhone);
-    if (estimate.custFax) billLines.push('FAX# ' + estimate.custFax);
-
-    const projLines = [];
-    if (estimate.projectName) projLines.push(U(estimate.projectName));
-    if (estimate.projectAddress) projLines.push(U(estimate.projectAddress));
-    const projCSZ = [estimate.projectCity, estimate.projectState].filter(Boolean).join(' ') + (estimate.projectZip ? ' ' + estimate.projectZip : '');
-    if (projCSZ.trim()) projLines.push(U(projCSZ));
-
-    const lineH = 12;
-    const hdrH = 15;
-    const billContentH = Math.max(billLines.length * lineH + 6, 36);
-    const projContentH = Math.max(projLines.length * lineH + 6, 36);
-    const maxBoxH = Math.max(hdrH + billContentH, hdrH + projContentH);
-
-    doc.lineWidth(stroke);
-    doc.rect(leftM, boxTop, billBoxW, maxBoxH).stroke();
-    doc.font('Helvetica-Bold').fontSize(7);
-    doc.text('BILL TO', leftM + 4, boxTop + 4);
-    doc.moveTo(leftM, boxTop + hdrH).lineTo(leftM + billBoxW, boxTop + hdrH).lineWidth(0.5).stroke();
-    doc.font('Helvetica').fontSize(8);
-    let bY = boxTop + hdrH + 3;
-    for (const line of billLines) { doc.text(line, leftM + 4, bY, { width: billBoxW - 8 }); bY += lineH; }
-
-    doc.lineWidth(stroke);
-    doc.rect(projBoxX, boxTop, projBoxW, maxBoxH).stroke();
-    doc.font('Helvetica-Bold').fontSize(7);
-    doc.text('PROJECT NAME/ADDRESS', projBoxX + 4, boxTop + 4);
-    doc.moveTo(projBoxX, boxTop + hdrH).lineTo(projBoxX + projBoxW, boxTop + hdrH).lineWidth(0.5).stroke();
-    doc.font('Helvetica').fontSize(8);
-    let pY = boxTop + hdrH + 3;
-    for (const line of projLines) { doc.text(line, projBoxX + 4, pY, { width: projBoxW - 8 }); pY += lineH; }
-
-    curY = boxTop + maxBoxH;
-
-    // --- P.O. NUMBER box ---
-    if (estimate.poNumber) {
-      const poY = curY + 3;
-      const poH = hdrH + lineH + 4;
-      doc.lineWidth(stroke);
-      doc.rect(projBoxX, poY, projBoxW, poH).stroke();
-      doc.font('Helvetica-Bold').fontSize(7);
-      doc.text('P.O. No.', projBoxX + 4, poY + 4);
-      doc.moveTo(projBoxX, poY + hdrH).lineTo(projBoxX + projBoxW, poY + hdrH).lineWidth(0.5).stroke();
-      doc.font('Helvetica').fontSize(8);
-      doc.text(U(estimate.poNumber), projBoxX + 4, poY + hdrH + 3);
-      curY = poY + poH;
-    }
-
-    // --- LINE ITEMS TABLE ---
-    const tableTop = curY + 10;
-    const colQty = leftM;
-    const colDesc = leftM + 50;
-    const colTotal = leftM + pw - 75;
-    const colEnd = leftM + pw;
-    const tHeaderH = 18;
-
-    // Calculate available space for line items
-    const footerH = 46;
-    const footerGap = 8;
-    const maxTableBottom = bottomLimit - footerH - footerGap;
-
-    // Pre-calculate line item heights to check fit
-    doc.font('Helvetica').fontSize(8);
-    const itemHeights = lineItems.map(item => {
-      const desc = U(item.description || '');
-      const descH = doc.heightOfString(desc, { width: colTotal - colDesc - 8 });
-      return Math.max(descH + 6, 16);
-    });
-    const totalItemsH = itemHeights.reduce((s, h) => s + h, 0);
-    const neededH = tHeaderH + totalItemsH;
-    const availH = maxTableBottom - tableTop;
-
-    // If content won't fit, compress row heights proportionally
-    let scale = 1;
-    if (neededH > availH && totalItemsH > 0) {
-      const targetItemsH = availH - tHeaderH;
-      scale = Math.max(targetItemsH / totalItemsH, 0.6);
-    }
-
-    // Gray header row
-    doc.lineWidth(stroke);
-    doc.save();
-    doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).fill('#E0E0E0');
-    doc.restore();
-    doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).stroke();
-    doc.moveTo(colDesc, tableTop).lineTo(colDesc, tableTop + tHeaderH).stroke();
-    doc.moveTo(colTotal, tableTop).lineTo(colTotal, tableTop + tHeaderH).stroke();
-
-    doc.font('Helvetica-Bold').fontSize(7).fillColor('#000000');
-    doc.text('Qty', colQty + 2, tableTop + 5, { width: colDesc - colQty - 4, align: 'center' });
-    doc.text('DESCRIPTION', colDesc + 4, tableTop + 5);
-    doc.text('TOTAL', colTotal + 4, tableTop + 5, { width: colEnd - colTotal - 8, align: 'right' });
-
-    // Table body rows
-    let rowY = tableTop + tHeaderH;
-    doc.font('Helvetica').fontSize(8);
-    for (let i = 0; i < lineItems.length; i++) {
-      const item = lineItems[i];
-      const cellH = Math.max(itemHeights[i] * scale, 14);
-      const desc = U(item.description || '');
-
-      doc.lineWidth(0.5);
-      doc.rect(colQty, rowY, colDesc - colQty, cellH).stroke();
-      doc.rect(colDesc, rowY, colTotal - colDesc, cellH).stroke();
-      doc.rect(colTotal, rowY, colEnd - colTotal, cellH).stroke();
-
-      if (item.quantity != null && Number(item.quantity) > 0) {
-        const qtyStr = Number(item.quantity) === Math.floor(Number(item.quantity))
-          ? String(Math.floor(Number(item.quantity)))
-          : Number(item.quantity).toFixed(2);
-        doc.text(qtyStr, colQty + 2, rowY + 3, { width: colDesc - colQty - 4, align: 'center' });
-      }
-      doc.text(desc, colDesc + 4, rowY + 3, { width: colTotal - colDesc - 8 });
-      const amt = Number(item.amount) || 0;
-      if (amt > 0) {
-        doc.text(amt.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), colTotal + 4, rowY + 3, { width: colEnd - colTotal - 8, align: 'right' });
-      }
-      rowY += cellH;
-    }
-
-    // --- FOOTER: Terms (left) + TOTAL label + TOTAL value (right) ---
-    const totalAmountW = 100;
-    const totalLabelW = 60;
-    const termsColW = pw - totalLabelW - totalAmountW;
-    const totalLabelX = leftM + termsColW;
-    const totalAmountX = totalLabelX + totalLabelW;
-
-    const footerY = Math.min(rowY + footerGap, maxTableBottom);
-
-    doc.lineWidth(stroke);
-    doc.rect(leftM, footerY, termsColW, footerH).stroke();
-    doc.rect(totalLabelX, footerY, totalLabelW, footerH).stroke();
-    doc.rect(totalAmountX, footerY, totalAmountW, footerH).stroke();
-
-    const termsText = (estimate.terms || '').toUpperCase();
-    if (termsText) {
-      doc.font('Helvetica').fontSize(7);
-      doc.text(termsText, leftM + 4, footerY + 5, { width: termsColW - 8, lineGap: 1.5 });
-    }
-
-    const totalStr = fmtMoney(estimate.total);
-    doc.font('Helvetica-Bold').fontSize(10);
-    doc.text('TOTAL', totalLabelX + 4, footerY + (footerH / 2) - 6, { width: totalLabelW - 8, align: 'center' });
-    doc.fontSize(11);
-    doc.text(totalStr, totalAmountX + 4, footerY + (footerH / 2) - 6, { width: totalAmountW - 8, align: 'right' });
-
-    doc.end();
-  });
+  const cfg = await loadTemplateConfig(templateId, 'estimate');
+  return generatePdfWithConfig(estimate, lineItems, cfg, 'estimate');
 }
 
 // GET /estimates - list all estimates
@@ -2065,7 +2251,8 @@ app.put('/estimates/:id/status', authenticate, requireNumericParam('id'), async 
 // POST /estimates/:id/generate-pdf
 app.post('/estimates/:id/generate-pdf', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
-    const pdfBuffer = await generateEstimatePdf(req.params.id);
+    const b = coerceBody(req);
+    const pdfBuffer = await generateEstimatePdf(req.params.id, b.templateId || null);
     const filename = `estimate_${req.params.id}_${Date.now()}.pdf`;
     const localDir = path.resolve(__dirname, 'uploads');
     if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
@@ -2152,7 +2339,7 @@ async function recalcInvoiceTotals(invoiceId) {
 }
 
 // --- Generate professional Invoice PDF matching QuickBooks format ---
-async function generateInvoicePdf(invoiceId) {
+async function generateInvoicePdf(invoiceId, templateId = null) {
   const [[invoice]] = await db.query(`
     SELECT i.*,
            c.companyName, c.name AS custName,
@@ -2174,245 +2361,8 @@ async function generateInvoicePdf(invoiceId) {
     [invoiceId]
   );
 
-  // Load logo
-  const logoPath = path.resolve(__dirname, 'assets', 'logo.png');
-  const hasLogo = fs.existsSync(logoPath);
-
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'LETTER', margins: { top: 40, bottom: 40, left: 50, right: 50 } });
-    const chunks = [];
-    doc.on('data', c => chunks.push(c));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-
-    const U = s => (s || '').toUpperCase();
-    const fmtMoney = v => '$' + (Number(v) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    const pageW = 612;
-    const leftM = 50;
-    const pw = pageW - leftM - 50; // 512
-    const pageH = 792;
-    const bottomLimit = pageH - 40;
-    const stroke = 0.75;
-
-    const headerY = 40;
-
-    // --- COMPANY INFO (far left) ---
-    doc.font('Helvetica-Bold').fontSize(11);
-    doc.text('First Class Glass & Mirror, Inc.', leftM, headerY);
-    doc.font('Helvetica').fontSize(9);
-    doc.text('1513 Industrial Drive', leftM, headerY + 14);
-    doc.text('Itasca, IL. 60143', leftM, headerY + 25);
-    doc.text('630-250-9777', leftM, headerY + 36);
-    doc.text('630-250-9727', leftM, headerY + 47);
-
-    // --- LOGO (between company info and title) ---
-    if (hasLogo) {
-      doc.image(logoPath, 250, 40, { width: 60, height: 60 });
-    }
-
-    // --- "Invoice" title (top-right) ---
-    doc.font('Helvetica-Bold').fontSize(22);
-    doc.text('Invoice', leftM, headerY, { width: pw, align: 'right' });
-
-    // --- DATE / INVOICE # box (right side, below title) ---
-    const dateBoxX = pageW - 50 - 190;
-    const dateBoxY = headerY + 28;
-    const dateColW = 95;
-    const invColW = 95;
-    const dbH = 16;
-    const issueDateStr = invoice.issueDate
-      ? new Date(invoice.issueDate).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })
-      : new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
-
-    doc.lineWidth(stroke);
-    doc.rect(dateBoxX, dateBoxY, dateColW, dbH).stroke();
-    doc.rect(dateBoxX + dateColW, dateBoxY, invColW, dbH).stroke();
-    doc.font('Helvetica-Bold').fontSize(7);
-    doc.text('DATE', dateBoxX + 4, dateBoxY + 4, { width: dateColW - 8, align: 'center' });
-    doc.text('INVOICE #', dateBoxX + dateColW + 4, dateBoxY + 4, { width: invColW - 8, align: 'center' });
-
-    doc.rect(dateBoxX, dateBoxY + dbH, dateColW, dbH).stroke();
-    doc.rect(dateBoxX + dateColW, dateBoxY + dbH, invColW, dbH).stroke();
-    doc.font('Helvetica').fontSize(8);
-    doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dbH + 4, { width: dateColW - 8, align: 'center' });
-    doc.text(String(invoice.invoiceNumber || ''), dateBoxX + dateColW + 4, dateBoxY + dbH + 4, { width: invColW - 8, align: 'center' });
-
-    let curY = headerY + 68;
-
-    // --- BILL TO (left) + SHIP TO (right) ---
-    const boxTop = curY;
-    const billBoxW = Math.floor(pw * 0.48);
-    const shipBoxX = leftM + billBoxW + 10;
-    const shipBoxW = pw - billBoxW - 10;
-
-    const custName = U(invoice.companyName || invoice.custName || '');
-    const billLines = [];
-    if (custName) billLines.push(custName);
-    const rawAddr = (invoice.billingAddress || '').trim();
-    const bCity = (invoice.billingCity || '').trim();
-    const bState = (invoice.billingState || '').trim();
-    const bZip = (invoice.billingZip || '').trim();
-    const cityStateZip = [bCity, bState].filter(Boolean).join(', ') + (bZip ? ' ' + bZip : '');
-    if (rawAddr) {
-      const addrUpper = rawAddr.toUpperCase();
-      if (cityStateZip && bCity && addrUpper.includes(bCity.toUpperCase()) && bZip && addrUpper.includes(bZip)) {
-        billLines.push(U(rawAddr));
-      } else {
-        billLines.push(U(rawAddr));
-        if (cityStateZip) billLines.push(U(cityStateZip));
-      }
-    } else if (cityStateZip) {
-      billLines.push(U(cityStateZip));
-    }
-    if (invoice.custPhone) billLines.push(invoice.custPhone);
-    if (invoice.custFax) billLines.push('FAX# ' + invoice.custFax);
-
-    const shipLines = [];
-    if (invoice.projectName) shipLines.push(U(invoice.projectName));
-    if (invoice.shipToAddress) shipLines.push(U(invoice.shipToAddress));
-    const shipCSZ = [invoice.shipToCity, invoice.shipToState].filter(Boolean).join(' ') + (invoice.shipToZip ? ' ' + invoice.shipToZip : '');
-    if (shipCSZ.trim()) shipLines.push(U(shipCSZ));
-
-    const lineH = 12;
-    const hdrH = 15;
-    const billContentH = Math.max(billLines.length * lineH + 6, 36);
-    const shipContentH = Math.max(shipLines.length * lineH + 6, 36);
-    const maxBoxH = Math.max(hdrH + billContentH, hdrH + shipContentH);
-
-    doc.lineWidth(stroke);
-    doc.rect(leftM, boxTop, billBoxW, maxBoxH).stroke();
-    doc.font('Helvetica-Bold').fontSize(7);
-    doc.text('BILL TO', leftM + 4, boxTop + 4);
-    doc.moveTo(leftM, boxTop + hdrH).lineTo(leftM + billBoxW, boxTop + hdrH).lineWidth(0.5).stroke();
-    doc.font('Helvetica').fontSize(8);
-    let bY = boxTop + hdrH + 3;
-    for (const line of billLines) { doc.text(line, leftM + 4, bY, { width: billBoxW - 8 }); bY += lineH; }
-
-    doc.lineWidth(stroke);
-    doc.rect(shipBoxX, boxTop, shipBoxW, maxBoxH).stroke();
-    doc.font('Helvetica-Bold').fontSize(7);
-    doc.text('SHIP TO', shipBoxX + 4, boxTop + 4);
-    doc.moveTo(shipBoxX, boxTop + hdrH).lineTo(shipBoxX + shipBoxW, boxTop + hdrH).lineWidth(0.5).stroke();
-    doc.font('Helvetica').fontSize(8);
-    let sY = boxTop + hdrH + 3;
-    for (const line of shipLines) { doc.text(line, shipBoxX + 4, sY, { width: shipBoxW - 8 }); sY += lineH; }
-
-    curY = boxTop + maxBoxH;
-
-    // --- P.O. NUMBER box ---
-    if (invoice.poNumber) {
-      const poY = curY + 3;
-      const poH = hdrH + lineH + 4;
-      doc.lineWidth(stroke);
-      doc.rect(shipBoxX, poY, shipBoxW, poH).stroke();
-      doc.font('Helvetica-Bold').fontSize(7);
-      doc.text('P.O. No.', shipBoxX + 4, poY + 4);
-      doc.moveTo(shipBoxX, poY + hdrH).lineTo(shipBoxX + shipBoxW, poY + hdrH).lineWidth(0.5).stroke();
-      doc.font('Helvetica').fontSize(8);
-      doc.text(U(invoice.poNumber), shipBoxX + 4, poY + hdrH + 3);
-      curY = poY + poH;
-    }
-
-    // --- LINE ITEMS TABLE ---
-    const tableTop = curY + 10;
-    const colQty = leftM;
-    const colDesc = leftM + 50;
-    const colTotal = leftM + pw - 75;
-    const colEnd = leftM + pw;
-    const tHeaderH = 18;
-
-    // Calculate available space for line items
-    const footerH = 46;
-    const footerGap = 8;
-    const maxTableBottom = bottomLimit - footerH - footerGap;
-
-    // Pre-calculate line item heights to check fit
-    doc.font('Helvetica').fontSize(8);
-    const itemHeights = lineItems.map(item => {
-      const desc = U(item.description || '');
-      const descH = doc.heightOfString(desc, { width: colTotal - colDesc - 8 });
-      return Math.max(descH + 6, 16);
-    });
-    const totalItemsH = itemHeights.reduce((s, h) => s + h, 0);
-    const neededH = tHeaderH + totalItemsH;
-    const availH = maxTableBottom - tableTop;
-
-    // If content won't fit, compress row heights proportionally
-    let scale = 1;
-    if (neededH > availH && totalItemsH > 0) {
-      const targetItemsH = availH - tHeaderH;
-      scale = Math.max(targetItemsH / totalItemsH, 0.6);
-    }
-
-    // Gray header row
-    doc.lineWidth(stroke);
-    doc.save();
-    doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).fill('#E0E0E0');
-    doc.restore();
-    doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).stroke();
-    doc.moveTo(colDesc, tableTop).lineTo(colDesc, tableTop + tHeaderH).stroke();
-    doc.moveTo(colTotal, tableTop).lineTo(colTotal, tableTop + tHeaderH).stroke();
-
-    doc.font('Helvetica-Bold').fontSize(7).fillColor('#000000');
-    doc.text('QUANTITY', colQty + 2, tableTop + 5, { width: colDesc - colQty - 4, align: 'center' });
-    doc.text('DESCRIPTION', colDesc + 4, tableTop + 5);
-    doc.text('AMOUNT', colTotal + 4, tableTop + 5, { width: colEnd - colTotal - 8, align: 'right' });
-
-    // Table body rows
-    let rowY = tableTop + tHeaderH;
-    doc.font('Helvetica').fontSize(8);
-    for (let i = 0; i < lineItems.length; i++) {
-      const item = lineItems[i];
-      const cellH = Math.max(itemHeights[i] * scale, 14);
-      const desc = U(item.description || '');
-
-      doc.lineWidth(0.5);
-      doc.rect(colQty, rowY, colDesc - colQty, cellH).stroke();
-      doc.rect(colDesc, rowY, colTotal - colDesc, cellH).stroke();
-      doc.rect(colTotal, rowY, colEnd - colTotal, cellH).stroke();
-
-      if (item.quantity != null && Number(item.quantity) > 0) {
-        const qtyStr = Number(item.quantity) === Math.floor(Number(item.quantity))
-          ? String(Math.floor(Number(item.quantity)))
-          : Number(item.quantity).toFixed(2);
-        doc.text(qtyStr, colQty + 2, rowY + 3, { width: colDesc - colQty - 4, align: 'center' });
-      }
-      doc.text(desc, colDesc + 4, rowY + 3, { width: colTotal - colDesc - 8 });
-      const amt = Number(item.amount) || 0;
-      if (amt > 0) {
-        doc.text(amt.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), colTotal + 4, rowY + 3, { width: colEnd - colTotal - 8, align: 'right' });
-      }
-      rowY += cellH;
-    }
-
-    // --- FOOTER: Terms (left) + TOTAL label + TOTAL value (right) ---
-    const totalAmountW = 100;
-    const totalLabelW = 60;
-    const termsColW = pw - totalLabelW - totalAmountW;
-    const totalLabelX = leftM + termsColW;
-    const totalAmountX = totalLabelX + totalLabelW;
-
-    const footerY = Math.min(rowY + footerGap, maxTableBottom);
-
-    doc.lineWidth(stroke);
-    doc.rect(leftM, footerY, termsColW, footerH).stroke();
-    doc.rect(totalLabelX, footerY, totalLabelW, footerH).stroke();
-    doc.rect(totalAmountX, footerY, totalAmountW, footerH).stroke();
-
-    const termsText = (invoice.terms || '').toUpperCase();
-    if (termsText) {
-      doc.font('Helvetica').fontSize(7);
-      doc.text(termsText, leftM + 4, footerY + 5, { width: termsColW - 8, lineGap: 1.5 });
-    }
-
-    const totalStr = fmtMoney(invoice.total);
-    doc.font('Helvetica-Bold').fontSize(10);
-    doc.text('TOTAL', totalLabelX + 4, footerY + (footerH / 2) - 6, { width: totalLabelW - 8, align: 'center' });
-    doc.fontSize(11);
-    doc.text(totalStr, totalAmountX + 4, footerY + (footerH / 2) - 6, { width: totalAmountW - 8, align: 'right' });
-
-    doc.end();
-  });
+  const cfg = await loadTemplateConfig(templateId, 'invoice');
+  return generatePdfWithConfig(invoice, lineItems, cfg, 'invoice');
 }
 
 // GET /invoices/overdue-summary (must be before :id route)
@@ -2703,7 +2653,8 @@ app.put('/invoices/:id/status', authenticate, requireNumericParam('id'), async (
 // POST /invoices/:id/generate-pdf
 app.post('/invoices/:id/generate-pdf', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
-    const pdfBuffer = await generateInvoicePdf(req.params.id);
+    const b = coerceBody(req);
+    const pdfBuffer = await generateInvoicePdf(req.params.id, b.templateId || null);
     const filename = `invoice_${req.params.id}_${Date.now()}.pdf`;
     const localDir = path.resolve(__dirname, 'uploads');
     if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
@@ -2984,6 +2935,172 @@ app.delete('/line-item-templates/:id', authenticate, requireNumericParam('id'), 
   } catch (err) {
     console.error('Error deleting line item template:', err);
     res.status(500).json({ error: 'Failed to delete template.' });
+  }
+});
+
+// ─── PDF TEMPLATE ENDPOINTS ─────────────────────────────────────────────────
+
+// GET /pdf-templates
+app.get('/pdf-templates', authenticate, async (req, res) => {
+  try {
+    const { type } = req.query;
+    let sql = 'SELECT * FROM pdf_templates WHERE isActive = 1';
+    const params = [];
+    if (type) {
+      sql += ' AND type IN (?, "both")';
+      params.push(type);
+    }
+    sql += ' ORDER BY isDefault DESC, name ASC';
+    const [rows] = await db.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching pdf templates:', err);
+    res.status(500).json({ error: 'Failed to fetch PDF templates.' });
+  }
+});
+
+// GET /pdf-templates/:id
+app.get('/pdf-templates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [[tpl]] = await db.query('SELECT * FROM pdf_templates WHERE id = ? AND isActive = 1', [req.params.id]);
+    if (!tpl) return res.status(404).json({ error: 'Template not found.' });
+    res.json(tpl);
+  } catch (err) {
+    console.error('Error fetching pdf template:', err);
+    res.status(500).json({ error: 'Failed to fetch PDF template.' });
+  }
+});
+
+// POST /pdf-templates
+app.post('/pdf-templates', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    if (!b.name?.trim()) return res.status(400).json({ error: 'name is required' });
+    const configStr = typeof b.config === 'string' ? b.config : JSON.stringify(b.config || DEFAULT_TEMPLATE_CONFIG);
+    const [r] = await db.query(
+      'INSERT INTO pdf_templates (name, type, config, isDefault) VALUES (?, ?, ?, 0)',
+      [b.name.trim(), b.type || 'both', configStr]
+    );
+    const [[created]] = await db.query('SELECT * FROM pdf_templates WHERE id = ?', [r.insertId]);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('Error creating pdf template:', err);
+    res.status(500).json({ error: 'Failed to create PDF template.' });
+  }
+});
+
+// PUT /pdf-templates/:id
+app.put('/pdf-templates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const sets = [], params = [];
+    if (b.name !== undefined) { sets.push('name=?'); params.push(b.name); }
+    if (b.type !== undefined) { sets.push('type=?'); params.push(b.type); }
+    if (b.config !== undefined) {
+      const configStr = typeof b.config === 'string' ? b.config : JSON.stringify(b.config);
+      sets.push('config=?'); params.push(configStr);
+    }
+    if (b.isDefault !== undefined) {
+      sets.push('isDefault=?'); params.push(b.isDefault ? 1 : 0);
+      if (b.isDefault) {
+        // Clear default on others
+        await db.query('UPDATE pdf_templates SET isDefault = 0 WHERE id != ?', [req.params.id]);
+      }
+    }
+    if (!sets.length) return res.status(400).json({ error: 'No fields to update.' });
+    params.push(req.params.id);
+    await db.query(`UPDATE pdf_templates SET ${sets.join(', ')} WHERE id = ?`, params);
+    const [[updated]] = await db.query('SELECT * FROM pdf_templates WHERE id = ?', [req.params.id]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating pdf template:', err);
+    res.status(500).json({ error: 'Failed to update PDF template.' });
+  }
+});
+
+// DELETE /pdf-templates/:id (soft delete)
+app.delete('/pdf-templates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [[tpl]] = await db.query('SELECT isDefault FROM pdf_templates WHERE id = ?', [req.params.id]);
+    if (!tpl) return res.status(404).json({ error: 'Template not found.' });
+    if (tpl.isDefault) return res.status(400).json({ error: 'Cannot delete the default template.' });
+    await db.query('UPDATE pdf_templates SET isActive = 0 WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error deleting pdf template:', err);
+    res.status(500).json({ error: 'Failed to delete PDF template.' });
+  }
+});
+
+// POST /pdf-templates/:id/duplicate
+app.post('/pdf-templates/:id/duplicate', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [[orig]] = await db.query('SELECT * FROM pdf_templates WHERE id = ? AND isActive = 1', [req.params.id]);
+    if (!orig) return res.status(404).json({ error: 'Template not found.' });
+    const [r] = await db.query(
+      'INSERT INTO pdf_templates (name, type, config, isDefault) VALUES (?, ?, ?, 0)',
+      [orig.name + ' (Copy)', orig.type, orig.config]
+    );
+    const [[created]] = await db.query('SELECT * FROM pdf_templates WHERE id = ?', [r.insertId]);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('Error duplicating pdf template:', err);
+    res.status(500).json({ error: 'Failed to duplicate PDF template.' });
+  }
+});
+
+// POST /pdf-templates/preview — generate sample PDF with given config
+app.post('/pdf-templates/preview', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    let config = DEFAULT_TEMPLATE_CONFIG;
+    if (b.config) {
+      const parsed = typeof b.config === 'string' ? JSON.parse(b.config) : b.config;
+      config = deepMerge(DEFAULT_TEMPLATE_CONFIG, parsed);
+    }
+    const previewType = b.previewType || 'estimate';
+
+    const sampleData = {
+      companyName: 'SAMPLE CUSTOMER INC.',
+      custName: 'John Smith',
+      custPhone: '555-123-4567',
+      custFax: '555-123-4568',
+      custEmail: 'john@sample.com',
+      billingAddress: '123 Main Street',
+      billingCity: 'Chicago',
+      billingState: 'IL',
+      billingZip: '60601',
+      projectName: 'OFFICE RENOVATION',
+      projectAddress: '456 Oak Avenue',
+      projectCity: 'Chicago',
+      projectState: 'IL',
+      projectZip: '60602',
+      shipToAddress: '456 Oak Avenue',
+      shipToCity: 'Chicago',
+      shipToState: 'IL',
+      shipToZip: '60602',
+      poNumber: 'PO-12345',
+      issueDate: new Date(),
+      invoiceNumber: 'INV-1001',
+      terms: 'Net 30. All prices valid for 30 days.',
+      total: 2150.00,
+      subtotal: 2150.00,
+      taxRate: 0,
+      taxAmount: 0
+    };
+    const sampleLineItems = [
+      { quantity: 1, description: 'INITIAL SERVICE CALL', amount: 150.00 },
+      { quantity: 2, description: 'TEMPERED GLASS PANEL 48" X 72"', amount: 850.00 },
+      { quantity: 4, description: 'LABOR - INSTALLATION', amount: 300.00 },
+    ];
+
+    const pdfBuffer = await generatePdfWithConfig(sampleData, sampleLineItems, config, previewType);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="template-preview.pdf"');
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error('Error generating template preview:', err);
+    res.status(500).json({ error: 'Failed to generate preview.' });
   }
 });
 

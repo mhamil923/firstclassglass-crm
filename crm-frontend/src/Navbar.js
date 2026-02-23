@@ -29,6 +29,7 @@ const NAV_ITEMS = [
     children: [
       { label: "Customers", to: "/customers" },
       { label: "Line Item Templates", to: "/line-item-templates" },
+      { label: "PDF Templates", to: "/pdf-templates" },
       { label: "History", to: "/history" },
       { label: "Reports", to: "/reports" },
     ],
