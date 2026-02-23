@@ -513,6 +513,86 @@
   opacity: 0.08;
 }
 
+/* ─── Drag & Drop / Block Selection ──────────────────────── */
+.ptb-block {
+  cursor: grab;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  transition: border-color 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+}
+
+.ptb-block:hover {
+  border-color: rgba(0, 113, 227, 0.3);
+}
+
+.ptb-block:active {
+  cursor: grabbing;
+}
+
+.ptb-block-selected {
+  border-color: var(--accent-blue, #0071e3) !important;
+  border-style: dashed;
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.12);
+}
+
+.ptb-block-dragging {
+  opacity: 0.4;
+}
+
+.ptb-block-info {
+  width: 100%;
+}
+
+/* Drop Zones */
+.ptb-drop-zone {
+  min-width: 40px;
+  min-height: 40px;
+  border: 2px dashed transparent;
+  border-radius: 4px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  display: flex;
+  align-items: flex-start;
+}
+
+.ptb-drop-zone-over {
+  border-color: var(--accent-blue, #0071e3) !important;
+  background: rgba(0, 113, 227, 0.04);
+}
+
+.ptb-drop-zone-center {
+  justify-content: center;
+  align-items: center;
+}
+
+.ptb-drop-zone-info {
+  flex: 1;
+}
+
+/* Logo Placeholder (when image fails to load) */
+.ptb-pv-logo-placeholder {
+  background: #eee;
+  border: 1px solid #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  color: #999;
+  border-radius: 2px;
+  width: 100%;
+  height: 100%;
+}
+
+/* Selected section highlight in settings panel */
+.ptb-section-selected {
+  border-color: var(--accent-blue, #0071e3) !important;
+  box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.15);
+}
+
+.ptb-section-selected > .ptb-section-header {
+  background: rgba(0, 113, 227, 0.06);
+}
+
 @media (max-width: 900px) {
   .ptb-body {
     flex-direction: column;

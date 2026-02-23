@@ -52,6 +52,13 @@ const DEFAULT_CONFIG = {
   },
   fonts: { body: "Helvetica", bold: "Helvetica-Bold" },
   colors: { text: "#000000", headerBg: "#E0E0E0", lineStroke: "#000000" },
+  layout: {
+    headerLeft: "companyInfo",
+    headerCenter: "logo",
+    headerRight: "title",
+    infoLeft: "billTo",
+    infoRight: "projectBox",
+  },
 };
 
 function deepMerge(target, source) {
@@ -72,6 +79,29 @@ function deepMerge(target, source) {
   return result;
 }
 
+const HEADER_BLOCKS = ["companyInfo", "logo", "title"];
+const INFO_BLOCKS = ["billTo", "projectBox"];
+
+const SECTION_MAP = {
+  companyInfo: "companyInfo",
+  logo: "logo",
+  title: "title",
+  billTo: "billTo",
+  projectBox: "projectBox",
+  dateBox: "dateBox",
+  poNumber: "poNumber",
+  lineItems: "lineItems",
+  footer: "footer",
+};
+
+const BLOCK_LABELS = {
+  companyInfo: "Company Info",
+  logo: "Logo",
+  title: "Document Title",
+  billTo: "Bill To",
+  projectBox: "Project / Ship To",
+};
+
 export default function PdfTemplateBuilder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -84,7 +114,6 @@ export default function PdfTemplateBuilder() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [openSections, setOpenSections] = useState({
-    general: true,
     companyInfo: true,
     logo: false,
     title: false,
@@ -97,7 +126,14 @@ export default function PdfTemplateBuilder() {
     colors: false,
   });
   const [previewType, setPreviewType] = useState("estimate");
+  const [selectedBlock, setSelectedBlock] = useState(null);
+  const [draggingBlock, setDraggingBlock] = useState(null);
+  const [dragOverZone, setDragOverZone] = useState(null);
+  const [logoLoaded, setLogoLoaded] = useState(false);
   const savedConfigRef = useRef(null);
+  const sectionRefs = useRef({});
+
+  const logoUrl = `${API_BASE_URL}/assets/logo`;
 
   useEffect(() => {
     if (!isNew) {
@@ -125,35 +161,29 @@ export default function PdfTemplateBuilder() {
     }
   }, [id, isNew]);
 
-  const updateConfig = useCallback(
-    (section, key, value) => {
-      setConfig((prev) => {
-        const next = { ...prev };
-        if (key === null) {
-          next[section] = value;
-        } else {
-          next[section] = { ...prev[section], [key]: value };
-        }
-        return next;
-      });
-      setDirty(true);
-    },
-    []
-  );
+  const updateConfig = useCallback((section, key, value) => {
+    setConfig((prev) => {
+      const next = { ...prev };
+      if (key === null) {
+        next[section] = value;
+      } else {
+        next[section] = { ...prev[section], [key]: value };
+      }
+      return next;
+    });
+    setDirty(true);
+  }, []);
 
-  const updateNestedConfig = useCallback(
-    (section, subsection, key, value) => {
-      setConfig((prev) => ({
-        ...prev,
-        [section]: {
-          ...prev[section],
-          [subsection]: { ...prev[section]?.[subsection], [key]: value },
-        },
-      }));
-      setDirty(true);
-    },
-    []
-  );
+  const updateNestedConfig = useCallback((section, subsection, key, value) => {
+    setConfig((prev) => ({
+      ...prev,
+      [section]: {
+        ...prev[section],
+        [subsection]: { ...prev[section]?.[subsection], [key]: value },
+      },
+    }));
+    setDirty(true);
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);
@@ -207,6 +237,82 @@ export default function PdfTemplateBuilder() {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  // Click block in preview → select it and scroll to its properties
+  const handleBlockClick = (blockId) => {
+    setSelectedBlock(blockId);
+    const sectionId = SECTION_MAP[blockId];
+    if (sectionId) {
+      setOpenSections((prev) => ({ ...prev, [sectionId]: true }));
+      setTimeout(() => {
+        sectionRefs.current[sectionId]?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
+    }
+  };
+
+  // ─── Drag and Drop ───
+  const handleDragStart = (e, blockId, zoneType) => {
+    e.dataTransfer.setData("blockId", blockId);
+    e.dataTransfer.setData("zoneType", zoneType);
+    setDraggingBlock(blockId);
+  };
+
+  const handleDragEnd = () => {
+    setDraggingBlock(null);
+    setDragOverZone(null);
+  };
+
+  const handleDragOver = (e, zone) => {
+    e.preventDefault();
+    setDragOverZone(zone);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverZone(null);
+  };
+
+  const handleDrop = (e, targetZone) => {
+    e.preventDefault();
+    const blockId = e.dataTransfer.getData("blockId");
+    const srcZoneType = e.dataTransfer.getData("zoneType");
+    setDragOverZone(null);
+    setDraggingBlock(null);
+
+    if (!blockId) return;
+
+    // Determine if this is a header swap or info swap
+    if (srcZoneType === "header" && targetZone.startsWith("header")) {
+      // Find what's currently in the target zone and swap
+      setConfig((prev) => {
+        const layout = { ...prev.layout };
+        const slots = ["headerLeft", "headerCenter", "headerRight"];
+        const srcSlot = slots.find((s) => layout[s] === blockId);
+        const targetSlot = targetZone === "header-left" ? "headerLeft" : targetZone === "header-center" ? "headerCenter" : "headerRight";
+        if (srcSlot && srcSlot !== targetSlot) {
+          const temp = layout[targetSlot];
+          layout[targetSlot] = layout[srcSlot];
+          layout[srcSlot] = temp;
+        }
+        return { ...prev, layout };
+      });
+      setDirty(true);
+    } else if (srcZoneType === "info" && targetZone.startsWith("info")) {
+      setConfig((prev) => {
+        const layout = { ...prev.layout };
+        const slots = ["infoLeft", "infoRight"];
+        const srcSlot = slots.find((s) => layout[s] === blockId);
+        const targetSlot = targetZone === "info-left" ? "infoLeft" : "infoRight";
+        if (srcSlot && srcSlot !== targetSlot) {
+          const temp = layout[targetSlot];
+          layout[targetSlot] = layout[srcSlot];
+          layout[srcSlot] = temp;
+        }
+        return { ...prev, layout };
+      });
+      setDirty(true);
+    }
+  };
+
+  // ─── Components ───
   const Toggle = ({ checked, onChange }) => (
     <label className="ptb-toggle">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
@@ -214,8 +320,11 @@ export default function PdfTemplateBuilder() {
     </label>
   );
 
-  const Section = ({ id: sId, title, children, showToggle, toggleKey, toggleSection: tSection }) => (
-    <div className="ptb-section">
+  const Section = ({ id: sId, title, children, showToggle, toggleSection: tSection }) => (
+    <div
+      className={`ptb-section${selectedBlock && SECTION_MAP[selectedBlock] === sId ? " ptb-section-selected" : ""}`}
+      ref={(el) => { sectionRefs.current[sId] = el; }}
+    >
       <div className="ptb-section-header" onClick={() => toggleSection(sId)}>
         <span className="ptb-section-title">
           <span className={`ptb-section-chevron ${openSections[sId] ? "open" : ""}`}>&#9654;</span>
@@ -232,9 +341,112 @@ export default function PdfTemplateBuilder() {
     </div>
   );
 
-  // Shorthand for the headers
   const estHeaders = config.lineItems?.estimateHeaders || {};
   const invHeaders = config.lineItems?.invoiceHeaders || {};
+  const layout = config.layout || DEFAULT_CONFIG.layout;
+
+  // ─── Preview Block Renderers ───
+  const renderHeaderBlock = (blockId) => {
+    if (blockId === "companyInfo") {
+      return (
+        <div className={config.companyInfo?.show === false ? "ptb-pv-hidden" : ""} style={{ lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 700, fontSize: config.companyInfo?.fontSize || 11, color: config.colors?.text || "#000" }}>
+            {config.companyInfo?.name || "Company Name"}
+          </div>
+          <div style={{ fontSize: config.companyInfo?.linesFontSize || 9, color: config.colors?.text || "#000" }}>
+            {config.companyInfo?.line1 || ""}
+          </div>
+          <div style={{ fontSize: config.companyInfo?.linesFontSize || 9, color: config.colors?.text || "#000" }}>
+            {config.companyInfo?.line2 || ""}
+          </div>
+          <div style={{ fontSize: config.companyInfo?.linesFontSize || 9, color: config.colors?.text || "#000" }}>
+            {config.companyInfo?.phone || ""}
+          </div>
+          <div style={{ fontSize: config.companyInfo?.linesFontSize || 9, color: config.colors?.text || "#000" }}>
+            {config.companyInfo?.fax || ""}
+          </div>
+        </div>
+      );
+    }
+    if (blockId === "logo") {
+      if (config.logo?.show === false) return <div className="ptb-pv-hidden" style={{ width: 40, height: 40 }} />;
+      return (
+        <div style={{ width: config.logo?.width || 60, height: config.logo?.height || 60 }}>
+          {logoLoaded ? (
+            <img
+              src={logoUrl}
+              alt="Logo"
+              style={{ width: config.logo?.width || 60, height: config.logo?.height || 60, objectFit: "contain" }}
+            />
+          ) : (
+            <div
+              className="ptb-pv-logo-placeholder"
+              style={{ width: config.logo?.width || 60, height: config.logo?.height || 60 }}
+            >
+              LOGO
+            </div>
+          )}
+        </div>
+      );
+    }
+    if (blockId === "title") {
+      return (
+        <div
+          className={config.title?.show === false ? "ptb-pv-hidden" : ""}
+          style={{
+            fontSize: config.title?.fontSize || 22,
+            fontWeight: 700,
+            textAlign: config.title?.align || "right",
+            color: config.colors?.text || "#000",
+            minWidth: 80,
+          }}
+        >
+          {previewType === "invoice" ? "Invoice" : "Estimate"}
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const renderInfoBlock = (blockId) => {
+    if (blockId === "billTo") {
+      if (config.billTo?.show === false) return null;
+      return (
+        <div className="ptb-pv-box" style={{ flex: config.billTo?.widthPercent || 48, borderColor: config.colors?.lineStroke || "#000" }}>
+          <div className="ptb-pv-box-header" style={{ borderColor: config.colors?.lineStroke || "#000", color: config.colors?.text || "#000" }}>
+            {config.billTo?.label || "BILL TO"}
+          </div>
+          <div className="ptb-pv-box-body" style={{ color: config.colors?.text || "#000" }}>
+            SAMPLE CUSTOMER INC.<br />123 MAIN STREET<br />CHICAGO, IL 60601<br />555-123-4567
+          </div>
+        </div>
+      );
+    }
+    if (blockId === "projectBox") {
+      if (config.projectBox?.show === false) return null;
+      return (
+        <div className="ptb-pv-box" style={{ flex: 100 - (config.billTo?.widthPercent || 48), borderColor: config.colors?.lineStroke || "#000" }}>
+          <div className="ptb-pv-box-header" style={{ borderColor: config.colors?.lineStroke || "#000", color: config.colors?.text || "#000" }}>
+            {previewType === "invoice"
+              ? config.projectBox?.invoiceLabel || "SHIP TO"
+              : config.projectBox?.estimateLabel || "PROJECT NAME/ADDRESS"}
+          </div>
+          <div className="ptb-pv-box-body" style={{ color: config.colors?.text || "#000" }}>
+            OFFICE RENOVATION<br />456 OAK AVENUE<br />CHICAGO IL 60602
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  // Preload logo
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => setLogoLoaded(true);
+    img.onerror = () => setLogoLoaded(false);
+    img.src = logoUrl;
+  }, [logoUrl]);
 
   if (loading) return <div className="ptb-page"><div style={{ padding: 40, color: "var(--text-tertiary)" }}>Loading...</div></div>;
 
@@ -286,7 +498,7 @@ export default function PdfTemplateBuilder() {
         {/* Settings Panel */}
         <div className="ptb-settings">
           {/* Company Info */}
-          <Section id="companyInfo" title="Company Info" showToggle toggleKey="show" toggleSection="companyInfo">
+          <Section id="companyInfo" title="Company Info" showToggle toggleSection="companyInfo">
             <div className="ptb-field">
               <label className="ptb-label">Company Name</label>
               <input className="ptb-input" value={config.companyInfo?.name || ""} onChange={(e) => updateConfig("companyInfo", "name", e.target.value)} />
@@ -322,7 +534,7 @@ export default function PdfTemplateBuilder() {
           </Section>
 
           {/* Logo */}
-          <Section id="logo" title="Logo" showToggle toggleKey="show" toggleSection="logo">
+          <Section id="logo" title="Logo" showToggle toggleSection="logo">
             <div className="ptb-field-row">
               <div className="ptb-field" style={{ flex: 1 }}>
                 <label className="ptb-label">Width</label>
@@ -336,7 +548,7 @@ export default function PdfTemplateBuilder() {
           </Section>
 
           {/* Title */}
-          <Section id="title" title="Document Title" showToggle toggleKey="show" toggleSection="title">
+          <Section id="title" title="Document Title" showToggle toggleSection="title">
             <div className="ptb-field-row">
               <div className="ptb-field" style={{ flex: 1 }}>
                 <label className="ptb-label">Font Size</label>
@@ -354,7 +566,7 @@ export default function PdfTemplateBuilder() {
           </Section>
 
           {/* Date Box */}
-          <Section id="dateBox" title="Date Box" showToggle toggleKey="show" toggleSection="dateBox">
+          <Section id="dateBox" title="Date Box" showToggle toggleSection="dateBox">
             <div className="ptb-field">
               <label className="ptb-label">Box Width (pt)</label>
               <input className="ptb-input ptb-input-sm" type="number" min="80" max="200" value={config.dateBox?.width || 130} onChange={(e) => updateConfig("dateBox", "width", Number(e.target.value))} />
@@ -362,7 +574,7 @@ export default function PdfTemplateBuilder() {
           </Section>
 
           {/* Bill To */}
-          <Section id="billTo" title="Bill To" showToggle toggleKey="show" toggleSection="billTo">
+          <Section id="billTo" title="Bill To" showToggle toggleSection="billTo">
             <div className="ptb-field">
               <label className="ptb-label">Header Label</label>
               <input className="ptb-input" value={config.billTo?.label || "BILL TO"} onChange={(e) => updateConfig("billTo", "label", e.target.value)} />
@@ -374,7 +586,7 @@ export default function PdfTemplateBuilder() {
           </Section>
 
           {/* Project / Ship To */}
-          <Section id="projectBox" title="Project / Ship To" showToggle toggleKey="show" toggleSection="projectBox">
+          <Section id="projectBox" title="Project / Ship To" showToggle toggleSection="projectBox">
             <div className="ptb-field">
               <label className="ptb-label">Estimate Label</label>
               <input className="ptb-input" value={config.projectBox?.estimateLabel || "PROJECT NAME/ADDRESS"} onChange={(e) => updateConfig("projectBox", "estimateLabel", e.target.value)} />
@@ -386,7 +598,7 @@ export default function PdfTemplateBuilder() {
           </Section>
 
           {/* PO Number */}
-          <Section id="poNumber" title="PO Number" showToggle toggleKey="show" toggleSection="poNumber">
+          <Section id="poNumber" title="PO Number" showToggle toggleSection="poNumber">
             <div className="ptb-field">
               <label className="ptb-label">Label</label>
               <input className="ptb-input" value={config.poNumber?.label || "P.O. No."} onChange={(e) => updateConfig("poNumber", "label", e.target.value)} />
@@ -394,7 +606,7 @@ export default function PdfTemplateBuilder() {
           </Section>
 
           {/* Line Items */}
-          <Section id="lineItems" title="Line Items Table" showToggle toggleKey="show" toggleSection="lineItems">
+          <Section id="lineItems" title="Line Items Table" showToggle toggleSection="lineItems">
             <div className="ptb-field-row">
               <div className="ptb-field" style={{ flex: 1 }}>
                 <label className="ptb-label">Header Font Size</label>
@@ -435,7 +647,7 @@ export default function PdfTemplateBuilder() {
           </Section>
 
           {/* Footer */}
-          <Section id="footer" title="Footer" showToggle toggleKey="show" toggleSection="footer">
+          <Section id="footer" title="Footer" showToggle toggleSection="footer">
             <div className="ptb-field-row">
               <label className="ptb-label">Show Terms Box</label>
               <Toggle
@@ -473,106 +685,102 @@ export default function PdfTemplateBuilder() {
         </div>
 
         {/* Live Preview */}
-        <div className="ptb-preview">
-          <div className="ptb-preview-page">
-            {/* Header */}
+        <div className="ptb-preview" onClick={() => setSelectedBlock(null)}>
+          <div className="ptb-preview-page" style={{ color: config.colors?.text || "#000" }}>
+
+            {/* Header Row — 3 drop zones */}
             <div className="ptb-pv-header">
-              <div className={`ptb-pv-company ${config.companyInfo?.show === false ? "ptb-pv-hidden" : ""}`}>
-                <div className="ptb-pv-company-name" style={{ fontSize: config.companyInfo?.fontSize || 11 }}>
-                  {config.companyInfo?.name || "First Class Glass & Mirror, Inc."}
-                </div>
-                <div className="ptb-pv-company-line" style={{ fontSize: config.companyInfo?.linesFontSize || 9 }}>
-                  {config.companyInfo?.line1 || "1513 Industrial Drive"}
-                </div>
-                <div className="ptb-pv-company-line" style={{ fontSize: config.companyInfo?.linesFontSize || 9 }}>
-                  {config.companyInfo?.line2 || "Itasca, IL. 60143"}
-                </div>
-                <div className="ptb-pv-company-line" style={{ fontSize: config.companyInfo?.linesFontSize || 9 }}>
-                  {config.companyInfo?.phone || "630-250-9777"}
-                </div>
-                <div className="ptb-pv-company-line" style={{ fontSize: config.companyInfo?.linesFontSize || 9 }}>
-                  {config.companyInfo?.fax || "630-250-9727"}
-                </div>
-              </div>
-
-              {config.logo?.show !== false && (
-                <div
-                  className="ptb-pv-logo"
-                  style={{
-                    width: config.logo?.width || 60,
-                    height: config.logo?.height || 60,
-                  }}
-                >
-                  LOGO
-                </div>
-              )}
-
-              <div
-                className={`ptb-pv-title ${config.title?.show === false ? "ptb-pv-hidden" : ""}`}
-                style={{
-                  fontSize: config.title?.fontSize || 22,
-                  textAlign: config.title?.align || "right",
-                }}
-              >
-                {previewType === "invoice" ? "Invoice" : "Estimate"}
-              </div>
+              {["header-left", "header-center", "header-right"].map((zone) => {
+                const slotKey = zone === "header-left" ? "headerLeft" : zone === "header-center" ? "headerCenter" : "headerRight";
+                const blockId = layout[slotKey];
+                return (
+                  <div
+                    key={zone}
+                    className={`ptb-drop-zone${dragOverZone === zone ? " ptb-drop-zone-over" : ""}${zone === "header-center" ? " ptb-drop-zone-center" : ""}`}
+                    onDragOver={(e) => handleDragOver(e, zone)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, zone)}
+                  >
+                    {blockId && (
+                      <div
+                        className={`ptb-block${selectedBlock === blockId ? " ptb-block-selected" : ""}${draggingBlock === blockId ? " ptb-block-dragging" : ""}`}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, blockId, "header")}
+                        onDragEnd={handleDragEnd}
+                        onClick={(e) => { e.stopPropagation(); handleBlockClick(blockId); }}
+                        title={`Drag to reorder: ${BLOCK_LABELS[blockId] || blockId}`}
+                      >
+                        {renderHeaderBlock(blockId)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Date Box */}
             {config.dateBox?.show !== false && (
-              <div className="ptb-pv-datebox">
-                <div className="ptb-pv-datebox-inner">
-                  <div className="ptb-pv-datebox-cell ptb-pv-datebox-label">DATE</div>
-                  <div className="ptb-pv-datebox-cell ptb-pv-datebox-value">
+              <div
+                className={`ptb-block ptb-pv-datebox${selectedBlock === "dateBox" ? " ptb-block-selected" : ""}`}
+                onClick={(e) => { e.stopPropagation(); handleBlockClick("dateBox"); }}
+              >
+                <div className="ptb-pv-datebox-inner" style={{ borderColor: config.colors?.lineStroke || "#000" }}>
+                  <div className="ptb-pv-datebox-cell ptb-pv-datebox-label" style={{ borderColor: config.colors?.lineStroke || "#000", color: config.colors?.text || "#000" }}>DATE</div>
+                  <div className="ptb-pv-datebox-cell ptb-pv-datebox-value" style={{ color: config.colors?.text || "#000" }}>
                     {new Date().toLocaleDateString("en-US")}
                   </div>
                 </div>
                 {previewType === "invoice" && (
-                  <div className="ptb-pv-datebox-inner" style={{ marginLeft: -1 }}>
-                    <div className="ptb-pv-datebox-cell ptb-pv-datebox-label">INVOICE #</div>
-                    <div className="ptb-pv-datebox-cell ptb-pv-datebox-value">INV-1001</div>
+                  <div className="ptb-pv-datebox-inner" style={{ marginLeft: -1, borderColor: config.colors?.lineStroke || "#000" }}>
+                    <div className="ptb-pv-datebox-cell ptb-pv-datebox-label" style={{ borderColor: config.colors?.lineStroke || "#000", color: config.colors?.text || "#000" }}>INVOICE #</div>
+                    <div className="ptb-pv-datebox-cell ptb-pv-datebox-value" style={{ color: config.colors?.text || "#000" }}>INV-1001</div>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Bill To / Project boxes */}
+            {/* Info Row — 2 drop zones */}
             <div className="ptb-pv-boxes">
-              {config.billTo?.show !== false && (
-                <div className="ptb-pv-box" style={{ flex: config.billTo?.widthPercent || 48 }}>
-                  <div className="ptb-pv-box-header">{config.billTo?.label || "BILL TO"}</div>
-                  <div className="ptb-pv-box-body">
-                    SAMPLE CUSTOMER INC.
-                    <br />123 MAIN STREET
-                    <br />CHICAGO, IL 60601
-                    <br />555-123-4567
+              {["info-left", "info-right"].map((zone) => {
+                const slotKey = zone === "info-left" ? "infoLeft" : "infoRight";
+                const blockId = layout[slotKey];
+                return (
+                  <div
+                    key={zone}
+                    className={`ptb-drop-zone ptb-drop-zone-info${dragOverZone === zone ? " ptb-drop-zone-over" : ""}`}
+                    style={{ flex: blockId === "billTo" ? (config.billTo?.widthPercent || 48) : (100 - (config.billTo?.widthPercent || 48)) }}
+                    onDragOver={(e) => handleDragOver(e, zone)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, zone)}
+                  >
+                    {blockId && (
+                      <div
+                        className={`ptb-block ptb-block-info${selectedBlock === blockId ? " ptb-block-selected" : ""}${draggingBlock === blockId ? " ptb-block-dragging" : ""}`}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, blockId, "info")}
+                        onDragEnd={handleDragEnd}
+                        onClick={(e) => { e.stopPropagation(); handleBlockClick(blockId); }}
+                        title={`Drag to swap: ${BLOCK_LABELS[blockId] || blockId}`}
+                      >
+                        {renderInfoBlock(blockId)}
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
-              {config.projectBox?.show !== false && (
-                <div className="ptb-pv-box" style={{ flex: 100 - (config.billTo?.widthPercent || 48) }}>
-                  <div className="ptb-pv-box-header">
-                    {previewType === "invoice"
-                      ? config.projectBox?.invoiceLabel || "SHIP TO"
-                      : config.projectBox?.estimateLabel || "PROJECT NAME/ADDRESS"}
-                  </div>
-                  <div className="ptb-pv-box-body">
-                    OFFICE RENOVATION
-                    <br />456 OAK AVENUE
-                    <br />CHICAGO IL 60602
-                  </div>
-                </div>
-              )}
+                );
+              })}
             </div>
 
             {/* PO Number */}
             {config.poNumber?.show !== false && (
-              <div className="ptb-pv-po">
-                <div className="ptb-pv-po-box">
-                  <div className="ptb-pv-box-header" style={{ fontSize: 7 }}>
+              <div
+                className={`ptb-block ptb-pv-po${selectedBlock === "poNumber" ? " ptb-block-selected" : ""}`}
+                onClick={(e) => { e.stopPropagation(); handleBlockClick("poNumber"); }}
+              >
+                <div className="ptb-pv-po-box" style={{ borderColor: config.colors?.lineStroke || "#000" }}>
+                  <div className="ptb-pv-box-header" style={{ fontSize: 7, borderColor: config.colors?.lineStroke || "#000", color: config.colors?.text || "#000" }}>
                     {config.poNumber?.label || "P.O. No."}
                   </div>
-                  <div className="ptb-pv-box-body" style={{ padding: "3px 4px", minHeight: "auto", fontSize: 8 }}>
+                  <div className="ptb-pv-box-body" style={{ padding: "3px 4px", minHeight: "auto", fontSize: 8, color: config.colors?.text || "#000" }}>
                     PO-12345
                   </div>
                 </div>
@@ -581,77 +789,77 @@ export default function PdfTemplateBuilder() {
 
             {/* Line Items Table */}
             {config.lineItems?.show !== false && (
-              <table className="ptb-pv-table">
-                <thead>
-                  <tr>
-                    <th
-                      style={{
+              <div
+                className={`ptb-block${selectedBlock === "lineItems" ? " ptb-block-selected" : ""}`}
+                onClick={(e) => { e.stopPropagation(); handleBlockClick("lineItems"); }}
+              >
+                <table className="ptb-pv-table" style={{ borderColor: config.colors?.lineStroke || "#000" }}>
+                  <thead>
+                    <tr>
+                      <th style={{
                         background: config.lineItems?.headerBgColor || "#E0E0E0",
                         fontSize: config.lineItems?.headerFontSize || 7,
                         width: config.lineItems?.qtyColumnWidth || 50,
                         textAlign: "center",
-                      }}
-                    >
-                      {previewType === "invoice"
-                        ? invHeaders.qty || "QUANTITY"
-                        : estHeaders.qty || "Qty"}
-                    </th>
-                    <th
-                      style={{
+                        borderColor: config.colors?.lineStroke || "#000",
+                        color: config.colors?.text || "#000",
+                      }}>
+                        {previewType === "invoice" ? invHeaders.qty || "QUANTITY" : estHeaders.qty || "Qty"}
+                      </th>
+                      <th style={{
                         background: config.lineItems?.headerBgColor || "#E0E0E0",
                         fontSize: config.lineItems?.headerFontSize || 7,
-                      }}
-                    >
-                      {previewType === "invoice"
-                        ? invHeaders.description || "DESCRIPTION"
-                        : estHeaders.description || "DESCRIPTION"}
-                    </th>
-                    <th
-                      style={{
+                        borderColor: config.colors?.lineStroke || "#000",
+                        color: config.colors?.text || "#000",
+                      }}>
+                        {previewType === "invoice" ? invHeaders.description || "DESCRIPTION" : estHeaders.description || "DESCRIPTION"}
+                      </th>
+                      <th style={{
                         background: config.lineItems?.headerBgColor || "#E0E0E0",
                         fontSize: config.lineItems?.headerFontSize || 7,
                         width: config.lineItems?.totalColumnWidth || 75,
                         textAlign: "right",
-                      }}
-                    >
-                      {previewType === "invoice"
-                        ? invHeaders.total || "AMOUNT"
-                        : estHeaders.total || "TOTAL"}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody style={{ fontSize: config.lineItems?.bodyFontSize || 8 }}>
-                  <tr><td>1</td><td>INITIAL SERVICE CALL</td><td>150.00</td></tr>
-                  <tr><td>2</td><td>TEMPERED GLASS PANEL 48&quot; X 72&quot;</td><td>850.00</td></tr>
-                  <tr><td>4</td><td>LABOR - INSTALLATION</td><td>300.00</td></tr>
-                </tbody>
-              </table>
+                        borderColor: config.colors?.lineStroke || "#000",
+                        color: config.colors?.text || "#000",
+                      }}>
+                        {previewType === "invoice" ? invHeaders.total || "AMOUNT" : estHeaders.total || "TOTAL"}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody style={{ fontSize: config.lineItems?.bodyFontSize || 8 }}>
+                    <tr><td style={{ borderColor: config.colors?.lineStroke || "#000" }}>1</td><td style={{ borderColor: config.colors?.lineStroke || "#000" }}>INITIAL SERVICE CALL</td><td style={{ borderColor: config.colors?.lineStroke || "#000" }}>150.00</td></tr>
+                    <tr><td style={{ borderColor: config.colors?.lineStroke || "#000" }}>2</td><td style={{ borderColor: config.colors?.lineStroke || "#000" }}>TEMPERED GLASS PANEL 48&quot; X 72&quot;</td><td style={{ borderColor: config.colors?.lineStroke || "#000" }}>850.00</td></tr>
+                    <tr><td style={{ borderColor: config.colors?.lineStroke || "#000" }}>4</td><td style={{ borderColor: config.colors?.lineStroke || "#000" }}>LABOR - INSTALLATION</td><td style={{ borderColor: config.colors?.lineStroke || "#000" }}>300.00</td></tr>
+                  </tbody>
+                </table>
+              </div>
             )}
 
             {/* Footer */}
             {config.footer?.show !== false && (
-              <div className="ptb-pv-footer">
+              <div
+                className={`ptb-block ptb-pv-footer${selectedBlock === "footer" ? " ptb-block-selected" : ""}`}
+                onClick={(e) => { e.stopPropagation(); handleBlockClick("footer"); }}
+              >
                 {config.footer?.showTerms !== false && (
-                  <div className="ptb-pv-terms">
+                  <div className="ptb-pv-terms" style={{ borderColor: config.colors?.lineStroke || "#000", color: config.colors?.text || "#000" }}>
                     NET 30. ALL PRICES VALID FOR 30 DAYS.
                   </div>
                 )}
-                <div
-                  className="ptb-pv-total-label"
-                  style={{
-                    fontSize: config.footer?.totalFontSize || 10,
-                    minWidth: config.footer?.totalLabelWidth || 60,
-                  }}
-                >
+                <div className="ptb-pv-total-label" style={{
+                  fontSize: config.footer?.totalFontSize || 10,
+                  minWidth: config.footer?.totalLabelWidth || 60,
+                  borderColor: config.colors?.lineStroke || "#000",
+                  color: config.colors?.text || "#000",
+                }}>
                   TOTAL
                 </div>
-                <div
-                  className="ptb-pv-total-amount"
-                  style={{
-                    fontSize: config.footer?.totalAmountFontSize || 11,
-                    minWidth: config.footer?.totalAmountWidth || 100,
-                  }}
-                >
+                <div className="ptb-pv-total-amount" style={{
+                  fontSize: config.footer?.totalAmountFontSize || 11,
+                  minWidth: config.footer?.totalAmountWidth || 100,
+                  borderColor: config.colors?.lineStroke || "#000",
+                  color: config.colors?.text || "#000",
+                }}>
                   $2,150.00
                 </div>
               </div>

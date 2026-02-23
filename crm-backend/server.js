@@ -3312,6 +3312,18 @@ app.post('/pdf-templates/preview', authenticate, async (req, res) => {
   }
 });
 
+// GET /assets/logo — serve the company logo
+app.get('/assets/logo', (req, res) => {
+  const logoPath = path.resolve(__dirname, 'assets', 'logo.png');
+  if (fs.existsSync(logoPath)) {
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(logoPath);
+  } else {
+    res.status(404).json({ error: 'Logo not found' });
+  }
+});
+
 // ─── EMAIL SETTINGS ENDPOINTS ───────────────────────────────────────────────
 
 // GET /email-settings
