@@ -306,24 +306,29 @@ export default function CreateEstimate() {
         estimateId = res.data.id;
       }
 
+      // Filter out empty line items (e.g. blank rows from Tab-to-add)
+      const validLineItems = lineItems.filter(
+        (li) => li.description && li.description.trim()
+      );
+
       // Sync line items: delete removed, update existing, create new
       if (isEdit) {
         // Get current server-side items
         const currentRes = await api.get(`/estimates/${estimateId}`);
         const serverItems = currentRes.data.lineItems || [];
-        const clientIds = lineItems.filter((li) => li.id).map((li) => li.id);
+        const keepIds = new Set(validLineItems.filter((li) => li.id).map((li) => li.id));
 
-        // Delete items no longer present
+        // Delete items no longer present (or cleared)
         for (const si of serverItems) {
-          if (!clientIds.includes(si.id)) {
+          if (!keepIds.has(si.id)) {
             await api.delete(`/estimates/${estimateId}/line-items/${si.id}`);
           }
         }
       }
 
-      // Create/update all items
-      for (let i = 0; i < lineItems.length; i++) {
-        const li = lineItems[i];
+      // Create/update only valid items
+      for (let i = 0; i < validLineItems.length; i++) {
+        const li = validLineItems[i];
         const itemPayload = {
           description: li.description,
           quantity: li.quantity !== "" ? Number(li.quantity) : null,

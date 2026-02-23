@@ -365,21 +365,26 @@ export default function CreateInvoice() {
         invoiceId = res.data.id;
       }
 
+      // Filter out empty line items (e.g. blank rows from Tab-to-add)
+      const validLineItems = lineItems.filter(
+        (li) => li.description && li.description.trim()
+      );
+
       // Sync line items
       if (isEdit) {
         const currentRes = await api.get(`/invoices/${invoiceId}`);
         const serverItems = currentRes.data.lineItems || [];
-        const clientIds = lineItems.filter((li) => li.id).map((li) => li.id);
+        const keepIds = new Set(validLineItems.filter((li) => li.id).map((li) => li.id));
 
         for (const si of serverItems) {
-          if (!clientIds.includes(si.id)) {
+          if (!keepIds.has(si.id)) {
             await api.delete(`/invoices/${invoiceId}/line-items/${si.id}`);
           }
         }
       }
 
-      for (let i = 0; i < lineItems.length; i++) {
-        const li = lineItems[i];
+      for (let i = 0; i < validLineItems.length; i++) {
+        const li = validLineItems[i];
         const itemPayload = {
           description: li.description,
           quantity: li.quantity !== "" ? Number(li.quantity) : null,
