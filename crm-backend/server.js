@@ -2600,9 +2600,8 @@ app.put('/invoices/:id', authenticate, requireNumericParam('id'), async (req, re
 // DELETE /invoices/:id
 app.delete('/invoices/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
-    const [[inv]] = await db.query('SELECT status FROM invoices WHERE id = ?', [req.params.id]);
+    const [[inv]] = await db.query('SELECT id FROM invoices WHERE id = ?', [req.params.id]);
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
-    if (inv.status !== 'Draft') return res.status(400).json({ error: 'Only draft invoices can be deleted.' });
     await db.query('DELETE FROM invoices WHERE id = ?', [req.params.id]);
     res.json({ success: true });
   } catch (err) {

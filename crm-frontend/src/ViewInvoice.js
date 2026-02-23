@@ -46,7 +46,7 @@ export default function ViewInvoice() {
   const [loading, setLoading] = useState(true);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
-  const [duplicating, setDuplicating] = useState(false);
+
 
   // Payment modal
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -121,19 +121,6 @@ export default function ViewInvoice() {
     } catch (err) {
       console.error("Error deleting invoice:", err);
       alert(err?.response?.data?.error || "Failed to delete invoice.");
-    }
-  };
-
-  const handleDuplicate = async () => {
-    setDuplicating(true);
-    try {
-      const res = await api.post(`/invoices/${id}/duplicate`);
-      navigate(`/invoices/${res.data.id}`);
-    } catch (err) {
-      console.error("Error duplicating invoice:", err);
-      alert("Failed to duplicate invoice.");
-    } finally {
-      setDuplicating(false);
     }
   };
 
@@ -235,27 +222,9 @@ export default function ViewInvoice() {
             <button className="vi-btn vi-btn-secondary" onClick={handleSendEmail}>
               Send to Customer
             </button>
-            <button
-              className="vi-btn vi-btn-secondary"
-              onClick={handleDuplicate}
-              disabled={duplicating}
-            >
-              {duplicating ? "Duplicating..." : "Duplicate"}
+            <button className="vi-btn vi-btn-danger" onClick={handleDelete}>
+              Delete
             </button>
-            {!isVoid && !isDraft && (
-              <button
-                className="vi-btn vi-btn-danger"
-                onClick={() => handleStatusChange("Void")}
-                disabled={statusUpdating}
-              >
-                Mark as Void
-              </button>
-            )}
-            {isDraft && (
-              <button className="vi-btn vi-btn-danger" onClick={handleDelete}>
-                Delete
-              </button>
-            )}
           </div>
         </div>
 
