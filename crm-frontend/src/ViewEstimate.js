@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import api from "./api";
 import API_BASE_URL from "./config";
+import SendEmailModal from "./SendEmailModal";
 import "./ViewEstimate.css";
 
 function fmtMoney(val) {
@@ -43,6 +44,8 @@ export default function ViewEstimate() {
   const [converting, setConverting] = useState(false);
   const [pdfTemplates, setPdfTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailHistory, setEmailHistory] = useState([]);
 
   const fetchEstimate = useCallback(async () => {
     setLoading(true);
@@ -65,6 +68,16 @@ export default function ViewEstimate() {
       setPdfTemplates(Array.isArray(res.data) ? res.data : []);
     }).catch(() => {});
   }, []);
+
+  const fetchEmailHistory = useCallback(() => {
+    api.get(`/email-log?estimateId=${id}`).then((res) => {
+      setEmailHistory(Array.isArray(res.data) ? res.data : []);
+    }).catch(() => {});
+  }, [id]);
+
+  useEffect(() => {
+    fetchEmailHistory();
+  }, [fetchEmailHistory]);
 
   const handleStatusChange = async (newStatus) => {
     setStatusUpdating(true);
@@ -97,18 +110,13 @@ export default function ViewEstimate() {
     }
   };
 
-  const handleSendToCustomer = async () => {
-    setStatusUpdating(true);
-    try {
-      await api.post(`/estimates/${id}/send-email`);
-      await fetchEstimate();
-      alert("Estimate marked as Sent to Customer.");
-    } catch (err) {
-      console.error("Error sending to customer:", err);
-      alert("Failed to send to customer.");
-    } finally {
-      setStatusUpdating(false);
-    }
+  const handleSendToCustomer = () => {
+    setShowEmailModal(true);
+  };
+
+  const handleEmailSent = () => {
+    fetchEstimate();
+    fetchEmailHistory();
   };
 
   const handleConvertToInvoice = async () => {
@@ -437,7 +445,53 @@ export default function ViewEstimate() {
             />
           </div>
         )}
+
+        {/* Email History */}
+        {emailHistory.length > 0 && (
+          <div className="ve-card">
+            <div className="ve-card-header">Email History</div>
+            <table className="ve-li-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Recipient</th>
+                  <th>Subject</th>
+                  <th className="col-amount">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {emailHistory.map((log) => (
+                  <tr key={log.id}>
+                    <td>{fmtDate(log.sentAt)}</td>
+                    <td>{log.recipientEmail}</td>
+                    <td>{log.subject}</td>
+                    <td className="col-amount">
+                      <span style={{
+                        color: log.status === 'sent' ? 'var(--accent-green)' : 'var(--accent-red)',
+                        fontWeight: 600, fontSize: 12, textTransform: 'uppercase'
+                      }}>
+                        {log.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+
+      {/* Send Email Modal */}
+      <SendEmailModal
+        isOpen={showEmailModal}
+        onClose={() => setShowEmailModal(false)}
+        type="estimate"
+        entityId={id}
+        entityData={estimate}
+        customerEmail={e.custEmail || ""}
+        customerName={customerName}
+        onSent={handleEmailSent}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api from "./api";
+import SendEmailModal from "./SendEmailModal";
 import "./Invoices.css";
 
 const STATUS_OPTIONS = ["All", "Draft", "Sent", "Partial", "Paid", "Overdue", "Void"];
@@ -56,6 +57,9 @@ export default function Invoices() {
   // Ready to Invoice state
   const [rtiOrders, setRtiOrders] = useState([]);
   const [rtiOpen, setRtiOpen] = useState(true);
+
+  // Reminder email modal
+  const [reminderInvoice, setReminderInvoice] = useState(null);
 
   const fetchReadyToInvoice = useCallback(async () => {
     try {
@@ -230,12 +234,13 @@ export default function Invoices() {
                   <th>Status</th>
                   <th style={{ textAlign: "right" }}>Total</th>
                   <th style={{ textAlign: "right" }}>Balance Due</th>
+                  <th style={{ width: 50 }}></th>
                 </tr>
               </thead>
               <tbody>
                 {invoices.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={8}>
+                    <td colSpan={9}>
                       <div className="inv-empty">
                         {search || statusFilter !== "All"
                           ? "No invoices match your filters."
@@ -270,6 +275,17 @@ export default function Invoices() {
                         {fmtMoney(inv.balanceDue)}
                       </span>
                     </td>
+                    <td style={{ textAlign: "center", width: 50 }}>
+                      {(inv.status === "Sent" || inv.status === "Overdue") && Number(inv.balanceDue) > 0 && (
+                        <button
+                          className="inv-remind-btn"
+                          title="Send payment reminder"
+                          onClick={(e) => { e.stopPropagation(); setReminderInvoice(inv); }}
+                        >
+                          &#9993;
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -283,6 +299,20 @@ export default function Invoices() {
           )}
         </div>
       </div>
+
+      {/* Reminder Email Modal */}
+      {reminderInvoice && (
+        <SendEmailModal
+          isOpen={true}
+          onClose={() => setReminderInvoice(null)}
+          type="payment_reminder"
+          entityId={reminderInvoice.id}
+          entityData={reminderInvoice}
+          customerEmail={reminderInvoice.custEmail || ""}
+          customerName={reminderInvoice.companyName || reminderInvoice.custName || ""}
+          onSent={() => { setReminderInvoice(null); fetchInvoices(search, statusFilter); }}
+        />
+      )}
     </div>
   );
 }

@@ -420,3 +420,21 @@
     display: block;
   }
 }
+
+/* Reminder button */
+.inv-remind-btn {
+  background: none;
+  border: 1px solid var(--border-color-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 8px;
+  color: var(--accent-orange);
+  transition: var(--transition-fast);
+  line-height: 1;
+}
+
+.inv-remind-btn:hover {
+  background: rgba(255, 149, 0, 0.1);
+  border-color: var(--accent-orange);
+}

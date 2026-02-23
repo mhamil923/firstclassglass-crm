@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import api from "./api";
 import API_BASE_URL from "./config";
+import SendEmailModal from "./SendEmailModal";
 import "./ViewInvoice.css";
 
 function fmtMoney(val) {
@@ -48,6 +49,9 @@ export default function ViewInvoice() {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [pdfTemplates, setPdfTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailModalType, setEmailModalType] = useState("invoice");
+  const [emailHistory, setEmailHistory] = useState([]);
 
   // Payment modal
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -82,6 +86,16 @@ export default function ViewInvoice() {
     }).catch(() => {});
   }, []);
 
+  const fetchEmailHistory = useCallback(() => {
+    api.get(`/email-log?invoiceId=${id}`).then((res) => {
+      setEmailHistory(Array.isArray(res.data) ? res.data : []);
+    }).catch(() => {});
+  }, [id]);
+
+  useEffect(() => {
+    fetchEmailHistory();
+  }, [fetchEmailHistory]);
+
   const handleStatusChange = async (newStatus) => {
     if (newStatus === "Void" && !window.confirm("Mark this invoice as void? This cannot be undone.")) return;
     setStatusUpdating(true);
@@ -109,15 +123,19 @@ export default function ViewInvoice() {
     }
   };
 
-  const handleSendEmail = async () => {
-    try {
-      const res = await api.post(`/invoices/${id}/send-email`);
-      alert(res.data.message || "Email sent.");
-      await fetchInvoice();
-    } catch (err) {
-      console.error("Error sending email:", err);
-      alert("Failed to send email.");
-    }
+  const handleSendEmail = () => {
+    setEmailModalType("invoice");
+    setShowEmailModal(true);
+  };
+
+  const handleSendReminder = () => {
+    setEmailModalType("payment_reminder");
+    setShowEmailModal(true);
+  };
+
+  const handleEmailSent = () => {
+    fetchInvoice();
+    fetchEmailHistory();
   };
 
   const handleDelete = async () => {
@@ -269,6 +287,12 @@ export default function ViewInvoice() {
                       onClick={openPaymentModal}
                     >
                       Record Payment
+                    </button>
+                    <button
+                      className="vi-btn vi-btn-primary"
+                      onClick={handleSendReminder}
+                    >
+                      Send Reminder
                     </button>
                     {balanceDue > 0 && (
                       <button
@@ -555,7 +579,53 @@ export default function ViewInvoice() {
             />
           </div>
         )}
+
+        {/* Email History */}
+        {emailHistory.length > 0 && (
+          <div className="vi-card">
+            <div className="vi-card-header">Email History</div>
+            <table className="vi-li-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Recipient</th>
+                  <th>Subject</th>
+                  <th className="col-amount">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {emailHistory.map((log) => (
+                  <tr key={log.id}>
+                    <td>{fmtDate(log.sentAt)}</td>
+                    <td>{log.recipientEmail}</td>
+                    <td>{log.subject}</td>
+                    <td className="col-amount">
+                      <span style={{
+                        color: log.status === 'sent' ? 'var(--accent-green)' : 'var(--accent-red)',
+                        fontWeight: 600, fontSize: 12, textTransform: 'uppercase'
+                      }}>
+                        {log.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+
+      {/* Send Email Modal */}
+      <SendEmailModal
+        isOpen={showEmailModal}
+        onClose={() => setShowEmailModal(false)}
+        type={emailModalType}
+        entityId={id}
+        entityData={invoice}
+        customerEmail={inv.custEmail || ""}
+        customerName={customerName}
+        onSent={handleEmailSent}
+      />
 
       {/* Payment Modal */}
       {showPaymentModal && (

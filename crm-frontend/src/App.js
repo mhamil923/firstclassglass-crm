@@ -30,6 +30,7 @@ import RouteBuilder from "./RouteBuilder";
 import LineItemTemplates from "./LineItemTemplates";
 import PdfTemplates from "./PdfTemplates";
 import PdfTemplateBuilder from "./PdfTemplateBuilder";
+import EmailTemplates from "./EmailTemplates";
 // Note: Bootstrap is imported in index.js before our custom styles
 
 // A wrapper for protecting routes
@@ -236,6 +237,14 @@ export default function App() {
               element={
                 <PrivateRoute>
                   <PdfTemplateBuilder />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/email-templates"
+              element={
+                <PrivateRoute>
+                  <EmailTemplates />
                 </PrivateRoute>
               }
             />

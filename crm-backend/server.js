@@ -20,6 +20,7 @@ const jwt        = require('jsonwebtoken');
 
 // ✅ use axios so we don't depend on Node's global fetch() (EB can be Node < 18)
 const axios      = require('axios');
+const nodemailer = require('nodemailer');
 
 // PO PDF vendor/number detection from PDF content (with OCR support)
 const { analyzePoPdf, detectSupplierFromText, detectPoNumberFromText, extractWorkOrderFields, extractTextSmart, extractTextFromPdf, extractTextFromScannedPdf } = require('./utils/poVendorDetector');
@@ -979,6 +980,213 @@ async function ensurePdfTemplateTable() {
   }
 }
 ensurePdfTemplateTable().catch(() => {});
+
+// ─── EMAIL TABLES ───────────────────────────────────────────────────────────
+async function ensureEmailTables() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS email_settings (
+        id            INT PRIMARY KEY DEFAULT 1,
+        smtpHost      VARCHAR(255) DEFAULT 'smtp.mail.yahoo.com',
+        smtpPort      INT DEFAULT 465,
+        smtpSecure    TINYINT(1) DEFAULT 1,
+        senderEmail   VARCHAR(255) NULL,
+        senderPassword VARCHAR(500) NULL,
+        senderName    VARCHAR(255) DEFAULT 'First Class Glass & Mirror, Inc.',
+        replyTo       VARCHAR(255) NULL,
+        created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+    await db.query('INSERT IGNORE INTO email_settings (id) VALUES (1)');
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS email_templates (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        name        VARCHAR(255) NOT NULL,
+        type        VARCHAR(50) NOT NULL,
+        subject     VARCHAR(500) NOT NULL,
+        body        TEXT NOT NULL,
+        isDefault   TINYINT(1) DEFAULT 0,
+        isActive    TINYINT(1) DEFAULT 1,
+        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS email_log (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        templateId      INT NULL,
+        estimateId      INT NULL,
+        invoiceId       INT NULL,
+        recipientEmail  VARCHAR(255) NOT NULL,
+        recipientName   VARCHAR(255) NULL,
+        subject         VARCHAR(500) NULL,
+        body            TEXT NULL,
+        attachmentPath  VARCHAR(255) NULL,
+        status          VARCHAR(50) DEFAULT 'sent',
+        errorMessage    TEXT NULL,
+        sentAt          DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sentBy          VARCHAR(100) NULL
+      )
+    `);
+
+    // Seed default email templates if none exist
+    const [[{ cnt }]] = await db.query('SELECT COUNT(*) AS cnt FROM email_templates');
+    if (cnt === 0) {
+      const seeds = [
+        {
+          name: 'Estimate - Standard',
+          type: 'estimate',
+          subject: 'Estimate from First Class Glass & Mirror, Inc.',
+          body: `Dear {{customerName}},
+
+Please find attached the estimate for the following project:
+
+Project: {{projectName}}
+Location: {{projectAddress}}
+P.O. Reference: {{poNumber}}
+Total: {{total}}
+
+This estimate is valid for 30 days from the date of issue.
+
+If you have any questions or would like to proceed, please don't hesitate to contact us.
+
+Thank you for your business.
+
+Best regards,
+First Class Glass & Mirror, Inc.
+1513 Industrial Drive, Itasca, IL 60143
+Phone: 630-250-9777`,
+          isDefault: 1
+        },
+        {
+          name: 'Invoice - Standard',
+          type: 'invoice',
+          subject: 'Invoice #{{invoiceNumber}} from First Class Glass & Mirror, Inc.',
+          body: `Dear {{customerName}},
+
+Please find attached Invoice #{{invoiceNumber}} for services rendered.
+
+Project: {{shipToName}}
+Location: {{shipToAddress}}
+P.O. Reference: {{poNumber}}
+Amount Due: {{total}}
+Due Date: {{dueDate}}
+
+Payment Terms: {{terms}}
+
+Please remit payment at your earliest convenience.
+
+Thank you for your business.
+
+Best regards,
+First Class Glass & Mirror, Inc.
+1513 Industrial Drive, Itasca, IL 60143
+Phone: 630-250-9777`,
+          isDefault: 1
+        },
+        {
+          name: 'Payment Reminder - Friendly',
+          type: 'payment_reminder',
+          subject: 'Payment Reminder - Invoice #{{invoiceNumber}}',
+          body: `Dear {{customerName}},
+
+This is a friendly reminder that Invoice #{{invoiceNumber}} for {{total}} is currently outstanding.
+
+Invoice Date: {{issueDate}}
+Due Date: {{dueDate}}
+Amount Due: {{balanceDue}}
+
+If payment has already been sent, please disregard this notice.
+
+Please let us know if you have any questions.
+
+Thank you,
+First Class Glass & Mirror, Inc.
+Phone: 630-250-9777`,
+          isDefault: 1
+        },
+        {
+          name: 'Payment Reminder - Overdue',
+          type: 'payment_reminder',
+          subject: 'OVERDUE: Invoice #{{invoiceNumber}} - Payment Required',
+          body: `Dear {{customerName}},
+
+Our records indicate that Invoice #{{invoiceNumber}} is past due.
+
+Invoice Date: {{issueDate}}
+Due Date: {{dueDate}}
+Days Overdue: {{daysOverdue}}
+Amount Due: {{balanceDue}}
+
+Per our payment terms, a 15% late fee may be applied to overdue balances.
+
+Please arrange payment as soon as possible. If you have any questions or need to discuss payment arrangements, please contact us immediately.
+
+Thank you,
+First Class Glass & Mirror, Inc.
+Phone: 630-250-9777`,
+          isDefault: 0
+        }
+      ];
+
+      for (const s of seeds) {
+        await db.query(
+          'INSERT INTO email_templates (name, type, subject, body, isDefault) VALUES (?, ?, ?, ?, ?)',
+          [s.name, s.type, s.subject, s.body, s.isDefault]
+        );
+      }
+      console.log('[Email] Seeded 4 default email templates');
+    }
+  } catch (e) {
+    console.warn('[Email] Could not create email tables:', e.message);
+  }
+}
+ensureEmailTables().catch(() => {});
+
+// ─── EMAIL UTILITIES ────────────────────────────────────────────────────────
+
+function mergeEmailFields(template, data) {
+  let result = template;
+  const fmtMoney = v => '$' + (Number(v) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-US') : '';
+  const fields = {
+    customerName: data.companyName || data.custName || '',
+    projectName: data.projectName || '',
+    projectAddress: [data.projectAddress, data.projectCity, data.projectState, data.projectZip].filter(Boolean).join(', '),
+    poNumber: data.poNumber || '',
+    total: fmtMoney(data.total),
+    invoiceNumber: data.invoiceNumber || '',
+    shipToName: data.shipToName || data.projectName || '',
+    shipToAddress: [data.shipToAddress || data.projectAddress, data.shipToCity || data.projectCity, data.shipToState || data.projectState, data.shipToZip || data.projectZip].filter(Boolean).join(', '),
+    issueDate: fmtDate(data.issueDate),
+    dueDate: fmtDate(data.dueDate),
+    balanceDue: fmtMoney(data.balanceDue ?? data.total),
+    daysOverdue: data.daysOverdue || '0',
+    terms: data.terms || '',
+    companyName: 'First Class Glass & Mirror, Inc.',
+    companyPhone: '630-250-9777'
+  };
+  for (const [key, value] of Object.entries(fields)) {
+    result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+  }
+  return result;
+}
+
+async function createEmailTransport() {
+  const [[settings]] = await db.query('SELECT * FROM email_settings WHERE id = 1');
+  if (!settings || !settings.senderEmail || !settings.senderPassword) {
+    throw new Error('Email settings not configured. Go to Settings to configure Yahoo Mail.');
+  }
+  return { transport: nodemailer.createTransport({
+    host: settings.smtpHost || 'smtp.mail.yahoo.com',
+    port: settings.smtpPort || 465,
+    secure: settings.smtpSecure !== 0,
+    auth: { user: settings.senderEmail, pass: settings.senderPassword },
+  }), settings };
+}
 
 // ─── AUTO STATUS JOB ─────────────────────────────────────────────────────────
 function envOn(v, def = true) {
@@ -3101,6 +3309,536 @@ app.post('/pdf-templates/preview', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error generating template preview:', err);
     res.status(500).json({ error: 'Failed to generate preview.' });
+  }
+});
+
+// ─── EMAIL SETTINGS ENDPOINTS ───────────────────────────────────────────────
+
+// GET /email-settings
+app.get('/email-settings', authenticate, async (req, res) => {
+  try {
+    const [[settings]] = await db.query('SELECT * FROM email_settings WHERE id = 1');
+    if (settings && settings.senderPassword) {
+      settings.senderPassword = '••••••••';
+    }
+    res.json(settings || {});
+  } catch (err) {
+    console.error('Error fetching email settings:', err);
+    res.status(500).json({ error: 'Failed to fetch email settings.' });
+  }
+});
+
+// PUT /email-settings
+app.put('/email-settings', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const fields = [];
+    const params = [];
+    if (b.smtpHost !== undefined)      { fields.push('smtpHost=?');      params.push(b.smtpHost); }
+    if (b.smtpPort !== undefined)      { fields.push('smtpPort=?');      params.push(Number(b.smtpPort) || 465); }
+    if (b.smtpSecure !== undefined)    { fields.push('smtpSecure=?');    params.push(b.smtpSecure ? 1 : 0); }
+    if (b.senderEmail !== undefined)   { fields.push('senderEmail=?');   params.push(b.senderEmail); }
+    if (b.senderPassword !== undefined && b.senderPassword !== '••••••••') {
+      fields.push('senderPassword=?'); params.push(b.senderPassword);
+    }
+    if (b.senderName !== undefined)    { fields.push('senderName=?');    params.push(b.senderName); }
+    if (b.replyTo !== undefined)       { fields.push('replyTo=?');       params.push(b.replyTo || null); }
+
+    if (fields.length === 0) return res.json({ message: 'No changes.' });
+    await db.query(`UPDATE email_settings SET ${fields.join(', ')} WHERE id = 1`, params);
+    res.json({ message: 'Email settings updated.' });
+  } catch (err) {
+    console.error('Error updating email settings:', err);
+    res.status(500).json({ error: 'Failed to update email settings.' });
+  }
+});
+
+// POST /email-settings/test
+app.post('/email-settings/test', authenticate, async (req, res) => {
+  try {
+    const { transport, settings } = await createEmailTransport();
+    await transport.sendMail({
+      from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+      to: settings.senderEmail,
+      subject: 'Test Email from First Class Glass CRM',
+      text: 'This is a test email to verify your SMTP settings are working correctly.\n\nIf you received this, your email configuration is set up properly!',
+    });
+    res.json({ message: 'Test email sent successfully!' });
+  } catch (err) {
+    console.error('Error sending test email:', err);
+    res.status(500).json({ error: err.message || 'Failed to send test email.' });
+  }
+});
+
+// ─── EMAIL TEMPLATE ENDPOINTS ──────────────────────────────────────────────
+
+// GET /email-templates
+app.get('/email-templates', authenticate, async (req, res) => {
+  try {
+    let sql = 'SELECT * FROM email_templates WHERE isActive = 1';
+    const params = [];
+    if (req.query.type) {
+      sql += ' AND type = ?';
+      params.push(req.query.type);
+    }
+    sql += ' ORDER BY type, isDefault DESC, name';
+    const [rows] = await db.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching email templates:', err);
+    res.status(500).json({ error: 'Failed to fetch email templates.' });
+  }
+});
+
+// GET /email-templates/:id
+app.get('/email-templates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [[row]] = await db.query('SELECT * FROM email_templates WHERE id = ? AND isActive = 1', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Template not found.' });
+    res.json(row);
+  } catch (err) {
+    console.error('Error fetching email template:', err);
+    res.status(500).json({ error: 'Failed to fetch email template.' });
+  }
+});
+
+// POST /email-templates
+app.post('/email-templates', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    if (!b.name || !b.type || !b.subject || !b.body) {
+      return res.status(400).json({ error: 'name, type, subject, and body are required.' });
+    }
+    if (b.isDefault) {
+      await db.query('UPDATE email_templates SET isDefault = 0 WHERE type = ? AND isActive = 1', [b.type]);
+    }
+    const [r] = await db.query(
+      'INSERT INTO email_templates (name, type, subject, body, isDefault) VALUES (?, ?, ?, ?, ?)',
+      [b.name, b.type, b.subject, b.body, b.isDefault ? 1 : 0]
+    );
+    const [[created]] = await db.query('SELECT * FROM email_templates WHERE id = ?', [r.insertId]);
+    res.status(201).json(created);
+  } catch (err) {
+    console.error('Error creating email template:', err);
+    res.status(500).json({ error: 'Failed to create email template.' });
+  }
+});
+
+// PUT /email-templates/:id
+app.put('/email-templates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const fields = [];
+    const params = [];
+    if (b.name !== undefined)    { fields.push('name=?');    params.push(b.name); }
+    if (b.type !== undefined)    { fields.push('type=?');    params.push(b.type); }
+    if (b.subject !== undefined) { fields.push('subject=?'); params.push(b.subject); }
+    if (b.body !== undefined)    { fields.push('body=?');    params.push(b.body); }
+    if (b.isDefault !== undefined) {
+      fields.push('isDefault=?'); params.push(b.isDefault ? 1 : 0);
+      if (b.isDefault) {
+        const type = b.type || (await db.query('SELECT type FROM email_templates WHERE id = ?', [req.params.id]))?.[0]?.[0]?.type;
+        if (type) await db.query('UPDATE email_templates SET isDefault = 0 WHERE type = ? AND id != ? AND isActive = 1', [type, req.params.id]);
+      }
+    }
+    if (fields.length === 0) return res.json({ message: 'No changes.' });
+    params.push(req.params.id);
+    await db.query(`UPDATE email_templates SET ${fields.join(', ')} WHERE id = ?`, params);
+    const [[updated]] = await db.query('SELECT * FROM email_templates WHERE id = ?', [req.params.id]);
+    res.json(updated);
+  } catch (err) {
+    console.error('Error updating email template:', err);
+    res.status(500).json({ error: 'Failed to update email template.' });
+  }
+});
+
+// DELETE /email-templates/:id
+app.delete('/email-templates/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    await db.query('UPDATE email_templates SET isActive = 0 WHERE id = ?', [req.params.id]);
+    res.json({ message: 'Template deleted.' });
+  } catch (err) {
+    console.error('Error deleting email template:', err);
+    res.status(500).json({ error: 'Failed to delete email template.' });
+  }
+});
+
+// ─── EMAIL SEND ENDPOINTS ──────────────────────────────────────────────────
+
+// Helper: resolve a pdfPath to a local file buffer for attachment
+async function resolvePdfAttachment(pdfPath) {
+  const localPath = path.resolve(__dirname, pdfPath);
+  if (fs.existsSync(localPath)) {
+    return { buffer: fs.readFileSync(localPath), filename: path.basename(localPath) };
+  }
+  // Try S3
+  if (S3_BUCKET) {
+    try {
+      const obj = await s3.getObject({ Bucket: S3_BUCKET, Key: pdfPath }).promise();
+      return { buffer: obj.Body, filename: path.basename(pdfPath) };
+    } catch (e) {
+      // Try with uploads/ prefix
+      const key2 = `uploads/${path.basename(pdfPath)}`;
+      const obj = await s3.getObject({ Bucket: S3_BUCKET, Key: key2 }).promise();
+      return { buffer: obj.Body, filename: path.basename(pdfPath) };
+    }
+  }
+  throw new Error('PDF file not found locally or in S3');
+}
+
+// POST /email/send-estimate/:estimateId
+app.post('/email/send-estimate/:estimateId', authenticate, requireNumericParam('estimateId'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const estimateId = Number(req.params.estimateId);
+
+    // Load estimate + customer
+    const [[est]] = await db.query(`
+      SELECT e.*, c.companyName, c.name AS custName, c.phone AS custPhone, c.email AS custEmail
+      FROM estimates e LEFT JOIN customers c ON e.customerId = c.id
+      WHERE e.id = ?
+    `, [estimateId]);
+    if (!est) return res.status(404).json({ error: 'Estimate not found.' });
+
+    const recipientEmail = b.recipientEmail || est.custEmail;
+    if (!recipientEmail) return res.status(400).json({ error: 'Recipient email is required.' });
+
+    // Save email to customer if requested
+    if (b.saveEmail && b.recipientEmail && est.customerId) {
+      await db.query('UPDATE customers SET email = ? WHERE id = ?', [b.recipientEmail, est.customerId]);
+    }
+
+    // Generate PDF if needed
+    let pdfPath = est.pdfPath;
+    if (!pdfPath) {
+      const pdfBuffer = await generateEstimatePdf(estimateId);
+      const filename = `estimate_${estimateId}_${Date.now()}.pdf`;
+      const localDir = path.resolve(__dirname, 'uploads');
+      if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+      const localPath = path.join(localDir, filename);
+      fs.writeFileSync(localPath, pdfBuffer);
+      pdfPath = `uploads/${filename}`;
+      await db.query('UPDATE estimates SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, estimateId]);
+      await uploadToS3IfConfigured(localPath, pdfPath);
+    }
+
+    // Resolve PDF for attachment
+    const attachment = await resolvePdfAttachment(pdfPath);
+
+    // Get subject/body from request (already merged by frontend) or merge now
+    let subject = b.subject;
+    let body = b.body;
+    if (!subject || !body) {
+      const [[tmpl]] = b.templateId
+        ? await db.query('SELECT * FROM email_templates WHERE id = ?', [b.templateId])
+        : await db.query("SELECT * FROM email_templates WHERE type = 'estimate' AND isDefault = 1 AND isActive = 1 LIMIT 1");
+      if (tmpl) {
+        subject = subject || mergeEmailFields(tmpl.subject, est);
+        body = body || mergeEmailFields(tmpl.body, est);
+      } else {
+        subject = subject || 'Estimate from First Class Glass & Mirror, Inc.';
+        body = body || 'Please find attached the estimate.';
+      }
+    }
+
+    // Send email
+    const { transport, settings } = await createEmailTransport();
+    await transport.sendMail({
+      from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+      replyTo: settings.replyTo || settings.senderEmail,
+      to: recipientEmail,
+      subject,
+      text: body,
+      attachments: [{
+        filename: attachment.filename,
+        content: attachment.buffer,
+        contentType: 'application/pdf',
+      }],
+    });
+
+    // Log
+    await db.query(
+      'INSERT INTO email_log (templateId, estimateId, recipientEmail, recipientName, subject, body, attachmentPath, status, sentBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [b.templateId || null, estimateId, recipientEmail, b.recipientName || est.companyName || est.custName || null, subject, body, pdfPath, 'sent', req.user?.username || null]
+    );
+
+    // Update status
+    await db.query("UPDATE estimates SET status='Sent', sentAt=NOW(), updatedAt=NOW() WHERE id=?", [estimateId]);
+
+    res.json({ message: 'Email sent successfully!' });
+  } catch (err) {
+    console.error('Error sending estimate email:', err);
+    // Log the failure
+    try {
+      const b = coerceBody(req);
+      await db.query(
+        'INSERT INTO email_log (estimateId, recipientEmail, subject, status, errorMessage, sentBy) VALUES (?, ?, ?, ?, ?, ?)',
+        [req.params.estimateId, b.recipientEmail || '', b.subject || '', 'failed', err.message, req.user?.username || null]
+      );
+    } catch (logErr) { /* ignore */ }
+    res.status(500).json({ error: err.message || 'Failed to send email.' });
+  }
+});
+
+// POST /email/send-invoice/:invoiceId
+app.post('/email/send-invoice/:invoiceId', authenticate, requireNumericParam('invoiceId'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const invoiceId = Number(req.params.invoiceId);
+
+    const [[inv]] = await db.query(`
+      SELECT i.*, c.companyName, c.name AS custName, c.phone AS custPhone, c.email AS custEmail
+      FROM invoices i LEFT JOIN customers c ON i.customerId = c.id
+      WHERE i.id = ?
+    `, [invoiceId]);
+    if (!inv) return res.status(404).json({ error: 'Invoice not found.' });
+
+    const recipientEmail = b.recipientEmail || inv.custEmail;
+    if (!recipientEmail) return res.status(400).json({ error: 'Recipient email is required.' });
+
+    if (b.saveEmail && b.recipientEmail && inv.customerId) {
+      await db.query('UPDATE customers SET email = ? WHERE id = ?', [b.recipientEmail, inv.customerId]);
+    }
+
+    let pdfPath = inv.pdfPath;
+    if (!pdfPath) {
+      const pdfBuffer = await generateInvoicePdf(invoiceId);
+      const filename = `invoice_${invoiceId}_${Date.now()}.pdf`;
+      const localDir = path.resolve(__dirname, 'uploads');
+      if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+      const localPath = path.join(localDir, filename);
+      fs.writeFileSync(localPath, pdfBuffer);
+      pdfPath = `uploads/${filename}`;
+      await db.query('UPDATE invoices SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, invoiceId]);
+      await uploadToS3IfConfigured(localPath, pdfPath);
+    }
+
+    const attachment = await resolvePdfAttachment(pdfPath);
+
+    // Calculate daysOverdue for merge
+    if (inv.dueDate) {
+      const due = new Date(inv.dueDate);
+      const now = new Date();
+      const diff = Math.floor((now - due) / (1000 * 60 * 60 * 24));
+      inv.daysOverdue = diff > 0 ? String(diff) : '0';
+    }
+
+    let subject = b.subject;
+    let body = b.body;
+    if (!subject || !body) {
+      const [[tmpl]] = b.templateId
+        ? await db.query('SELECT * FROM email_templates WHERE id = ?', [b.templateId])
+        : await db.query("SELECT * FROM email_templates WHERE type = 'invoice' AND isDefault = 1 AND isActive = 1 LIMIT 1");
+      if (tmpl) {
+        subject = subject || mergeEmailFields(tmpl.subject, inv);
+        body = body || mergeEmailFields(tmpl.body, inv);
+      } else {
+        subject = subject || `Invoice #${inv.invoiceNumber} from First Class Glass & Mirror, Inc.`;
+        body = body || 'Please find attached the invoice.';
+      }
+    }
+
+    const { transport, settings } = await createEmailTransport();
+    await transport.sendMail({
+      from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+      replyTo: settings.replyTo || settings.senderEmail,
+      to: recipientEmail,
+      subject,
+      text: body,
+      attachments: [{
+        filename: attachment.filename,
+        content: attachment.buffer,
+        contentType: 'application/pdf',
+      }],
+    });
+
+    await db.query(
+      'INSERT INTO email_log (templateId, invoiceId, recipientEmail, recipientName, subject, body, attachmentPath, status, sentBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [b.templateId || null, invoiceId, recipientEmail, b.recipientName || inv.companyName || inv.custName || null, subject, body, pdfPath, 'sent', req.user?.username || null]
+    );
+
+    await db.query("UPDATE invoices SET status='Sent', sentAt=NOW(), updatedAt=NOW() WHERE id=?", [invoiceId]);
+
+    res.json({ message: 'Email sent successfully!' });
+  } catch (err) {
+    console.error('Error sending invoice email:', err);
+    try {
+      const b = coerceBody(req);
+      await db.query(
+        'INSERT INTO email_log (invoiceId, recipientEmail, subject, status, errorMessage, sentBy) VALUES (?, ?, ?, ?, ?, ?)',
+        [req.params.invoiceId, b.recipientEmail || '', b.subject || '', 'failed', err.message, req.user?.username || null]
+      );
+    } catch (logErr) { /* ignore */ }
+    res.status(500).json({ error: err.message || 'Failed to send email.' });
+  }
+});
+
+// POST /email/send-reminder/:invoiceId
+app.post('/email/send-reminder/:invoiceId', authenticate, requireNumericParam('invoiceId'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const invoiceId = Number(req.params.invoiceId);
+
+    const [[inv]] = await db.query(`
+      SELECT i.*, c.companyName, c.name AS custName, c.phone AS custPhone, c.email AS custEmail
+      FROM invoices i LEFT JOIN customers c ON i.customerId = c.id
+      WHERE i.id = ?
+    `, [invoiceId]);
+    if (!inv) return res.status(404).json({ error: 'Invoice not found.' });
+
+    const recipientEmail = b.recipientEmail || inv.custEmail;
+    if (!recipientEmail) return res.status(400).json({ error: 'Recipient email is required.' });
+
+    if (b.saveEmail && b.recipientEmail && inv.customerId) {
+      await db.query('UPDATE customers SET email = ? WHERE id = ?', [b.recipientEmail, inv.customerId]);
+    }
+
+    // Generate PDF if needed
+    let pdfPath = inv.pdfPath;
+    if (!pdfPath) {
+      const pdfBuffer = await generateInvoicePdf(invoiceId);
+      const filename = `invoice_${invoiceId}_${Date.now()}.pdf`;
+      const localDir = path.resolve(__dirname, 'uploads');
+      if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+      const localPath = path.join(localDir, filename);
+      fs.writeFileSync(localPath, pdfBuffer);
+      pdfPath = `uploads/${filename}`;
+      await db.query('UPDATE invoices SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, invoiceId]);
+      await uploadToS3IfConfigured(localPath, pdfPath);
+    }
+
+    const attachment = await resolvePdfAttachment(pdfPath);
+
+    // Calculate daysOverdue
+    if (inv.dueDate) {
+      const due = new Date(inv.dueDate);
+      const now = new Date();
+      const diff = Math.floor((now - due) / (1000 * 60 * 60 * 24));
+      inv.daysOverdue = diff > 0 ? String(diff) : '0';
+    }
+
+    let subject = b.subject;
+    let body = b.body;
+    if (!subject || !body) {
+      const [[tmpl]] = b.templateId
+        ? await db.query('SELECT * FROM email_templates WHERE id = ?', [b.templateId])
+        : await db.query("SELECT * FROM email_templates WHERE type = 'payment_reminder' AND isDefault = 1 AND isActive = 1 LIMIT 1");
+      if (tmpl) {
+        subject = subject || mergeEmailFields(tmpl.subject, inv);
+        body = body || mergeEmailFields(tmpl.body, inv);
+      } else {
+        subject = subject || `Payment Reminder - Invoice #${inv.invoiceNumber}`;
+        body = body || 'This is a reminder about your outstanding invoice.';
+      }
+    }
+
+    const { transport, settings } = await createEmailTransport();
+    await transport.sendMail({
+      from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+      replyTo: settings.replyTo || settings.senderEmail,
+      to: recipientEmail,
+      subject,
+      text: body,
+      attachments: [{
+        filename: attachment.filename,
+        content: attachment.buffer,
+        contentType: 'application/pdf',
+      }],
+    });
+
+    await db.query(
+      'INSERT INTO email_log (templateId, invoiceId, recipientEmail, recipientName, subject, body, attachmentPath, status, sentBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [b.templateId || null, invoiceId, recipientEmail, b.recipientName || inv.companyName || inv.custName || null, subject, body, pdfPath, 'sent', req.user?.username || null]
+    );
+
+    // Don't change invoice status for reminders
+    res.json({ message: 'Reminder sent successfully!' });
+  } catch (err) {
+    console.error('Error sending reminder email:', err);
+    try {
+      const b = coerceBody(req);
+      await db.query(
+        'INSERT INTO email_log (invoiceId, recipientEmail, subject, status, errorMessage, sentBy) VALUES (?, ?, ?, ?, ?, ?)',
+        [req.params.invoiceId, b.recipientEmail || '', b.subject || '', 'failed', err.message, req.user?.username || null]
+      );
+    } catch (logErr) { /* ignore */ }
+    res.status(500).json({ error: err.message || 'Failed to send reminder.' });
+  }
+});
+
+// POST /email/preview
+app.post('/email/preview', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const { templateId, type, entityId } = b;
+
+    let tmpl;
+    if (templateId) {
+      const [[t]] = await db.query('SELECT * FROM email_templates WHERE id = ? AND isActive = 1', [templateId]);
+      tmpl = t;
+    }
+    if (!tmpl && type) {
+      const [[t]] = await db.query('SELECT * FROM email_templates WHERE type = ? AND isDefault = 1 AND isActive = 1 LIMIT 1', [type]);
+      tmpl = t;
+    }
+    if (!tmpl) return res.status(404).json({ error: 'No template found.' });
+
+    let data = {};
+    let recipientEmail = '';
+    let recipientName = '';
+    let attachmentName = '';
+
+    if ((type === 'estimate' || tmpl.type === 'estimate') && entityId) {
+      const [[est]] = await db.query(`
+        SELECT e.*, c.companyName, c.name AS custName, c.email AS custEmail
+        FROM estimates e LEFT JOIN customers c ON e.customerId = c.id WHERE e.id = ?
+      `, [entityId]);
+      if (est) {
+        data = est;
+        recipientEmail = est.custEmail || '';
+        recipientName = est.companyName || est.custName || '';
+        attachmentName = est.pdfPath ? path.basename(est.pdfPath) : `estimate_${entityId}.pdf`;
+      }
+    } else if (entityId) {
+      const [[inv]] = await db.query(`
+        SELECT i.*, c.companyName, c.name AS custName, c.email AS custEmail
+        FROM invoices i LEFT JOIN customers c ON i.customerId = c.id WHERE i.id = ?
+      `, [entityId]);
+      if (inv) {
+        if (inv.dueDate) {
+          const diff = Math.floor((new Date() - new Date(inv.dueDate)) / (1000 * 60 * 60 * 24));
+          inv.daysOverdue = diff > 0 ? String(diff) : '0';
+        }
+        data = inv;
+        recipientEmail = inv.custEmail || '';
+        recipientName = inv.companyName || inv.custName || '';
+        attachmentName = inv.pdfPath ? path.basename(inv.pdfPath) : `invoice_${entityId}.pdf`;
+      }
+    }
+
+    const subject = mergeEmailFields(tmpl.subject, data);
+    const body = mergeEmailFields(tmpl.body, data);
+
+    res.json({ subject, body, recipientEmail, recipientName, attachmentName, templateId: tmpl.id });
+  } catch (err) {
+    console.error('Error previewing email:', err);
+    res.status(500).json({ error: 'Failed to generate preview.' });
+  }
+});
+
+// GET /email-log
+app.get('/email-log', authenticate, async (req, res) => {
+  try {
+    let sql = 'SELECT * FROM email_log WHERE 1=1';
+    const params = [];
+    if (req.query.estimateId) { sql += ' AND estimateId = ?'; params.push(Number(req.query.estimateId)); }
+    if (req.query.invoiceId) { sql += ' AND invoiceId = ?'; params.push(Number(req.query.invoiceId)); }
+    sql += ' ORDER BY sentAt DESC LIMIT 100';
+    const [rows] = await db.query(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching email log:', err);
+    res.status(500).json({ error: 'Failed to fetch email log.' });
   }
 });
 

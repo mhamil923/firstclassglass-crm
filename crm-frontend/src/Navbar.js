@@ -30,6 +30,7 @@ const NAV_ITEMS = [
       { label: "Customers", to: "/customers" },
       { label: "Line Item Templates", to: "/line-item-templates" },
       { label: "PDF Templates", to: "/pdf-templates" },
+      { label: "Email Templates", to: "/email-templates" },
       { label: "History", to: "/history" },
       { label: "Reports", to: "/reports" },
     ],
@@ -114,6 +115,14 @@ function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
   const [saving, setSaving] = useState(false);
   const [localOrder, setLocalOrder] = useState(navOrder);
 
+  // Email settings
+  const [emailSettings, setEmailSettings] = useState({
+    senderEmail: "", senderPassword: "", senderName: "", replyTo: ""
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [emailTestResult, setEmailTestResult] = useState("");
+
   // Line item templates
   const [templates, setTemplates] = useState([]);
   const [editingTpl, setEditingTpl] = useState(null); // id of template being edited
@@ -124,14 +133,22 @@ function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
-      const [settingsRes, tplRes] = await Promise.all([
+      const [settingsRes, tplRes, emailRes] = await Promise.all([
         api.get("/settings"),
         api.get("/line-item-templates"),
+        api.get("/email-settings").catch(() => ({ data: {} })),
       ]);
       const s = settingsRes.data || {};
       setNextInvoiceNumber(s.nextInvoiceNumber || "1");
       setDefaultInvoiceTerms(s.defaultInvoiceTerms || "");
       setTemplates(tplRes.data || []);
+      const es = emailRes.data || {};
+      setEmailSettings({
+        senderEmail: es.senderEmail || "",
+        senderPassword: es.senderPassword || "",
+        senderName: es.senderName || "",
+        replyTo: es.replyTo || "",
+      });
     } catch (err) {
       console.error("Error fetching settings:", err);
     } finally {
@@ -212,7 +229,10 @@ function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.put("/settings", { nextInvoiceNumber, defaultInvoiceTerms });
+      await Promise.all([
+        api.put("/settings", { nextInvoiceNumber, defaultInvoiceTerms }),
+        api.put("/email-settings", emailSettings),
+      ]);
       saveNavOrder(localOrder);
       onNavOrderChange(localOrder);
       onClose();
@@ -221,6 +241,21 @@ function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
       alert("Failed to save settings.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestEmail = async () => {
+    setTestingEmail(true);
+    setEmailTestResult("");
+    try {
+      // Save email settings first
+      await api.put("/email-settings", emailSettings);
+      const res = await api.post("/email-settings/test");
+      setEmailTestResult(res.data.message || "Test email sent!");
+    } catch (err) {
+      setEmailTestResult(err.response?.data?.error || "Failed to send test email.");
+    } finally {
+      setTestingEmail(false);
     }
   };
 
@@ -250,6 +285,99 @@ function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
                 onChange={(e) => setDefaultInvoiceTerms(e.target.value)}
                 rows={4}
               />
+            </div>
+
+            <div className="settings-divider" />
+
+            {/* Email Configuration */}
+            <div className="settings-field">
+              <label className="settings-label">Email Configuration</label>
+              <p className="settings-hint">
+                Configure Yahoo Mail to send estimates, invoices, and payment reminders.
+                You need a Yahoo App Password (Account Settings → Security → Generate App Password).
+              </p>
+            </div>
+
+            <div className="settings-field">
+              <label className="settings-label" style={{ fontSize: 11 }}>Yahoo Email Address</label>
+              <input
+                className="settings-input"
+                type="email"
+                value={emailSettings.senderEmail}
+                onChange={(e) => setEmailSettings((s) => ({ ...s, senderEmail: e.target.value }))}
+                placeholder="youremail@yahoo.com"
+              />
+            </div>
+
+            <div className="settings-field">
+              <label className="settings-label" style={{ fontSize: 11 }}>App Password</label>
+              <div style={{ position: "relative" }}>
+                <input
+                  className="settings-input"
+                  type={showPassword ? "text" : "password"}
+                  value={emailSettings.senderPassword}
+                  onChange={(e) => setEmailSettings((s) => ({ ...s, senderPassword: e.target.value }))}
+                  placeholder="Yahoo app password"
+                  style={{ paddingRight: 60 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                    background: "none", border: "none", color: "var(--accent-blue)",
+                    cursor: "pointer", fontSize: 12, fontWeight: 600
+                  }}
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+            </div>
+
+            <div className="settings-field">
+              <label className="settings-label" style={{ fontSize: 11 }}>Sender Display Name</label>
+              <input
+                className="settings-input"
+                value={emailSettings.senderName}
+                onChange={(e) => setEmailSettings((s) => ({ ...s, senderName: e.target.value }))}
+                placeholder="First Class Glass & Mirror, Inc."
+              />
+            </div>
+
+            <div className="settings-field">
+              <label className="settings-label" style={{ fontSize: 11 }}>Reply-To Email (optional)</label>
+              <input
+                className="settings-input"
+                type="email"
+                value={emailSettings.replyTo}
+                onChange={(e) => setEmailSettings((s) => ({ ...s, replyTo: e.target.value }))}
+                placeholder="Leave blank to use sender email"
+              />
+            </div>
+
+            <div className="settings-field">
+              <button
+                type="button"
+                className="settings-btn-test"
+                onClick={handleTestEmail}
+                disabled={testingEmail || !emailSettings.senderEmail || !emailSettings.senderPassword}
+                style={{
+                  padding: "8px 16px", borderRadius: 8, border: "1px solid var(--border-color-strong)",
+                  background: "var(--bg-secondary)", color: "var(--text-primary)", cursor: "pointer",
+                  fontSize: 13, fontWeight: 600, transition: "var(--transition-fast)",
+                  opacity: (testingEmail || !emailSettings.senderEmail || !emailSettings.senderPassword) ? 0.5 : 1
+                }}
+              >
+                {testingEmail ? "Testing..." : "Test Connection"}
+              </button>
+              {emailTestResult && (
+                <span style={{
+                  marginLeft: 12, fontSize: 13, fontWeight: 500,
+                  color: emailTestResult.includes("success") || emailTestResult.includes("sent") ? "var(--accent-green)" : "var(--accent-red)"
+                }}>
+                  {emailTestResult}
+                </span>
+              )}
             </div>
 
             <div className="settings-divider" />
