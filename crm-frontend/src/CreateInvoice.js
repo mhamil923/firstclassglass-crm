@@ -38,9 +38,6 @@ export default function CreateInvoice() {
     shipToState: "",
     shipToZip: "",
     billingAddress: "",
-    billingCity: "",
-    billingState: "",
-    billingZip: "",
     issueDate: todayISO(),
     dueDate: addDays(todayISO(), 45),
     notes: "",
@@ -68,7 +65,13 @@ export default function CreateInvoice() {
   // --- Load PDF templates ---
   useEffect(() => {
     api.get("/pdf-templates?type=invoice").then((res) => {
-      setPdfTemplates(Array.isArray(res.data) ? res.data : []);
+      const tpls = Array.isArray(res.data) ? res.data : [];
+      setPdfTemplates(tpls);
+      if (tpls.length > 0 && !selectedTemplateId) {
+        const def = tpls.find((t) => t.isDefault);
+        if (def) setSelectedTemplateId(String(def.id));
+        else setSelectedTemplateId(String(tpls[0].id));
+      }
     }).catch(() => {});
   }, []);
 
@@ -104,10 +107,7 @@ export default function CreateInvoice() {
         ...prev,
         customerId: match.id,
         customerSearch: match.companyName || match.name || "",
-        billingAddress: match.billingAddress || "",
-        billingCity: match.billingCity || "",
-        billingState: match.billingState || "",
-        billingZip: match.billingZip || "",
+        billingAddress: [match.billingAddress, match.billingCity, match.billingState, match.billingZip].filter(Boolean).join(", ") || "",
       }));
     }
   }, [customers, invoice.customerSearch, invoice.customerId]);
@@ -129,10 +129,7 @@ export default function CreateInvoice() {
         shipToCity: inv.shipToCity || "",
         shipToState: inv.shipToState || "",
         shipToZip: inv.shipToZip || "",
-        billingAddress: inv.billingAddress || inv.custBillingAddress || "",
-        billingCity: inv.billingCity || inv.custBillingCity || "",
-        billingState: inv.billingState || inv.custBillingState || "",
-        billingZip: inv.billingZip || inv.custBillingZip || "",
+        billingAddress: [inv.billingAddress || inv.custBillingAddress, inv.billingCity || inv.custBillingCity, inv.billingState || inv.custBillingState, inv.billingZip || inv.custBillingZip].filter(Boolean).join(", ") || "",
         issueDate: inv.issueDate ? inv.issueDate.split("T")[0] : todayISO(),
         dueDate: inv.dueDate ? inv.dueDate.split("T")[0] : addDays(todayISO(), 45),
         notes: inv.notes || "",
@@ -144,10 +141,7 @@ export default function CreateInvoice() {
       setSelectedCustomer({
         id: inv.customerId,
         companyName: inv.companyName || inv.custName,
-        billingAddress: inv.billingAddress,
-        billingCity: inv.billingCity,
-        billingState: inv.billingState,
-        billingZip: inv.billingZip,
+        billingAddress: [inv.billingAddress, inv.billingCity, inv.billingState, inv.billingZip].filter(Boolean).join(", "),
         phone: inv.custPhone,
         email: inv.custEmail,
       });
@@ -193,10 +187,7 @@ export default function CreateInvoice() {
           shipToCity: e.projectCity || "",
           shipToState: e.projectState || "",
           shipToZip: e.projectZip || "",
-          billingAddress: e.effectiveBillingAddress || e.billingAddress || "",
-          billingCity: e.effectiveBillingCity || e.billingCity || "",
-          billingState: e.effectiveBillingState || e.billingState || "",
-          billingZip: e.effectiveBillingZip || e.billingZip || "",
+          billingAddress: [e.effectiveBillingAddress || e.billingAddress, e.effectiveBillingCity || e.billingCity, e.effectiveBillingState || e.billingState, e.effectiveBillingZip || e.billingZip].filter(Boolean).join(", ") || "",
           taxRate: Number(e.taxRate) || 0,
           notes: e.notes || "",
           terms: e.terms || prev.terms,
@@ -238,10 +229,7 @@ export default function CreateInvoice() {
               ...prev,
               customerId: cRes.data.id,
               customerSearch: cRes.data.companyName || cRes.data.name || "",
-              billingAddress: cRes.data.billingAddress || "",
-              billingCity: cRes.data.billingCity || "",
-              billingState: cRes.data.billingState || "",
-              billingZip: cRes.data.billingZip || "",
+              billingAddress: [cRes.data.billingAddress, cRes.data.billingCity, cRes.data.billingState, cRes.data.billingZip].filter(Boolean).join(", ") || "",
             }));
           }).catch(() => {});
         } else if (wo.customer) {
@@ -256,10 +244,7 @@ export default function CreateInvoice() {
           ...prev,
           customerId: c.id,
           customerSearch: c.companyName || c.name || "",
-          billingAddress: c.billingAddress || "",
-          billingCity: c.billingCity || "",
-          billingState: c.billingState || "",
-          billingZip: c.billingZip || "",
+          billingAddress: [c.billingAddress, c.billingCity, c.billingState, c.billingZip].filter(Boolean).join(", ") || "",
         }));
       }).catch(() => {});
     }
@@ -282,10 +267,7 @@ export default function CreateInvoice() {
       ...prev,
       customerId: c.id,
       customerSearch: c.companyName || c.name || "",
-      billingAddress: c.billingAddress || "",
-      billingCity: c.billingCity || "",
-      billingState: c.billingState || "",
-      billingZip: c.billingZip || "",
+      billingAddress: [c.billingAddress, c.billingCity, c.billingState, c.billingZip].filter(Boolean).join(", ") || "",
     }));
     setShowCustomerDropdown(false);
   };
@@ -353,9 +335,6 @@ export default function CreateInvoice() {
         shipToState: invoice.shipToState,
         shipToZip: invoice.shipToZip,
         billingAddress: invoice.billingAddress || null,
-        billingCity: invoice.billingCity || null,
-        billingState: invoice.billingState || null,
-        billingZip: invoice.billingZip || null,
         issueDate: invoice.issueDate || todayISO(),
         dueDate: invoice.dueDate || addDays(invoice.issueDate || todayISO(), 45),
         notes: invoice.notes,
@@ -520,10 +499,7 @@ export default function CreateInvoice() {
                       style={{ background: "none", border: "none", color: "var(--accent-blue)", fontSize: 12, fontWeight: 500, cursor: "pointer", padding: 0 }}
                       onClick={() => setInvoice((prev) => ({
                         ...prev,
-                        billingAddress: selectedCustomer.billingAddress || "",
-                        billingCity: selectedCustomer.billingCity || "",
-                        billingState: selectedCustomer.billingState || "",
-                        billingZip: selectedCustomer.billingZip || "",
+                        billingAddress: [selectedCustomer.billingAddress, selectedCustomer.billingCity, selectedCustomer.billingState, selectedCustomer.billingZip].filter(Boolean).join(", ") || "",
                       }))}
                     >
                       Reset to Customer Default
@@ -535,31 +511,8 @@ export default function CreateInvoice() {
                     value={invoice.billingAddress}
                     onChange={handleChange}
                     className="ci-input"
-                    placeholder="Billing street address"
+                    placeholder="Full billing address"
                   />
-                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 8, marginTop: 8 }}>
-                    <input
-                      name="billingCity"
-                      value={invoice.billingCity}
-                      onChange={handleChange}
-                      className="ci-input"
-                      placeholder="City"
-                    />
-                    <input
-                      name="billingState"
-                      value={invoice.billingState}
-                      onChange={handleChange}
-                      className="ci-input"
-                      placeholder="ST"
-                    />
-                    <input
-                      name="billingZip"
-                      value={invoice.billingZip}
-                      onChange={handleChange}
-                      className="ci-input"
-                      placeholder="ZIP"
-                    />
-                  </div>
                 </div>
             </div>
           </div>
@@ -631,6 +584,28 @@ export default function CreateInvoice() {
                   placeholder="Full address, e.g. 1739 E Golf Rd, Schaumburg, IL 60159"
                 />
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* PDF Template */}
+        <div className="ci-card">
+          <div className="ci-card-header">PDF Template</div>
+          <div className="ci-card-body">
+            <div className="ci-field">
+              <div className="ci-label">Template</div>
+              <select
+                className="ci-input"
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
+              >
+                <option value="">Default Template</option>
+                {pdfTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}{t.isDefault ? " (Default)" : ""}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
@@ -717,19 +692,6 @@ export default function CreateInvoice() {
           >
             {saving ? "Saving..." : "Save as Draft"}
           </button>
-          {pdfTemplates.length > 1 && (
-            <select
-              className="ci-input"
-              value={selectedTemplateId}
-              onChange={(e) => setSelectedTemplateId(e.target.value)}
-              style={{ width: "auto", minWidth: 140, padding: "8px 12px", fontSize: 13 }}
-            >
-              <option value="">Default Template</option>
-              {pdfTemplates.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-          )}
           <button
             className="ci-btn ci-btn-primary"
             onClick={() => handleSave(true)}

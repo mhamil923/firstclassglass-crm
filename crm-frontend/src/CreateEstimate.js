@@ -35,9 +35,6 @@ export default function CreateEstimate() {
     projectState: "",
     projectZip: "",
     billingAddress: "",
-    billingCity: "",
-    billingState: "",
-    billingZip: "",
     issueDate: todayISO(),
     expirationDate: "",
     notes: "",
@@ -67,7 +64,13 @@ export default function CreateEstimate() {
   // --- Load PDF templates ---
   useEffect(() => {
     api.get("/pdf-templates?type=estimate").then((res) => {
-      setPdfTemplates(Array.isArray(res.data) ? res.data : []);
+      const tpls = Array.isArray(res.data) ? res.data : [];
+      setPdfTemplates(tpls);
+      if (tpls.length > 0 && !selectedTemplateId) {
+        const def = tpls.find((t) => t.isDefault);
+        if (def) setSelectedTemplateId(String(def.id));
+        else setSelectedTemplateId(String(tpls[0].id));
+      }
     }).catch(() => {});
   }, []);
 
@@ -95,10 +98,7 @@ export default function CreateEstimate() {
         ...prev,
         customerId: match.id,
         customerSearch: match.companyName || match.name || "",
-        billingAddress: match.billingAddress || "",
-        billingCity: match.billingCity || "",
-        billingState: match.billingState || "",
-        billingZip: match.billingZip || "",
+        billingAddress: [match.billingAddress, match.billingCity, match.billingState, match.billingZip].filter(Boolean).join(", ") || "",
       }));
     }
   }, [customers, estimate.customerSearch, estimate.customerId]);
@@ -119,10 +119,7 @@ export default function CreateEstimate() {
         projectCity: e.projectCity || "",
         projectState: e.projectState || "",
         projectZip: e.projectZip || "",
-        billingAddress: e.billingAddress || e.custBillingAddress || "",
-        billingCity: e.billingCity || e.custBillingCity || "",
-        billingState: e.billingState || e.custBillingState || "",
-        billingZip: e.billingZip || e.custBillingZip || "",
+        billingAddress: [e.billingAddress || e.custBillingAddress, e.billingCity || e.custBillingCity, e.billingState || e.custBillingState, e.billingZip || e.custBillingZip].filter(Boolean).join(", ") || "",
         issueDate: e.issueDate ? e.issueDate.split("T")[0] : todayISO(),
         expirationDate: e.expirationDate ? e.expirationDate.split("T")[0] : "",
         notes: e.notes || "",
@@ -133,10 +130,7 @@ export default function CreateEstimate() {
       setSelectedCustomer({
         id: e.customerId,
         companyName: e.companyName || e.custName,
-        billingAddress: e.billingAddress,
-        billingCity: e.billingCity,
-        billingState: e.billingState,
-        billingZip: e.billingZip,
+        billingAddress: [e.billingAddress, e.billingCity, e.billingState, e.billingZip].filter(Boolean).join(", "),
         phone: e.custPhone,
         email: e.custEmail,
       });
@@ -185,10 +179,7 @@ export default function CreateEstimate() {
               ...prev,
               customerId: cRes.data.id,
               customerSearch: cRes.data.companyName || cRes.data.name || "",
-              billingAddress: cRes.data.billingAddress || "",
-              billingCity: cRes.data.billingCity || "",
-              billingState: cRes.data.billingState || "",
-              billingZip: cRes.data.billingZip || "",
+              billingAddress: [cRes.data.billingAddress, cRes.data.billingCity, cRes.data.billingState, cRes.data.billingZip].filter(Boolean).join(", ") || "",
             }));
           }).catch(() => {});
         } else if (wo.customer) {
@@ -203,10 +194,7 @@ export default function CreateEstimate() {
           ...prev,
           customerId: c.id,
           customerSearch: c.companyName || c.name || "",
-          billingAddress: c.billingAddress || "",
-          billingCity: c.billingCity || "",
-          billingState: c.billingState || "",
-          billingZip: c.billingZip || "",
+          billingAddress: [c.billingAddress, c.billingCity, c.billingState, c.billingZip].filter(Boolean).join(", ") || "",
         }));
       }).catch(() => {});
     }
@@ -229,10 +217,7 @@ export default function CreateEstimate() {
       ...prev,
       customerId: c.id,
       customerSearch: c.companyName || c.name || "",
-      billingAddress: c.billingAddress || "",
-      billingCity: c.billingCity || "",
-      billingState: c.billingState || "",
-      billingZip: c.billingZip || "",
+      billingAddress: [c.billingAddress, c.billingCity, c.billingState, c.billingZip].filter(Boolean).join(", ") || "",
     }));
     setShowCustomerDropdown(false);
   };
@@ -294,9 +279,6 @@ export default function CreateEstimate() {
         projectState: estimate.projectState,
         projectZip: estimate.projectZip,
         billingAddress: estimate.billingAddress || null,
-        billingCity: estimate.billingCity || null,
-        billingState: estimate.billingState || null,
-        billingZip: estimate.billingZip || null,
         issueDate: estimate.issueDate || todayISO(),
         expirationDate: estimate.expirationDate || null,
         notes: estimate.notes,
@@ -462,10 +444,7 @@ export default function CreateEstimate() {
                       style={{ background: "none", border: "none", color: "var(--accent-blue)", fontSize: 12, fontWeight: 500, cursor: "pointer", padding: 0 }}
                       onClick={() => setEstimate((prev) => ({
                         ...prev,
-                        billingAddress: selectedCustomer.billingAddress || "",
-                        billingCity: selectedCustomer.billingCity || "",
-                        billingState: selectedCustomer.billingState || "",
-                        billingZip: selectedCustomer.billingZip || "",
+                        billingAddress: [selectedCustomer.billingAddress, selectedCustomer.billingCity, selectedCustomer.billingState, selectedCustomer.billingZip].filter(Boolean).join(", ") || "",
                       }))}
                     >
                       Reset to Customer Default
@@ -477,31 +456,8 @@ export default function CreateEstimate() {
                     value={estimate.billingAddress}
                     onChange={handleChange}
                     className="ce-input"
-                    placeholder="Billing street address"
+                    placeholder="Full billing address"
                   />
-                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 8, marginTop: 8 }}>
-                    <input
-                      name="billingCity"
-                      value={estimate.billingCity}
-                      onChange={handleChange}
-                      className="ce-input"
-                      placeholder="City"
-                    />
-                    <input
-                      name="billingState"
-                      value={estimate.billingState}
-                      onChange={handleChange}
-                      className="ce-input"
-                      placeholder="ST"
-                    />
-                    <input
-                      name="billingZip"
-                      value={estimate.billingZip}
-                      onChange={handleChange}
-                      className="ce-input"
-                      placeholder="ZIP"
-                    />
-                  </div>
                 </div>
             </div>
           </div>
@@ -568,6 +524,28 @@ export default function CreateEstimate() {
                   className="ce-input"
                 />
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* PDF Template */}
+        <div className="ce-card">
+          <div className="ce-card-header">PDF Template</div>
+          <div className="ce-card-body">
+            <div className="ce-field">
+              <div className="ce-label">Template</div>
+              <select
+                className="ce-input"
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
+              >
+                <option value="">Default Template</option>
+                {pdfTemplates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}{t.isDefault ? " (Default)" : ""}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
@@ -658,19 +636,6 @@ export default function CreateEstimate() {
           >
             {saving ? "Saving..." : "Save as Draft"}
           </button>
-          {pdfTemplates.length > 1 && (
-            <select
-              className="ce-input"
-              value={selectedTemplateId}
-              onChange={(e) => setSelectedTemplateId(e.target.value)}
-              style={{ width: "auto", minWidth: 140, padding: "8px 12px", fontSize: 13 }}
-            >
-              <option value="">Default Template</option>
-              {pdfTemplates.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-          )}
           <button
             className="ce-btn ce-btn-primary"
             onClick={() => handleSave(true)}
