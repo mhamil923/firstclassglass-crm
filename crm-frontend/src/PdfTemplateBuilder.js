@@ -84,6 +84,118 @@ const HANDLES = [
   { id: "r", cursor: "ew-resize", style: { right: -4, top: "50%", transform: "translateY(-50%)" } },
 ];
 
+/* ═══════════════════════════════════════════════════════════════
+   STABLE SUB-COMPONENTS — defined at module scope so React never
+   unmounts/remounts them on parent re-render. This prevents
+   input focus loss.
+   ═══════════════════════════════════════════════════════════════ */
+
+function PtbToggle({ checked, onChange }) {
+  return (
+    <label className="ptb-toggle">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="ptb-toggle-slider" />
+    </label>
+  );
+}
+
+function PtbSection({ title, isSelected, isOpen, onToggle, showToggle, showChecked, onShowChange, sRef, children }) {
+  return (
+    <div className={`ptb-section${isSelected ? " ptb-section-selected" : ""}`} ref={sRef}>
+      <div className="ptb-section-header" onClick={onToggle}>
+        <span className="ptb-section-title">
+          <span className={`ptb-section-chevron ${isOpen ? "open" : ""}`}>&#9654;</span>
+          {title}
+        </span>
+        {showToggle && <PtbToggle checked={showChecked} onChange={onShowChange} />}
+      </div>
+      {isOpen && <div className="ptb-section-body">{children}</div>}
+    </div>
+  );
+}
+
+function PtbNumInput({ value, onChange, onBlur, label }) {
+  return (
+    <div className="ptb-field" style={{ flex: 1 }}>
+      {label && <label className="ptb-label">{label}</label>}
+      <input
+        className="ptb-input ptb-input-sm"
+        type="text"
+        inputMode="numeric"
+        value={value}
+        onChange={onChange}
+        onBlur={onBlur}
+      />
+    </div>
+  );
+}
+
+function PtbAlignButtons({ onAlign, textAlign, hasTextAlign, onTextAlignChange }) {
+  return (
+    <div className="ptb-align-row">
+      <div className="ptb-field-row" style={{ gap: 8 }}>
+        <label className="ptb-label" style={{ minWidth: 48 }}>Position</label>
+        <div className="ptb-align-buttons">
+          <button type="button" className="ptb-align-btn" onClick={() => onAlign("left")} title="Align Left">L</button>
+          <button type="button" className="ptb-align-btn" onClick={() => onAlign("center")} title="Center">C</button>
+          <button type="button" className="ptb-align-btn" onClick={() => onAlign("right")} title="Align Right">R</button>
+        </div>
+      </div>
+      {hasTextAlign && (
+        <div className="ptb-field-row" style={{ gap: 8 }}>
+          <label className="ptb-label" style={{ minWidth: 48 }}>Text</label>
+          <div className="ptb-align-buttons">
+            {["left", "center", "right"].map((a) => (
+              <button
+                key={a}
+                type="button"
+                className={`ptb-align-btn${textAlign === a ? " active" : ""}`}
+                onClick={() => onTextAlignChange(a)}
+                title={a.charAt(0).toUpperCase() + a.slice(1)}
+              >
+                {a === "left" ? "L" : a === "center" ? "C" : "R"}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PtbPositionControls({ x, y, w, h, textAlign, hasTextAlign, onNumChange, onNumBlur, onAlign, onTextAlignChange }) {
+  return (
+    <div className="ptb-pos-controls">
+      <div className="ptb-field-row">
+        <PtbNumInput value={x ?? 0} onChange={(e) => onNumChange("x", e.target.value)} onBlur={() => onNumBlur("x", 0)} label="X" />
+        <PtbNumInput value={y ?? 0} onChange={(e) => onNumChange("y", e.target.value)} onBlur={() => onNumBlur("y", 0)} label="Y" />
+        <PtbNumInput value={w ?? 100} onChange={(e) => onNumChange("width", e.target.value)} onBlur={() => onNumBlur("width", 100)} label="W" />
+        <PtbNumInput value={h ?? 50} onChange={(e) => onNumChange("height", e.target.value)} onBlur={() => onNumBlur("height", 50)} label="H" />
+      </div>
+      <PtbAlignButtons onAlign={onAlign} textAlign={textAlign} hasTextAlign={hasTextAlign} onTextAlignChange={onTextAlignChange} />
+    </div>
+  );
+}
+
+function PtbResizeHandles({ blockId, onMouseDown }) {
+  return (
+    <>
+      {HANDLES.map((h) => (
+        <div
+          key={h.id}
+          className="ptb-resize-handle"
+          style={{ ...h.style, cursor: h.cursor }}
+          onMouseDown={(e) => onMouseDown(e, blockId, h.id)}
+        />
+      ))}
+    </>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MAIN COMPONENT
+   ═══════════════════════════════════════════════════════════════ */
+
 export default function PdfTemplateBuilder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -104,11 +216,8 @@ export default function PdfTemplateBuilder() {
   const [selectedBlock, setSelectedBlock] = useState(null);
   const [logoLoaded, setLogoLoaded] = useState(false);
 
-  // Freeform drag
   const [dragging, setDragging] = useState(null);
   const dragRef = useRef({ offsetX: 0, offsetY: 0 });
-
-  // Resize
   const [resizing, setResizing] = useState(null);
   const resizeRef = useRef({ startX: 0, startY: 0, origX: 0, origY: 0, origW: 0, origH: 0 });
 
@@ -118,7 +227,6 @@ export default function PdfTemplateBuilder() {
 
   const logoUrl = `${API_BASE_URL}/assets/logo`;
 
-  // Load template
   useEffect(() => {
     if (!isNew) {
       api.get(`/pdf-templates/${id}`).then((res) => {
@@ -136,7 +244,6 @@ export default function PdfTemplateBuilder() {
     }
   }, [id, isNew]);
 
-  // Preload logo
   useEffect(() => {
     const img = new Image();
     img.onload = () => setLogoLoaded(true);
@@ -162,7 +269,6 @@ export default function PdfTemplateBuilder() {
     setDirty(true);
   }, []);
 
-  // ─── Number input fix (Issue 2) ───
   const handleNumChange = useCallback((section, key, val) => {
     if (val === "" || val === undefined) {
       setConfig((prev) => ({ ...prev, [section]: { ...prev[section], [key]: "" } }));
@@ -186,7 +292,6 @@ export default function PdfTemplateBuilder() {
     });
   }, []);
 
-  // ─── Freeform Drag ───
   const handleBlockMouseDown = useCallback((e, blockId) => {
     if (e.button !== 0) return;
     if (e.target.closest(".ptb-resize-handle")) return;
@@ -204,7 +309,6 @@ export default function PdfTemplateBuilder() {
     setSelectedBlock(blockId);
   }, []);
 
-  // ─── Resize ───
   const handleResizeMouseDown = useCallback((e, blockId, handleId) => {
     e.preventDefault();
     e.stopPropagation();
@@ -220,7 +324,6 @@ export default function PdfTemplateBuilder() {
     setSelectedBlock(blockId);
   }, []);
 
-  // Mouse move/up for drag and resize
   useEffect(() => {
     if (!dragging && !resizing) return;
     const onMove = (e) => {
@@ -252,7 +355,6 @@ export default function PdfTemplateBuilder() {
     return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
   }, [dragging, resizing]);
 
-  // ─── Alignment ───
   const alignBlock = useCallback((blockId, dir) => {
     setConfig((prev) => {
       const b = prev[blockId] || {};
@@ -309,99 +411,31 @@ export default function PdfTemplateBuilder() {
 
   const toggleSection = (key) => setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
 
-  // ─── Sub-components ───
-  const Toggle = ({ checked, onChange }) => (
-    <label className="ptb-toggle">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span className="ptb-toggle-slider" />
-    </label>
-  );
+  // Helper to build PtbSection props for a given section id
+  const sectionProps = (sId, title, tSection) => ({
+    title,
+    isSelected: selectedBlock && SECTION_MAP[selectedBlock] === sId,
+    isOpen: openSections[sId],
+    onToggle: () => toggleSection(sId),
+    showToggle: !!tSection,
+    showChecked: tSection ? config[tSection]?.show !== false : false,
+    onShowChange: tSection ? (v) => updateConfig(tSection, "show", v) : undefined,
+    sRef: (el) => { sectionRefs.current[sId] = el; },
+  });
 
-  const Section = ({ id: sId, title, children, showToggle, toggleSection: tSection }) => (
-    <div
-      className={`ptb-section${selectedBlock && SECTION_MAP[selectedBlock] === sId ? " ptb-section-selected" : ""}`}
-      ref={(el) => { sectionRefs.current[sId] = el; }}
-    >
-      <div className="ptb-section-header" onClick={() => toggleSection(sId)}>
-        <span className="ptb-section-title">
-          <span className={`ptb-section-chevron ${openSections[sId] ? "open" : ""}`}>&#9654;</span>
-          {title}
-        </span>
-        {showToggle && <Toggle checked={config[tSection]?.show !== false} onChange={(v) => updateConfig(tSection, "show", v)} />}
-      </div>
-      {openSections[sId] && <div className="ptb-section-body">{children}</div>}
-    </div>
-  );
-
-  const NumInput = ({ section, field, def, label }) => (
-    <div className="ptb-field" style={{ flex: 1 }}>
-      {label && <label className="ptb-label">{label}</label>}
-      <input
-        className="ptb-input ptb-input-sm"
-        type="text"
-        inputMode="numeric"
-        value={config[section]?.[field] ?? def}
-        onChange={(e) => handleNumChange(section, field, e.target.value)}
-        onBlur={() => handleNumBlur(section, field, def)}
-      />
-    </div>
-  );
-
-  const AlignButtons = ({ blockId }) => (
-    <div className="ptb-align-row">
-      <div className="ptb-field-row" style={{ gap: 8 }}>
-        <label className="ptb-label" style={{ minWidth: 48 }}>Position</label>
-        <div className="ptb-align-buttons">
-          <button type="button" className="ptb-align-btn" onClick={() => alignBlock(blockId, "left")} title="Align Left">L</button>
-          <button type="button" className="ptb-align-btn" onClick={() => alignBlock(blockId, "center")} title="Center">C</button>
-          <button type="button" className="ptb-align-btn" onClick={() => alignBlock(blockId, "right")} title="Align Right">R</button>
-        </div>
-      </div>
-      {config[blockId]?.textAlign !== undefined && (
-        <div className="ptb-field-row" style={{ gap: 8 }}>
-          <label className="ptb-label" style={{ minWidth: 48 }}>Text</label>
-          <div className="ptb-align-buttons">
-            {["left", "center", "right"].map((a) => (
-              <button
-                key={a}
-                type="button"
-                className={`ptb-align-btn${config[blockId]?.textAlign === a ? " active" : ""}`}
-                onClick={() => updateConfig(blockId, "textAlign", a)}
-                title={a.charAt(0).toUpperCase() + a.slice(1)}
-              >
-                {a === "left" ? "L" : a === "center" ? "C" : "R"}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const PositionControls = ({ blockId }) => (
-    <div className="ptb-pos-controls">
-      <div className="ptb-field-row">
-        <NumInput section={blockId} field="x" def={0} label="X" />
-        <NumInput section={blockId} field="y" def={0} label="Y" />
-        <NumInput section={blockId} field="width" def={100} label="W" />
-        <NumInput section={blockId} field="height" def={50} label="H" />
-      </div>
-      <AlignButtons blockId={blockId} />
-    </div>
-  );
-
-  const ResizeHandles = ({ blockId }) => (
-    <>
-      {HANDLES.map((h) => (
-        <div
-          key={h.id}
-          className="ptb-resize-handle"
-          style={{ ...h.style, cursor: h.cursor }}
-          onMouseDown={(e) => handleResizeMouseDown(e, blockId, h.id)}
-        />
-      ))}
-    </>
-  );
+  // Helper to build PtbPositionControls props for a given block id
+  const posProps = (blockId) => ({
+    x: config[blockId]?.x ?? 0,
+    y: config[blockId]?.y ?? 0,
+    w: config[blockId]?.width ?? 100,
+    h: config[blockId]?.height ?? 50,
+    textAlign: config[blockId]?.textAlign,
+    hasTextAlign: config[blockId]?.textAlign !== undefined,
+    onNumChange: (field, val) => handleNumChange(blockId, field, val),
+    onNumBlur: (field, def) => handleNumBlur(blockId, field, def),
+    onAlign: (dir) => alignBlock(blockId, dir),
+    onTextAlignChange: (val) => updateConfig(blockId, "textAlign", val),
+  });
 
   const estHeaders = config.lineItems?.estimateHeaders || {};
   const invHeaders = config.lineItems?.invoiceHeaders || {};
@@ -412,11 +446,12 @@ export default function PdfTemplateBuilder() {
     const c = config[blockId] || {};
     const textColor = clr.text || "#000";
     const lineColor = clr.lineStroke || "#000";
+    const fill = { width: "100%", height: "100%", boxSizing: "border-box" };
 
     switch (blockId) {
       case "companyInfo":
         return (
-          <div style={{ lineHeight: 1.5, textAlign: c.textAlign || "left", opacity: c.show === false ? 0.08 : 1 }}>
+          <div style={{ ...fill, lineHeight: 1.5, textAlign: c.textAlign || "left", opacity: c.show === false ? 0.08 : 1, overflow: "hidden" }}>
             <div style={{ fontWeight: 700, fontSize: c.fontSize || 11, color: textColor }}>{c.name || "Company Name"}</div>
             <div style={{ fontSize: c.linesFontSize || 9, color: textColor }}>{c.line1 || ""}</div>
             <div style={{ fontSize: c.linesFontSize || 9, color: textColor }}>{c.line2 || ""}</div>
@@ -425,7 +460,7 @@ export default function PdfTemplateBuilder() {
           </div>
         );
       case "logo":
-        if (c.show === false) return <div style={{ opacity: 0.08, width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#999" }}>LOGO</div>;
+        if (c.show === false) return <div style={{ ...fill, opacity: 0.08, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, color: "#999" }}>LOGO</div>;
         return logoLoaded ? (
           <img src={logoUrl} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
         ) : (
@@ -433,19 +468,19 @@ export default function PdfTemplateBuilder() {
         );
       case "title":
         return (
-          <div style={{ fontSize: c.fontSize || 22, fontWeight: 700, textAlign: c.textAlign || "right", color: textColor, opacity: c.show === false ? 0.08 : 1 }}>
+          <div style={{ ...fill, fontSize: c.fontSize || 22, fontWeight: 700, textAlign: c.textAlign || "right", color: textColor, opacity: c.show === false ? 0.08 : 1, overflow: "hidden" }}>
             {previewType === "invoice" ? "Invoice" : "Estimate"}
           </div>
         );
       case "dateBox":
         return (
-          <div style={{ display: "flex", opacity: c.show === false ? 0.08 : 1 }}>
-            <div style={{ border: `0.75px solid ${lineColor}` }}>
+          <div style={{ ...fill, display: "flex", opacity: c.show === false ? 0.08 : 1, overflow: "hidden" }}>
+            <div style={{ border: `0.75px solid ${lineColor}`, flex: 1 }}>
               <div style={{ padding: "3px 8px", textAlign: "center", borderBottom: `0.75px solid ${lineColor}`, fontSize: 7, fontWeight: 700, color: textColor }}>DATE</div>
               <div style={{ padding: "3px 8px", textAlign: "center", fontSize: 8, color: textColor }}>{new Date().toLocaleDateString("en-US")}</div>
             </div>
             {previewType === "invoice" && (
-              <div style={{ border: `0.75px solid ${lineColor}`, marginLeft: -1 }}>
+              <div style={{ border: `0.75px solid ${lineColor}`, marginLeft: -1, flex: 1 }}>
                 <div style={{ padding: "3px 8px", textAlign: "center", borderBottom: `0.75px solid ${lineColor}`, fontSize: 7, fontWeight: 700, color: textColor }}>INVOICE #</div>
                 <div style={{ padding: "3px 8px", textAlign: "center", fontSize: 8, color: textColor }}>INV-1001</div>
               </div>
@@ -454,7 +489,7 @@ export default function PdfTemplateBuilder() {
         );
       case "billTo":
         return (
-          <div style={{ border: `0.75px solid ${lineColor}`, height: "100%", opacity: c.show === false ? 0.08 : 1 }}>
+          <div style={{ ...fill, border: `0.75px solid ${lineColor}`, opacity: c.show === false ? 0.08 : 1, overflow: "hidden" }}>
             <div style={{ fontWeight: 700, fontSize: 7, padding: "3px 4px", borderBottom: `0.5px solid ${lineColor}`, color: textColor }}>{c.label || "BILL TO"}</div>
             <div style={{ padding: 4, fontSize: 8, lineHeight: 1.5, color: textColor, textAlign: c.textAlign || "left" }}>
               SAMPLE CUSTOMER INC.<br />123 MAIN STREET<br />CHICAGO, IL 60601<br />555-123-4567
@@ -464,7 +499,7 @@ export default function PdfTemplateBuilder() {
       case "projectBox": {
         const pc = config.projectBox || {};
         return (
-          <div style={{ border: `0.75px solid ${lineColor}`, height: "100%", opacity: pc.show === false ? 0.08 : 1 }}>
+          <div style={{ ...fill, border: `0.75px solid ${lineColor}`, opacity: pc.show === false ? 0.08 : 1, overflow: "hidden" }}>
             <div style={{ fontWeight: 700, fontSize: 7, padding: "3px 4px", borderBottom: `0.5px solid ${lineColor}`, color: textColor }}>
               {previewType === "invoice" ? pc.invoiceLabel || "SHIP TO" : pc.estimateLabel || "PROJECT NAME/ADDRESS"}
             </div>
@@ -476,8 +511,8 @@ export default function PdfTemplateBuilder() {
       }
       case "poNumber":
         return (
-          <div style={{ opacity: c.show === false ? 0.08 : 1 }}>
-            <div style={{ border: `0.75px solid ${lineColor}`, display: "inline-block" }}>
+          <div style={{ ...fill, opacity: c.show === false ? 0.08 : 1, overflow: "hidden" }}>
+            <div style={{ width: "100%", height: "100%", border: `0.75px solid ${lineColor}`, boxSizing: "border-box" }}>
               <div style={{ fontWeight: 700, fontSize: 7, padding: "3px 4px", borderBottom: `0.5px solid ${lineColor}`, color: textColor }}>{c.label || "P.O. No."}</div>
               <div style={{ padding: "3px 4px", fontSize: 8, color: textColor }}>PO-12345</div>
             </div>
@@ -490,10 +525,10 @@ export default function PdfTemplateBuilder() {
         const hbg = li.headerBgColor || "#E0E0E0";
         const hfs = li.headerFontSize || 7;
         const bfs = li.bodyFontSize || 8;
-        const thS = { background: hbg, fontSize: hfs, borderColor: lineColor, color: textColor, fontWeight: 700, padding: "4px 4px", border: `0.75px solid ${lineColor}`, textAlign: "left" };
+        const thS = { background: hbg, fontSize: hfs, color: textColor, fontWeight: 700, padding: "4px 4px", border: `0.75px solid ${lineColor}`, textAlign: "left" };
         const tdS = { fontSize: bfs, padding: "3px 4px", border: `0.5px solid ${lineColor}`, color: textColor };
         return (
-          <div style={{ opacity: li.show === false ? 0.08 : 1, width: "100%" }}>
+          <div style={{ ...fill, opacity: li.show === false ? 0.08 : 1, overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr>
@@ -514,9 +549,9 @@ export default function PdfTemplateBuilder() {
       case "footer": {
         const f = config.footer || {};
         return (
-          <div style={{ display: "flex", opacity: f.show === false ? 0.08 : 1, width: "100%" }}>
+          <div style={{ ...fill, display: "flex", opacity: f.show === false ? 0.08 : 1, overflow: "hidden" }}>
             {f.showTerms !== false && (
-              <div style={{ flex: 1, border: `0.75px solid ${lineColor}`, padding: 5, fontSize: 7, lineHeight: 1.5, color: textColor, minHeight: 40 }}>
+              <div style={{ flex: 1, border: `0.75px solid ${lineColor}`, padding: 5, fontSize: 7, lineHeight: 1.5, color: textColor }}>
                 NET 30. ALL PRICES VALID FOR 30 DAYS.
               </div>
             )}
@@ -534,7 +569,6 @@ export default function PdfTemplateBuilder() {
 
   return (
     <div className="ptb-page">
-      {/* Top Bar */}
       <div className="ptb-topbar">
         <div className="ptb-topbar-left">
           <button className="ptb-back-btn" onClick={() => navigate("/pdf-templates")}>&larr; Templates</button>
@@ -558,11 +592,9 @@ export default function PdfTemplateBuilder() {
         </div>
       </div>
 
-      {/* Main Body */}
       <div className="ptb-body">
         {/* Settings Panel */}
         <div className="ptb-settings">
-          {/* Quick align toolbar when block selected */}
           {selectedBlock && (
             <div className="ptb-quick-toolbar">
               <span className="ptb-quick-label">{BLOCK_LABELS[selectedBlock]}</span>
@@ -574,8 +606,8 @@ export default function PdfTemplateBuilder() {
             </div>
           )}
 
-          <Section id="companyInfo" title="Company Info" showToggle toggleSection="companyInfo">
-            <PositionControls blockId="companyInfo" />
+          <PtbSection {...sectionProps("companyInfo", "Company Info", "companyInfo")}>
+            <PtbPositionControls {...posProps("companyInfo")} />
             <div className="ptb-field">
               <label className="ptb-label">Company Name</label>
               <input className="ptb-input" value={config.companyInfo?.name || ""} onChange={(e) => updateConfig("companyInfo", "name", e.target.value)} />
@@ -599,34 +631,34 @@ export default function PdfTemplateBuilder() {
               </div>
             </div>
             <div className="ptb-field-row">
-              <NumInput section="companyInfo" field="fontSize" def={11} label="Name Font Size" />
-              <NumInput section="companyInfo" field="linesFontSize" def={9} label="Lines Font Size" />
+              <PtbNumInput value={config.companyInfo?.fontSize ?? 11} onChange={(e) => handleNumChange("companyInfo", "fontSize", e.target.value)} onBlur={() => handleNumBlur("companyInfo", "fontSize", 11)} label="Name Font Size" />
+              <PtbNumInput value={config.companyInfo?.linesFontSize ?? 9} onChange={(e) => handleNumChange("companyInfo", "linesFontSize", e.target.value)} onBlur={() => handleNumBlur("companyInfo", "linesFontSize", 9)} label="Lines Font Size" />
             </div>
-          </Section>
+          </PtbSection>
 
-          <Section id="logo" title="Logo" showToggle toggleSection="logo">
-            <PositionControls blockId="logo" />
-          </Section>
+          <PtbSection {...sectionProps("logo", "Logo", "logo")}>
+            <PtbPositionControls {...posProps("logo")} />
+          </PtbSection>
 
-          <Section id="title" title="Document Title" showToggle toggleSection="title">
-            <PositionControls blockId="title" />
-            <NumInput section="title" field="fontSize" def={22} label="Font Size" />
-          </Section>
+          <PtbSection {...sectionProps("title", "Document Title", "title")}>
+            <PtbPositionControls {...posProps("title")} />
+            <PtbNumInput value={config.title?.fontSize ?? 22} onChange={(e) => handleNumChange("title", "fontSize", e.target.value)} onBlur={() => handleNumBlur("title", "fontSize", 22)} label="Font Size" />
+          </PtbSection>
 
-          <Section id="dateBox" title="Date Box" showToggle toggleSection="dateBox">
-            <PositionControls blockId="dateBox" />
-          </Section>
+          <PtbSection {...sectionProps("dateBox", "Date Box", "dateBox")}>
+            <PtbPositionControls {...posProps("dateBox")} />
+          </PtbSection>
 
-          <Section id="billTo" title="Bill To" showToggle toggleSection="billTo">
-            <PositionControls blockId="billTo" />
+          <PtbSection {...sectionProps("billTo", "Bill To", "billTo")}>
+            <PtbPositionControls {...posProps("billTo")} />
             <div className="ptb-field">
               <label className="ptb-label">Header Label</label>
               <input className="ptb-input" value={config.billTo?.label || "BILL TO"} onChange={(e) => updateConfig("billTo", "label", e.target.value)} />
             </div>
-          </Section>
+          </PtbSection>
 
-          <Section id="projectBox" title="Project / Ship To" showToggle toggleSection="projectBox">
-            <PositionControls blockId="projectBox" />
+          <PtbSection {...sectionProps("projectBox", "Project / Ship To", "projectBox")}>
+            <PtbPositionControls {...posProps("projectBox")} />
             <div className="ptb-field">
               <label className="ptb-label">Estimate Label</label>
               <input className="ptb-input" value={config.projectBox?.estimateLabel || "PROJECT NAME/ADDRESS"} onChange={(e) => updateConfig("projectBox", "estimateLabel", e.target.value)} />
@@ -635,25 +667,25 @@ export default function PdfTemplateBuilder() {
               <label className="ptb-label">Invoice Label</label>
               <input className="ptb-input" value={config.projectBox?.invoiceLabel || "SHIP TO"} onChange={(e) => updateConfig("projectBox", "invoiceLabel", e.target.value)} />
             </div>
-          </Section>
+          </PtbSection>
 
-          <Section id="poNumber" title="PO Number" showToggle toggleSection="poNumber">
-            <PositionControls blockId="poNumber" />
+          <PtbSection {...sectionProps("poNumber", "PO Number", "poNumber")}>
+            <PtbPositionControls {...posProps("poNumber")} />
             <div className="ptb-field">
               <label className="ptb-label">Label</label>
               <input className="ptb-input" value={config.poNumber?.label || "P.O. No."} onChange={(e) => updateConfig("poNumber", "label", e.target.value)} />
             </div>
-          </Section>
+          </PtbSection>
 
-          <Section id="lineItems" title="Line Items Table" showToggle toggleSection="lineItems">
-            <PositionControls blockId="lineItems" />
+          <PtbSection {...sectionProps("lineItems", "Line Items Table", "lineItems")}>
+            <PtbPositionControls {...posProps("lineItems")} />
             <div className="ptb-field-row">
-              <NumInput section="lineItems" field="headerFontSize" def={7} label="Header Font" />
-              <NumInput section="lineItems" field="bodyFontSize" def={8} label="Body Font" />
+              <PtbNumInput value={config.lineItems?.headerFontSize ?? 7} onChange={(e) => handleNumChange("lineItems", "headerFontSize", e.target.value)} onBlur={() => handleNumBlur("lineItems", "headerFontSize", 7)} label="Header Font" />
+              <PtbNumInput value={config.lineItems?.bodyFontSize ?? 8} onChange={(e) => handleNumChange("lineItems", "bodyFontSize", e.target.value)} onBlur={() => handleNumBlur("lineItems", "bodyFontSize", 8)} label="Body Font" />
             </div>
             <div className="ptb-field-row">
-              <NumInput section="lineItems" field="qtyColumnWidth" def={50} label="Qty Col (pt)" />
-              <NumInput section="lineItems" field="totalColumnWidth" def={75} label="Total Col (pt)" />
+              <PtbNumInput value={config.lineItems?.qtyColumnWidth ?? 50} onChange={(e) => handleNumChange("lineItems", "qtyColumnWidth", e.target.value)} onBlur={() => handleNumBlur("lineItems", "qtyColumnWidth", 50)} label="Qty Col (pt)" />
+              <PtbNumInput value={config.lineItems?.totalColumnWidth ?? 75} onChange={(e) => handleNumChange("lineItems", "totalColumnWidth", e.target.value)} onBlur={() => handleNumBlur("lineItems", "totalColumnWidth", 75)} label="Total Col (pt)" />
             </div>
             <div className="ptb-field">
               <label className="ptb-label">Header Background</label>
@@ -672,21 +704,21 @@ export default function PdfTemplateBuilder() {
               <input className="ptb-input" placeholder="Description" value={invHeaders.description || ""} onChange={(e) => updateNestedConfig("lineItems", "invoiceHeaders", "description", e.target.value)} style={{ flex: 2 }} />
               <input className="ptb-input" placeholder="Total" value={invHeaders.total || ""} onChange={(e) => updateNestedConfig("lineItems", "invoiceHeaders", "total", e.target.value)} style={{ flex: 1 }} />
             </div>
-          </Section>
+          </PtbSection>
 
-          <Section id="footer" title="Footer / Totals" showToggle toggleSection="footer">
-            <PositionControls blockId="footer" />
+          <PtbSection {...sectionProps("footer", "Footer / Totals", "footer")}>
+            <PtbPositionControls {...posProps("footer")} />
             <div className="ptb-field-row">
               <label className="ptb-label">Show Terms Box</label>
-              <Toggle checked={config.footer?.showTerms !== false} onChange={(v) => updateConfig("footer", "showTerms", v)} />
+              <PtbToggle checked={config.footer?.showTerms !== false} onChange={(v) => updateConfig("footer", "showTerms", v)} />
             </div>
             <div className="ptb-field-row">
-              <NumInput section="footer" field="totalFontSize" def={10} label="Total Font" />
-              <NumInput section="footer" field="totalAmountFontSize" def={11} label="Amount Font" />
+              <PtbNumInput value={config.footer?.totalFontSize ?? 10} onChange={(e) => handleNumChange("footer", "totalFontSize", e.target.value)} onBlur={() => handleNumBlur("footer", "totalFontSize", 10)} label="Total Font" />
+              <PtbNumInput value={config.footer?.totalAmountFontSize ?? 11} onChange={(e) => handleNumChange("footer", "totalAmountFontSize", e.target.value)} onBlur={() => handleNumBlur("footer", "totalAmountFontSize", 11)} label="Amount Font" />
             </div>
-          </Section>
+          </PtbSection>
 
-          <Section id="colors" title="Colors">
+          <PtbSection {...sectionProps("colors", "Colors", null)}>
             <div className="ptb-field-row">
               <label className="ptb-label">Text Color</label>
               <input className="ptb-input-color" type="color" value={clr.text || "#000000"} onChange={(e) => updateConfig("colors", "text", e.target.value)} />
@@ -699,7 +731,7 @@ export default function PdfTemplateBuilder() {
               <label className="ptb-label">Line Stroke</label>
               <input className="ptb-input-color" type="color" value={clr.lineStroke || "#000000"} onChange={(e) => updateConfig("colors", "lineStroke", e.target.value)} />
             </div>
-          </Section>
+          </PtbSection>
         </div>
 
         {/* Live Preview Canvas */}
@@ -721,16 +753,17 @@ export default function PdfTemplateBuilder() {
                     left: b.x || 0,
                     top: b.y || 0,
                     width: b.width || 100,
-                    minHeight: b.height || 50,
+                    height: b.height || 50,
                     cursor: dragging === blockId ? "grabbing" : "grab",
                     zIndex: selectedBlock === blockId ? 10 : 1,
+                    overflow: "hidden",
                   }}
                   onMouseDown={(e) => handleBlockMouseDown(e, blockId)}
                   onClick={(e) => { e.stopPropagation(); handleBlockClick(blockId); }}
                   title={BLOCK_LABELS[blockId]}
                 >
                   {renderBlockContent(blockId)}
-                  {selectedBlock === blockId && <ResizeHandles blockId={blockId} />}
+                  {selectedBlock === blockId && <PtbResizeHandles blockId={blockId} onMouseDown={handleResizeMouseDown} />}
                 </div>
               );
             })}
