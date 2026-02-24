@@ -918,13 +918,15 @@ const DEFAULT_TEMPLATE_CONFIG = {
   poNumber: { show: true, label: 'P.O. No.' },
   lineItems: {
     show: true,
+    displayMode: 'detailed',
     headerBgColor: '#E0E0E0',
     headerFontSize: 7,
     bodyFontSize: 8,
     qtyColumnWidth: 50,
     totalColumnWidth: 75,
     estimateHeaders: { qty: 'Qty', description: 'DESCRIPTION', total: 'TOTAL' },
-    invoiceHeaders: { qty: 'QUANTITY', description: 'DESCRIPTION', total: 'AMOUNT' }
+    invoiceHeaders: { qty: 'QUANTITY', description: 'DESCRIPTION', total: 'AMOUNT' },
+    bidDescriptionLabel: 'Scope of Work'
   },
   footer: {
     show: true,
@@ -980,6 +982,17 @@ async function ensurePdfTemplateTable() {
   }
 }
 ensurePdfTemplateTable().catch(() => {});
+
+// Add templateId column to estimates and invoices if not present
+(async () => {
+  try {
+    const [[estCols]] = await db.query("SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='estimates' AND COLUMN_NAME='templateId'");
+    if (!estCols.cnt) await db.query('ALTER TABLE estimates ADD COLUMN templateId INT NULL');
+    const [[invCols]] = await db.query("SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='invoices' AND COLUMN_NAME='templateId'");
+    if (!invCols.cnt) await db.query('ALTER TABLE invoices ADD COLUMN templateId INT NULL');
+    console.log('[Migration] templateId columns ensured on estimates/invoices');
+  } catch (e) { console.warn('[Migration] templateId columns:', e.message); }
+})();
 
 // ─── EMAIL TABLES ───────────────────────────────────────────────────────────
 async function ensureEmailTables() {
@@ -2028,84 +2041,133 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
     }
 
     // --- LINE ITEMS TABLE ---
+    const displayMode = cfg.lineItems?.displayMode || 'detailed';
     if (cfg.lineItems?.show !== false) {
       const tableTop = curY + 10;
-      const colQty = leftM;
-      const qtyW = cfg.lineItems?.qtyColumnWidth || 50;
-      const totalW = cfg.lineItems?.totalColumnWidth || 75;
-      const colDesc = leftM + qtyW;
-      const colTotal = leftM + pw - totalW;
       const colEnd = leftM + pw;
-      const tHeaderH = 18;
-
       const footerH = cfg.footer?.height || 46;
       const footerGap = 8;
       const maxTableBottom = bottomLimit - footerH - footerGap;
-
       const bodyFontSize = cfg.lineItems?.bodyFontSize || 8;
-      doc.font(bodyFont).fontSize(bodyFontSize);
-      const itemHeights = lineItems.map(item => {
-        const desc = U(item.description || '');
-        const descH = doc.heightOfString(desc, { width: colTotal - colDesc - 8 });
-        return Math.max(descH + 6, 16);
-      });
-      const totalItemsH = itemHeights.reduce((s, h) => s + h, 0);
-      const neededH = tHeaderH + totalItemsH;
-      const availH = maxTableBottom - tableTop;
+      let rowY = tableTop;
 
-      let scale = 1;
-      if (neededH > availH && totalItemsH > 0) {
-        const targetItemsH = availH - tHeaderH;
-        scale = Math.max(targetItemsH / totalItemsH, 0.6);
-      }
-
-      // Gray header row
-      const headerBg = cfg.lineItems?.headerBgColor || cfg.colors?.headerBg || '#E0E0E0';
-      doc.lineWidth(stroke);
-      doc.save();
-      doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).fill(headerBg);
-      doc.restore();
-      doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).stroke();
-      doc.moveTo(colDesc, tableTop).lineTo(colDesc, tableTop + tHeaderH).stroke();
-      doc.moveTo(colTotal, tableTop).lineTo(colTotal, tableTop + tHeaderH).stroke();
-
-      const headers = docType === 'invoice'
-        ? (cfg.lineItems?.invoiceHeaders || { qty: 'QUANTITY', description: 'DESCRIPTION', total: 'AMOUNT' })
-        : (cfg.lineItems?.estimateHeaders || { qty: 'Qty', description: 'DESCRIPTION', total: 'TOTAL' });
-
-      doc.font(boldFont).fontSize(cfg.lineItems?.headerFontSize || 7).fillColor(textColor);
-      doc.text(headers.qty, colQty + 2, tableTop + 5, { width: colDesc - colQty - 4, align: 'center' });
-      doc.text(headers.description, colDesc + 4, tableTop + 5);
-      doc.text(headers.total, colTotal + 4, tableTop + 5, { width: colEnd - colTotal - 8, align: 'right' });
-
-      // Table body rows
-      let rowY = tableTop + tHeaderH;
-      doc.font(bodyFont).fontSize(bodyFontSize);
-      for (let i = 0; i < lineItems.length; i++) {
-        const item = lineItems[i];
-        const cellH = Math.max(itemHeights[i] * scale, 14);
-        const desc = U(item.description || '');
-
-        doc.lineWidth(0.5);
-        doc.rect(colQty, rowY, colDesc - colQty, cellH).stroke();
-        doc.rect(colDesc, rowY, colTotal - colDesc, cellH).stroke();
-        doc.rect(colTotal, rowY, colEnd - colTotal, cellH).stroke();
-
-        if (item.quantity != null && Number(item.quantity) > 0) {
-          const qtyStr = Number(item.quantity) === Math.floor(Number(item.quantity))
-            ? String(Math.floor(Number(item.quantity)))
-            : Number(item.quantity).toFixed(2);
-          doc.text(qtyStr, colQty + 2, rowY + 3, { width: colDesc - colQty - 4, align: 'center' });
+      if (displayMode === 'bid') {
+        // ── BID MODE: Scope of work paragraph + total ──
+        const bidLabel = cfg.lineItems?.bidDescriptionLabel || 'Scope of Work';
+        doc.font(boldFont).fontSize(cfg.lineItems?.headerFontSize || 9).fillColor(textColor);
+        doc.text(bidLabel + ':', leftM, tableTop);
+        rowY = tableTop + 16;
+        const bidDesc = lineItems.map(item => U(item.description || '')).filter(Boolean).join(', ');
+        doc.font(bodyFont).fontSize(bodyFontSize);
+        const descH = doc.heightOfString(bidDesc, { width: pw - 8 });
+        doc.text(bidDesc, leftM, rowY, { width: pw });
+        rowY += descH + 14;
+        const totalStr = fmtMoney(data.total);
+        doc.font(boldFont).fontSize(cfg.footer?.totalAmountFontSize || 12).fillColor(textColor);
+        doc.text('TOTAL: ' + totalStr, leftM, rowY, { width: pw, align: 'right' });
+        rowY += 20;
+      } else if (displayMode === 'summary') {
+        // ── SUMMARY MODE: Descriptions only, no qty/amount columns, total at bottom ──
+        const tHeaderH = 18;
+        const headerBg = cfg.lineItems?.headerBgColor || cfg.colors?.headerBg || '#E0E0E0';
+        const headers = docType === 'invoice'
+          ? (cfg.lineItems?.invoiceHeaders || { description: 'DESCRIPTION' })
+          : (cfg.lineItems?.estimateHeaders || { description: 'DESCRIPTION' });
+        doc.font(bodyFont).fontSize(bodyFontSize);
+        const itemHeights = lineItems.map(item => {
+          const desc = U(item.description || '');
+          const descH = doc.heightOfString(desc, { width: pw - 8 });
+          return Math.max(descH + 6, 16);
+        });
+        doc.lineWidth(stroke);
+        doc.save();
+        doc.rect(leftM, tableTop, pw, tHeaderH).fill(headerBg);
+        doc.restore();
+        doc.rect(leftM, tableTop, pw, tHeaderH).stroke();
+        doc.font(boldFont).fontSize(cfg.lineItems?.headerFontSize || 7).fillColor(textColor);
+        doc.text(headers.description || 'DESCRIPTION', leftM + 4, tableTop + 5);
+        rowY = tableTop + tHeaderH;
+        doc.font(bodyFont).fontSize(bodyFontSize);
+        for (let i = 0; i < lineItems.length; i++) {
+          const item = lineItems[i];
+          const cellH = Math.max(itemHeights[i], 14);
+          doc.lineWidth(0.5);
+          doc.rect(leftM, rowY, pw, cellH).stroke();
+          doc.text(U(item.description || ''), leftM + 4, rowY + 3, { width: pw - 8 });
+          rowY += cellH;
         }
-        doc.text(desc, colDesc + 4, rowY + 3, { width: colTotal - colDesc - 8 });
-        const amt = Number(item.amount) || 0;
-        if (amt > 0) {
-          doc.text(amt.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), colTotal + 4, rowY + 3, { width: colEnd - colTotal - 8, align: 'right' });
+      } else {
+        // ── DETAILED MODE (default): Full table with Qty, Description, Amount ──
+        const colQty = leftM;
+        const qtyW = cfg.lineItems?.qtyColumnWidth || 50;
+        const totalW = cfg.lineItems?.totalColumnWidth || 75;
+        const colDesc = leftM + qtyW;
+        const colTotal = leftM + pw - totalW;
+        const tHeaderH = 18;
+
+        doc.font(bodyFont).fontSize(bodyFontSize);
+        const itemHeights = lineItems.map(item => {
+          const desc = U(item.description || '');
+          const descH = doc.heightOfString(desc, { width: colTotal - colDesc - 8 });
+          return Math.max(descH + 6, 16);
+        });
+        const totalItemsH = itemHeights.reduce((s, h) => s + h, 0);
+        const neededH = tHeaderH + totalItemsH;
+        const availH = maxTableBottom - tableTop;
+
+        let scale = 1;
+        if (neededH > availH && totalItemsH > 0) {
+          const targetItemsH = availH - tHeaderH;
+          scale = Math.max(targetItemsH / totalItemsH, 0.6);
         }
-        rowY += cellH;
+
+        const headerBg = cfg.lineItems?.headerBgColor || cfg.colors?.headerBg || '#E0E0E0';
+        doc.lineWidth(stroke);
+        doc.save();
+        doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).fill(headerBg);
+        doc.restore();
+        doc.rect(colQty, tableTop, colEnd - colQty, tHeaderH).stroke();
+        doc.moveTo(colDesc, tableTop).lineTo(colDesc, tableTop + tHeaderH).stroke();
+        doc.moveTo(colTotal, tableTop).lineTo(colTotal, tableTop + tHeaderH).stroke();
+
+        const headers = docType === 'invoice'
+          ? (cfg.lineItems?.invoiceHeaders || { qty: 'QUANTITY', description: 'DESCRIPTION', total: 'AMOUNT' })
+          : (cfg.lineItems?.estimateHeaders || { qty: 'Qty', description: 'DESCRIPTION', total: 'TOTAL' });
+
+        doc.font(boldFont).fontSize(cfg.lineItems?.headerFontSize || 7).fillColor(textColor);
+        doc.text(headers.qty, colQty + 2, tableTop + 5, { width: colDesc - colQty - 4, align: 'center' });
+        doc.text(headers.description, colDesc + 4, tableTop + 5);
+        doc.text(headers.total, colTotal + 4, tableTop + 5, { width: colEnd - colTotal - 8, align: 'right' });
+
+        rowY = tableTop + tHeaderH;
+        doc.font(bodyFont).fontSize(bodyFontSize);
+        for (let i = 0; i < lineItems.length; i++) {
+          const item = lineItems[i];
+          const cellH = Math.max(itemHeights[i] * scale, 14);
+          const desc = U(item.description || '');
+
+          doc.lineWidth(0.5);
+          doc.rect(colQty, rowY, colDesc - colQty, cellH).stroke();
+          doc.rect(colDesc, rowY, colTotal - colDesc, cellH).stroke();
+          doc.rect(colTotal, rowY, colEnd - colTotal, cellH).stroke();
+
+          if (item.quantity != null && Number(item.quantity) > 0) {
+            const qtyStr = Number(item.quantity) === Math.floor(Number(item.quantity))
+              ? String(Math.floor(Number(item.quantity)))
+              : Number(item.quantity).toFixed(2);
+            doc.text(qtyStr, colQty + 2, rowY + 3, { width: colDesc - colQty - 4, align: 'center' });
+          }
+          doc.text(desc, colDesc + 4, rowY + 3, { width: colTotal - colDesc - 8 });
+          const amt = Number(item.amount) || 0;
+          if (amt > 0) {
+            doc.text(amt.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','), colTotal + 4, rowY + 3, { width: colEnd - colTotal - 8, align: 'right' });
+          }
+          rowY += cellH;
+        }
       }
 
       // --- FOOTER: Terms (left) + TOTAL label + TOTAL value (right) ---
+      // (bid mode renders its own total inline, but still shows terms footer if configured)
       if (cfg.footer?.show !== false) {
         const totalAmountW = cfg.footer?.totalAmountWidth || 100;
         const totalLabelW = cfg.footer?.totalLabelWidth || 60;
@@ -2115,24 +2177,37 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
 
         const footerY2 = Math.min(rowY + footerGap, maxTableBottom);
 
-        doc.lineWidth(stroke);
-        doc.rect(leftM, footerY2, termsColW, footerH).stroke();
-        doc.rect(totalLabelX, footerY2, totalLabelW, footerH).stroke();
-        doc.rect(totalAmountX, footerY2, totalAmountW, footerH).stroke();
-
-        if (cfg.footer?.showTerms !== false) {
-          const termsText = (data.terms || '').toUpperCase();
-          if (termsText) {
-            doc.font(bodyFont).fontSize(7);
-            doc.text(termsText, leftM + 4, footerY2 + 5, { width: termsColW - 8, lineGap: 1.5 });
+        if (displayMode === 'bid') {
+          // Bid mode: only show terms box if enabled, skip TOTAL boxes (already rendered above)
+          if (cfg.footer?.showTerms !== false) {
+            const termsText = (data.terms || '').toUpperCase();
+            if (termsText) {
+              doc.lineWidth(stroke);
+              doc.rect(leftM, footerY2, pw, footerH).stroke();
+              doc.font(bodyFont).fontSize(7).fillColor(textColor);
+              doc.text(termsText, leftM + 4, footerY2 + 5, { width: pw - 8, lineGap: 1.5 });
+            }
           }
-        }
+        } else {
+          doc.lineWidth(stroke);
+          doc.rect(leftM, footerY2, termsColW, footerH).stroke();
+          doc.rect(totalLabelX, footerY2, totalLabelW, footerH).stroke();
+          doc.rect(totalAmountX, footerY2, totalAmountW, footerH).stroke();
 
-        const totalStr = fmtMoney(data.total);
-        doc.font(boldFont).fontSize(cfg.footer?.totalFontSize || 10).fillColor(textColor);
-        doc.text('TOTAL', totalLabelX + 4, footerY2 + (footerH / 2) - 6, { width: totalLabelW - 8, align: 'center' });
-        doc.fontSize(cfg.footer?.totalAmountFontSize || 11);
-        doc.text(totalStr, totalAmountX + 4, footerY2 + (footerH / 2) - 6, { width: totalAmountW - 8, align: 'right' });
+          if (cfg.footer?.showTerms !== false) {
+            const termsText = (data.terms || '').toUpperCase();
+            if (termsText) {
+              doc.font(bodyFont).fontSize(7);
+              doc.text(termsText, leftM + 4, footerY2 + 5, { width: termsColW - 8, lineGap: 1.5 });
+            }
+          }
+
+          const totalStr = fmtMoney(data.total);
+          doc.font(boldFont).fontSize(cfg.footer?.totalFontSize || 10).fillColor(textColor);
+          doc.text('TOTAL', totalLabelX + 4, footerY2 + (footerH / 2) - 6, { width: totalLabelW - 8, align: 'center' });
+          doc.fontSize(cfg.footer?.totalAmountFontSize || 11);
+          doc.text(totalStr, totalAmountX + 4, footerY2 + (footerH / 2) - 6, { width: totalAmountW - 8, align: 'right' });
+        }
       }
     }
 
@@ -2255,7 +2330,7 @@ app.post('/estimates', authenticate, async (req, res) => {
     const fields = ['workOrderId','status','issueDate','expirationDate','poNumber','projectName',
       'projectAddress','projectCity','projectState','projectZip',
       'billingAddress','billingCity','billingState','billingZip',
-      'subtotal','taxRate','taxAmount','total','notes','pdfPath'];
+      'subtotal','taxRate','taxAmount','total','notes','pdfPath','templateId'];
 
     for (const f of fields) {
       if (body[f] !== undefined) {
@@ -2300,7 +2375,7 @@ app.put('/estimates/:id', authenticate, requireNumericParam('id'), async (req, r
     const fields = ['customerId','workOrderId','status','issueDate','expirationDate','poNumber',
       'projectName','projectAddress','projectCity','projectState','projectZip',
       'billingAddress','billingCity','billingState','billingZip',
-      'subtotal','taxRate','taxAmount','total','notes','terms','pdfPath'];
+      'subtotal','taxRate','taxAmount','total','notes','terms','pdfPath','templateId'];
 
     for (const f of fields) {
       if (body[f] !== undefined) {
@@ -2468,7 +2543,8 @@ app.post('/estimates/:id/generate-pdf', authenticate, requireNumericParam('id'),
     fs.writeFileSync(filePath, pdfBuffer);
 
     const pdfPath = `uploads/${filename}`;
-    await db.query('UPDATE estimates SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, req.params.id]);
+    const tplId = b.templateId || null;
+    await db.query('UPDATE estimates SET pdfPath=?, templateId=COALESCE(?,templateId), updatedAt=NOW() WHERE id=?', [pdfPath, tplId, req.params.id]);
     await uploadToS3IfConfigured(filePath, pdfPath);
 
     res.json({ pdfPath });
@@ -2706,8 +2782,8 @@ app.post('/invoices', authenticate, async (req, res) => {
       `INSERT INTO invoices (invoiceNumber, customerId, workOrderId, estimateId, status, issueDate, dueDate,
         poNumber, projectName, shipToAddress, shipToCity, shipToState, shipToZip,
         billingAddress, billingCity, billingState, billingZip,
-        subtotal, taxRate, taxAmount, total, amountPaid, balanceDue, notes, terms)
-       VALUES (?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+        subtotal, taxRate, taxAmount, total, amountPaid, balanceDue, notes, terms, templateId)
+       VALUES (?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
       [
         invoiceNumber, resolvedCustomerId, b.workOrderId || null, b.estimateId || null,
         issueDate, dueDate,
@@ -2716,7 +2792,7 @@ app.post('/invoices', authenticate, async (req, res) => {
         b.billingAddress || null, b.billingCity || null, b.billingState || null, b.billingZip || null,
         Number(b.subtotal) || 0, Number(b.taxRate) || 0, Number(b.taxAmount) || 0, Number(b.total) || 0,
         Number(b.total) || 0,
-        b.notes || null, terms
+        b.notes || null, terms, b.templateId || null
       ]
     );
     const [[created]] = await db.query('SELECT * FROM invoices WHERE id = ?', [result.insertId]);
@@ -2734,7 +2810,7 @@ app.put('/invoices/:id', authenticate, requireNumericParam('id'), async (req, re
     const fields = ['customerId', 'workOrderId', 'estimateId', 'issueDate', 'dueDate', 'poNumber', 'projectName',
       'shipToAddress', 'shipToCity', 'shipToState', 'shipToZip',
       'billingAddress', 'billingCity', 'billingState', 'billingZip',
-      'taxRate', 'notes', 'terms'];
+      'taxRate', 'notes', 'terms', 'templateId'];
     const sets = [];
     const params = [];
     for (const f of fields) {
@@ -2870,7 +2946,8 @@ app.post('/invoices/:id/generate-pdf', authenticate, requireNumericParam('id'), 
     fs.writeFileSync(filePath, pdfBuffer);
 
     const pdfPath = `uploads/${filename}`;
-    await db.query('UPDATE invoices SET pdfPath=?, updatedAt=NOW() WHERE id=?', [pdfPath, req.params.id]);
+    const tplId = b.templateId || null;
+    await db.query('UPDATE invoices SET pdfPath=?, templateId=COALESCE(?,templateId), updatedAt=NOW() WHERE id=?', [pdfPath, tplId, req.params.id]);
     await uploadToS3IfConfigured(filePath, pdfPath);
     res.json({ pdfPath });
   } catch (err) {

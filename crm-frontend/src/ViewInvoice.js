@@ -69,6 +69,9 @@ export default function ViewInvoice() {
     try {
       const res = await api.get(`/invoices/${id}`);
       setInvoice(res.data);
+      if (res.data.templateId && !selectedTemplateId) {
+        setSelectedTemplateId(String(res.data.templateId));
+      }
     } catch (err) {
       console.error("Error fetching invoice:", err);
     } finally {

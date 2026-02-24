@@ -45,10 +45,12 @@ const DEFAULT_CONFIG = {
   poNumber: { show: true, x: 400, y: 255, width: 162, height: 35, label: "P.O. No." },
   lineItems: {
     show: true, x: 50, y: 300, width: 512, height: 130,
+    displayMode: "detailed",
     headerBgColor: "#E0E0E0", headerFontSize: 7, bodyFontSize: 8,
     qtyColumnWidth: 50, totalColumnWidth: 75,
     estimateHeaders: { qty: "Qty", description: "DESCRIPTION", total: "TOTAL" },
     invoiceHeaders: { qty: "QUANTITY", description: "DESCRIPTION", total: "AMOUNT" },
+    bidDescriptionLabel: "Scope of Work",
   },
   footer: {
     show: true, x: 50, y: 700, width: 512, height: 52,
@@ -520,6 +522,7 @@ export default function PdfTemplateBuilder() {
         );
       case "lineItems": {
         const li = config.lineItems || {};
+        const mode = li.displayMode || "detailed";
         const eh = li.estimateHeaders || {};
         const ih = li.invoiceHeaders || {};
         const hbg = li.headerBgColor || "#E0E0E0";
@@ -527,6 +530,39 @@ export default function PdfTemplateBuilder() {
         const bfs = li.bodyFontSize || 8;
         const thS = { background: hbg, fontSize: hfs, color: textColor, fontWeight: 700, padding: "4px 4px", border: `0.75px solid ${lineColor}`, textAlign: "left" };
         const tdS = { fontSize: bfs, padding: "3px 4px", border: `0.5px solid ${lineColor}`, color: textColor };
+
+        if (mode === "bid") {
+          return (
+            <div style={{ ...fill, opacity: li.show === false ? 0.08 : 1, overflow: "hidden", padding: 4 }}>
+              <div style={{ fontWeight: 700, fontSize: hfs + 2, color: textColor, marginBottom: 4 }}>{li.bidDescriptionLabel || "Scope of Work"}:</div>
+              <div style={{ fontSize: bfs, color: textColor, lineHeight: 1.5, marginBottom: 8 }}>
+                INITIAL SERVICE CALL, TEMPERED GLASS PANEL 48&quot; X 72&quot;, LABOR - INSTALLATION
+              </div>
+              <div style={{ fontWeight: 700, fontSize: bfs + 2, color: textColor, textAlign: "right" }}>TOTAL: $2,150.00</div>
+            </div>
+          );
+        }
+
+        if (mode === "summary") {
+          return (
+            <div style={{ ...fill, opacity: li.show === false ? 0.08 : 1, overflow: "hidden" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th style={thS}>{previewType === "invoice" ? ih.description || "DESCRIPTION" : eh.description || "DESCRIPTION"}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td style={tdS}>INITIAL SERVICE CALL</td></tr>
+                  <tr><td style={tdS}>TEMPERED GLASS PANEL 48&quot; X 72&quot;</td></tr>
+                  <tr><td style={tdS}>LABOR - INSTALLATION</td></tr>
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+
+        // detailed (default)
         return (
           <div style={{ ...fill, opacity: li.show === false ? 0.08 : 1, overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -679,31 +715,49 @@ export default function PdfTemplateBuilder() {
 
           <PtbSection {...sectionProps("lineItems", "Line Items Table", "lineItems")}>
             <PtbPositionControls {...posProps("lineItems")} />
+            <div className="ptb-field">
+              <label className="ptb-label">Display Mode</label>
+              <select className="ptb-input" value={config.lineItems?.displayMode || "detailed"} onChange={(e) => updateConfig("lineItems", "displayMode", e.target.value)}>
+                <option value="detailed">Detailed (Qty + Description + Amount)</option>
+                <option value="summary">Summary (Descriptions only, total at bottom)</option>
+                <option value="bid">Bid (Single paragraph + total price)</option>
+              </select>
+            </div>
+            {config.lineItems?.displayMode === "bid" && (
+              <div className="ptb-field">
+                <label className="ptb-label">Bid Description Label</label>
+                <input className="ptb-input" value={config.lineItems?.bidDescriptionLabel || "Scope of Work"} onChange={(e) => updateConfig("lineItems", "bidDescriptionLabel", e.target.value)} />
+              </div>
+            )}
             <div className="ptb-field-row">
               <PtbNumInput value={config.lineItems?.headerFontSize ?? 7} onChange={(e) => handleNumChange("lineItems", "headerFontSize", e.target.value)} onBlur={() => handleNumBlur("lineItems", "headerFontSize", 7)} label="Header Font" />
               <PtbNumInput value={config.lineItems?.bodyFontSize ?? 8} onChange={(e) => handleNumChange("lineItems", "bodyFontSize", e.target.value)} onBlur={() => handleNumBlur("lineItems", "bodyFontSize", 8)} label="Body Font" />
             </div>
-            <div className="ptb-field-row">
-              <PtbNumInput value={config.lineItems?.qtyColumnWidth ?? 50} onChange={(e) => handleNumChange("lineItems", "qtyColumnWidth", e.target.value)} onBlur={() => handleNumBlur("lineItems", "qtyColumnWidth", 50)} label="Qty Col (pt)" />
-              <PtbNumInput value={config.lineItems?.totalColumnWidth ?? 75} onChange={(e) => handleNumChange("lineItems", "totalColumnWidth", e.target.value)} onBlur={() => handleNumBlur("lineItems", "totalColumnWidth", 75)} label="Total Col (pt)" />
-            </div>
-            <div className="ptb-field">
-              <label className="ptb-label">Header Background</label>
-              <input className="ptb-input-color" type="color" value={config.lineItems?.headerBgColor || "#E0E0E0"} onChange={(e) => updateConfig("lineItems", "headerBgColor", e.target.value)} />
-            </div>
-            <hr style={{ border: "none", borderTop: "1px solid var(--border-color)", margin: "4px 0" }} />
-            <label className="ptb-label" style={{ marginBottom: 4 }}>Estimate Column Headers</label>
-            <div className="ptb-field-row">
-              <input className="ptb-input" placeholder="Qty" value={estHeaders.qty || ""} onChange={(e) => updateNestedConfig("lineItems", "estimateHeaders", "qty", e.target.value)} style={{ flex: 1 }} />
-              <input className="ptb-input" placeholder="Description" value={estHeaders.description || ""} onChange={(e) => updateNestedConfig("lineItems", "estimateHeaders", "description", e.target.value)} style={{ flex: 2 }} />
-              <input className="ptb-input" placeholder="Total" value={estHeaders.total || ""} onChange={(e) => updateNestedConfig("lineItems", "estimateHeaders", "total", e.target.value)} style={{ flex: 1 }} />
-            </div>
-            <label className="ptb-label" style={{ marginBottom: 4 }}>Invoice Column Headers</label>
-            <div className="ptb-field-row">
-              <input className="ptb-input" placeholder="Qty" value={invHeaders.qty || ""} onChange={(e) => updateNestedConfig("lineItems", "invoiceHeaders", "qty", e.target.value)} style={{ flex: 1 }} />
-              <input className="ptb-input" placeholder="Description" value={invHeaders.description || ""} onChange={(e) => updateNestedConfig("lineItems", "invoiceHeaders", "description", e.target.value)} style={{ flex: 2 }} />
-              <input className="ptb-input" placeholder="Total" value={invHeaders.total || ""} onChange={(e) => updateNestedConfig("lineItems", "invoiceHeaders", "total", e.target.value)} style={{ flex: 1 }} />
-            </div>
+            {config.lineItems?.displayMode !== "bid" && (
+              <>
+                <div className="ptb-field-row">
+                  <PtbNumInput value={config.lineItems?.qtyColumnWidth ?? 50} onChange={(e) => handleNumChange("lineItems", "qtyColumnWidth", e.target.value)} onBlur={() => handleNumBlur("lineItems", "qtyColumnWidth", 50)} label="Qty Col (pt)" />
+                  <PtbNumInput value={config.lineItems?.totalColumnWidth ?? 75} onChange={(e) => handleNumChange("lineItems", "totalColumnWidth", e.target.value)} onBlur={() => handleNumBlur("lineItems", "totalColumnWidth", 75)} label="Total Col (pt)" />
+                </div>
+                <div className="ptb-field">
+                  <label className="ptb-label">Header Background</label>
+                  <input className="ptb-input-color" type="color" value={config.lineItems?.headerBgColor || "#E0E0E0"} onChange={(e) => updateConfig("lineItems", "headerBgColor", e.target.value)} />
+                </div>
+                <hr style={{ border: "none", borderTop: "1px solid var(--border-color)", margin: "4px 0" }} />
+                <label className="ptb-label" style={{ marginBottom: 4 }}>Estimate Column Headers</label>
+                <div className="ptb-field-row">
+                  <input className="ptb-input" placeholder="Qty" value={estHeaders.qty || ""} onChange={(e) => updateNestedConfig("lineItems", "estimateHeaders", "qty", e.target.value)} style={{ flex: 1 }} />
+                  <input className="ptb-input" placeholder="Description" value={estHeaders.description || ""} onChange={(e) => updateNestedConfig("lineItems", "estimateHeaders", "description", e.target.value)} style={{ flex: 2 }} />
+                  <input className="ptb-input" placeholder="Total" value={estHeaders.total || ""} onChange={(e) => updateNestedConfig("lineItems", "estimateHeaders", "total", e.target.value)} style={{ flex: 1 }} />
+                </div>
+                <label className="ptb-label" style={{ marginBottom: 4 }}>Invoice Column Headers</label>
+                <div className="ptb-field-row">
+                  <input className="ptb-input" placeholder="Qty" value={invHeaders.qty || ""} onChange={(e) => updateNestedConfig("lineItems", "invoiceHeaders", "qty", e.target.value)} style={{ flex: 1 }} />
+                  <input className="ptb-input" placeholder="Description" value={invHeaders.description || ""} onChange={(e) => updateNestedConfig("lineItems", "invoiceHeaders", "description", e.target.value)} style={{ flex: 2 }} />
+                  <input className="ptb-input" placeholder="Total" value={invHeaders.total || ""} onChange={(e) => updateNestedConfig("lineItems", "invoiceHeaders", "total", e.target.value)} style={{ flex: 1 }} />
+                </div>
+              </>
+            )}
           </PtbSection>
 
           <PtbSection {...sectionProps("footer", "Footer / Totals", "footer")}>

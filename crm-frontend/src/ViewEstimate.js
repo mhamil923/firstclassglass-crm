@@ -52,6 +52,9 @@ export default function ViewEstimate() {
     try {
       const res = await api.get(`/estimates/${id}`);
       setEstimate(res.data);
+      if (res.data.templateId && !selectedTemplateId) {
+        setSelectedTemplateId(String(res.data.templateId));
+      }
     } catch (err) {
       console.error("Error fetching estimate:", err);
     } finally {

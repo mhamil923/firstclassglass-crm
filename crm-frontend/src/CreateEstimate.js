@@ -140,6 +140,7 @@ export default function CreateEstimate() {
         phone: e.custPhone,
         email: e.custEmail,
       });
+      if (e.templateId) setSelectedTemplateId(String(e.templateId));
       if (e.lineItems && e.lineItems.length > 0) {
         setLineItems(
           e.lineItems.map((li) => ({
@@ -304,6 +305,7 @@ export default function CreateEstimate() {
         subtotal,
         taxAmount,
         total,
+        templateId: selectedTemplateId || null,
       };
 
       let estimateId;

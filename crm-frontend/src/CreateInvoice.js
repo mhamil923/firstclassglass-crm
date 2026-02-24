@@ -151,6 +151,7 @@ export default function CreateInvoice() {
         phone: inv.custPhone,
         email: inv.custEmail,
       });
+      if (inv.templateId) setSelectedTemplateId(String(inv.templateId));
       if (inv.lineItems && inv.lineItems.length > 0) {
         setLineItems(
           inv.lineItems.map((li) => ({
@@ -363,6 +364,7 @@ export default function CreateInvoice() {
         subtotal,
         taxAmount,
         total,
+        templateId: selectedTemplateId || null,
       };
 
       let invoiceId;
