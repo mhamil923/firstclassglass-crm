@@ -161,7 +161,7 @@ export default function WorkOrders() {
 
   // For jeffsr, only show these status tabs; everyone else gets the full list.
   const visibleStatusList = isJeffSr
-    ? ["Needs to be Quoted", "Needs to be Invoiced"]
+    ? ["Scheduled", "Needs to be Scheduled", "Needs to be Quoted", "Needs to be Invoiced"]
     : STATUS_LIST;
 
   // state
