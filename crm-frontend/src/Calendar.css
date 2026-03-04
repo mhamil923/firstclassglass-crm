@@ -1287,3 +1287,325 @@
   border-color: rgba(255, 255, 255, 0.2) !important;
   color: #ffffff !important;
 }
+
+/* ===========================
+   Day Modal — Card-based redesign (dm-*)
+   =========================== */
+
+.dm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: grid;
+  place-items: center;
+  z-index: 2000;
+}
+
+.dm-container {
+  width: min(650px, 94vw);
+  max-height: 80vh;
+  background: var(--bg-primary, #000);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+[data-theme="dark"] .dm-container {
+  background: #000;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Header */
+.dm-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 24px 24px 16px;
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+}
+
+.dm-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+}
+
+.dm-subtitle {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--text-secondary, #8e8e93);
+  font-weight: 500;
+}
+
+.dm-close {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-secondary, #8e8e93);
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: all 0.15s ease;
+}
+
+.dm-close:hover {
+  color: var(--text-primary, #fff);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+}
+
+/* Body — scrollable card list */
+.dm-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px;
+}
+
+/* Individual card */
+.dm-card {
+  background: rgba(28, 28, 30, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid #636366;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  transition: border-color 0.2s ease;
+}
+
+[data-theme="dark"] .dm-card {
+  background: rgba(28, 28, 30, 0.8);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dm-card:last-child {
+  margin-bottom: 0;
+}
+
+/* Top row: time + tech dropdown */
+.dm-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.dm-card-time {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dm-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #007AFF;
+}
+
+.dm-dot-amber {
+  background: #FFD60A !important;
+}
+
+.dm-no-time {
+  color: #FFD60A;
+}
+
+.dm-no-time-label {
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+.dm-saved-check {
+  color: #30D158;
+  font-size: 14px;
+  font-weight: 700;
+  animation: dm-fade-in 0.2s ease;
+}
+
+@keyframes dm-fade-in {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Tech dropdown */
+.dm-tech-select {
+  background: var(--bg-tertiary, #2c2c2e);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  padding: 4px 12px;
+  color: var(--text-primary, #fff);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  appearance: auto;
+  min-width: 110px;
+  transition: border-color 0.15s ease;
+}
+
+.dm-tech-select:focus {
+  border-color: var(--accent-blue, #007AFF);
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.15);
+}
+
+[data-theme="dark"] .dm-tech-select {
+  background: #2c2c2e;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  color-scheme: dark;
+}
+
+/* Card info (middle) */
+.dm-card-info {
+  margin-bottom: 12px;
+}
+
+.dm-card-customer {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+  line-height: 1.3;
+}
+
+.dm-card-address {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-secondary, #8e8e93);
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+/* Action buttons (bottom) */
+.dm-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dm-btn {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: var(--text-primary, #fff);
+}
+
+.dm-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dm-btn-unschedule {
+  border: none;
+  color: #FF453A;
+}
+
+.dm-btn-unschedule:hover {
+  background: rgba(255, 69, 58, 0.1);
+}
+
+.dm-btn-save {
+  background: var(--accent-blue, #007AFF);
+  border-color: var(--accent-blue, #007AFF);
+  color: #fff;
+}
+
+.dm-btn-save:hover {
+  opacity: 0.9;
+  background: var(--accent-blue, #007AFF);
+}
+
+/* Inline time editor */
+.dm-inline-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dm-inline-edit-row {
+  display: flex;
+  gap: 16px;
+}
+
+.dm-inline-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #8e8e93);
+}
+
+.dm-time-input {
+  background: var(--bg-tertiary, #2c2c2e);
+  color: var(--text-primary, #fff);
+  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 14px;
+  color-scheme: dark;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.dm-time-input:focus {
+  border-color: var(--accent-blue, #007AFF);
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.15);
+}
+
+[data-theme="dark"] .dm-time-input {
+  background: #2c2c2e;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.dm-inline-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Footer */
+.dm-footer {
+  display: flex;
+  justify-content: center;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+}
+
+/* Responsive */
+@media (max-width: 500px) {
+  .dm-container {
+    width: 98vw;
+    max-height: 90vh;
+    border-radius: 12px;
+  }
+  .dm-header,
+  .dm-body,
+  .dm-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .dm-card-top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .dm-tech-select {
+    width: 100%;
+  }
+}

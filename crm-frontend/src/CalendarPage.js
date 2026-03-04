@@ -403,6 +403,17 @@ export default function WorkOrderCalendar() {
   const [dayOrders, setDayOrders] = useState([]);
   const [dayForModal, setDayForModal] = useState(null);
 
+  // Tech list for assignment dropdown
+  const [techs, setTechs] = useState([]);
+
+  // Inline edit-time state (card ID being edited)
+  const [inlineEditId, setInlineEditId] = useState(null);
+  const [inlineStartTime, setInlineStartTime] = useState("");
+  const [inlineEndTime, setInlineEndTime] = useState("");
+
+  // Tech assignment saving feedback
+  const [techSavedId, setTechSavedId] = useState(null);
+
   // Quick edit modal
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editOrder, setEditOrder] = useState(null);
@@ -571,6 +582,13 @@ export default function WorkOrderCalendar() {
   /* ========= initial fetches ========= */
   useEffect(() => {
     refreshLists();
+    // Fetch tech list for assignment dropdowns
+    api.get("/users", { params: { assignees: 1 } })
+      .then((res) => {
+        const list = (res.data || []).filter((u) => u.username !== "Mark");
+        setTechs(list);
+      })
+      .catch((e) => console.error("⚠️ Error loading techs:", e));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -778,6 +796,7 @@ export default function WorkOrderCalendar() {
             serviceAddress: ev.serviceAddress,
             address: ev.address,
             status: ev.status ?? ev.meta?.status,
+            assignedTo: ev.meta?.assignedTo ?? ev.assignedTo ?? "",
           };
         })
         .filter((o) => o.scheduledDate && isSameDay(o.scheduledDate, day));
@@ -795,6 +814,68 @@ export default function WorkOrderCalendar() {
     } catch (e) {
       console.error("⚠️ Error loading day:", e);
       alert("Failed to load that day.");
+    }
+  }
+
+  /* ===== Tech assignment handler ===== */
+  async function handleAssignTech(orderId, techName) {
+    try {
+      const form = new FormData();
+      form.append("assignedTo", techName);
+      await api.put(`/work-orders/${orderId}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      // Update local state immediately
+      setDayOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, assignedTo: techName } : o))
+      );
+      // Flash success indicator
+      setTechSavedId(orderId);
+      setTimeout(() => setTechSavedId(null), 1200);
+      // Refresh background data
+      await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
+    } catch (e) {
+      console.error("⚠️ Error assigning tech:", e);
+      alert("Failed to assign tech.");
+    }
+  }
+
+  /* ===== Inline edit-time helpers ===== */
+  function startInlineEdit(order) {
+    const s = fromDbString(order.scheduledDate);
+    const e = fromDbString(order.scheduledEnd) ||
+      (s ? moment(s).add(DEFAULT_WINDOW_MIN, "minutes").toDate() : new Date());
+    setInlineEditId(order.id);
+    setInlineStartTime(s ? fmtTime(s) : "08:00");
+    setInlineEndTime(e ? fmtTime(e) : "10:00");
+  }
+
+  function cancelInlineEdit() {
+    setInlineEditId(null);
+    setInlineStartTime("");
+    setInlineEndTime("");
+  }
+
+  async function saveInlineEdit(orderId) {
+    if (!dayForModal) return;
+    const dateStr = fmtDate(dayForModal);
+    if (inlineStartTime >= inlineEndTime) {
+      alert("End time must be after start time.");
+      return;
+    }
+    try {
+      await setSchedulePayload(orderId, {
+        date: dateStr,
+        time: inlineStartTime,
+        endTime: inlineEndTime,
+        status: "Scheduled",
+      });
+      cancelInlineEdit();
+      await openDayModal(dayForModal);
+      await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
+    } catch (e) {
+      console.error("⚠️ Error saving inline time:", e);
+      alert("Failed to save time.");
     }
   }
 
@@ -1182,15 +1263,21 @@ export default function WorkOrderCalendar() {
         </div>
       </div>
 
-      {/* ---------- Day list modal ---------- */}
+      {/* ---------- Day list modal (card-based) ---------- */}
       {dayModalOpen && (
-        <div className="modal-overlay" onClick={() => setDayModalOpen(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{dayModalTitle}</h3>
+        <div className="dm-overlay" onClick={() => { setDayModalOpen(false); cancelInlineEdit(); }}>
+          <div className="dm-container" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="dm-header">
+              <div>
+                <h3 className="dm-title">{dayModalTitle}</h3>
+                <p className="dm-subtitle">
+                  {dayOrders.length} job{dayOrders.length !== 1 ? "s" : ""} scheduled
+                </p>
+              </div>
               <button
-                className="modal-close"
-                onClick={() => setDayModalOpen(false)}
+                className="dm-close"
+                onClick={() => { setDayModalOpen(false); cancelInlineEdit(); }}
                 aria-label="Close"
                 type="button"
               >
@@ -1198,97 +1285,185 @@ export default function WorkOrderCalendar() {
               </button>
             </div>
 
-            <div className="modal-body">
+            {/* Cards */}
+            <div className="dm-body">
               {dayOrders.length ? (
-                <div className="modal-list">
-                  <table className="mini-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: 120 }}>Time</th>
-                        <th>Work Order</th>
-                        <th style={{ width: 380 }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dayOrders.map((o) => {
-                        const s = fromDbString(o.scheduledDate);
-                        const e2 = fromDbString(o.scheduledEnd);
-                        const label =
-                          s && e2
-                            ? `${moment(s).format("hh:mm A")} – ${moment(e2).format("hh:mm A")}`
-                            : s
-                            ? `${moment(s).format("hh:mm A")} – ${moment(s)
-                                .add(DEFAULT_WINDOW_MIN, "minutes")
-                                .format("hh:mm A")}`
-                            : "—";
+                dayOrders.map((o) => {
+                  const s = fromDbString(o.scheduledDate);
+                  const e2 = fromDbString(o.scheduledEnd);
+                  const startM = s ? moment(s) : null;
+                  const endM = e2
+                    ? moment(e2)
+                    : startM
+                    ? moment(startM).add(DEFAULT_WINDOW_MIN, "minutes")
+                    : null;
 
-                        const idLabel = displayWOThenPO(o);
-                        const siteLoc = getSiteLocation(o) || o.siteLocation || "";
-                        const siteAddr = getSiteAddress(o) || "";
+                  const isNoTime =
+                    startM &&
+                    startM.hours() === 0 &&
+                    startM.minutes() === 0 &&
+                    endM &&
+                    endM.hours() <= 2 &&
+                    endM.minutes() === 0;
 
-                        return (
-                          <tr key={o.id}>
-                            <td>{label}</td>
-                            <td style={{ minWidth: 0 }}>
-                              <div className="fw-bold" style={clamp1}>
-                                {o.customer ? `${o.customer}` : `Work Order`} — {idLabel}
+                  const timeLabel =
+                    startM && endM
+                      ? `${startM.format("h:mm A")} – ${endM.format("h:mm A")}`
+                      : "—";
+
+                  const idLabel = displayWOThenPO(o);
+                  const siteLoc = getSiteLocation(o) || o.siteLocation || "";
+                  const siteAddr = getSiteAddress(o) || "";
+                  const techName = o.assignedTo || "";
+
+                  // Color for left border based on tech
+                  const techColors = {
+                    jeff: "#007AFF",
+                    mikey: "#30D158",
+                    adin: "#FF9F0A",
+                    jeffsr: "#BF5AF2",
+                  };
+                  const borderColor = techName
+                    ? techColors[techName.toLowerCase()] ||
+                      `hsl(${[...techName].reduce((a, c) => a + c.charCodeAt(0), 0) % 360}, 60%, 55%)`
+                    : "#636366";
+
+                  const isEditing = inlineEditId === o.id;
+
+                  return (
+                    <div
+                      key={o.id}
+                      className="dm-card"
+                      style={{ borderLeftColor: borderColor }}
+                    >
+                      {isEditing ? (
+                        /* Inline time editor */
+                        <div className="dm-inline-edit">
+                          <div className="dm-inline-edit-row">
+                            <label className="dm-inline-label">
+                              Start
+                              <input
+                                type="time"
+                                className="dm-time-input"
+                                value={inlineStartTime}
+                                onChange={(ev) => setInlineStartTime(ev.target.value)}
+                              />
+                            </label>
+                            <label className="dm-inline-label">
+                              End
+                              <input
+                                type="time"
+                                className="dm-time-input"
+                                value={inlineEndTime}
+                                onChange={(ev) => setInlineEndTime(ev.target.value)}
+                              />
+                            </label>
+                          </div>
+                          <div className="dm-inline-edit-actions">
+                            <button
+                              className="dm-btn dm-btn-save"
+                              onClick={() => saveInlineEdit(o.id)}
+                              type="button"
+                            >
+                              Save
+                            </button>
+                            <button
+                              className="dm-btn"
+                              onClick={cancelInlineEdit}
+                              type="button"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Top row: time + tech */}
+                          <div className="dm-card-top">
+                            <div className={`dm-card-time ${isNoTime ? "dm-no-time" : ""}`}>
+                              {isNoTime ? (
+                                <>
+                                  <span className="dm-dot dm-dot-amber" />
+                                  {timeLabel}
+                                  <span className="dm-no-time-label">(no time set)</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="dm-dot" style={{ background: borderColor }} />
+                                  {timeLabel}
+                                </>
+                              )}
+                              {techSavedId === o.id && (
+                                <span className="dm-saved-check">✓</span>
+                              )}
+                            </div>
+                            <select
+                              className="dm-tech-select"
+                              value={techName}
+                              onChange={(ev) => handleAssignTech(o.id, ev.target.value)}
+                            >
+                              <option value="">Unassigned</option>
+                              {techs.map((t) => (
+                                <option key={t.id || t.username} value={t.username}>
+                                  {t.username}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Middle: WO info */}
+                          <div className="dm-card-info">
+                            <div className="dm-card-customer" style={clamp1}>
+                              {o.customer ? o.customer : "Work Order"} — {idLabel}
+                            </div>
+                            {(siteLoc || siteAddr) && (
+                              <div className="dm-card-address" style={clamp2}>
+                                📍 {siteLoc}{siteLoc && siteAddr ? " · " : ""}{siteAddr}
                               </div>
-                              {siteLoc ? (
-                                <div className="text-muted" style={clamp1}>
-                                  Site Location: {siteLoc}
-                                </div>
-                              ) : null}
-                              {siteAddr ? (
-                                <div className="text-muted" style={clamp2}>
-                                  Site Address: {siteAddr}
-                                </div>
-                              ) : null}
-                            </td>
-                            <td>
-                              <div className="d-flex align-items-center flex-wrap" style={{ gap: 8 }}>
-                                <button
-                                  className="btn btn-sm btn-primary"
-                                  onClick={() => openEditModal(o, dayForModal)}
-                                  type="button"
-                                >
-                                  Edit Time…
-                                </button>
-                                <button
-                                  className="btn btn-sm btn-outline-secondary"
-                                  onClick={() => navigateToView(o.id)}
-                                  type="button"
-                                >
-                                  Open
-                                </button>
-                                <button
-                                  className="btn btn-sm btn-outline-dark"
-                                  onClick={() => openStatusPicker(o)}
-                                  type="button"
-                                >
-                                  Status…
-                                </button>
-                                <button
-                                  className="btn btn-sm btn-outline-danger"
-                                  onClick={() => unschedule(o.id)}
-                                  type="button"
-                                >
-                                  Unschedule
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                            )}
+                          </div>
+
+                          {/* Bottom: actions */}
+                          <div className="dm-card-actions">
+                            <button
+                              className="dm-btn"
+                              onClick={() => startInlineEdit(o)}
+                              type="button"
+                            >
+                              Edit Time
+                            </button>
+                            <button
+                              className="dm-btn"
+                              onClick={() => navigateToView(o.id)}
+                              type="button"
+                            >
+                              Open
+                            </button>
+                            <button
+                              className="dm-btn dm-btn-unschedule"
+                              onClick={() => unschedule(o.id)}
+                              type="button"
+                            >
+                              Unschedule
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })
               ) : (
                 <p className="empty-text mb-0">No work orders scheduled on this day.</p>
               )}
             </div>
 
-            <div className="modal-footer">
-              <button className="btn btn-ghost" onClick={() => setDayModalOpen(false)} type="button">
+            {/* Footer */}
+            <div className="dm-footer">
+              <button
+                className="dm-btn"
+                onClick={() => { setDayModalOpen(false); cancelInlineEdit(); }}
+                type="button"
+              >
                 Close
               </button>
             </div>
