@@ -1290,12 +1290,13 @@
 
 /* ===========================
    Day Modal — Card-based redesign (dm-*)
+   Works in both light and dark mode via CSS variables.
    =========================== */
 
 .dm-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   display: grid;
@@ -1303,21 +1304,24 @@
   z-index: 2000;
 }
 
+[data-theme="dark"] .dm-overlay {
+  background: rgba(0, 0, 0, 0.7);
+}
+
 .dm-container {
   width: min(650px, 94vw);
   max-height: 80vh;
-  background: var(--bg-primary, #000);
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
   border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 [data-theme="dark"] .dm-container {
-  background: #000;
-  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
 }
 
 /* Header */
@@ -1326,20 +1330,21 @@
   align-items: flex-start;
   justify-content: space-between;
   padding: 24px 24px 16px;
-  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
 }
 
 .dm-title {
   margin: 0;
   font-size: 18px;
   font-weight: 700;
-  color: var(--text-primary, #fff);
+  color: var(--text-primary);
 }
 
 .dm-subtitle {
   margin: 4px 0 0;
   font-size: 14px;
-  color: var(--text-secondary, #8e8e93);
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
@@ -1349,15 +1354,15 @@
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
-  color: var(--text-secondary, #8e8e93);
+  color: var(--text-secondary);
   padding: 4px 8px;
   border-radius: 8px;
   transition: all 0.15s ease;
 }
 
 .dm-close:hover {
-  color: var(--text-primary, #fff);
-  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 /* Body — scrollable card list */
@@ -1369,18 +1374,18 @@
 
 /* Individual card */
 .dm-card {
-  background: rgba(28, 28, 30, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
   border-left: 3px solid #636366;
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
   transition: border-color 0.2s ease;
 }
 
 [data-theme="dark"] .dm-card {
-  background: rgba(28, 28, 30, 0.8);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--bg-card);
 }
 
 .dm-card:last-child {
@@ -1399,7 +1404,7 @@
 .dm-card-time {
   font-size: 14px;
   font-weight: 700;
-  color: var(--text-primary, #fff);
+  color: var(--text-primary);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1414,10 +1419,18 @@
 }
 
 .dm-dot-amber {
+  background: #e6a800 !important;
+}
+
+[data-theme="dark"] .dm-dot-amber {
   background: #FFD60A !important;
 }
 
 .dm-no-time {
+  color: #b8860b;
+}
+
+[data-theme="dark"] .dm-no-time {
   color: #FFD60A;
 }
 
@@ -1428,7 +1441,7 @@
 }
 
 .dm-saved-check {
-  color: #30D158;
+  color: var(--accent-green);
   font-size: 14px;
   font-weight: 700;
   animation: dm-fade-in 0.2s ease;
@@ -1441,11 +1454,11 @@
 
 /* Tech dropdown */
 .dm-tech-select {
-  background: var(--bg-tertiary, #2c2c2e);
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 4px 12px;
-  color: var(--text-primary, #fff);
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -1456,14 +1469,11 @@
 }
 
 .dm-tech-select:focus {
-  border-color: var(--accent-blue, #007AFF);
+  border-color: var(--accent-blue);
   box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.15);
 }
 
 [data-theme="dark"] .dm-tech-select {
-  background: #2c2c2e;
-  border-color: rgba(255, 255, 255, 0.1);
-  color: #fff;
   color-scheme: dark;
 }
 
@@ -1475,14 +1485,14 @@
 .dm-card-customer {
   font-size: 14px;
   font-weight: 700;
-  color: var(--text-primary, #fff);
+  color: var(--text-primary);
   line-height: 1.3;
 }
 
 .dm-card-address {
   margin-top: 4px;
   font-size: 13px;
-  color: var(--text-secondary, #8e8e93);
+  color: var(--text-secondary);
   font-weight: 500;
   line-height: 1.3;
 }
@@ -1502,33 +1512,37 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--border-color-strong);
   background: transparent;
-  color: var(--text-primary, #fff);
+  color: var(--text-primary);
 }
 
 .dm-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-hover);
 }
 
 .dm-btn-unschedule {
   border: none;
-  color: #FF453A;
+  color: var(--accent-red);
 }
 
 .dm-btn-unschedule:hover {
-  background: rgba(255, 69, 58, 0.1);
+  background: rgba(255, 59, 48, 0.08);
+}
+
+[data-theme="dark"] .dm-btn-unschedule:hover {
+  background: rgba(255, 69, 58, 0.12);
 }
 
 .dm-btn-save {
-  background: var(--accent-blue, #007AFF);
-  border-color: var(--accent-blue, #007AFF);
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
   color: #fff;
 }
 
 .dm-btn-save:hover {
   opacity: 0.9;
-  background: var(--accent-blue, #007AFF);
+  background: var(--accent-blue);
 }
 
 /* Inline time editor */
@@ -1549,30 +1563,27 @@
   gap: 4px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary, #8e8e93);
+  color: var(--text-secondary);
 }
 
 .dm-time-input {
-  background: var(--bg-tertiary, #2c2c2e);
-  color: var(--text-primary, #fff);
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 6px 12px;
   font-size: 14px;
-  color-scheme: dark;
   outline: none;
   transition: border-color 0.15s ease;
 }
 
 .dm-time-input:focus {
-  border-color: var(--accent-blue, #007AFF);
+  border-color: var(--accent-blue);
   box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.15);
 }
 
 [data-theme="dark"] .dm-time-input {
-  background: #2c2c2e;
-  border-color: rgba(255, 255, 255, 0.1);
-  color: #fff;
+  color-scheme: dark;
 }
 
 .dm-inline-edit-actions {
@@ -1585,7 +1596,8 @@
   display: flex;
   justify-content: center;
   padding: 16px 24px;
-  border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
 }
 
 /* Responsive */
