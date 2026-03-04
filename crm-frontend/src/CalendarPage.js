@@ -775,6 +775,11 @@ export default function WorkOrderCalendar() {
         list = Array.isArray(data) ? data : [];
       }
 
+      // Build lookup from allOrders (from /work-orders endpoint, which always
+      // includes assignedTo + assignedToName). This is the authoritative source.
+      const allOrdersById = {};
+      allOrders.forEach((wo) => { allOrdersById[wo.id] = wo; });
+
       const normalized = list
         .map((ev) => {
           const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
@@ -782,6 +787,9 @@ export default function WorkOrderCalendar() {
             fromDbString(ev.end) ||
             fromDbString(ev.scheduledEnd) ||
             (s ? moment(s).add(DEFAULT_WINDOW_MIN, "minutes").toDate() : null);
+
+          // Cross-reference with allOrders for assignedTo data
+          const full = allOrdersById[ev.id];
 
           return {
             id: ev.id,
@@ -796,8 +804,8 @@ export default function WorkOrderCalendar() {
             serviceAddress: ev.serviceAddress,
             address: ev.address,
             status: ev.status ?? ev.meta?.status,
-            assignedTo: ev.meta?.assignedTo ?? ev.assignedTo ?? null,
-            assignedToName: ev.meta?.assignedToName ?? ev.assignedToName ?? "",
+            assignedTo: full?.assignedTo ?? ev.meta?.assignedTo ?? ev.assignedTo ?? null,
+            assignedToName: full?.assignedToName ?? ev.meta?.assignedToName ?? ev.assignedToName ?? "",
           };
         })
         .filter((o) => o.scheduledDate && isSameDay(o.scheduledDate, day));
@@ -807,6 +815,18 @@ export default function WorkOrderCalendar() {
         const sb = b.scheduledDate ? +b.scheduledDate : 0;
         return sa - sb;
       });
+
+      // Diagnostic: verify assignedTo data is reaching the modal
+      console.log('[Calendar Modal] Work orders for day:', JSON.stringify(normalized.map(wo => ({
+        id: wo.id,
+        customer: wo.customer,
+        assignedTo: wo.assignedTo,
+        assignedToName: wo.assignedToName,
+        fromAllOrders: allOrdersById[wo.id] ? {
+          assignedTo: allOrdersById[wo.id].assignedTo,
+          assignedToName: allOrdersById[wo.id].assignedToName,
+        } : 'NOT_FOUND_IN_ALL_ORDERS',
+      }))));
 
       setDayOrders(normalized);
       setDayForModal(day.toDate());
@@ -1321,7 +1341,8 @@ export default function WorkOrderCalendar() {
                   const siteLoc = getSiteLocation(o) || o.siteLocation || "";
                   const siteAddr = getSiteAddress(o) || "";
                   const techName = o.assignedToName || "";
-                  const techId = o.assignedTo || "";
+                  // Coerce to string so <select value> always matches <option value> (both strings)
+                  const techId = o.assignedTo ? String(o.assignedTo) : "";
 
                   // Color for left border based on tech
                   const techColors = {
@@ -1411,7 +1432,7 @@ export default function WorkOrderCalendar() {
                             >
                               <option value="">Unassigned</option>
                               {techs.map((t) => (
-                                <option key={t.id} value={t.id}>
+                                <option key={t.id} value={String(t.id)}>
                                   {t.username}
                                 </option>
                               ))}
