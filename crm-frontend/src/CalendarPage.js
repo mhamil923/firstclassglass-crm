@@ -796,7 +796,8 @@ export default function WorkOrderCalendar() {
             serviceAddress: ev.serviceAddress,
             address: ev.address,
             status: ev.status ?? ev.meta?.status,
-            assignedTo: ev.meta?.assignedTo ?? ev.assignedTo ?? "",
+            assignedTo: ev.meta?.assignedTo ?? ev.assignedTo ?? null,
+            assignedToName: ev.meta?.assignedToName ?? ev.assignedToName ?? "",
           };
         })
         .filter((o) => o.scheduledDate && isSameDay(o.scheduledDate, day));
@@ -818,16 +819,21 @@ export default function WorkOrderCalendar() {
   }
 
   /* ===== Tech assignment handler ===== */
-  async function handleAssignTech(orderId, techName) {
+  async function handleAssignTech(orderId, techIdStr) {
+    const techId = techIdStr ? Number(techIdStr) : null;
+    const techObj = techs.find((t) => t.id === techId);
+    const techName = techObj?.username || "";
     try {
       const form = new FormData();
-      form.append("assignedTo", techName);
+      form.append("assignedTo", techId != null ? String(techId) : "");
       await api.put(`/work-orders/${orderId}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       // Update local state immediately
       setDayOrders((prev) =>
-        prev.map((o) => (o.id === orderId ? { ...o, assignedTo: techName } : o))
+        prev.map((o) =>
+          o.id === orderId ? { ...o, assignedTo: techId, assignedToName: techName } : o
+        )
       );
       // Flash success indicator
       setTechSavedId(orderId);
@@ -1314,7 +1320,8 @@ export default function WorkOrderCalendar() {
                   const idLabel = displayWOThenPO(o);
                   const siteLoc = getSiteLocation(o) || o.siteLocation || "";
                   const siteAddr = getSiteAddress(o) || "";
-                  const techName = o.assignedTo || "";
+                  const techName = o.assignedToName || "";
+                  const techId = o.assignedTo || "";
 
                   // Color for left border based on tech
                   const techColors = {
@@ -1399,12 +1406,12 @@ export default function WorkOrderCalendar() {
                             </div>
                             <select
                               className="dm-tech-select"
-                              value={techName}
+                              value={techId}
                               onChange={(ev) => handleAssignTech(o.id, ev.target.value)}
                             >
                               <option value="">Unassigned</option>
                               {techs.map((t) => (
-                                <option key={t.id || t.username} value={t.username}>
+                                <option key={t.id} value={t.id}>
                                   {t.username}
                                 </option>
                               ))}

@@ -5887,14 +5887,19 @@ app.get('/calendar/events', authenticate, async (req, res) => {
     const startSql = startQ ? asSqlDayStart(startQ) : defaultStart;
     const endSql   = endQ   ? asSqlDayEnd(endQ)     : defaultEnd;
 
+    const hasA = !!SCHEMA.hasAssignedTo;
+    const assignedSel = hasA ? ', u.username AS assignedToName, w.assignedTo' : '';
+    const assignedJoin = hasA ? 'LEFT JOIN users u ON w.assignedTo = u.id' : '';
+
     const [rows] = await db.execute(
-      `SELECT id, workOrderNumber, poNumber, customer, siteLocation, siteAddress, problemDescription, status,
-              scheduledDate, scheduledEnd
-         FROM work_orders
-        WHERE scheduledDate IS NOT NULL
-          AND scheduledDate <= ?
-          AND (scheduledEnd IS NULL OR scheduledEnd >= ?)
-        ORDER BY scheduledDate ASC`,
+      `SELECT w.id, w.workOrderNumber, w.poNumber, w.customer, w.siteLocation, w.siteAddress, w.problemDescription, w.status,
+              w.scheduledDate, w.scheduledEnd${assignedSel}
+         FROM work_orders w
+         ${assignedJoin}
+        WHERE w.scheduledDate IS NOT NULL
+          AND w.scheduledDate <= ?
+          AND (w.scheduledEnd IS NULL OR w.scheduledEnd >= ?)
+        ORDER BY w.scheduledDate ASC`,
       [endSql, startSql]
     );
 
@@ -5918,6 +5923,8 @@ app.get('/calendar/events', authenticate, async (req, res) => {
         problemDescription: r.problemDescription,
         workOrderNumber: r.workOrderNumber || null,
         poNumber: r.poNumber || null,
+        assignedTo: r.assignedTo || null,
+        assignedToName: r.assignedToName || null,
       }
     }));
 
