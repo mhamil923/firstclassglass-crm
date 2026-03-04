@@ -5295,6 +5295,9 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
 
     const newPhotos    = images.map(fileKeySafe);
     const extraPdfKeys = (otherPdfs || []).map(fileKeySafe);
+    if (newPhotos.length) {
+      console.log('[Photo Upload] WO ID:', wid, '| New photos:', JSON.stringify(newPhotos));
+    }
     attachments = uniq([...attachments, ...newPhotos, ...extraPdfKeys]);
 
     const body = { ...existing, ...req.body };
