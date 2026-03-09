@@ -1429,6 +1429,21 @@ export default function WorkOrderCalendar() {
                               className="dm-tech-select"
                               value={techId}
                               onChange={(ev) => handleAssignTech(o.id, ev.target.value)}
+                              style={{
+                                WebkitAppearance: 'auto',
+                                MozAppearance: 'auto',
+                                appearance: 'auto',
+                                backgroundColor: '#2c2c2e',
+                                color: '#f5f5f7',
+                                border: '1px solid rgba(255, 255, 255, 0.15)',
+                                borderRadius: '8px',
+                                padding: '6px 12px',
+                                fontSize: '13px',
+                                cursor: 'pointer',
+                                outline: 'none',
+                                minWidth: '120px',
+                                backgroundImage: 'none',
+                              }}
                             >
                               <option value="">Unassigned</option>
                               {techs.map((t) => (
