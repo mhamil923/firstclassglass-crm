@@ -3280,10 +3280,10 @@ app.get('/pdf-templates/debug', async (req, res) => {
       'SELECT id, name, type, isDefault, isActive, LENGTH(config) as config_length, LEFT(config, 300) as config_preview FROM pdf_templates'
     );
     const [recentEstimates] = await db.query(
-      'SELECT id, templateId, created_at FROM estimates ORDER BY id DESC LIMIT 5'
+      'SELECT id, templateId FROM estimates ORDER BY id DESC LIMIT 5'
     );
     const [recentInvoices] = await db.query(
-      'SELECT id, templateId, created_at FROM invoices ORDER BY id DESC LIMIT 5'
+      'SELECT id, templateId FROM invoices ORDER BY id DESC LIMIT 5'
     );
     res.json({ templates, recentEstimates, recentInvoices });
   } catch (err) {
