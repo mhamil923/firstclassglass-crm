@@ -1824,20 +1824,35 @@ function fmtMoney(val) {
 // --- Shared PDF generation with template config ---
 async function loadTemplateConfig(templateId, docType) {
   let tplConfig = JSON.parse(JSON.stringify(DEFAULT_TEMPLATE_CONFIG));
+  console.log('[PDF Gen] loadTemplateConfig called — templateId:', templateId, 'docType:', docType);
   try {
     if (templateId) {
-      const [[tpl]] = await db.query('SELECT config FROM pdf_templates WHERE id = ? AND isActive = 1', [templateId]);
-      if (tpl) tplConfig = deepMerge(DEFAULT_TEMPLATE_CONFIG, JSON.parse(tpl.config));
+      const [[tpl]] = await db.query('SELECT id, config FROM pdf_templates WHERE id = ? AND isActive = 1', [templateId]);
+      console.log('[PDF Gen] Looked up template id=' + templateId + ' — found:', tpl ? 'YES (config length=' + (tpl.config || '').length + ')' : 'NO');
+      if (tpl && tpl.config) {
+        const parsed = JSON.parse(tpl.config);
+        console.log('[PDF Gen] Parsed template config keys:', Object.keys(parsed));
+        console.log('[PDF Gen] Template companyInfo.name:', parsed.companyInfo?.name || '(not set)');
+        console.log('[PDF Gen] Template lineItems.displayMode:', parsed.lineItems?.displayMode || '(not set)');
+        tplConfig = deepMerge(DEFAULT_TEMPLATE_CONFIG, parsed);
+      }
     } else {
       const [[defTpl]] = await db.query(
-        'SELECT config FROM pdf_templates WHERE isDefault = 1 AND isActive = 1 AND type IN (?, "both") LIMIT 1',
+        "SELECT id, config FROM pdf_templates WHERE isDefault = 1 AND isActive = 1 AND type IN (?, 'both') LIMIT 1",
         [docType]
       );
-      if (defTpl) tplConfig = deepMerge(DEFAULT_TEMPLATE_CONFIG, JSON.parse(defTpl.config));
+      console.log('[PDF Gen] Looked up default template — found:', defTpl ? 'YES (id=' + defTpl.id + ', config length=' + (defTpl.config || '').length + ')' : 'NO');
+      if (defTpl && defTpl.config) {
+        const parsed = JSON.parse(defTpl.config);
+        console.log('[PDF Gen] Default template companyInfo.name:', parsed.companyInfo?.name || '(not set)');
+        tplConfig = deepMerge(DEFAULT_TEMPLATE_CONFIG, parsed);
+      }
     }
   } catch (e) {
-    console.warn('[PdfTemplates] Error loading template config, using defaults:', e.message);
+    console.warn('[PDF Gen] Error loading template config, using defaults:', e.message, e.stack);
   }
+  console.log('[PDF Gen] Final config companyInfo.name:', tplConfig.companyInfo?.name);
+  console.log('[PDF Gen] Final config lineItems.displayMode:', tplConfig.lineItems?.displayMode);
   return tplConfig;
 }
 
@@ -2217,6 +2232,7 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
 
 // --- Generate professional PDF matching QuickBooks format ---
 async function generateEstimatePdf(estimateId, templateId = null) {
+  console.log('[PDF Gen] generateEstimatePdf called — estimateId:', estimateId, 'templateId param:', templateId);
   const [[estimate]] = await db.query(`
     SELECT e.*,
            c.companyName, c.name AS custName,
@@ -2227,6 +2243,11 @@ async function generateEstimatePdf(estimateId, templateId = null) {
     WHERE e.id = ?
   `, [estimateId]);
   if (!estimate) throw new Error('Estimate not found');
+  console.log('[PDF Gen] Estimate loaded — estimate.templateId stored in DB:', estimate.templateId);
+
+  // Use explicit templateId param, fall back to estimate's stored templateId
+  const effectiveTemplateId = templateId || estimate.templateId || null;
+  console.log('[PDF Gen] Effective templateId:', effectiveTemplateId);
 
   estimate.billingAddress = estimate.billingAddress || estimate.custBillingAddress;
   estimate.billingCity = estimate.billingCity || estimate.custBillingCity;
@@ -2238,7 +2259,7 @@ async function generateEstimatePdf(estimateId, templateId = null) {
     [estimateId]
   );
 
-  const cfg = await loadTemplateConfig(templateId, 'estimate');
+  const cfg = await loadTemplateConfig(effectiveTemplateId, 'estimate');
   return generatePdfWithConfig(estimate, lineItems, cfg, 'estimate');
 }
 
@@ -2535,6 +2556,7 @@ app.put('/estimates/:id/status', authenticate, requireNumericParam('id'), async 
 app.post('/estimates/:id/generate-pdf', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const b = coerceBody(req);
+    console.log('[PDF Gen] POST /estimates/' + req.params.id + '/generate-pdf — body keys:', Object.keys(b), 'templateId:', b.templateId);
     const pdfBuffer = await generateEstimatePdf(req.params.id, b.templateId || null);
     const filename = `estimate_${req.params.id}_${Date.now()}.pdf`;
     const localDir = path.resolve(__dirname, 'uploads');
@@ -2624,6 +2646,7 @@ async function recalcInvoiceTotals(invoiceId) {
 
 // --- Generate professional Invoice PDF matching QuickBooks format ---
 async function generateInvoicePdf(invoiceId, templateId = null) {
+  console.log('[PDF Gen] generateInvoicePdf called — invoiceId:', invoiceId, 'templateId param:', templateId);
   const [[invoice]] = await db.query(`
     SELECT i.*,
            c.companyName, c.name AS custName,
@@ -2634,6 +2657,11 @@ async function generateInvoicePdf(invoiceId, templateId = null) {
     WHERE i.id = ?
   `, [invoiceId]);
   if (!invoice) throw new Error('Invoice not found');
+  console.log('[PDF Gen] Invoice loaded — invoice.templateId stored in DB:', invoice.templateId);
+
+  // Use explicit templateId param, fall back to invoice's stored templateId
+  const effectiveTemplateId = templateId || invoice.templateId || null;
+  console.log('[PDF Gen] Effective templateId:', effectiveTemplateId);
 
   invoice.billingAddress = invoice.billingAddress || invoice.custBillingAddress;
   invoice.billingCity = invoice.billingCity || invoice.custBillingCity;
@@ -2645,7 +2673,7 @@ async function generateInvoicePdf(invoiceId, templateId = null) {
     [invoiceId]
   );
 
-  const cfg = await loadTemplateConfig(templateId, 'invoice');
+  const cfg = await loadTemplateConfig(effectiveTemplateId, 'invoice');
   return generatePdfWithConfig(invoice, lineItems, cfg, 'invoice');
 }
 
@@ -2938,6 +2966,7 @@ app.put('/invoices/:id/status', authenticate, requireNumericParam('id'), async (
 app.post('/invoices/:id/generate-pdf', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const b = coerceBody(req);
+    console.log('[PDF Gen] POST /invoices/' + req.params.id + '/generate-pdf — body keys:', Object.keys(b), 'templateId:', b.templateId);
     const pdfBuffer = await generateInvoicePdf(req.params.id, b.templateId || null);
     const filename = `invoice_${req.params.id}_${Date.now()}.pdf`;
     const localDir = path.resolve(__dirname, 'uploads');
@@ -3232,7 +3261,7 @@ app.get('/pdf-templates', authenticate, async (req, res) => {
     let sql = 'SELECT * FROM pdf_templates WHERE isActive = 1';
     const params = [];
     if (type) {
-      sql += ' AND type IN (?, "both")';
+      sql += " AND type IN (?, 'both')";
       params.push(type);
     }
     sql += ' ORDER BY isDefault DESC, name ASC';
@@ -3241,6 +3270,25 @@ app.get('/pdf-templates', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error fetching pdf templates:', err);
     res.status(500).json({ error: 'Failed to fetch PDF templates.' });
+  }
+});
+
+// GET /pdf-templates/debug — diagnostic endpoint to check template state
+app.get('/pdf-templates/debug', authenticate, async (req, res) => {
+  try {
+    const [templates] = await db.query(
+      'SELECT id, name, type, isDefault, isActive, LENGTH(config) as config_length, LEFT(config, 300) as config_preview FROM pdf_templates'
+    );
+    const [recentEstimates] = await db.query(
+      'SELECT id, templateId, created_at FROM estimates ORDER BY id DESC LIMIT 5'
+    );
+    const [recentInvoices] = await db.query(
+      'SELECT id, templateId, created_at FROM invoices ORDER BY id DESC LIMIT 5'
+    );
+    res.json({ templates, recentEstimates, recentInvoices });
+  } catch (err) {
+    console.error('Error in pdf-templates debug:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -3262,11 +3310,13 @@ app.post('/pdf-templates', authenticate, async (req, res) => {
     const b = coerceBody(req);
     if (!b.name?.trim()) return res.status(400).json({ error: 'name is required' });
     const configStr = typeof b.config === 'string' ? b.config : JSON.stringify(b.config || DEFAULT_TEMPLATE_CONFIG);
+    console.log('[PDF Templates] Creating template — name:', b.name, 'type:', b.type, 'config length:', configStr.length);
     const [r] = await db.query(
       'INSERT INTO pdf_templates (name, type, config, isDefault) VALUES (?, ?, ?, 0)',
       [b.name.trim(), b.type || 'both', configStr]
     );
     const [[created]] = await db.query('SELECT * FROM pdf_templates WHERE id = ?', [r.insertId]);
+    console.log('[PDF Templates] Created template id:', created.id);
     res.status(201).json(created);
   } catch (err) {
     console.error('Error creating pdf template:', err);
@@ -3283,6 +3333,13 @@ app.put('/pdf-templates/:id', authenticate, requireNumericParam('id'), async (re
     if (b.type !== undefined) { sets.push('type=?'); params.push(b.type); }
     if (b.config !== undefined) {
       const configStr = typeof b.config === 'string' ? b.config : JSON.stringify(b.config);
+      console.log('[PDF Templates] PUT /pdf-templates/' + req.params.id + ' — config length:', configStr.length);
+      // Parse to verify it's valid JSON and log key info
+      try {
+        const parsed = JSON.parse(configStr);
+        console.log('[PDF Templates] Config companyInfo.name:', parsed.companyInfo?.name || '(not set)');
+        console.log('[PDF Templates] Config lineItems.displayMode:', parsed.lineItems?.displayMode || '(not set)');
+      } catch (pe) { console.warn('[PDF Templates] Config is not valid JSON:', pe.message); }
       sets.push('config=?'); params.push(configStr);
     }
     if (b.isDefault !== undefined) {
@@ -3296,6 +3353,7 @@ app.put('/pdf-templates/:id', authenticate, requireNumericParam('id'), async (re
     params.push(req.params.id);
     await db.query(`UPDATE pdf_templates SET ${sets.join(', ')} WHERE id = ?`, params);
     const [[updated]] = await db.query('SELECT * FROM pdf_templates WHERE id = ?', [req.params.id]);
+    console.log('[PDF Templates] Updated template id:', req.params.id, '— stored config length:', (updated.config || '').length);
     res.json(updated);
   } catch (err) {
     console.error('Error updating pdf template:', err);
