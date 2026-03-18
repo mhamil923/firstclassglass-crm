@@ -186,7 +186,21 @@ export default function ViewEstimate() {
                 className="ve-btn ve-btn-secondary"
                 value={selectedTemplateId}
                 onChange={(e) => setSelectedTemplateId(e.target.value)}
-                style={{ cursor: "pointer", minWidth: 130 }}
+                style={{
+                  WebkitAppearance: 'auto',
+                  MozAppearance: 'auto',
+                  appearance: 'auto',
+                  backgroundColor: '#1c1c1e',
+                  color: '#f5f5f7',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  borderRadius: '12px',
+                  padding: '10px 16px',
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  outline: 'none',
+                  minWidth: 130,
+                  backgroundImage: 'none'
+                }}
               >
                 <option value="">Default Template</option>
                 {pdfTemplates.map((t) => (
