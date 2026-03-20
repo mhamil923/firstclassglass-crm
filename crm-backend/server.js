@@ -1857,6 +1857,35 @@ async function loadTemplateConfig(templateId, docType) {
 }
 
 function generatePdfWithConfig(data, lineItems, cfg, docType) {
+  // ============ TEMPORARY DEBUG LOGGING ============
+  console.log('============ PDF GENERATION DEBUG START ============');
+  console.log('FULL CONFIG:', JSON.stringify(cfg, null, 2));
+  console.log('CONFIG KEYS:', Object.keys(cfg));
+  console.log('COMPANY INFO:', JSON.stringify({
+    readingFrom: cfg.companyInfo ? 'cfg.companyInfo' : cfg.companyHeader ? 'cfg.companyHeader' : 'NEITHER',
+    name: cfg.companyInfo?.name || cfg.companyHeader?.companyName || 'FALLBACK',
+    x: cfg.companyInfo?.x ?? cfg.companyHeader?.x ?? 'NOT SET',
+    y: cfg.companyInfo?.y ?? cfg.companyHeader?.y ?? 'NOT SET',
+    width: cfg.companyInfo?.width ?? cfg.companyHeader?.width ?? 'NOT SET',
+    height: cfg.companyInfo?.height ?? cfg.companyHeader?.height ?? 'NOT SET',
+  }));
+  console.log('LOGO:', JSON.stringify({
+    x: cfg.logo?.x ?? 'NOT SET', y: cfg.logo?.y ?? 'NOT SET',
+    width: cfg.logo?.width ?? 'NOT SET', height: cfg.logo?.height ?? 'NOT SET',
+  }));
+  console.log('TITLE:', JSON.stringify({
+    fromTitle: { x: cfg.title?.x, y: cfg.title?.y, width: cfg.title?.width, fontSize: cfg.title?.fontSize, align: cfg.title?.align },
+    fromDocTitle: { x: cfg.documentTitle?.x, y: cfg.documentTitle?.y, fontSize: cfg.documentTitle?.fontSize },
+  }));
+  console.log('DATE BOX:', JSON.stringify(cfg.dateBox));
+  console.log('BILL TO:', JSON.stringify(cfg.billTo));
+  console.log('PROJECT BOX:', JSON.stringify(cfg.projectBox));
+  console.log('PO NUMBER:', JSON.stringify(cfg.poNumber));
+  console.log('LINE ITEMS:', JSON.stringify(cfg.lineItems));
+  console.log('FOOTER:', JSON.stringify(cfg.footer));
+  console.log('============ PDF GENERATION DEBUG END ============');
+  // ============ END DEBUG LOGGING ============
+
   const logoPath = path.resolve(__dirname, 'assets', 'logo.png');
   const hasLogo = fs.existsSync(logoPath);
 
@@ -3273,11 +3302,11 @@ app.get('/pdf-templates', authenticate, async (req, res) => {
   }
 });
 
-// GET /pdf-templates/debug — diagnostic endpoint to check template state
-app.get('/pdf-templates/debug', authenticate, async (req, res) => {
+// GET /pdf-templates/debug — diagnostic endpoint (temporarily public for diagnosis)
+app.get('/pdf-templates/debug', async (req, res) => {
   try {
     const [templates] = await db.query(
-      'SELECT id, name, type, isDefault, isActive, LENGTH(config) as config_length, LEFT(config, 500) as config_preview FROM pdf_templates'
+      'SELECT id, name, type, isDefault, isActive, LENGTH(config) as config_length, config FROM pdf_templates'
     );
     const [recentEstimates] = await db.query(
       'SELECT id, templateId FROM estimates ORDER BY id DESC LIMIT 5'
