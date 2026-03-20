@@ -3273,8 +3273,8 @@ app.get('/pdf-templates', authenticate, async (req, res) => {
   }
 });
 
-// GET /pdf-templates/debug — diagnostic endpoint to check template state (temporarily public for diagnosis)
-app.get('/pdf-templates/debug', async (req, res) => {
+// GET /pdf-templates/debug — diagnostic endpoint to check template state
+app.get('/pdf-templates/debug', authenticate, async (req, res) => {
   try {
     const [templates] = await db.query(
       'SELECT id, name, type, isDefault, isActive, LENGTH(config) as config_length, LEFT(config, 500) as config_preview FROM pdf_templates'
