@@ -901,7 +901,7 @@ const DEFAULT_TEMPLATE_CONFIG = {
   pageSize: 'LETTER',
   margins: { top: 40, bottom: 40, left: 50, right: 50 },
   companyInfo: {
-    show: true,
+    show: true, x: 50, y: 40, width: 220, height: 80, textAlign: 'left',
     name: 'First Class Glass & Mirror, Inc.',
     line1: '1513 Industrial Drive',
     line2: 'Itasca, IL. 60143',
@@ -910,14 +910,14 @@ const DEFAULT_TEMPLATE_CONFIG = {
     fontSize: 11,
     linesFontSize: 9
   },
-  logo: { show: true, x: 250, y: 40, width: 60, height: 60 },
-  title: { show: true, fontSize: 22, align: 'right' },
-  dateBox: { show: true, width: 130, position: 'right' },
-  billTo: { show: true, label: 'BILL TO', widthPercent: 48 },
-  projectBox: { show: true, estimateLabel: 'PROJECT NAME/ADDRESS', invoiceLabel: 'SHIP TO' },
-  poNumber: { show: true, label: 'P.O. No.' },
+  logo: { show: true, x: 260, y: 40, width: 72, height: 72 },
+  title: { show: true, x: 400, y: 40, width: 162, height: 40, textAlign: 'right', fontSize: 22, align: 'right' },
+  dateBox: { show: true, x: 400, y: 90, width: 162, height: 55, position: 'right' },
+  billTo: { show: true, x: 50, y: 155, width: 245, height: 90, textAlign: 'left', label: 'BILL TO', widthPercent: 48 },
+  projectBox: { show: true, x: 305, y: 155, width: 257, height: 90, textAlign: 'left', estimateLabel: 'PROJECT NAME/ADDRESS', invoiceLabel: 'SHIP TO' },
+  poNumber: { show: true, x: 400, y: 255, width: 162, height: 35, label: 'P.O. No.' },
   lineItems: {
-    show: true,
+    show: true, x: 50, y: 300, width: 512, height: 130,
     displayMode: 'detailed',
     headerBgColor: '#E0E0E0',
     headerFontSize: 7,
@@ -929,9 +929,8 @@ const DEFAULT_TEMPLATE_CONFIG = {
     bidDescriptionLabel: 'Scope of Work'
   },
   footer: {
-    show: true,
+    show: true, x: 50, y: 700, width: 512, height: 52,
     showTerms: true,
-    height: 46,
     totalLabelWidth: 60,
     totalAmountWidth: 100,
     totalFontSize: 10,
@@ -1906,97 +1905,92 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
 
     const U = s => (s || '').toUpperCase();
     const fmtMoney = v => '$' + (Number(v) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    const leftM = cfg.margins?.left ?? 50;
-    const rightM = cfg.margins?.right ?? 50;
-    const pageW = cfg.pageSize === 'LEGAL' ? 612 : 612;
-    const pw = pageW - leftM - rightM;
+    // Template builder canvas is 612×792 (same as PDF Letter), so no scaling needed
+    const pageW = 612;
     const pageH = cfg.pageSize === 'LEGAL' ? 1008 : 792;
-    const bottomLimit = pageH - (cfg.margins?.bottom ?? 40);
     const stroke = 0.75;
     const bodyFont = cfg.fonts?.body || 'Helvetica';
     const boldFont = cfg.fonts?.bold || 'Helvetica-Bold';
     const textColor = cfg.colors?.text || '#000000';
 
-    const headerY = cfg.margins?.top ?? 40;
+    // ═══════════════════════════════════════════════════════════════
+    // All positions come from cfg (template config) — absolute coords
+    // ═══════════════════════════════════════════════════════════════
 
-    // --- COMPANY INFO (far left) ---
+    // --- COMPANY INFO — use cfg.companyInfo.x, y, width ---
     if (cfg.companyInfo?.show !== false) {
+      const ciX = cfg.companyInfo?.x ?? 50;
+      const ciY = cfg.companyInfo?.y ?? 40;
+      const ciW = cfg.companyInfo?.width ?? 220;
       doc.font(boldFont).fontSize(cfg.companyInfo?.fontSize || 11).fillColor(textColor);
-      doc.text(cfg.companyInfo?.name || 'First Class Glass & Mirror, Inc.', leftM, headerY);
+      doc.text(cfg.companyInfo?.name || 'First Class Glass & Mirror, Inc.', ciX, ciY, { width: ciW });
       doc.font(bodyFont).fontSize(cfg.companyInfo?.linesFontSize || 9);
-      doc.text(cfg.companyInfo?.line1 || '1513 Industrial Drive', leftM, headerY + 14);
-      doc.text(cfg.companyInfo?.line2 || 'Itasca, IL. 60143', leftM, headerY + 25);
-      doc.text(cfg.companyInfo?.phone || '630-250-9777', leftM, headerY + 36);
-      doc.text(cfg.companyInfo?.fax || '630-250-9727', leftM, headerY + 47);
+      doc.text(cfg.companyInfo?.line1 || '1513 Industrial Drive', ciX, ciY + 14, { width: ciW });
+      doc.text(cfg.companyInfo?.line2 || 'Itasca, IL. 60143', ciX, ciY + 25, { width: ciW });
+      doc.text(cfg.companyInfo?.phone || '630-250-9777', ciX, ciY + 36, { width: ciW });
+      doc.text(cfg.companyInfo?.fax || '630-250-9727', ciX, ciY + 47, { width: ciW });
     }
 
-    // --- LOGO ---
+    // --- LOGO — use cfg.logo.x, y, width, height ---
     if (cfg.logo?.show !== false && hasLogo) {
-      doc.image(logoPath, cfg.logo?.x ?? 250, cfg.logo?.y ?? 40, {
-        width: cfg.logo?.width ?? 60,
-        height: cfg.logo?.height ?? 60
+      doc.image(logoPath, cfg.logo?.x ?? 260, cfg.logo?.y ?? 40, {
+        width: cfg.logo?.width ?? 72,
+        height: cfg.logo?.height ?? 72
       });
     }
 
-    // --- Title ---
+    // --- TITLE — use cfg.title.x, y, width ---
     if (cfg.title?.show !== false) {
+      const ttX = cfg.title?.x ?? 400;
+      const ttY = cfg.title?.y ?? 40;
+      const ttW = cfg.title?.width ?? 162;
       doc.font(boldFont).fontSize(cfg.title?.fontSize || 22).fillColor(textColor);
       const titleText = docType === 'invoice' ? 'Invoice' : 'Estimate';
-      doc.text(titleText, leftM, headerY, { width: pw, align: cfg.title?.align || 'right' });
+      doc.text(titleText, ttX, ttY, { width: ttW, align: cfg.title?.textAlign || cfg.title?.align || 'right' });
     }
 
-    // --- DATE box ---
+    // --- DATE BOX — use cfg.dateBox.x, y, width, height ---
     if (cfg.dateBox?.show !== false) {
+      const dbX = cfg.dateBox?.x ?? 400;
+      const dbY = cfg.dateBox?.y ?? 90;
+      const dbW = cfg.dateBox?.width ?? 162;
       const isInvoice = docType === 'invoice';
       const issueDateStr = data.issueDate
         ? new Date(data.issueDate).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' })
         : new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
 
       if (isInvoice) {
-        const dateBoxW = 190;
-        const dateBoxX = pageW - rightM - dateBoxW;
-        const dateBoxY = headerY + 28;
-        const dateColW = 95;
-        const invColW = 95;
+        const dateColW = Math.floor(dbW / 2);
+        const invColW = dbW - dateColW;
         const dbH = 16;
         doc.lineWidth(stroke);
-        doc.rect(dateBoxX, dateBoxY, dateColW, dbH).stroke();
-        doc.rect(dateBoxX + dateColW, dateBoxY, invColW, dbH).stroke();
+        doc.rect(dbX, dbY, dateColW, dbH).stroke();
+        doc.rect(dbX + dateColW, dbY, invColW, dbH).stroke();
         doc.font(boldFont).fontSize(7).fillColor(textColor);
-        doc.text('DATE', dateBoxX + 4, dateBoxY + 4, { width: dateColW - 8, align: 'center' });
-        doc.text('INVOICE #', dateBoxX + dateColW + 4, dateBoxY + 4, { width: invColW - 8, align: 'center' });
-        doc.rect(dateBoxX, dateBoxY + dbH, dateColW, dbH).stroke();
-        doc.rect(dateBoxX + dateColW, dateBoxY + dbH, invColW, dbH).stroke();
+        doc.text('DATE', dbX + 4, dbY + 4, { width: dateColW - 8, align: 'center' });
+        doc.text('INVOICE #', dbX + dateColW + 4, dbY + 4, { width: invColW - 8, align: 'center' });
+        doc.rect(dbX, dbY + dbH, dateColW, dbH).stroke();
+        doc.rect(dbX + dateColW, dbY + dbH, invColW, dbH).stroke();
         doc.font(bodyFont).fontSize(8);
-        doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dbH + 4, { width: dateColW - 8, align: 'center' });
-        doc.text(String(data.invoiceNumber || ''), dateBoxX + dateColW + 4, dateBoxY + dbH + 4, { width: invColW - 8, align: 'center' });
+        doc.text(issueDateStr, dbX + 4, dbY + dbH + 4, { width: dateColW - 8, align: 'center' });
+        doc.text(String(data.invoiceNumber || ''), dbX + dateColW + 4, dbY + dbH + 4, { width: invColW - 8, align: 'center' });
       } else {
-        const dateBoxW = cfg.dateBox?.width || 130;
-        const dateBoxX = pageW - rightM - dateBoxW;
-        const dateBoxY = headerY + 28;
         const dbH = 16;
         doc.lineWidth(stroke);
-        doc.rect(dateBoxX, dateBoxY, dateBoxW, dbH).stroke();
+        doc.rect(dbX, dbY, dbW, dbH).stroke();
         doc.font(boldFont).fontSize(7).fillColor(textColor);
-        doc.text('DATE', dateBoxX + 4, dateBoxY + 4, { width: dateBoxW - 8, align: 'center' });
-        doc.rect(dateBoxX, dateBoxY + dbH, dateBoxW, dbH).stroke();
+        doc.text('DATE', dbX + 4, dbY + 4, { width: dbW - 8, align: 'center' });
+        doc.rect(dbX, dbY + dbH, dbW, dbH).stroke();
         doc.font(bodyFont).fontSize(8);
-        doc.text(issueDateStr, dateBoxX + 4, dateBoxY + dbH + 4, { width: dateBoxW - 8, align: 'center' });
+        doc.text(issueDateStr, dbX + 4, dbY + dbH + 4, { width: dbW - 8, align: 'center' });
       }
     }
 
-    let curY = headerY + 68;
-
-    // --- BILL TO + PROJECT/SHIP TO ---
+    // --- BILL TO — use cfg.billTo.x, y, width, height ---
     const billToShow = cfg.billTo?.show !== false;
     const projShow = cfg.projectBox?.show !== false;
     if (billToShow || projShow) {
-      const boxTop = curY;
-      const billBoxW = billToShow ? Math.floor(pw * ((cfg.billTo?.widthPercent || 48) / 100)) : 0;
-      const gap = billToShow && projShow ? 10 : 0;
-      const projBoxX = leftM + billBoxW + gap;
-      const projBoxW = billToShow ? pw - billBoxW - gap : pw;
-
+      // Gather bill-to data
       const custName = U(data.companyName || data.custName || '');
       const billLines = [];
       if (custName) billLines.push(custName);
@@ -2019,6 +2013,7 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
       if (data.custPhone) billLines.push(data.custPhone);
       if (data.custFax) billLines.push('FAX# ' + data.custFax);
 
+      // Gather project/ship-to data
       const projLabel = docType === 'invoice'
         ? (cfg.projectBox?.invoiceLabel || 'SHIP TO')
         : (cfg.projectBox?.estimateLabel || 'PROJECT NAME/ADDRESS');
@@ -2037,81 +2032,85 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
 
       const lineH = 12;
       const hdrH = 15;
-      const billContentH = Math.max(billLines.length * lineH + 6, 36);
-      const projContentH = Math.max(projLines.length * lineH + 6, 36);
-      const maxBoxH = Math.max(hdrH + billContentH, hdrH + projContentH);
 
+      // Bill To — absolute position from config
       if (billToShow) {
+        const btX = cfg.billTo?.x ?? 50;
+        const btY = cfg.billTo?.y ?? 155;
+        const btW = cfg.billTo?.width ?? 245;
+        const btH = cfg.billTo?.height ?? 90;
         doc.lineWidth(stroke);
-        doc.rect(leftM, boxTop, billBoxW, maxBoxH).stroke();
+        doc.rect(btX, btY, btW, btH).stroke();
         doc.font(boldFont).fontSize(7).fillColor(textColor);
-        doc.text(cfg.billTo?.label || 'BILL TO', leftM + 4, boxTop + 4);
-        doc.moveTo(leftM, boxTop + hdrH).lineTo(leftM + billBoxW, boxTop + hdrH).lineWidth(0.5).stroke();
+        doc.text(cfg.billTo?.label || 'BILL TO', btX + 4, btY + 4);
+        doc.moveTo(btX, btY + hdrH).lineTo(btX + btW, btY + hdrH).lineWidth(0.5).stroke();
         doc.font(bodyFont).fontSize(8);
-        let bY = boxTop + hdrH + 3;
-        for (const line of billLines) { doc.text(line, leftM + 4, bY, { width: billBoxW - 8 }); bY += lineH; }
+        let bY = btY + hdrH + 3;
+        for (const line of billLines) { doc.text(line, btX + 4, bY, { width: btW - 8 }); bY += lineH; }
       }
 
+      // Project Box — absolute position from config
       if (projShow) {
+        const pbX = cfg.projectBox?.x ?? 305;
+        const pbY = cfg.projectBox?.y ?? 155;
+        const pbW = cfg.projectBox?.width ?? 257;
+        const pbH = cfg.projectBox?.height ?? 90;
         doc.lineWidth(stroke);
-        doc.rect(projBoxX, boxTop, projBoxW, maxBoxH).stroke();
+        doc.rect(pbX, pbY, pbW, pbH).stroke();
         doc.font(boldFont).fontSize(7).fillColor(textColor);
-        doc.text(projLabel, projBoxX + 4, boxTop + 4);
-        doc.moveTo(projBoxX, boxTop + hdrH).lineTo(projBoxX + projBoxW, boxTop + hdrH).lineWidth(0.5).stroke();
+        doc.text(projLabel, pbX + 4, pbY + 4);
+        doc.moveTo(pbX, pbY + hdrH).lineTo(pbX + pbW, pbY + hdrH).lineWidth(0.5).stroke();
         doc.font(bodyFont).fontSize(8);
-        let pY = boxTop + hdrH + 3;
-        for (const line of projLines) { doc.text(line, projBoxX + 4, pY, { width: projBoxW - 8 }); pY += lineH; }
+        let pY = pbY + hdrH + 3;
+        for (const line of projLines) { doc.text(line, pbX + 4, pY, { width: pbW - 8 }); pY += lineH; }
       }
 
-      curY = boxTop + maxBoxH;
-
-      // --- P.O. NUMBER box ---
+      // --- P.O. NUMBER — absolute position from config ---
       if (cfg.poNumber?.show !== false && data.poNumber) {
-        const lineH2 = 12;
-        const hdrH2 = 15;
-        const poY = curY + 3;
-        const poH = hdrH2 + lineH2 + 4;
-        const poBoxX = projShow ? projBoxX : leftM;
-        const poBoxW = projShow ? projBoxW : pw;
+        const poX = cfg.poNumber?.x ?? 400;
+        const poY = cfg.poNumber?.y ?? 255;
+        const poW = cfg.poNumber?.width ?? 162;
+        const poH = cfg.poNumber?.height ?? 35;
         doc.lineWidth(stroke);
-        doc.rect(poBoxX, poY, poBoxW, poH).stroke();
+        doc.rect(poX, poY, poW, poH).stroke();
         doc.font(boldFont).fontSize(7).fillColor(textColor);
-        doc.text(cfg.poNumber?.label || 'P.O. No.', poBoxX + 4, poY + 4);
-        doc.moveTo(poBoxX, poY + hdrH2).lineTo(poBoxX + poBoxW, poY + hdrH2).lineWidth(0.5).stroke();
+        doc.text(cfg.poNumber?.label || 'P.O. No.', poX + 4, poY + 4);
+        doc.moveTo(poX, poY + hdrH).lineTo(poX + poW, poY + hdrH).lineWidth(0.5).stroke();
         doc.font(bodyFont).fontSize(8);
-        doc.text(U(data.poNumber), poBoxX + 4, poY + hdrH2 + 3);
-        curY = poY + poH;
+        doc.text(U(data.poNumber), poX + 4, poY + hdrH + 3, { width: poW - 8 });
       }
     }
 
-    // --- LINE ITEMS TABLE ---
+    // --- LINE ITEMS TABLE — use cfg.lineItems.x, y, width ---
     const displayMode = cfg.lineItems?.displayMode || 'detailed';
     if (cfg.lineItems?.show !== false) {
-      const tableTop = curY + 10;
-      const colEnd = leftM + pw;
-      const footerH = cfg.footer?.height || 46;
+      const liX = cfg.lineItems?.x ?? 50;
+      const liY = cfg.lineItems?.y ?? 300;
+      const liW = cfg.lineItems?.width ?? 512;
+      const tableTop = liY;
+      const colEnd = liX + liW;
+      const footerH = cfg.footer?.height || 52;
       const footerGap = 8;
+      const bottomLimit = pageH - (cfg.margins?.bottom ?? 40);
       const maxTableBottom = bottomLimit - footerH - footerGap;
       const bodyFontSize = cfg.lineItems?.bodyFontSize || 8;
       let rowY = tableTop;
 
       if (displayMode === 'bid') {
-        // ── BID MODE: Scope of work paragraph + total ──
         const bidLabel = cfg.lineItems?.bidDescriptionLabel || 'Scope of Work';
         doc.font(boldFont).fontSize(cfg.lineItems?.headerFontSize || 9).fillColor(textColor);
-        doc.text(bidLabel + ':', leftM, tableTop);
+        doc.text(bidLabel + ':', liX, tableTop);
         rowY = tableTop + 16;
         const bidDesc = lineItems.map(item => U(item.description || '')).filter(Boolean).join(', ');
         doc.font(bodyFont).fontSize(bodyFontSize);
-        const descH = doc.heightOfString(bidDesc, { width: pw - 8 });
-        doc.text(bidDesc, leftM, rowY, { width: pw });
+        const descH = doc.heightOfString(bidDesc, { width: liW - 8 });
+        doc.text(bidDesc, liX, rowY, { width: liW });
         rowY += descH + 14;
         const totalStr = fmtMoney(data.total);
         doc.font(boldFont).fontSize(cfg.footer?.totalAmountFontSize || 12).fillColor(textColor);
-        doc.text('TOTAL: ' + totalStr, leftM, rowY, { width: pw, align: 'right' });
+        doc.text('TOTAL: ' + totalStr, liX, rowY, { width: liW, align: 'right' });
         rowY += 20;
       } else if (displayMode === 'summary') {
-        // ── SUMMARY MODE: Descriptions only, no qty/amount columns, total at bottom ──
         const tHeaderH = 18;
         const headerBg = cfg.lineItems?.headerBgColor || cfg.colors?.headerBg || '#E0E0E0';
         const headers = docType === 'invoice'
@@ -2120,33 +2119,33 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
         doc.font(bodyFont).fontSize(bodyFontSize);
         const itemHeights = lineItems.map(item => {
           const desc = U(item.description || '');
-          const descH = doc.heightOfString(desc, { width: pw - 8 });
+          const descH = doc.heightOfString(desc, { width: liW - 8 });
           return Math.max(descH + 6, 16);
         });
         doc.lineWidth(stroke);
         doc.save();
-        doc.rect(leftM, tableTop, pw, tHeaderH).fill(headerBg);
+        doc.rect(liX, tableTop, liW, tHeaderH).fill(headerBg);
         doc.restore();
-        doc.rect(leftM, tableTop, pw, tHeaderH).stroke();
+        doc.rect(liX, tableTop, liW, tHeaderH).stroke();
         doc.font(boldFont).fontSize(cfg.lineItems?.headerFontSize || 7).fillColor(textColor);
-        doc.text(headers.description || 'DESCRIPTION', leftM + 4, tableTop + 5);
+        doc.text(headers.description || 'DESCRIPTION', liX + 4, tableTop + 5);
         rowY = tableTop + tHeaderH;
         doc.font(bodyFont).fontSize(bodyFontSize);
         for (let i = 0; i < lineItems.length; i++) {
           const item = lineItems[i];
           const cellH = Math.max(itemHeights[i], 14);
           doc.lineWidth(0.5);
-          doc.rect(leftM, rowY, pw, cellH).stroke();
-          doc.text(U(item.description || ''), leftM + 4, rowY + 3, { width: pw - 8 });
+          doc.rect(liX, rowY, liW, cellH).stroke();
+          doc.text(U(item.description || ''), liX + 4, rowY + 3, { width: liW - 8 });
           rowY += cellH;
         }
       } else {
-        // ── DETAILED MODE (default): Full table with Qty, Description, Amount ──
-        const colQty = leftM;
+        // ── DETAILED MODE ──
         const qtyW = cfg.lineItems?.qtyColumnWidth || 50;
         const totalW = cfg.lineItems?.totalColumnWidth || 75;
-        const colDesc = leftM + qtyW;
-        const colTotal = leftM + pw - totalW;
+        const colQty = liX;
+        const colDesc = liX + qtyW;
+        const colTotal = liX + liW - totalW;
         const tHeaderH = 18;
 
         doc.font(bodyFont).fontSize(bodyFontSize);
@@ -2210,47 +2209,48 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
         }
       }
 
-      // --- FOOTER: Terms (left) + TOTAL label + TOTAL value (right) ---
-      // (bid mode renders its own total inline, but still shows terms footer if configured)
+      // --- FOOTER — use cfg.footer.x, y, width, height ---
       if (cfg.footer?.show !== false) {
+        const ftX = cfg.footer?.x ?? 50;
+        const ftW = cfg.footer?.width ?? 512;
+        // Footer y: use config position, but push down if line items extend past it
+        const ftY = Math.max(cfg.footer?.y ?? 700, rowY + footerGap);
+        const ftH = cfg.footer?.height || 52;
         const totalAmountW = cfg.footer?.totalAmountWidth || 100;
         const totalLabelW = cfg.footer?.totalLabelWidth || 60;
-        const termsColW = pw - totalLabelW - totalAmountW;
-        const totalLabelX = leftM + termsColW;
+        const termsColW = ftW - totalLabelW - totalAmountW;
+        const totalLabelX = ftX + termsColW;
         const totalAmountX = totalLabelX + totalLabelW;
 
-        const footerY2 = Math.min(rowY + footerGap, maxTableBottom);
-
         if (displayMode === 'bid') {
-          // Bid mode: only show terms box if enabled, skip TOTAL boxes (already rendered above)
           if (cfg.footer?.showTerms !== false) {
             const termsText = (data.terms || '').toUpperCase();
             if (termsText) {
               doc.lineWidth(stroke);
-              doc.rect(leftM, footerY2, pw, footerH).stroke();
+              doc.rect(ftX, ftY, ftW, ftH).stroke();
               doc.font(bodyFont).fontSize(7).fillColor(textColor);
-              doc.text(termsText, leftM + 4, footerY2 + 5, { width: pw - 8, lineGap: 1.5 });
+              doc.text(termsText, ftX + 4, ftY + 5, { width: ftW - 8, lineGap: 1.5 });
             }
           }
         } else {
           doc.lineWidth(stroke);
-          doc.rect(leftM, footerY2, termsColW, footerH).stroke();
-          doc.rect(totalLabelX, footerY2, totalLabelW, footerH).stroke();
-          doc.rect(totalAmountX, footerY2, totalAmountW, footerH).stroke();
+          doc.rect(ftX, ftY, termsColW, ftH).stroke();
+          doc.rect(totalLabelX, ftY, totalLabelW, ftH).stroke();
+          doc.rect(totalAmountX, ftY, totalAmountW, ftH).stroke();
 
           if (cfg.footer?.showTerms !== false) {
             const termsText = (data.terms || '').toUpperCase();
             if (termsText) {
               doc.font(bodyFont).fontSize(7);
-              doc.text(termsText, leftM + 4, footerY2 + 5, { width: termsColW - 8, lineGap: 1.5 });
+              doc.text(termsText, ftX + 4, ftY + 5, { width: termsColW - 8, lineGap: 1.5 });
             }
           }
 
           const totalStr = fmtMoney(data.total);
           doc.font(boldFont).fontSize(cfg.footer?.totalFontSize || 10).fillColor(textColor);
-          doc.text('TOTAL', totalLabelX + 4, footerY2 + (footerH / 2) - 6, { width: totalLabelW - 8, align: 'center' });
+          doc.text('TOTAL', totalLabelX + 4, ftY + (ftH / 2) - 6, { width: totalLabelW - 8, align: 'center' });
           doc.fontSize(cfg.footer?.totalAmountFontSize || 11);
-          doc.text(totalStr, totalAmountX + 4, footerY2 + (footerH / 2) - 6, { width: totalAmountW - 8, align: 'right' });
+          doc.text(totalStr, totalAmountX + 4, ftY + (ftH / 2) - 6, { width: totalAmountW - 8, align: 'right' });
         }
       }
     }
