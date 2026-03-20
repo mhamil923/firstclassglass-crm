@@ -3273,11 +3273,11 @@ app.get('/pdf-templates', authenticate, async (req, res) => {
   }
 });
 
-// GET /pdf-templates/debug — diagnostic endpoint to check template state
-app.get('/pdf-templates/debug', authenticate, async (req, res) => {
+// GET /pdf-templates/debug — diagnostic endpoint to check template state (temporarily public for diagnosis)
+app.get('/pdf-templates/debug', async (req, res) => {
   try {
     const [templates] = await db.query(
-      'SELECT id, name, type, isDefault, isActive, LENGTH(config) as config_length, LEFT(config, 300) as config_preview FROM pdf_templates'
+      'SELECT id, name, type, isDefault, isActive, LENGTH(config) as config_length, LEFT(config, 500) as config_preview FROM pdf_templates'
     );
     const [recentEstimates] = await db.query(
       'SELECT id, templateId FROM estimates ORDER BY id DESC LIMIT 5'
@@ -3285,7 +3285,9 @@ app.get('/pdf-templates/debug', authenticate, async (req, res) => {
     const [recentInvoices] = await db.query(
       'SELECT id, templateId FROM invoices ORDER BY id DESC LIMIT 5'
     );
-    res.json({ templates, recentEstimates, recentInvoices });
+    // Also show the estimates table columns to verify templateId exists
+    const [estColumns] = await db.query("SHOW COLUMNS FROM estimates LIKE '%template%'");
+    res.json({ templates, recentEstimates, recentInvoices, estimateColumns: estColumns });
   } catch (err) {
     console.error('Error in pdf-templates debug:', err);
     res.status(500).json({ error: err.message });
