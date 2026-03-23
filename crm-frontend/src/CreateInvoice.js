@@ -68,7 +68,10 @@ export default function CreateInvoice() {
       const tpls = Array.isArray(res.data) ? res.data : [];
       setPdfTemplates(tpls);
       if (tpls.length > 0 && !selectedTemplateId) {
-        const def = tpls.find((t) => t.isDefault);
+        // Prefer effective default (type-specific > "both"), fall back to any default, then first
+        const effectiveDef = tpls.find((t) => t.isEffectiveDefault === 1);
+        const anyDef = tpls.find((t) => t.isDefault === 1);
+        const def = effectiveDef || anyDef;
         if (def) setSelectedTemplateId(String(def.id));
         else setSelectedTemplateId(String(tpls[0].id));
       }

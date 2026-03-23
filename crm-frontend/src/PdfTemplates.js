@@ -39,6 +39,15 @@ export default function PdfTemplates() {
     }
   };
 
+  const handleRemoveDefault = async (id) => {
+    try {
+      await api.put(`/pdf-templates/${id}`, { isDefault: false });
+      fetchTemplates();
+    } catch (err) {
+      console.error("Error removing default:", err);
+    }
+  };
+
   const handleDelete = async (id, name) => {
     if (!window.confirm(`Delete template "${name}"? This cannot be undone.`)) return;
     try {
@@ -55,6 +64,19 @@ export default function PdfTemplates() {
     } catch { return {}; }
   };
 
+  // Determine which template is the effective default for each type
+  const getDefaultInfo = () => {
+    const estSpecific = templates.find(t => t.isDefault === 1 && t.type === "estimate");
+    const invSpecific = templates.find(t => t.isDefault === 1 && t.type === "invoice");
+    const bothDefault = templates.find(t => t.isDefault === 1 && t.type === "both");
+    return {
+      estimateDefaultId: estSpecific?.id || bothDefault?.id || null,
+      invoiceDefaultId: invSpecific?.id || bothDefault?.id || null,
+    };
+  };
+
+  const defaultInfo = templates.length > 0 ? getDefaultInfo() : { estimateDefaultId: null, invoiceDefaultId: null };
+
   const renderMiniPreview = (tpl) => {
     const cfg = parseConfig(tpl);
     const headerBg = cfg.lineItems?.headerBgColor || cfg.colors?.headerBg || "#E0E0E0";
@@ -69,7 +91,6 @@ export default function PdfTemplates() {
 
     return (
       <div className="pt-preview-page">
-        {/* Header row */}
         <div className="pt-preview-header">
           <div className={`pt-preview-company ${!showCompany ? "pt-preview-hidden" : ""}`}>
             {cfg.companyInfo?.name || "First Class Glass"}
@@ -84,7 +105,6 @@ export default function PdfTemplates() {
           </div>
         </div>
 
-        {/* Bill To / Project boxes */}
         <div className="pt-preview-boxes">
           {showBillTo && (
             <div className="pt-preview-box">
@@ -109,7 +129,6 @@ export default function PdfTemplates() {
           </div>
         )}
 
-        {/* Line Items Table */}
         {showLineItems && (
           <div className="pt-preview-table">
             <div className="pt-preview-table-header" style={{ background: headerBg }}>
@@ -130,7 +149,6 @@ export default function PdfTemplates() {
           </div>
         )}
 
-        {/* Footer */}
         {showFooter && (
           <div className="pt-preview-footer">
             <div className="pt-preview-terms">Terms...</div>
@@ -139,6 +157,69 @@ export default function PdfTemplates() {
         )}
       </div>
     );
+  };
+
+  const renderDefaultBadges = (tpl) => {
+    const badges = [];
+    if (tpl.id === defaultInfo.estimateDefaultId) {
+      badges.push(<span key="est" className="pt-badge pt-badge-default-estimate">Default Estimate</span>);
+    }
+    if (tpl.id === defaultInfo.invoiceDefaultId) {
+      badges.push(<span key="inv" className="pt-badge pt-badge-default-invoice">Default Invoice</span>);
+    }
+    return badges;
+  };
+
+  const renderDefaultButtons = (tpl) => {
+    const buttons = [];
+    const isEstDefault = tpl.id === defaultInfo.estimateDefaultId;
+    const isInvDefault = tpl.id === defaultInfo.invoiceDefaultId;
+
+    if (tpl.type === "estimate") {
+      if (isEstDefault) {
+        buttons.push(
+          <button key="rm-est" className="pt-btn pt-btn-outline-green" onClick={() => handleRemoveDefault(tpl.id)}>
+            Remove Default
+          </button>
+        );
+      } else {
+        buttons.push(
+          <button key="set-est" className="pt-btn pt-btn-success" onClick={() => handleSetDefault(tpl.id)}>
+            Set as Default Estimate
+          </button>
+        );
+      }
+    } else if (tpl.type === "invoice") {
+      if (isInvDefault) {
+        buttons.push(
+          <button key="rm-inv" className="pt-btn pt-btn-outline-green" onClick={() => handleRemoveDefault(tpl.id)}>
+            Remove Default
+          </button>
+        );
+      } else {
+        buttons.push(
+          <button key="set-inv" className="pt-btn pt-btn-success" onClick={() => handleSetDefault(tpl.id)}>
+            Set as Default Invoice
+          </button>
+        );
+      }
+    } else {
+      // type === "both" — single isDefault flag acts as fallback for both types
+      if (tpl.isDefault) {
+        buttons.push(
+          <button key="rm" className="pt-btn pt-btn-outline-green" onClick={() => handleRemoveDefault(tpl.id)}>
+            Remove Default
+          </button>
+        );
+      } else {
+        buttons.push(
+          <button key="set" className="pt-btn pt-btn-success" onClick={() => handleSetDefault(tpl.id)}>
+            Set as Default
+          </button>
+        );
+      }
+    }
+    return buttons;
   };
 
   if (loading) return <div className="pt-page"><div className="pt-loading">Loading templates...</div></div>;
@@ -167,7 +248,7 @@ export default function PdfTemplates() {
                   <h3 className="pt-card-name">{tpl.name}</h3>
                   <div className="pt-card-badges">
                     <span className="pt-badge pt-badge-type">{tpl.type}</span>
-                    {tpl.isDefault === 1 && <span className="pt-badge pt-badge-default">Default</span>}
+                    {renderDefaultBadges(tpl)}
                   </div>
                   <div className="pt-card-actions">
                     <button className="pt-btn" onClick={() => navigate(`/pdf-templates/${tpl.id}`)}>
@@ -176,11 +257,7 @@ export default function PdfTemplates() {
                     <button className="pt-btn" onClick={() => handleDuplicate(tpl.id)}>
                       Duplicate
                     </button>
-                    {!tpl.isDefault && (
-                      <button className="pt-btn pt-btn-success" onClick={() => handleSetDefault(tpl.id)}>
-                        Set Default
-                      </button>
-                    )}
+                    {renderDefaultButtons(tpl)}
                     {!tpl.isDefault && (
                       <button className="pt-btn pt-btn-danger" onClick={() => handleDelete(tpl.id, tpl.name)}>
                         Delete

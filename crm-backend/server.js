@@ -998,6 +998,17 @@ ensurePdfTemplateTable().catch(() => {});
   } catch (e) { console.warn('[Migration] templateId columns:', e.message); }
 })();
 
+// One-time migration: set invoice template as default if not already set
+(async () => {
+  try {
+    const [rows] = await db.query("SELECT id FROM pdf_templates WHERE isDefault = 1 AND type = 'invoice' AND isActive = 1");
+    if (rows.length === 0) {
+      const [result] = await db.query("UPDATE pdf_templates SET isDefault = 1 WHERE type = 'invoice' AND isActive = 1 AND name LIKE '%Invoice%' LIMIT 1");
+      if (result.affectedRows) console.log('[Migration] Set invoice template as default');
+    }
+  } catch (e) { console.warn('[Migration] invoice default:', e.message); }
+})();
+
 // ─── EMAIL TABLES ───────────────────────────────────────────────────────────
 async function ensureEmailTables() {
   try {
@@ -2008,8 +2019,8 @@ async function loadTemplateConfig(templateId, docType) {
       }
     } else {
       const [[defTpl]] = await db.query(
-        "SELECT id, config FROM pdf_templates WHERE isDefault = 1 AND isActive = 1 AND type IN (?, 'both') LIMIT 1",
-        [docType]
+        "SELECT id, config FROM pdf_templates WHERE isDefault = 1 AND isActive = 1 AND type IN (?, 'both') ORDER BY CASE WHEN type = ? THEN 0 ELSE 1 END LIMIT 1",
+        [docType, docType]
       );
       console.log('[PDF Gen] Looked up default template — found:', defTpl ? 'YES (id=' + defTpl.id + ', config length=' + (defTpl.config || '').length + ')' : 'NO');
       if (defTpl && defTpl.config) {
@@ -3504,6 +3515,18 @@ app.get('/pdf-templates', authenticate, async (req, res) => {
     }
     sql += ' ORDER BY isDefault DESC, name ASC';
     const [rows] = await db.query(sql, params);
+
+    // If a specific type was requested, mark which template is the effective default
+    // Priority: type-specific default > "both" default
+    if (type) {
+      const typeSpecificDefault = rows.find(r => r.isDefault === 1 && r.type === type);
+      const bothDefault = rows.find(r => r.isDefault === 1 && r.type === 'both');
+      const effectiveDefaultId = typeSpecificDefault?.id || bothDefault?.id || null;
+      for (const r of rows) {
+        r.isEffectiveDefault = r.id === effectiveDefaultId ? 1 : 0;
+      }
+    }
+
     res.json(rows);
   } catch (err) {
     console.error('Error fetching pdf templates:', err);
@@ -3585,8 +3608,11 @@ app.put('/pdf-templates/:id', authenticate, requireNumericParam('id'), async (re
     if (b.isDefault !== undefined) {
       sets.push('isDefault=?'); params.push(b.isDefault ? 1 : 0);
       if (b.isDefault) {
-        // Clear default on others
-        await db.query('UPDATE pdf_templates SET isDefault = 0 WHERE id != ?', [req.params.id]);
+        // Get this template's type to scope the default clearing
+        const [[thisTpl]] = await db.query('SELECT type FROM pdf_templates WHERE id = ?', [req.params.id]);
+        const tplType = thisTpl?.type || 'both';
+        // Only clear defaults of the same type
+        await db.query('UPDATE pdf_templates SET isDefault = 0 WHERE type = ? AND id != ?', [tplType, req.params.id]);
       }
     }
     if (!sets.length) return res.status(400).json({ error: 'No fields to update.' });

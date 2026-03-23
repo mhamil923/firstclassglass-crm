@@ -228,6 +228,16 @@
   color: #34c759;
 }
 
+.pt-badge-default-estimate {
+  background: rgba(52, 199, 89, 0.12);
+  color: #34c759;
+}
+
+.pt-badge-default-invoice {
+  background: rgba(0, 113, 227, 0.1);
+  color: var(--accent-blue);
+}
+
 /* Card Actions */
 .pt-card-actions {
   display: flex;
@@ -280,6 +290,33 @@
 
 .pt-btn-success:hover {
   background: rgba(52, 199, 89, 0.1);
+}
+
+.pt-btn-success-blue {
+  border-color: rgba(0, 113, 227, 0.3);
+  color: var(--accent-blue);
+}
+
+.pt-btn-success-blue:hover {
+  background: rgba(0, 113, 227, 0.1);
+}
+
+.pt-btn-outline-green {
+  border-color: rgba(52, 199, 89, 0.3);
+  color: #34c759;
+}
+
+.pt-btn-outline-green:hover {
+  background: rgba(52, 199, 89, 0.08);
+}
+
+.pt-btn-outline-blue {
+  border-color: rgba(0, 113, 227, 0.3);
+  color: var(--accent-blue);
+}
+
+.pt-btn-outline-blue:hover {
+  background: rgba(0, 113, 227, 0.08);
 }
 
 .pt-empty {
