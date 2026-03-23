@@ -659,3 +659,88 @@
     min-width: 160px;
   }
 }
+
+/* Custom Text Box controls */
+.ptb-add-textbox-btn {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px dashed var(--accent-blue);
+  background: rgba(0, 113, 227, 0.06);
+  color: var(--accent-blue);
+  transition: var(--transition-fast);
+  margin-bottom: 12px;
+}
+
+.ptb-add-textbox-btn:hover {
+  background: rgba(0, 113, 227, 0.12);
+}
+
+.ptb-textbox-editor {
+  padding: 10px;
+  background: rgba(0, 113, 227, 0.04);
+  border: 1px solid rgba(0, 113, 227, 0.15);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+
+.ptb-delete-textbox-btn {
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--accent-red);
+  background: transparent;
+  color: var(--accent-red);
+  transition: var(--transition-fast);
+  margin-top: 8px;
+}
+
+.ptb-delete-textbox-btn:hover {
+  background: var(--accent-red);
+  color: #fff;
+}
+
+.ptb-textbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ptb-textbox-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card-solid);
+  transition: var(--transition-fast);
+}
+
+.ptb-textbox-item:hover {
+  background: var(--bg-hover);
+}
+
+.ptb-textbox-item.active {
+  border-color: var(--accent-blue);
+  background: rgba(0, 113, 227, 0.06);
+}
+
+.ptb-textbox-item-text {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.ptb-textbox-item-pos {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-family: monospace;
+}

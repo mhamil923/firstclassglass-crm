@@ -931,11 +931,16 @@ const DEFAULT_TEMPLATE_CONFIG = {
   footer: {
     show: true, x: 50, y: 700, width: 512, height: 52,
     showTerms: true,
+    termsText: '',
+    termsFontSize: 8,
+    termsBold: false,
+    termsAlign: 'left',
     totalLabelWidth: 60,
     totalAmountWidth: 100,
     totalFontSize: 10,
     totalAmountFontSize: 11
   },
+  customTextBoxes: [],
   fonts: { body: 'Helvetica', bold: 'Helvetica-Bold' },
   colors: { text: '#000000', headerBg: '#E0E0E0', lineStroke: '#000000' }
 };
@@ -2388,14 +2393,20 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
         const totalLabelX = ftX + termsColW;
         const totalAmountX = totalLabelX + totalLabelW;
 
+        // Terms text: prefer template config termsText, fall back to data.terms
+        const termsFontSize = cfg.footer?.termsFontSize || 8;
+        const termsBold = cfg.footer?.termsBold || false;
+        const termsAlign = cfg.footer?.termsAlign || 'left';
+        const termsFont = termsBold ? boldFont : bodyFont;
+
         if (displayMode === 'bid') {
           if (cfg.footer?.showTerms !== false) {
-            const termsText = (data.terms || '').toUpperCase();
+            const termsText = (cfg.footer?.termsText || data.terms || '').toUpperCase();
             if (termsText) {
               doc.lineWidth(stroke);
               doc.rect(ftX, ftY, ftW, ftH).stroke();
-              doc.font(bodyFont).fontSize(7).fillColor(textColor);
-              doc.text(termsText, ftX + 4, ftY + 5, { width: ftW - 8, lineGap: 1.5 });
+              doc.font(termsFont).fontSize(termsFontSize).fillColor(textColor);
+              doc.text(termsText, ftX + 4, ftY + 5, { width: ftW - 8, lineGap: 1.5, align: termsAlign });
             }
           }
         } else {
@@ -2405,10 +2416,10 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
           doc.rect(totalAmountX, ftY, totalAmountW, ftH).stroke();
 
           if (cfg.footer?.showTerms !== false) {
-            const termsText = (data.terms || '').toUpperCase();
+            const termsText = (cfg.footer?.termsText || data.terms || '').toUpperCase();
             if (termsText) {
-              doc.font(bodyFont).fontSize(7);
-              doc.text(termsText, ftX + 4, ftY + 5, { width: termsColW - 8, lineGap: 1.5 });
+              doc.font(termsFont).fontSize(termsFontSize).fillColor(textColor);
+              doc.text(termsText, ftX + 4, ftY + 5, { width: termsColW - 8, lineGap: 1.5, align: termsAlign });
             }
           }
 
@@ -2418,6 +2429,38 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
           doc.fontSize(cfg.footer?.totalAmountFontSize || 11);
           doc.text(totalStr, totalAmountX + 4, ftY + (ftH / 2) - 6, { width: totalAmountW - 8, align: 'right' });
         }
+      }
+    }
+
+    // --- CUSTOM TEXT BOXES ---
+    if (cfg.customTextBoxes && cfg.customTextBoxes.length > 0) {
+      for (const tb of cfg.customTextBoxes) {
+        const tbX = tb.x || 0;
+        const tbY = tb.y || 0;
+        const tbW = tb.width || 200;
+        const tbH = tb.height || 40;
+
+        if (tb.backgroundColor && tb.backgroundColor !== '#ffffff' && tb.backgroundColor !== 'transparent') {
+          doc.save();
+          doc.rect(tbX, tbY, tbW, tbH).fill(tb.backgroundColor);
+          doc.restore();
+        }
+
+        if (tb.showBorder) {
+          doc.lineWidth(tb.borderWidth || 1);
+          doc.rect(tbX, tbY, tbW, tbH).stroke();
+          doc.lineWidth(stroke); // reset
+        }
+
+        doc.fontSize(tb.fontSize || 10)
+           .font(tb.bold ? boldFont : bodyFont)
+           .fillColor(tb.textColor || '#000000')
+           .text(tb.text || '', tbX + 4, tbY + 4, {
+             width: tbW - 8,
+             align: tb.textAlign || 'left',
+           });
+
+        doc.fillColor(textColor); // reset
       }
     }
 

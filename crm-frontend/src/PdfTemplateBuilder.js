@@ -55,9 +55,12 @@ const DEFAULT_CONFIG = {
   footer: {
     show: true, x: 50, y: 700, width: 512, height: 52,
     showTerms: true, totalFontSize: 10, totalAmountFontSize: 11,
+    termsText: "ALL PAYMENTS MUST BE MADE 45 DAYS AFTER INVOICE DATE OR A 15% LATE FEE WILL BE APPLIED",
+    termsFontSize: 8, termsBold: false, termsAlign: "left",
   },
   fonts: { body: "Helvetica", bold: "Helvetica-Bold" },
   colors: { text: "#000000", headerBg: "#E0E0E0", lineStroke: "#000000" },
+  customTextBoxes: [],
 };
 
 function deepMerge(target, source) {
@@ -212,7 +215,7 @@ export default function PdfTemplateBuilder() {
   const [openSections, setOpenSections] = useState({
     companyInfo: true, logo: false, title: false, dateBox: false,
     billTo: false, projectBox: false, poNumber: false,
-    lineItems: false, footer: false, colors: false,
+    lineItems: false, footer: false, colors: false, customTextBoxes: false,
   });
   const [previewType, setPreviewType] = useState("estimate");
   const [selectedBlock, setSelectedBlock] = useState(null);
@@ -222,6 +225,9 @@ export default function PdfTemplateBuilder() {
   const dragRef = useRef({ offsetX: 0, offsetY: 0 });
   const [resizing, setResizing] = useState(null);
   const resizeRef = useRef({ startX: 0, startY: 0, origX: 0, origY: 0, origW: 0, origH: 0 });
+
+  // selectedTextBox tracks which custom text box is selected (by id)
+  const [selectedTextBox, setSelectedTextBox] = useState(null);
 
   const canvasRef = useRef(null);
   const savedConfigRef = useRef(null);
@@ -237,6 +243,12 @@ export default function PdfTemplateBuilder() {
         setType(tpl.type);
         const parsed = typeof tpl.config === "string" ? JSON.parse(tpl.config) : tpl.config || {};
         const merged = deepMerge(DEFAULT_CONFIG, parsed);
+        // Preserve customTextBoxes array from saved config
+        if (Array.isArray(parsed.customTextBoxes)) {
+          merged.customTextBoxes = parsed.customTextBoxes;
+        } else if (!merged.customTextBoxes) {
+          merged.customTextBoxes = [];
+        }
         setConfig(merged);
         savedConfigRef.current = JSON.stringify(merged);
         setLoading(false);
@@ -294,6 +306,67 @@ export default function PdfTemplateBuilder() {
     });
   }, []);
 
+  // --- Custom text box helpers ---
+  const textBoxes = config.customTextBoxes || [];
+
+  const updateTextBox = useCallback((tbId, key, value) => {
+    setConfig((prev) => ({
+      ...prev,
+      customTextBoxes: (prev.customTextBoxes || []).map((tb) =>
+        tb.id === tbId ? { ...tb, [key]: value } : tb
+      ),
+    }));
+    setDirty(true);
+  }, []);
+
+  const updateTextBoxNum = useCallback((tbId, key, val) => {
+    if (val === "" || val === undefined) {
+      updateTextBox(tbId, key, "");
+      return;
+    }
+    const n = Number(val);
+    if (!isNaN(n)) updateTextBox(tbId, key, n);
+  }, [updateTextBox]);
+
+  const updateTextBoxNumBlur = useCallback((tbId, key, def) => {
+    setConfig((prev) => ({
+      ...prev,
+      customTextBoxes: (prev.customTextBoxes || []).map((tb) => {
+        if (tb.id !== tbId) return tb;
+        const v = tb[key];
+        if (v === "" || v === undefined || v === null) return { ...tb, [key]: def };
+        return tb;
+      }),
+    }));
+  }, []);
+
+  const addTextBox = useCallback(() => {
+    const newId = "text_" + Date.now();
+    const newTb = {
+      id: newId, x: 200, y: 400, width: 200, height: 40,
+      text: "Custom Text", fontSize: 10, bold: false, textAlign: "left",
+      showBorder: false, borderWidth: 1, backgroundColor: null, textColor: "#000000",
+    };
+    setConfig((prev) => ({
+      ...prev,
+      customTextBoxes: [...(prev.customTextBoxes || []), newTb],
+    }));
+    setDirty(true);
+    setSelectedBlock(null);
+    setSelectedTextBox(newId);
+    setOpenSections((prev) => ({ ...prev, customTextBoxes: true }));
+  }, []);
+
+  const deleteTextBox = useCallback((tbId) => {
+    setConfig((prev) => ({
+      ...prev,
+      customTextBoxes: (prev.customTextBoxes || []).filter((tb) => tb.id !== tbId),
+    }));
+    setDirty(true);
+    if (selectedTextBox === tbId) setSelectedTextBox(null);
+  }, [selectedTextBox]);
+
+  // --- Drag/resize for standard blocks ---
   const handleBlockMouseDown = useCallback((e, blockId) => {
     if (e.button !== 0) return;
     if (e.target.closest(".ptb-resize-handle")) return;
@@ -309,6 +382,7 @@ export default function PdfTemplateBuilder() {
     });
     setDragging(blockId);
     setSelectedBlock(blockId);
+    setSelectedTextBox(null);
   }, []);
 
   const handleResizeMouseDown = useCallback((e, blockId, handleId) => {
@@ -324,6 +398,43 @@ export default function PdfTemplateBuilder() {
     });
     setResizing({ blockId, handle: handleId });
     setSelectedBlock(blockId);
+    setSelectedTextBox(null);
+  }, []);
+
+  // --- Drag/resize for custom text boxes ---
+  const handleTextBoxMouseDown = useCallback((e, tbId) => {
+    if (e.button !== 0) return;
+    if (e.target.closest(".ptb-resize-handle")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const canvas = canvasRef.current?.getBoundingClientRect();
+    if (!canvas) return;
+    setConfig((prev) => {
+      const tb = (prev.customTextBoxes || []).find((t) => t.id === tbId);
+      if (!tb) return prev;
+      dragRef.current = { offsetX: e.clientX - canvas.left - (tb.x || 0), offsetY: e.clientY - canvas.top - (tb.y || 0) };
+      return prev;
+    });
+    setDragging("tb:" + tbId);
+    setSelectedBlock(null);
+    setSelectedTextBox(tbId);
+  }, []);
+
+  const handleTextBoxResizeMouseDown = useCallback((e, tbId, handleId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setConfig((prev) => {
+      const tb = (prev.customTextBoxes || []).find((t) => t.id === tbId);
+      if (!tb) return prev;
+      resizeRef.current = {
+        startX: e.clientX, startY: e.clientY,
+        origX: tb.x || 0, origY: tb.y || 0, origW: tb.width || 200, origH: tb.height || 40,
+      };
+      return prev;
+    });
+    setResizing({ blockId: "tb:" + tbId, handle: handleId });
+    setSelectedBlock(null);
+    setSelectedTextBox(tbId);
   }, []);
 
   useEffect(() => {
@@ -334,7 +445,18 @@ export default function PdfTemplateBuilder() {
         if (!canvas) return;
         const x = snap(Math.max(0, Math.min(CANVAS_W - 20, e.clientX - canvas.left - dragRef.current.offsetX)));
         const y = snap(Math.max(0, Math.min(CANVAS_H - 20, e.clientY - canvas.top - dragRef.current.offsetY)));
-        setConfig((prev) => ({ ...prev, [dragging]: { ...prev[dragging], x, y } }));
+
+        if (typeof dragging === "string" && dragging.startsWith("tb:")) {
+          const tbId = dragging.slice(3);
+          setConfig((prev) => ({
+            ...prev,
+            customTextBoxes: (prev.customTextBoxes || []).map((tb) =>
+              tb.id === tbId ? { ...tb, x, y } : tb
+            ),
+          }));
+        } else {
+          setConfig((prev) => ({ ...prev, [dragging]: { ...prev[dragging], x, y } }));
+        }
         setDirty(true);
       }
       if (resizing) {
@@ -347,7 +469,18 @@ export default function PdfTemplateBuilder() {
         if (handle.includes("b")) h = snap(Math.max(20, origH + dy));
         if (handle.includes("l")) { w = snap(Math.max(30, origW - dx)); x = snap(origX + origW - w); }
         if (handle.includes("t")) { h = snap(Math.max(20, origH - dy)); y = snap(origY + origH - h); }
-        setConfig((prev) => ({ ...prev, [blockId]: { ...prev[blockId], x, y, width: w, height: h } }));
+
+        if (typeof blockId === "string" && blockId.startsWith("tb:")) {
+          const tbId = blockId.slice(3);
+          setConfig((prev) => ({
+            ...prev,
+            customTextBoxes: (prev.customTextBoxes || []).map((tb) =>
+              tb.id === tbId ? { ...tb, x, y, width: w, height: h } : tb
+            ),
+          }));
+        } else {
+          setConfig((prev) => ({ ...prev, [blockId]: { ...prev[blockId], x, y, width: w, height: h } }));
+        }
         setDirty(true);
       }
     };
@@ -370,8 +503,25 @@ export default function PdfTemplateBuilder() {
     setDirty(true);
   }, []);
 
+  const alignTextBox = useCallback((tbId, dir) => {
+    setConfig((prev) => ({
+      ...prev,
+      customTextBoxes: (prev.customTextBoxes || []).map((tb) => {
+        if (tb.id !== tbId) return tb;
+        const w = tb.width || 200;
+        let x;
+        if (dir === "left") x = 50;
+        else if (dir === "center") x = snap((CANVAS_W - w) / 2);
+        else x = snap(CANVAS_W - 50 - w);
+        return { ...tb, x };
+      }),
+    }));
+    setDirty(true);
+  }, []);
+
   const handleBlockClick = useCallback((blockId) => {
     setSelectedBlock(blockId);
+    setSelectedTextBox(null);
     const sectionId = SECTION_MAP[blockId];
     if (sectionId) {
       setOpenSections((prev) => ({ ...prev, [sectionId]: true }));
@@ -379,6 +529,12 @@ export default function PdfTemplateBuilder() {
         sectionRefs.current[sectionId]?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 50);
     }
+  }, []);
+
+  const handleTextBoxClick = useCallback((tbId) => {
+    setSelectedTextBox(tbId);
+    setSelectedBlock(null);
+    setOpenSections((prev) => ({ ...prev, customTextBoxes: true }));
   }, []);
 
   const handleSave = async () => {
@@ -442,6 +598,9 @@ export default function PdfTemplateBuilder() {
   const estHeaders = config.lineItems?.estimateHeaders || {};
   const invHeaders = config.lineItems?.invoiceHeaders || {};
   const clr = config.colors || {};
+
+  // Currently selected text box data
+  const selTb = selectedTextBox ? textBoxes.find((tb) => tb.id === selectedTextBox) : null;
 
   // ─── Preview Block Renderers ───
   const renderBlockContent = (blockId) => {
@@ -584,11 +743,19 @@ export default function PdfTemplateBuilder() {
       }
       case "footer": {
         const f = config.footer || {};
+        const termsText = f.termsText || "ALL PAYMENTS MUST BE MADE 45 DAYS AFTER INVOICE DATE OR A 15% LATE FEE WILL BE APPLIED";
+        const termsFontSize = f.termsFontSize || 8;
+        const termsBold = f.termsBold || false;
+        const termsAlign = f.termsAlign || "left";
         return (
           <div style={{ ...fill, display: "flex", opacity: f.show === false ? 0.08 : 1, overflow: "hidden" }}>
             {f.showTerms !== false && (
-              <div style={{ flex: 1, border: `0.75px solid ${lineColor}`, padding: 5, fontSize: 7, lineHeight: 1.5, color: textColor }}>
-                NET 30. ALL PRICES VALID FOR 30 DAYS.
+              <div style={{
+                flex: 1, border: `0.75px solid ${lineColor}`, padding: 5,
+                fontSize: termsFontSize, fontWeight: termsBold ? 700 : 400,
+                textAlign: termsAlign, lineHeight: 1.5, color: textColor,
+              }}>
+                {termsText}
               </div>
             )}
             <div style={{ border: `0.75px solid ${lineColor}`, padding: 5, fontWeight: 700, fontSize: f.totalFontSize || 10, display: "flex", alignItems: "center", justifyContent: "center", minWidth: 50, color: textColor }}>TOTAL</div>
@@ -631,13 +798,15 @@ export default function PdfTemplateBuilder() {
       <div className="ptb-body">
         {/* Settings Panel */}
         <div className="ptb-settings">
-          {selectedBlock && (
+          {(selectedBlock || selectedTextBox) && (
             <div className="ptb-quick-toolbar">
-              <span className="ptb-quick-label">{BLOCK_LABELS[selectedBlock]}</span>
+              <span className="ptb-quick-label">
+                {selectedBlock ? BLOCK_LABELS[selectedBlock] : selTb ? `Text: ${(selTb.text || "").substring(0, 20)}` : ""}
+              </span>
               <div className="ptb-align-buttons">
-                <button type="button" className="ptb-align-btn" onClick={() => alignBlock(selectedBlock, "left")} title="Align Left">L</button>
-                <button type="button" className="ptb-align-btn" onClick={() => alignBlock(selectedBlock, "center")} title="Center H">C</button>
-                <button type="button" className="ptb-align-btn" onClick={() => alignBlock(selectedBlock, "right")} title="Align Right">R</button>
+                <button type="button" className="ptb-align-btn" onClick={() => selectedBlock ? alignBlock(selectedBlock, "left") : selectedTextBox && alignTextBox(selectedTextBox, "left")} title="Align Left">L</button>
+                <button type="button" className="ptb-align-btn" onClick={() => selectedBlock ? alignBlock(selectedBlock, "center") : selectedTextBox && alignTextBox(selectedTextBox, "center")} title="Center H">C</button>
+                <button type="button" className="ptb-align-btn" onClick={() => selectedBlock ? alignBlock(selectedBlock, "right") : selectedTextBox && alignTextBox(selectedTextBox, "right")} title="Align Right">R</button>
               </div>
             </div>
           )}
@@ -770,6 +939,48 @@ export default function PdfTemplateBuilder() {
               <PtbNumInput value={config.footer?.totalFontSize ?? 10} onChange={(e) => handleNumChange("footer", "totalFontSize", e.target.value)} onBlur={() => handleNumBlur("footer", "totalFontSize", 10)} label="Total Font" />
               <PtbNumInput value={config.footer?.totalAmountFontSize ?? 11} onChange={(e) => handleNumChange("footer", "totalAmountFontSize", e.target.value)} onBlur={() => handleNumBlur("footer", "totalAmountFontSize", 11)} label="Amount Font" />
             </div>
+            {config.footer?.showTerms !== false && (
+              <>
+                <hr style={{ border: "none", borderTop: "1px solid var(--border-color)", margin: "8px 0 4px" }} />
+                <div className="ptb-field">
+                  <label className="ptb-label">Payment Terms Text</label>
+                  <textarea
+                    className="ptb-input"
+                    style={{ minHeight: 60, resize: "vertical", lineHeight: 1.5 }}
+                    value={config.footer?.termsText ?? "ALL PAYMENTS MUST BE MADE 45 DAYS AFTER INVOICE DATE OR A 15% LATE FEE WILL BE APPLIED"}
+                    onChange={(e) => updateConfig("footer", "termsText", e.target.value)}
+                    placeholder="Enter payment terms..."
+                  />
+                </div>
+                <div className="ptb-field-row">
+                  <PtbNumInput
+                    value={config.footer?.termsFontSize ?? 8}
+                    onChange={(e) => handleNumChange("footer", "termsFontSize", e.target.value)}
+                    onBlur={() => handleNumBlur("footer", "termsFontSize", 8)}
+                    label="Terms Font"
+                  />
+                  <div className="ptb-field" style={{ flex: 1 }}>
+                    <label className="ptb-label">Bold</label>
+                    <PtbToggle checked={config.footer?.termsBold || false} onChange={(v) => updateConfig("footer", "termsBold", v)} />
+                  </div>
+                </div>
+                <div className="ptb-field-row" style={{ gap: 8 }}>
+                  <label className="ptb-label" style={{ minWidth: 48 }}>Terms Align</label>
+                  <div className="ptb-align-buttons">
+                    {["left", "center", "right"].map((a) => (
+                      <button
+                        key={a}
+                        type="button"
+                        className={`ptb-align-btn${(config.footer?.termsAlign || "left") === a ? " active" : ""}`}
+                        onClick={() => updateConfig("footer", "termsAlign", a)}
+                      >
+                        {a === "left" ? "L" : a === "center" ? "C" : "R"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </PtbSection>
 
           <PtbSection {...sectionProps("colors", "Colors", null)}>
@@ -786,15 +997,133 @@ export default function PdfTemplateBuilder() {
               <input className="ptb-input-color" type="color" value={clr.lineStroke || "#000000"} onChange={(e) => updateConfig("colors", "lineStroke", e.target.value)} />
             </div>
           </PtbSection>
+
+          {/* Custom Text Boxes Section */}
+          <PtbSection
+            title={`Custom Text Boxes (${textBoxes.length})`}
+            isSelected={!!selectedTextBox}
+            isOpen={openSections.customTextBoxes}
+            onToggle={() => toggleSection("customTextBoxes")}
+            showToggle={false}
+            sRef={(el) => { sectionRefs.current.customTextBoxes = el; }}
+          >
+            <button
+              type="button"
+              className="ptb-add-textbox-btn"
+              onClick={addTextBox}
+            >
+              + Add Text Box
+            </button>
+
+            {selTb && (
+              <div className="ptb-textbox-editor">
+                <div className="ptb-field-row">
+                  <PtbNumInput value={selTb.x ?? 0} onChange={(e) => updateTextBoxNum(selTb.id, "x", e.target.value)} onBlur={() => updateTextBoxNumBlur(selTb.id, "x", 0)} label="X" />
+                  <PtbNumInput value={selTb.y ?? 0} onChange={(e) => updateTextBoxNum(selTb.id, "y", e.target.value)} onBlur={() => updateTextBoxNumBlur(selTb.id, "y", 0)} label="Y" />
+                  <PtbNumInput value={selTb.width ?? 200} onChange={(e) => updateTextBoxNum(selTb.id, "width", e.target.value)} onBlur={() => updateTextBoxNumBlur(selTb.id, "width", 200)} label="W" />
+                  <PtbNumInput value={selTb.height ?? 40} onChange={(e) => updateTextBoxNum(selTb.id, "height", e.target.value)} onBlur={() => updateTextBoxNumBlur(selTb.id, "height", 40)} label="H" />
+                </div>
+
+                <div className="ptb-align-row">
+                  <div className="ptb-field-row" style={{ gap: 8 }}>
+                    <label className="ptb-label" style={{ minWidth: 48 }}>Position</label>
+                    <div className="ptb-align-buttons">
+                      <button type="button" className="ptb-align-btn" onClick={() => alignTextBox(selTb.id, "left")}>L</button>
+                      <button type="button" className="ptb-align-btn" onClick={() => alignTextBox(selTb.id, "center")}>C</button>
+                      <button type="button" className="ptb-align-btn" onClick={() => alignTextBox(selTb.id, "right")}>R</button>
+                    </div>
+                  </div>
+                  <div className="ptb-field-row" style={{ gap: 8 }}>
+                    <label className="ptb-label" style={{ minWidth: 48 }}>Text</label>
+                    <div className="ptb-align-buttons">
+                      {["left", "center", "right"].map((a) => (
+                        <button
+                          key={a}
+                          type="button"
+                          className={`ptb-align-btn${(selTb.textAlign || "left") === a ? " active" : ""}`}
+                          onClick={() => updateTextBox(selTb.id, "textAlign", a)}
+                        >
+                          {a === "left" ? "L" : a === "center" ? "C" : "R"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="ptb-field">
+                  <label className="ptb-label">Text Content</label>
+                  <textarea
+                    className="ptb-input"
+                    style={{ minHeight: 50, resize: "vertical", lineHeight: 1.4 }}
+                    value={selTb.text || ""}
+                    onChange={(e) => updateTextBox(selTb.id, "text", e.target.value)}
+                    placeholder="Enter text..."
+                  />
+                </div>
+
+                <div className="ptb-field-row">
+                  <PtbNumInput value={selTb.fontSize ?? 10} onChange={(e) => updateTextBoxNum(selTb.id, "fontSize", e.target.value)} onBlur={() => updateTextBoxNumBlur(selTb.id, "fontSize", 10)} label="Font Size" />
+                  <div className="ptb-field" style={{ flex: 1 }}>
+                    <label className="ptb-label">Bold</label>
+                    <PtbToggle checked={selTb.bold || false} onChange={(v) => updateTextBox(selTb.id, "bold", v)} />
+                  </div>
+                </div>
+
+                <div className="ptb-field-row">
+                  <div className="ptb-field" style={{ flex: 1 }}>
+                    <label className="ptb-label">Show Border</label>
+                    <PtbToggle checked={selTb.showBorder || false} onChange={(v) => updateTextBox(selTb.id, "showBorder", v)} />
+                  </div>
+                  {selTb.showBorder && (
+                    <PtbNumInput value={selTb.borderWidth ?? 1} onChange={(e) => updateTextBoxNum(selTb.id, "borderWidth", e.target.value)} onBlur={() => updateTextBoxNumBlur(selTb.id, "borderWidth", 1)} label="Border Width" />
+                  )}
+                </div>
+
+                <div className="ptb-field-row">
+                  <div className="ptb-field" style={{ flex: 1 }}>
+                    <label className="ptb-label">Text Color</label>
+                    <input className="ptb-input-color" type="color" value={selTb.textColor || "#000000"} onChange={(e) => updateTextBox(selTb.id, "textColor", e.target.value)} />
+                  </div>
+                  <div className="ptb-field" style={{ flex: 1 }}>
+                    <label className="ptb-label">Background</label>
+                    <input className="ptb-input-color" type="color" value={selTb.backgroundColor || "#ffffff"} onChange={(e) => updateTextBox(selTb.id, "backgroundColor", e.target.value)} />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="ptb-delete-textbox-btn"
+                  onClick={() => deleteTextBox(selTb.id)}
+                >
+                  Delete Text Box
+                </button>
+              </div>
+            )}
+
+            {textBoxes.length > 0 && (
+              <div className="ptb-textbox-list">
+                {textBoxes.map((tb) => (
+                  <div
+                    key={tb.id}
+                    className={`ptb-textbox-item${selectedTextBox === tb.id ? " active" : ""}`}
+                    onClick={() => { setSelectedTextBox(tb.id); setSelectedBlock(null); }}
+                  >
+                    <span className="ptb-textbox-item-text">{(tb.text || "Empty").substring(0, 30)}{(tb.text || "").length > 30 ? "..." : ""}</span>
+                    <span className="ptb-textbox-item-pos">{tb.x},{tb.y}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </PtbSection>
         </div>
 
         {/* Live Preview Canvas */}
-        <div className="ptb-preview" onClick={() => setSelectedBlock(null)}>
+        <div className="ptb-preview" onClick={() => { setSelectedBlock(null); setSelectedTextBox(null); }}>
           <div
             className="ptb-preview-page"
             ref={canvasRef}
             style={{ padding: 0, overflow: "hidden" }}
-            onClick={(e) => { if (e.target === e.currentTarget) setSelectedBlock(null); }}
+            onClick={(e) => { if (e.target === e.currentTarget) { setSelectedBlock(null); setSelectedTextBox(null); } }}
           >
             {ALL_BLOCKS.map((blockId) => {
               const b = config[blockId] || {};
@@ -818,6 +1147,55 @@ export default function PdfTemplateBuilder() {
                 >
                   {renderBlockContent(blockId)}
                   {selectedBlock === blockId && <PtbResizeHandles blockId={blockId} onMouseDown={handleResizeMouseDown} />}
+                </div>
+              );
+            })}
+
+            {/* Custom Text Boxes on canvas */}
+            {textBoxes.map((tb) => {
+              const isSel = selectedTextBox === tb.id;
+              const isDrag = dragging === "tb:" + tb.id;
+              return (
+                <div
+                  key={tb.id}
+                  className={`ptb-canvas-block${isSel ? " ptb-canvas-block-selected" : ""}${isDrag ? " ptb-canvas-block-dragging" : ""}`}
+                  style={{
+                    position: "absolute",
+                    left: tb.x || 0,
+                    top: tb.y || 0,
+                    width: tb.width || 200,
+                    minHeight: tb.height || 40,
+                    cursor: isDrag ? "grabbing" : "grab",
+                    zIndex: isSel ? 10 : 2,
+                    overflow: "hidden",
+                    fontSize: (tb.fontSize || 10) + "px",
+                    fontWeight: tb.bold ? "bold" : "normal",
+                    textAlign: tb.textAlign || "left",
+                    border: tb.showBorder ? `${tb.borderWidth || 1}px solid ${tb.textColor || "#000"}` : undefined,
+                    backgroundColor: tb.backgroundColor && tb.backgroundColor !== "#ffffff" ? tb.backgroundColor : "transparent",
+                    color: tb.textColor || "#000",
+                    padding: "2px 4px",
+                    lineHeight: 1.4,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                  onMouseDown={(e) => handleTextBoxMouseDown(e, tb.id)}
+                  onClick={(e) => { e.stopPropagation(); handleTextBoxClick(tb.id); }}
+                  title={`Text: ${(tb.text || "").substring(0, 30)}`}
+                >
+                  {tb.text || "Custom Text"}
+                  {isSel && (
+                    <>
+                      {HANDLES.map((h) => (
+                        <div
+                          key={h.id}
+                          className="ptb-resize-handle"
+                          style={{ ...h.style, cursor: h.cursor }}
+                          onMouseDown={(e) => handleTextBoxResizeMouseDown(e, tb.id, h.id)}
+                        />
+                      ))}
+                    </>
+                  )}
                 </div>
               );
             })}
