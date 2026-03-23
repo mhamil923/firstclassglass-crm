@@ -210,7 +210,10 @@ export default function ViewCustomer() {
     setMergeDropdownOpen(false);
     try {
       const res = await api.get(`/customers/${c.id}/merge-preview`);
+      // merge-preview now returns { customer, workOrders, estimates, invoices }
       setMergePreview(res.data);
+      // Update mergeTarget with full customer data from preview
+      if (res.data.customer) setMergeTarget(res.data.customer);
     } catch {
       setMergePreview({ workOrders: "?", estimates: "?", invoices: "?" });
     }
@@ -354,7 +357,7 @@ export default function ViewCustomer() {
                 All their work orders, estimates, and invoices will be moved here, and the duplicate will be deleted.
               </p>
 
-              <div ref={mergeDropdownRef} style={{ position: "relative", maxWidth: 400 }}>
+              <div ref={mergeDropdownRef} style={{ position: "relative", maxWidth: 500 }}>
                 <div className="vc-label">Search Customer to Merge In</div>
                 <input
                   type="text"
@@ -372,40 +375,109 @@ export default function ViewCustomer() {
                 />
                 {mergeDropdownOpen && mergeSearch.trim().length > 0 && (
                   <div className="vc-merge-dropdown">
-                    {filteredMergeCustomers.map((c) => (
-                      <div key={c.id} className="vc-merge-option" onMouseDown={() => selectMergeTarget(c)}>
-                        <div style={{ fontWeight: 600 }}>{c.companyName || c.name}</div>
-                        {c.contactName && <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{c.contactName}</div>}
-                      </div>
-                    ))}
+                    {filteredMergeCustomers.map((c) => {
+                      const addr = [c.billingAddress, c.billingCity, c.billingState, c.billingZip].filter(Boolean).join(", ");
+                      return (
+                        <div key={c.id} className="vc-merge-option" onMouseDown={() => selectMergeTarget(c)}>
+                          <div className="vc-merge-opt-name">{c.companyName || c.name}</div>
+                          {addr && <div className="vc-merge-opt-addr">{addr}</div>}
+                          <div className="vc-merge-opt-contact">
+                            {c.phone && <span>{c.phone}</span>}
+                            {c.email && <span>{c.email}</span>}
+                            {c.contactName && <span>{c.contactName}</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
                     {filteredMergeCustomers.length === 0 && (
-                      <div className="vc-merge-option" style={{ color: "var(--text-tertiary)" }}>No customers found</div>
+                      <div className="vc-merge-option" style={{ color: "var(--text-tertiary)", cursor: "default" }}>No customers found</div>
                     )}
                   </div>
                 )}
               </div>
 
-              {mergeTarget && (
-                <div className="vc-merge-preview">
-                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
-                    Merge "{mergeTarget.companyName || mergeTarget.name}" &rarr; "{customer.companyName || customer.name}"
-                  </div>
-                  {mergePreview && (
-                    <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 12 }}>
+              {mergeTarget && mergePreview && (() => {
+                const isEmpty = (v) => !v || !String(v).trim() || String(v).trim() === "\u2014" || String(v).trim() === "-";
+                const fields = [
+                  { key: "companyName", label: "Company Name" },
+                  { key: "contactName", label: "Contact Name" },
+                  { key: "phone", label: "Phone" },
+                  { key: "email", label: "Email" },
+                  { key: "fax", label: "Fax" },
+                  { key: "billingAddress", label: "Billing Address" },
+                  { key: "billingCity", label: "City" },
+                  { key: "billingState", label: "State" },
+                  { key: "billingZip", label: "Zip" },
+                ];
+                const src = mergeTarget;
+                const tgt = customer;
+                return (
+                  <div className="vc-merge-preview">
+                    <div className="vc-merge-preview-title">
+                      Merge Preview: "{src.companyName || src.name}" &rarr; "{tgt.companyName || tgt.name}"
+                    </div>
+
+                    <div className="vc-merge-record-summary">
                       Records to be moved: <strong>{mergePreview.workOrders}</strong> work orders, <strong>{mergePreview.estimates}</strong> estimates, <strong>{mergePreview.invoices}</strong> invoices
                     </div>
-                  )}
-                  <div style={{ display: "flex", gap: 10 }}>
-                    <button className="vc-btn vc-btn-danger" onClick={executeMerge} disabled={merging}
-                      style={{ background: "var(--accent-red)", color: "#fff", borderColor: "var(--accent-red)" }}>
-                      {merging ? "Merging..." : "Confirm Merge"}
-                    </button>
-                    <button className="vc-btn vc-btn-secondary" onClick={() => { setShowMerge(false); setMergeTarget(null); }}>
-                      Cancel
-                    </button>
+
+                    <table className="vc-merge-table">
+                      <thead>
+                        <tr>
+                          <th>Field</th>
+                          <th>Keep (Target)</th>
+                          <th>From Duplicate</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {fields.map(({ key, label }) => {
+                          const tgtVal = tgt[key];
+                          const srcVal = src[key];
+                          const tgtEmpty = isEmpty(tgtVal);
+                          const srcHasData = !isEmpty(srcVal);
+                          const willFill = tgtEmpty && srcHasData;
+                          return (
+                            <tr key={key}>
+                              <td style={{ fontWeight: 600, fontSize: 12, color: "var(--text-secondary)" }}>{label}</td>
+                              <td>
+                                {tgtEmpty ? (
+                                  <span>
+                                    <span className="vc-merge-empty">(empty)</span>
+                                    {willFill && <span className="vc-merge-fill-tag">FILL</span>}
+                                  </span>
+                                ) : (
+                                  <span>{tgtVal}</span>
+                                )}
+                              </td>
+                              <td>
+                                {srcHasData ? (
+                                  <span style={willFill ? { fontWeight: 600, color: "#34c759" } : undefined}>{srcVal}</span>
+                                ) : (
+                                  <span className="vc-merge-empty">(empty)</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+
+                    <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginBottom: 12 }}>
+                      Fields marked <span className="vc-merge-fill-tag">FILL</span> will be copied from the duplicate to fill in missing data.
+                    </div>
+
+                    <div className="vc-merge-actions">
+                      <button className="vc-btn vc-btn-secondary" onClick={() => { setShowMerge(false); setMergeTarget(null); setMergePreview(null); }}>
+                        Cancel
+                      </button>
+                      <button className="vc-btn vc-btn-danger" onClick={executeMerge} disabled={merging}
+                        style={{ background: "var(--accent-red)", color: "#fff", borderColor: "var(--accent-red)" }}>
+                        {merging ? "Merging..." : "Confirm Merge"}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
           </div>
         )}

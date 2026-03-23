@@ -290,18 +290,19 @@
   top: 100%;
   left: 0;
   right: 0;
-  max-height: 260px;
+  min-width: 420px;
+  max-height: 360px;
   overflow-y: auto;
-  background: var(--bg-card-solid);
-  border: 1px solid var(--border-color-strong);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-  z-index: 100;
-  margin-top: 4px;
+  background: var(--bg-card-solid, #1c1c1e);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.28), 0 4px 12px rgba(0,0,0,0.12);
+  z-index: 9999;
+  margin-top: 6px;
 }
 
 .vc-merge-option {
-  padding: 10px 14px;
+  padding: 12px 16px;
   cursor: pointer;
   transition: var(--transition-fast);
   font-size: 14px;
@@ -309,20 +310,124 @@
   border-bottom: 1px solid var(--border-color);
 }
 
+.vc-merge-option:first-child {
+  border-radius: 12px 12px 0 0;
+}
+
 .vc-merge-option:last-child {
   border-bottom: none;
+  border-radius: 0 0 12px 12px;
+}
+
+.vc-merge-option:only-child {
+  border-radius: 12px;
 }
 
 .vc-merge-option:hover {
   background: var(--bg-hover);
 }
 
+.vc-merge-opt-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.vc-merge-opt-addr {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.vc-merge-opt-contact {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Merge preview */
 .vc-merge-preview {
-  margin-top: 16px;
-  padding: 16px;
-  background: rgba(255,59,48,0.04);
-  border: 1px solid rgba(255,59,48,0.15);
-  border-radius: var(--radius-sm);
+  margin-top: 20px;
+  padding: 20px;
+  background: var(--bg-secondary, rgba(255,255,255,0.03));
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+
+.vc-merge-preview-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+}
+
+.vc-merge-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+
+.vc-merge-table th {
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.vc-merge-table td {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: top;
+}
+
+.vc-merge-table tr:last-child td {
+  border-bottom: none;
+}
+
+.vc-merge-fill-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(52,199,89,0.12);
+  color: #34c759;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.vc-merge-empty {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.vc-merge-record-summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: rgba(0,113,227,0.06);
+  border-radius: 8px;
+  border: 1px solid rgba(0,113,227,0.12);
+}
+
+.vc-merge-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color);
 }
 
 @media (max-width: 768px) {

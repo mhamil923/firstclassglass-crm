@@ -1875,18 +1875,21 @@ app.post('/customers/:targetId/merge', authenticate, requireNumericParam('target
       await db.execute('UPDATE work_orders SET customer = ? WHERE customer = ?', [tgtName, srcName]);
     }
 
-    // Copy empty fields from source to target
+    // Smart merge: fill in target's empty fields with source's data
+    const isEmpty = (v) => !v || !String(v).trim() || String(v).trim() === '—' || String(v).trim() === '-';
     const copyFields = ['contactName', 'phone', 'email', 'fax', 'billingAddress', 'billingCity', 'billingState', 'billingZip', 'siteAddress', 'siteCity', 'siteState', 'siteZip'];
     const sets = [];
     const vals = [];
+    const fieldsFilled = [];
     for (const f of copyFields) {
-      if ((!target[f] || !String(target[f]).trim()) && source[f] && String(source[f]).trim()) {
+      if (isEmpty(target[f]) && !isEmpty(source[f])) {
         sets.push(`\`${f}\` = ?`);
         vals.push(source[f]);
+        fieldsFilled.push(f);
       }
     }
     // Append source notes to target if source has notes
-    if (source.notes && String(source.notes).trim()) {
+    if (!isEmpty(source.notes)) {
       const combined = [target.notes, `[Merged from ${source.companyName || source.name}]: ${source.notes}`].filter(Boolean).join('\n');
       sets.push('`notes` = ?');
       vals.push(combined);
@@ -1895,6 +1898,9 @@ app.post('/customers/:targetId/merge', authenticate, requireNumericParam('target
       sets.push('`updatedAt` = NOW()');
       vals.push(targetId);
       await db.execute(`UPDATE customers SET ${sets.join(', ')} WHERE id = ?`, vals);
+    }
+    if (fieldsFilled.length > 0) {
+      console.log(`[Merge] Filled empty fields on target: ${fieldsFilled.join(', ')}`);
     }
 
     // Delete the source customer
@@ -1920,10 +1926,13 @@ app.post('/customers/:targetId/merge', authenticate, requireNumericParam('target
 app.get('/customers/:id/merge-preview', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const id = Number(req.params.id);
+    const [[customer]] = await db.execute('SELECT * FROM customers WHERE id = ?', [id]);
+    if (!customer) return res.status(404).json({ error: 'Customer not found.' });
     const [[woCount]] = await db.execute('SELECT COUNT(*) as cnt FROM work_orders WHERE customerId = ?', [id]);
     const [[estCount]] = await db.execute('SELECT COUNT(*) as cnt FROM estimates WHERE customerId = ?', [id]);
     const [[invCount]] = await db.execute('SELECT COUNT(*) as cnt FROM invoices WHERE customerId = ?', [id]);
     res.json({
+      customer,
       workOrders: woCount?.cnt || 0,
       estimates: estCount?.cnt || 0,
       invoices: invCount?.cnt || 0,
