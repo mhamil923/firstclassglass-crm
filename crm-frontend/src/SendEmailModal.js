@@ -1,5 +1,5 @@
 // File: src/SendEmailModal.js
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import api from "./api";
 import "./SendEmailModal.css";
 
@@ -27,9 +27,14 @@ export default function SendEmailModal({
 
   const templateType = type === "payment_reminder" ? "payment_reminder" : type;
 
+  // Use refs to avoid stale closures in loadPreview without causing re-render loops
+  const recipientEmailRef = useRef(recipientEmail);
+  const recipientNameRef = useRef(recipientName);
+  recipientEmailRef.current = recipientEmail;
+  recipientNameRef.current = recipientName;
+
   const loadPreview = useCallback(async (tmplId) => {
     try {
-      const entityType = type === "payment_reminder" ? "invoice" : type;
       const res = await api.post("/email/preview", {
         templateId: tmplId || undefined,
         type: templateType,
@@ -37,18 +42,20 @@ export default function SendEmailModal({
       });
       setSubject(res.data.subject || "");
       setBody(res.data.body || "");
-      if (res.data.recipientEmail && !recipientEmail) {
+      if (res.data.recipientEmail && !recipientEmailRef.current) {
         setRecipientEmail(res.data.recipientEmail);
       }
-      if (res.data.recipientName && !recipientName) {
+      if (res.data.recipientName && !recipientNameRef.current) {
         setRecipientName(res.data.recipientName);
       }
+      const entityType = type === "payment_reminder" ? "invoice" : type;
       setAttachmentName(res.data.attachmentName || `${entityType}_${entityId}.pdf`);
     } catch (err) {
       console.error("Error loading preview:", err);
     }
-  }, [type, templateType, entityId, recipientEmail, recipientName]);
+  }, [type, templateType, entityId]);
 
+  // Initialize state and load templates when modal opens
   useEffect(() => {
     if (!isOpen) {
       setLoaded(false);
@@ -75,7 +82,8 @@ export default function SendEmailModal({
         console.error("Error loading templates:", err);
         setLoaded(true);
       });
-  }, [isOpen, customerEmail, customerName, templateType, loadPreview]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, customerEmail, customerName, templateType, entityId]);
 
   const handleTemplateChange = (e) => {
     const newId = e.target.value;
