@@ -192,6 +192,11 @@
   font-size: 13px;
 }
 
+.ci-customer-option.fuzzy-match {
+  background: rgba(255, 149, 0, 0.06);
+  border-left: 3px solid var(--accent-orange);
+}
+
 .ci-customer-option-name {
   font-size: 14px;
   font-weight: 600;

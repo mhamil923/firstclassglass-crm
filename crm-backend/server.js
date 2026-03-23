@@ -1605,6 +1605,50 @@ app.get('/customers', authenticate, async (req, res) => {
   }
 });
 
+// GET /customers/duplicates — find potential duplicate customers (must be before :id route)
+app.get('/customers/duplicates', authenticate, async (req, res) => {
+  try {
+    const [all] = await db.execute('SELECT id, name, companyName, contactName, phone, email, billingAddress FROM customers WHERE isActive = 1 OR isActive IS NULL ORDER BY companyName');
+
+    const pairs = [];
+    const seen = new Set();
+
+    for (let i = 0; i < all.length; i++) {
+      const a = all[i];
+      const normA = normalizeCustomerName(a.companyName || a.name);
+      if (!normA) continue;
+
+      for (let j = i + 1; j < all.length; j++) {
+        const b = all[j];
+        const normB = normalizeCustomerName(b.companyName || b.name);
+        if (!normB) continue;
+
+        const pairKey = `${Math.min(a.id, b.id)}-${Math.max(a.id, b.id)}`;
+        if (seen.has(pairKey)) continue;
+
+        let isDupe = false;
+        if (normA === normB) {
+          isDupe = true;
+        } else if (normA.length >= 3 && normB.length >= 3) {
+          if (normA.includes(normB) || normB.includes(normA)) {
+            isDupe = true;
+          }
+        }
+
+        if (isDupe) {
+          seen.add(pairKey);
+          pairs.push({ a, b });
+        }
+      }
+    }
+
+    res.json(pairs);
+  } catch (err) {
+    console.error('Duplicates scan error:', err);
+    res.status(500).json({ error: 'Failed to scan for duplicates.' });
+  }
+});
+
 // GET /customers/:id — single customer with work order count
 app.get('/customers/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
@@ -1660,19 +1704,46 @@ app.post('/customers', authenticate, async (req, res) => {
   }
 });
 
-// --- Helper: find existing customer by name (case-insensitive) or create one ---
+// --- Helper: normalize customer name for fuzzy comparison ---
+function normalizeCustomerName(str) {
+  return (str || '').toLowerCase()
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()'"]/g, '')
+    .replace(/\b(inc|llc|ltd|corp|co|company|incorporated|limited|the)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// --- Helper: find existing customer by name (case-insensitive + fuzzy) or create one ---
 async function findOrCreateCustomer(customerName, billingInfo = {}) {
   const trimmed = (customerName || '').trim();
   if (!trimmed) throw new Error('customerName is required');
 
-  // 1. Find existing (case-insensitive)
-  const [existing] = await db.execute(
+  // 1. Exact match (case-insensitive)
+  const [exact] = await db.execute(
     'SELECT * FROM customers WHERE LOWER(name) = LOWER(?) OR LOWER(companyName) = LOWER(?) LIMIT 1',
     [trimmed, trimmed]
   );
-  if (existing.length) return existing[0];
+  if (exact.length) return exact[0];
 
-  // 2. Create new
+  // 2. Fuzzy match — check if name contains or is contained by existing customer
+  const [fuzzy] = await db.execute(
+    'SELECT * FROM customers WHERE LOWER(companyName) LIKE LOWER(?) OR LOWER(?) LIKE CONCAT("%", LOWER(companyName), "%") LIMIT 10',
+    [`%${trimmed}%`, trimmed]
+  );
+
+  if (fuzzy.length > 0) {
+    const normalizedInput = normalizeCustomerName(trimmed);
+    for (const match of fuzzy) {
+      const normalizedMatch = normalizeCustomerName(match.companyName || match.name);
+      if (normalizedInput === normalizedMatch) {
+        console.log(`[findOrCreateCustomer] Fuzzy matched "${trimmed}" to existing customer #${match.id} "${match.companyName}"`);
+        return match;
+      }
+    }
+  }
+
+  // 3. No match found — create new customer
+  console.log(`[findOrCreateCustomer] No match for "${trimmed}", creating new customer`);
   const cols = ['name', 'companyName'];
   const vals = [trimmed, trimmed];
   for (const [col, val] of Object.entries(billingInfo)) {
@@ -1774,6 +1845,92 @@ app.get('/customers/:id/work-orders', authenticate, requireNumericParam('id'), a
   } catch (err) {
     console.error('Customer work-orders error:', err);
     res.status(500).json({ error: 'Failed to fetch work orders for customer.' });
+  }
+});
+
+// POST /customers/:targetId/merge — merge source customer into target
+app.post('/customers/:targetId/merge', authenticate, requireNumericParam('targetId'), async (req, res) => {
+  try {
+    const targetId = Number(req.params.targetId);
+    const body = coerceBody(req);
+    const sourceId = Number(body.sourceId);
+    if (!sourceId || sourceId === targetId) {
+      return res.status(400).json({ error: 'Valid sourceId is required and must differ from targetId.' });
+    }
+
+    const [[target]] = await db.execute('SELECT * FROM customers WHERE id = ?', [targetId]);
+    const [[source]] = await db.execute('SELECT * FROM customers WHERE id = ?', [sourceId]);
+    if (!target) return res.status(404).json({ error: 'Target customer not found.' });
+    if (!source) return res.status(404).json({ error: 'Source customer not found.' });
+
+    // Update all foreign keys from source to target
+    const [woResult] = await db.execute('UPDATE work_orders SET customerId = ? WHERE customerId = ?', [targetId, sourceId]);
+    const [estResult] = await db.execute('UPDATE estimates SET customerId = ? WHERE customerId = ?', [targetId, sourceId]);
+    const [invResult] = await db.execute('UPDATE invoices SET customerId = ? WHERE customerId = ?', [targetId, sourceId]);
+
+    // Also update legacy string-based customer field on work orders
+    if (source.companyName || source.name) {
+      const srcName = source.companyName || source.name;
+      const tgtName = target.companyName || target.name;
+      await db.execute('UPDATE work_orders SET customer = ? WHERE customer = ?', [tgtName, srcName]);
+    }
+
+    // Copy empty fields from source to target
+    const copyFields = ['contactName', 'phone', 'email', 'fax', 'billingAddress', 'billingCity', 'billingState', 'billingZip', 'siteAddress', 'siteCity', 'siteState', 'siteZip'];
+    const sets = [];
+    const vals = [];
+    for (const f of copyFields) {
+      if ((!target[f] || !String(target[f]).trim()) && source[f] && String(source[f]).trim()) {
+        sets.push(`\`${f}\` = ?`);
+        vals.push(source[f]);
+      }
+    }
+    // Append source notes to target if source has notes
+    if (source.notes && String(source.notes).trim()) {
+      const combined = [target.notes, `[Merged from ${source.companyName || source.name}]: ${source.notes}`].filter(Boolean).join('\n');
+      sets.push('`notes` = ?');
+      vals.push(combined);
+    }
+    if (sets.length > 0) {
+      sets.push('`updatedAt` = NOW()');
+      vals.push(targetId);
+      await db.execute(`UPDATE customers SET ${sets.join(', ')} WHERE id = ?`, vals);
+    }
+
+    // Delete the source customer
+    await db.execute('DELETE FROM customers WHERE id = ?', [sourceId]);
+
+    const woCount = woResult.affectedRows || 0;
+    const estCount = estResult.affectedRows || 0;
+    const invCount = invResult.affectedRows || 0;
+    console.log(`[Merge] Merged customer #${sourceId} "${source.companyName}" into #${targetId} "${target.companyName}", updated ${woCount} work orders, ${estCount} estimates, ${invCount} invoices`);
+
+    res.json({
+      success: true,
+      merged: { sourceId, targetId },
+      updated: { workOrders: woCount, estimates: estCount, invoices: invCount },
+    });
+  } catch (err) {
+    console.error('Customer merge error:', err);
+    res.status(500).json({ error: 'Failed to merge customers.' });
+  }
+});
+
+// GET /customers/:id/merge-preview — preview what a merge would affect
+app.get('/customers/:id/merge-preview', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [[woCount]] = await db.execute('SELECT COUNT(*) as cnt FROM work_orders WHERE customerId = ?', [id]);
+    const [[estCount]] = await db.execute('SELECT COUNT(*) as cnt FROM estimates WHERE customerId = ?', [id]);
+    const [[invCount]] = await db.execute('SELECT COUNT(*) as cnt FROM invoices WHERE customerId = ?', [id]);
+    res.json({
+      workOrders: woCount?.cnt || 0,
+      estimates: estCount?.cnt || 0,
+      invoices: invCount?.cnt || 0,
+    });
+  } catch (err) {
+    console.error('Merge preview error:', err);
+    res.status(500).json({ error: 'Failed to get merge preview.' });
   }
 });
 

@@ -200,6 +200,14 @@ export default function CreateEstimate() {
     }
   }, [searchParams, isEdit]);
 
+  // --- Normalize for fuzzy comparison ---
+  const normalizeForCompare = (str) =>
+    (str || "").toLowerCase()
+      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()'"]/g, "")
+      .replace(/\b(inc|llc|ltd|corp|co|company|incorporated|limited|the)\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
   // --- Customer autocomplete ---
   const filteredCustomers = useMemo(() => {
     const q = (estimate.customerSearch || "").toLowerCase().trim();
@@ -210,6 +218,18 @@ export default function CreateEstimate() {
         (c.contactName || "").toLowerCase().includes(q)
     );
   }, [customers, estimate.customerSearch]);
+
+  // Find fuzzy matches even when exact filter returns nothing
+  const fuzzyMatch = useMemo(() => {
+    if (!estimate.customerSearch || estimate.customerId) return null;
+    const q = normalizeForCompare(estimate.customerSearch);
+    if (q.length < 3) return null;
+    if (filteredCustomers.length > 0) return null; // exact matches exist
+    return customers.find((c) => {
+      const n = normalizeForCompare(c.companyName || c.name);
+      return n === q || n.includes(q) || q.includes(n);
+    }) || null;
+  }, [customers, estimate.customerSearch, estimate.customerId, filteredCustomers]);
 
   const selectCustomer = (c) => {
     setSelectedCustomer(c);
@@ -428,8 +448,20 @@ export default function CreateEstimate() {
                         )}
                       </div>
                     ))}
-                    {filteredCustomers.length === 0 && (
+                    {filteredCustomers.length === 0 && fuzzyMatch && (
+                      <div className="ce-customer-option fuzzy-match" onMouseDown={() => selectCustomer(fuzzyMatch)}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--accent-orange)", marginBottom: 2 }}>Did you mean?</div>
+                        <div className="ce-customer-option-name">{fuzzyMatch.companyName || fuzzyMatch.name}</div>
+                        {fuzzyMatch.contactName && <div className="ce-customer-option-sub">{fuzzyMatch.contactName}</div>}
+                      </div>
+                    )}
+                    {filteredCustomers.length === 0 && !fuzzyMatch && (
                       <div className="ce-customer-option muted">No match found — "{estimate.customerSearch}" will be created as a new customer</div>
+                    )}
+                    {filteredCustomers.length === 0 && fuzzyMatch && (
+                      <div className="ce-customer-option muted" style={{ fontSize: 12, borderTop: "1px solid var(--border-color)" }}>
+                        Or create "{estimate.customerSearch}" as a new customer
+                      </div>
                     )}
                   </div>
                 )}

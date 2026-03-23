@@ -1,5 +1,5 @@
 // File: src/ViewCustomer.js
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import api from "./api";
 import "./ViewCustomer.css";
@@ -40,6 +40,16 @@ export default function ViewCustomer() {
   const [estLoading, setEstLoading] = useState(false);
   const [invoices, setInvoices] = useState([]);
   const [invLoading, setInvLoading] = useState(false);
+
+  // Merge state
+  const [showMerge, setShowMerge] = useState(false);
+  const [mergeSearch, setMergeSearch] = useState("");
+  const [mergeCustomers, setMergeCustomers] = useState([]);
+  const [mergeTarget, setMergeTarget] = useState(null);
+  const [mergePreview, setMergePreview] = useState(null);
+  const [merging, setMerging] = useState(false);
+  const [mergeDropdownOpen, setMergeDropdownOpen] = useState(false);
+  const mergeDropdownRef = useRef(null);
 
   /* ---------- fetch customer ---------- */
   const fetchCustomer = useCallback(async () => {
@@ -106,6 +116,17 @@ export default function ViewCustomer() {
     fetchInvoices();
   }, [fetchCustomer, fetchWorkOrders, fetchEstimates, fetchInvoices]);
 
+  // Close merge dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (mergeDropdownRef.current && !mergeDropdownRef.current.contains(e.target)) {
+        setMergeDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   /* ---------- form helpers ---------- */
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -154,8 +175,11 @@ export default function ViewCustomer() {
 
   /* ---------- deactivate ---------- */
   const handleDeactivate = async () => {
-    if (!window.confirm("Deactivate this customer? They will be hidden from the customer list."))
-      return;
+    const linkedCount = workOrders.length + estimates.length + invoices.length;
+    const msg = linkedCount > 0
+      ? `This customer has ${workOrders.length} work orders, ${estimates.length} estimates, and ${invoices.length} invoices linked. Deactivate anyway? They will be hidden from the customer list.`
+      : "Deactivate this customer? They will be hidden from the customer list.";
+    if (!window.confirm(msg)) return;
     try {
       await api.delete(`/customers/${id}`);
       navigate("/customers");
@@ -165,8 +189,70 @@ export default function ViewCustomer() {
     }
   };
 
+  /* ---------- merge ---------- */
+  const openMerge = async () => {
+    setShowMerge(true);
+    setMergeSearch("");
+    setMergeTarget(null);
+    setMergePreview(null);
+    try {
+      const res = await api.get("/customers");
+      const all = (Array.isArray(res.data) ? res.data : []).filter((c) => c.id !== Number(id));
+      setMergeCustomers(all);
+    } catch (err) {
+      console.error("Error loading customers for merge:", err);
+    }
+  };
+
+  const selectMergeTarget = async (c) => {
+    setMergeTarget(c);
+    setMergeSearch(c.companyName || c.name || "");
+    setMergeDropdownOpen(false);
+    try {
+      const res = await api.get(`/customers/${c.id}/merge-preview`);
+      setMergePreview(res.data);
+    } catch {
+      setMergePreview({ workOrders: "?", estimates: "?", invoices: "?" });
+    }
+  };
+
+  const executeMerge = async () => {
+    if (!mergeTarget) return;
+    const sourceName = mergeTarget.companyName || mergeTarget.name;
+    const targetName = customer.companyName || customer.name;
+    if (!window.confirm(
+      `MERGE "${sourceName}" into "${targetName}"?\n\nAll work orders, estimates, and invoices from "${sourceName}" will be moved to "${targetName}".\n\n"${sourceName}" will be permanently deleted.\n\nThis cannot be undone.`
+    )) return;
+
+    setMerging(true);
+    try {
+      const res = await api.post(`/customers/${id}/merge`, { sourceId: mergeTarget.id });
+      const u = res.data.updated || {};
+      alert(`Merge complete! Updated ${u.workOrders || 0} work orders, ${u.estimates || 0} estimates, ${u.invoices || 0} invoices.`);
+      setShowMerge(false);
+      setMergeTarget(null);
+      // Refresh all data
+      fetchCustomer();
+      fetchWorkOrders();
+      fetchEstimates();
+      fetchInvoices();
+    } catch (err) {
+      console.error("Merge error:", err);
+      alert("Failed to merge customers. " + (err.response?.data?.error || ""));
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const filteredMergeCustomers = mergeCustomers.filter((c) => {
+    const q = (mergeSearch || "").toLowerCase().trim();
+    if (!q) return true;
+    return (c.companyName || c.name || "").toLowerCase().includes(q) ||
+           (c.contactName || "").toLowerCase().includes(q);
+  }).slice(0, 15);
+
   /* ---------- helpers ---------- */
-  const displayVal = (v) => v || "—";
+  const displayVal = (v) => v || "\u2014";
   const fmtMoney = (v) => {
     const n = Number(v) || 0;
     return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -200,7 +286,7 @@ export default function ViewCustomer() {
   };
 
   const formatDate = (d) => {
-    if (!d) return "—";
+    if (!d) return "\u2014";
     try {
       return new Date(d).toLocaleDateString("en-US", {
         month: "short",
@@ -243,6 +329,11 @@ export default function ViewCustomer() {
                 <button className="vc-btn vc-btn-secondary" onClick={startEdit}>
                   Edit
                 </button>
+                {!isNew && (
+                  <button className="vc-btn vc-btn-secondary" onClick={openMerge}>
+                    Merge Duplicate
+                  </button>
+                )}
                 <button className="vc-btn vc-btn-danger" onClick={handleDeactivate}>
                   Deactivate
                 </button>
@@ -250,6 +341,74 @@ export default function ViewCustomer() {
             )}
           </div>
         </div>
+
+        {/* Merge Panel */}
+        {showMerge && !isNew && (
+          <div className="vc-card" style={{ borderColor: "var(--accent-orange)", borderWidth: 2 }}>
+            <div className="vc-card-header" style={{ background: "rgba(255,149,0,0.08)", color: "var(--accent-orange)" }}>
+              Merge Duplicate Customer
+            </div>
+            <div className="vc-card-body">
+              <p style={{ fontSize: 14, color: "var(--text-secondary)", margin: "0 0 16px 0" }}>
+                Search for the duplicate customer to merge <strong>into</strong> "{customer.companyName || customer.name}".
+                All their work orders, estimates, and invoices will be moved here, and the duplicate will be deleted.
+              </p>
+
+              <div ref={mergeDropdownRef} style={{ position: "relative", maxWidth: 400 }}>
+                <div className="vc-label">Search Customer to Merge In</div>
+                <input
+                  type="text"
+                  className="vc-input"
+                  placeholder="Type customer name..."
+                  value={mergeSearch}
+                  onChange={(e) => {
+                    setMergeSearch(e.target.value);
+                    setMergeTarget(null);
+                    setMergePreview(null);
+                    setMergeDropdownOpen(true);
+                  }}
+                  onFocus={() => setMergeDropdownOpen(true)}
+                  autoComplete="off"
+                />
+                {mergeDropdownOpen && mergeSearch.trim().length > 0 && (
+                  <div className="vc-merge-dropdown">
+                    {filteredMergeCustomers.map((c) => (
+                      <div key={c.id} className="vc-merge-option" onMouseDown={() => selectMergeTarget(c)}>
+                        <div style={{ fontWeight: 600 }}>{c.companyName || c.name}</div>
+                        {c.contactName && <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{c.contactName}</div>}
+                      </div>
+                    ))}
+                    {filteredMergeCustomers.length === 0 && (
+                      <div className="vc-merge-option" style={{ color: "var(--text-tertiary)" }}>No customers found</div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {mergeTarget && (
+                <div className="vc-merge-preview">
+                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
+                    Merge "{mergeTarget.companyName || mergeTarget.name}" &rarr; "{customer.companyName || customer.name}"
+                  </div>
+                  {mergePreview && (
+                    <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 12 }}>
+                      Records to be moved: <strong>{mergePreview.workOrders}</strong> work orders, <strong>{mergePreview.estimates}</strong> estimates, <strong>{mergePreview.invoices}</strong> invoices
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button className="vc-btn vc-btn-danger" onClick={executeMerge} disabled={merging}
+                      style={{ background: "var(--accent-red)", color: "#fff", borderColor: "var(--accent-red)" }}>
+                      {merging ? "Merging..." : "Confirm Merge"}
+                    </button>
+                    <button className="vc-btn vc-btn-secondary" onClick={() => { setShowMerge(false); setMergeTarget(null); }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Customer Information */}
         <div className="vc-card">
@@ -537,13 +696,13 @@ export default function ViewCustomer() {
                 className={`vc-tab${activeTab === "estimates" ? " active" : ""}`}
                 onClick={() => setActiveTab("estimates")}
               >
-                Estimates
+                Estimates ({estimates.length})
               </button>
               <button
                 className={`vc-tab${activeTab === "invoices" ? " active" : ""}`}
                 onClick={() => setActiveTab("invoices")}
               >
-                Invoices
+                Invoices ({invoices.length})
               </button>
             </div>
 
@@ -570,10 +729,10 @@ export default function ViewCustomer() {
                           onClick={() => navigate(`/view-work-order/${wo.id}`)}
                         >
                           <td>{wo.workOrderNumber || wo.id}</td>
-                          <td>{wo.siteLocation || wo.siteAddress || "—"}</td>
+                          <td>{wo.siteLocation || wo.siteAddress || "\u2014"}</td>
                           <td>
                             <span className="vc-status-pill" style={statusColor(wo.status)}>
-                              {wo.status || "—"}
+                              {wo.status || "\u2014"}
                             </span>
                           </td>
                           <td>{formatDate(wo.createdAt)}</td>
@@ -614,7 +773,7 @@ export default function ViewCustomer() {
                       {estimates.map((est) => (
                         <tr key={est.id} onClick={() => navigate(`/estimates/${est.id}`)}>
                           <td>{formatDate(est.issueDate || est.createdAt)}</td>
-                          <td>{est.projectName || "—"}</td>
+                          <td>{est.projectName || "\u2014"}</td>
                           <td>
                             <span className="vc-status-pill" style={estStatusClass(est.status)}>
                               {est.status || "Draft"}
@@ -661,9 +820,9 @@ export default function ViewCustomer() {
                     <tbody>
                       {invoices.map((inv) => (
                         <tr key={inv.id} onClick={() => navigate(`/invoices/${inv.id}`)}>
-                          <td style={{ fontWeight: 600 }}>{inv.invoiceNumber || "—"}</td>
+                          <td style={{ fontWeight: 600 }}>{inv.invoiceNumber || "\u2014"}</td>
                           <td>{formatDate(inv.issueDate || inv.createdAt)}</td>
-                          <td>{inv.projectName || "—"}</td>
+                          <td>{inv.projectName || "\u2014"}</td>
                           <td>
                             <span className="vc-status-pill" style={invStatusStyle(inv.status)}>
                               {inv.status || "Draft"}

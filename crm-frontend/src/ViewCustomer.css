@@ -284,6 +284,47 @@
   font-size: 15px;
 }
 
+/* Merge dropdown */
+.vc-merge-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  z-index: 100;
+  margin-top: 4px;
+}
+
+.vc-merge-option {
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  font-size: 14px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.vc-merge-option:last-child {
+  border-bottom: none;
+}
+
+.vc-merge-option:hover {
+  background: var(--bg-hover);
+}
+
+.vc-merge-preview {
+  margin-top: 16px;
+  padding: 16px;
+  background: rgba(255,59,48,0.04);
+  border: 1px solid rgba(255,59,48,0.15);
+  border-radius: var(--radius-sm);
+}
+
 @media (max-width: 768px) {
   .vc-page { padding: 16px; }
   .vc-title { font-size: 24px; }
