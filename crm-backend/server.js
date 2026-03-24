@@ -7716,15 +7716,23 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
     await db.query('UPDATE estimates SET status=?, updatedAt=NOW() WHERE id=?', [newStatus, tok.estimateId]);
 
     // Mark token as used
-    await db.query('UPDATE public_tokens SET usedAt=NOW(), response=?, responseNotes=?, respondedAt=NOW() WHERE id=?',
-      [response, notes || null, tok.id]);
+    try {
+      await db.query('UPDATE public_tokens SET usedAt=NOW(), response=?, responseNotes=?, respondedAt=NOW() WHERE id=?',
+        [response, notes || null, tok.id]);
+    } catch (tokErr) {
+      console.warn('[Public] Token update failed (non-fatal):', tokErr.message);
+    }
 
     // If accepted and estimate has a work order, update WO status
-    if (response === 'accepted') {
-      const [[est]] = await db.query('SELECT workOrderId FROM estimates WHERE id = ?', [tok.estimateId]);
-      if (est?.workOrderId) {
-        await db.query("UPDATE work_orders SET status='Approved', updatedAt=NOW() WHERE id=?", [est.workOrderId]);
+    try {
+      if (response === 'accepted') {
+        const [[est]] = await db.query('SELECT workOrderId FROM estimates WHERE id = ?', [tok.estimateId]);
+        if (est?.workOrderId) {
+          await db.query("UPDATE work_orders SET status='Approved', updatedAt=NOW() WHERE id=?", [est.workOrderId]);
+        }
       }
+    } catch (woErr) {
+      console.warn('[Public] Work order update failed (non-fatal):', woErr.message);
     }
 
     // Send notification email to the company
