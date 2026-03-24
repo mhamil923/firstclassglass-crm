@@ -4138,7 +4138,6 @@ app.post('/email/send-estimate/:estimateId', authenticate, requireNumericParam('
     }
 
     // Build branded HTML email with green header
-    const appUrl = await getAppPublicUrl(req);
     const logoUrl = appUrl ? `${appUrl}/assets/logo` : '';
     let htmlBody = `
       <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
@@ -4279,8 +4278,7 @@ app.post('/email/send-invoice/:invoiceId', authenticate, requireNumericParam('in
     }
 
     // Build branded HTML email with green header
-    const invoiceAppUrl = await getAppPublicUrl(req);
-    const invoiceLogoUrl = invoiceAppUrl ? `${invoiceAppUrl}/assets/logo` : '';
+    const invoiceLogoUrl = appUrl ? `${appUrl}/assets/logo` : '';
     let htmlBody = `
       <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
         <div style="background:linear-gradient(135deg,#1b5e20,#2e7d32);padding:24px;text-align:center;border-radius:12px 12px 0 0">
