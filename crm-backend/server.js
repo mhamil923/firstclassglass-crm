@@ -4153,9 +4153,9 @@ app.post('/email/send-estimate/:estimateId', authenticate, requireNumericParam('
     const logoUrl = appUrl ? `${appUrl}/assets/logo-green` : '';
     let htmlBody = `
       <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-        <div style="background:#1a1a1a;padding:24px;text-align:center;border-radius:12px 12px 0 0">
-          ${logoUrl ? `<img src="${logoUrl}" alt="First Class Glass" style="height:80px;margin-bottom:8px" onerror="this.style.display='none'">` : ''}
-          <div style="color:white;font-size:16px;font-weight:600;letter-spacing:1px;text-transform:uppercase">First Class Glass &amp; Mirror, Inc.</div>
+        <div style="background-color:#2d5a27;padding:40px 20px 30px;text-align:center;border-radius:12px 12px 0 0">
+          ${logoUrl ? `<img src="${logoUrl}" alt="First Class Glass" style="height:100px;margin-bottom:16px" onerror="this.style.display='none'">` : ''}
+          <div style="color:white;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">ESTIMATE</div>
         </div>
         <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
           ${body.replace(/\n/g, '<br>')}
@@ -4293,9 +4293,9 @@ app.post('/email/send-invoice/:invoiceId', authenticate, requireNumericParam('in
     const invoiceLogoUrl = appUrl ? `${appUrl}/assets/logo-green` : '';
     let htmlBody = `
       <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-        <div style="background:#1a1a1a;padding:24px;text-align:center;border-radius:12px 12px 0 0">
-          ${invoiceLogoUrl ? `<img src="${invoiceLogoUrl}" alt="First Class Glass" style="height:80px;margin-bottom:8px" onerror="this.style.display='none'">` : ''}
-          <div style="color:white;font-size:16px;font-weight:600;letter-spacing:1px;text-transform:uppercase">First Class Glass &amp; Mirror, Inc.</div>
+        <div style="background-color:#2d5a27;padding:40px 20px 30px;text-align:center;border-radius:12px 12px 0 0">
+          ${invoiceLogoUrl ? `<img src="${invoiceLogoUrl}" alt="First Class Glass" style="height:100px;margin-bottom:16px" onerror="this.style.display='none'">` : ''}
+          <div style="color:white;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">INVOICE #${escHtml(inv.invoiceNumber)}</div>
         </div>
         <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
           ${body.replace(/\n/g, '<br>')}
@@ -4419,9 +4419,9 @@ app.post('/email/send-reminder/:invoiceId', authenticate, requireNumericParam('i
     const reminderLogoUrl = reminderAppUrl ? `${reminderAppUrl}/assets/logo-green` : '';
     const reminderHtml = `
       <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-        <div style="background:#1a1a1a;padding:24px;text-align:center;border-radius:12px 12px 0 0">
-          ${reminderLogoUrl ? `<img src="${reminderLogoUrl}" alt="First Class Glass" style="height:80px;margin-bottom:8px" onerror="this.style.display='none'">` : ''}
-          <div style="color:white;font-size:16px;font-weight:600;letter-spacing:1px;text-transform:uppercase">First Class Glass &amp; Mirror, Inc.</div>
+        <div style="background-color:#2d5a27;padding:40px 20px 30px;text-align:center;border-radius:12px 12px 0 0">
+          ${reminderLogoUrl ? `<img src="${reminderLogoUrl}" alt="First Class Glass" style="height:100px;margin-bottom:16px" onerror="this.style.display='none'">` : ''}
+          <div style="color:white;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">PAYMENT REMINDER</div>
         </div>
         <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
           ${body.replace(/\n/g, '<br>')}
@@ -7628,7 +7628,7 @@ function fmtPublicMoney(v) {
 }
 function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-function publicPageShell(title, bodyContent) {
+function publicPageShell(title, bodyContent, headerTitle) {
   return `<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -7636,14 +7636,11 @@ function publicPageShell(title, bodyContent) {
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#333}
-.top-bar{background:#c0392b;padding:8px;text-align:center;color:white;font-size:13px;font-weight:500}
-.top-bar a{color:white;text-decoration:none;font-weight:700}
-.header{background:#1a1a1a;padding:24px 20px;text-align:center}
-.header img{height:90px;margin-bottom:10px}
-.header h2{font-size:18px;font-weight:600;color:white;letter-spacing:1px;text-transform:uppercase}
+.green-header{background-color:#2d5a27;text-align:center;padding:40px 20px 30px}
+.green-header img{height:120px;margin-bottom:16px}
+.green-header .header-title{color:white;font-size:24px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
 .container{max-width:700px;margin:24px auto 40px;padding:0 16px}
 .card{background:white;border-radius:12px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.1);margin-bottom:20px}
-h1{font-size:28px;text-align:center;margin-bottom:4px;color:#1b5e20}
 .subtitle{text-align:center;color:#666;margin-bottom:24px;font-size:15px}
 .section{margin-bottom:20px}
 .section-title{font-size:11px;font-weight:700;color:#1b5e20;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #e8f5e9}
@@ -7664,8 +7661,6 @@ th:last-child,td:last-child{text-align:right}
 .btn-accept:hover{background:#2e7d32;transform:translateY(-1px);box-shadow:0 4px 12px rgba(27,94,32,0.3)}
 .btn-decline{background:white;color:#c62828;border:2px solid #c62828}
 .btn-decline:hover{background:#ffebee}
-.btn-pay{background:#1b5e20;color:white;font-size:18px;font-weight:700;padding:16px 40px}
-.btn-pay:hover{background:#2e7d32}
 .btn:disabled{opacity:0.5;cursor:not-allowed;transform:none}
 .status-badge{display:inline-block;padding:6px 16px;border-radius:20px;font-size:14px;font-weight:600}
 .status-accepted{background:#e8f5e9;color:#1b5e20}
@@ -7684,13 +7679,12 @@ th:last-child,td:last-child{text-align:right}
 .contact-card .contact-phone{font-size:20px;font-weight:700;color:#1b5e20;margin-bottom:8px}
 .contact-card .contact-email{color:#666;font-size:13px}
 .contact-card .contact-note{color:#999;font-size:12px;margin-top:16px}
-@media(max-width:600px){.buttons{flex-direction:column}.btn{width:100%}.detail-grid{grid-template-columns:1fr}.card{padding:20px}.header{padding:20px 16px}.header img{height:60px}}
+@media(max-width:600px){.buttons{flex-direction:column}.btn{width:100%}.detail-grid{grid-template-columns:1fr}.card{padding:20px}.green-header{padding:30px 16px 20px}.green-header img{height:80px}}
 </style>
 </head><body>
-<div class="top-bar">24/7 Emergency Glass Service &mdash; Call Now: <a href="tel:6302509777">630-250-9777</a></div>
-<div class="header">
-<img src="/assets/logo-green" alt="First Class Glass & Mirror" onerror="this.style.display='none'">
-<h2>First Class Glass &amp; Mirror, Inc.</h2>
+<div class="green-header">
+<img src="/assets/logo-green" alt="First Class Glass" onerror="this.style.display='none'">
+${headerTitle ? `<div class="header-title">${headerTitle}</div>` : ''}
 </div>
 <div class="container">
 ${bodyContent}
@@ -7766,8 +7760,7 @@ app.get('/public/estimate/:token', async (req, res) => {
 
     res.send(publicPageShell('Estimate from First Class Glass & Mirror', `
       <div class="card">
-        <h1>Estimate</h1>
-        <div class="subtitle">Date: ${fmtPublicDate(est.issueDate)}${est.poNumber ? ' | P.O. #' + escHtml(est.poNumber) : ''}</div>
+        <div class="subtitle" style="margin-top:8px">Date: ${fmtPublicDate(est.issueDate)}${est.poNumber ? ' | P.O. #' + escHtml(est.poNumber) : ''}</div>
         ${statusBadge}
         <div class="section">
           <div class="section-title">Customer</div>
@@ -7786,7 +7779,7 @@ app.get('/public/estimate/:token', async (req, res) => {
         <div class="total-row">Total: ${fmtPublicMoney(est.total)}</div>
         ${actionsHtml}
       </div>
-    `));
+    `, 'ESTIMATE'));
   } catch (err) {
     console.error('Error rendering public estimate:', err);
     res.status(500).send(publicPageShell('Error', '<div class="card"><div class="msg error">An error occurred. Please try again later.</div></div>'));
@@ -7938,8 +7931,7 @@ app.get('/public/invoice/:token', async (req, res) => {
 
     res.send(publicPageShell('Invoice from First Class Glass & Mirror', `
       <div class="card">
-        <h1>Invoice #${escHtml(inv.invoiceNumber)}</h1>
-        <div class="subtitle">Date: ${fmtPublicDate(inv.issueDate)}${inv.dueDate ? ' | Due: ' + fmtPublicDate(inv.dueDate) : ''}</div>
+        <div class="subtitle" style="margin-top:8px">Date: ${fmtPublicDate(inv.issueDate)}${inv.dueDate ? ' | Due: ' + fmtPublicDate(inv.dueDate) : ''}</div>
         ${statusHtml}
         <div class="section">
           <div class="section-title">Customer</div>
@@ -7961,7 +7953,7 @@ app.get('/public/invoice/:token', async (req, res) => {
         ${inv.terms ? `<div class="section" style="margin-top:16px"><div class="section-title">Terms</div><p style="font-size:13px;color:#666;line-height:1.5">${escHtml(inv.terms)}</p></div>` : ''}
         ${payHtml}
       </div>
-    `));
+    `, `INVOICE #${escHtml(inv.invoiceNumber)}`));
   } catch (err) {
     console.error('Error rendering public invoice:', err);
     res.status(500).send(publicPageShell('Error', '<div class="card"><div class="msg error">An error occurred. Please try again later.</div></div>'));
