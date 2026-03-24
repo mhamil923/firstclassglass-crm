@@ -7665,10 +7665,13 @@ app.get('/public/estimate/:token', async (req, res) => {
         <button class="btn btn-decline" onclick="respond('declined')">Decline Estimate</button>
       </div>
       <script>
+        var _submitting = false;
         async function respond(response) {
+          if (_submitting) return;
+          _submitting = true;
           var notes = document.getElementById('notes').value;
           var btns = document.querySelectorAll('.btn');
-          btns.forEach(function(b){b.disabled=true});
+          btns.forEach(function(b){b.disabled=true;b.style.opacity='0.5'});
           try {
             var res = await fetch('/public/estimate/${req.params.token}/respond', {
               method:'POST', headers:{'Content-Type':'application/json'},
@@ -7733,45 +7736,49 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
       return res.status(400).json({ error: 'Invalid response.' });
     }
 
-    // If already responded, return success without re-processing
-    if (tok.usedAt) {
-      console.log('[Public] Token already used, returning cached response:', tok.response);
-      return res.json({ success: true, status: tok.response === 'accepted' ? 'Accepted' : 'Declined', message: 'Already responded' });
-    }
-
-    // Also check estimate's current status to prevent duplicates from race conditions
-    const [[currentEst]] = await db.query('SELECT status FROM estimates WHERE id = ?', [tok.estimateId]);
-    if (currentEst && (currentEst.status === 'Accepted' || currentEst.status === 'Declined')) {
-      console.log('[Public] Estimate already has status:', currentEst.status, '— skipping re-processing');
-      // Mark token as used so future requests hit the usedAt guard above
-      try { await db.query('UPDATE public_tokens SET usedAt=NOW(), response=?, respondedAt=NOW() WHERE id=? AND usedAt IS NULL', [response, tok.id]); } catch (e) {}
-      return res.json({ success: true, status: currentEst.status, message: 'Already responded' });
-    }
-
     const newStatus = response === 'accepted' ? 'Accepted' : 'Declined';
-    console.log('[Public] Processing estimate response:', response, 'for estimateId:', tok.estimateId);
 
-    // Update estimate status — this is the critical operation
-    await db.query('UPDATE estimates SET status=?, updatedAt=NOW() WHERE id=?', [newStatus, tok.estimateId]);
+    // ═══════════════════════════════════════════════════════════════════════
+    // ATOMIC GUARD: Use UPDATE ... WHERE status NOT IN ('Accepted','Declined')
+    // This is the ONLY way to prevent double-processing across multiple tokens.
+    // If affectedRows === 0, the estimate was already accepted/declined — skip everything.
+    // ═══════════════════════════════════════════════════════════════════════
+    const [updateResult] = await db.query(
+      "UPDATE estimates SET status=?, updatedAt=NOW() WHERE id=? AND status NOT IN ('Accepted','Declined')",
+      [newStatus, tok.estimateId]
+    );
 
-    // Mark token as used immediately to prevent duplicate processing (atomic with usedAt IS NULL)
+    // Mark this token as used regardless
     try {
-      const [tokResult] = await db.query('UPDATE public_tokens SET usedAt=NOW(), response=?, responseNotes=?, respondedAt=NOW() WHERE id=? AND usedAt IS NULL',
+      await db.query('UPDATE public_tokens SET usedAt=NOW(), response=?, responseNotes=?, respondedAt=NOW() WHERE id=?',
         [response, notes || null, tok.id]);
-      if (tokResult.affectedRows === 0) {
-        console.log('[Public] Token was already marked used by concurrent request — skipping notification');
-        return res.json({ success: true, status: newStatus, message: 'Already responded' });
-      }
-    } catch (tokErr) {
-      console.warn('[Public] Token update failed (non-fatal):', tokErr.message);
+    } catch (e) { /* non-fatal */ }
+
+    if (updateResult.affectedRows === 0) {
+      // Estimate was already accepted or declined — do NOT send another email
+      console.log('[Public] Estimate', tok.estimateId, 'already has final status. Skipping. (token:', req.params.token.substring(0, 8) + '...)');
+      const [[est]] = await db.query('SELECT status FROM estimates WHERE id = ?', [tok.estimateId]);
+      return res.json({ success: true, status: est?.status || newStatus, message: 'Already responded' });
     }
 
-    // If accepted and estimate has a work order, update WO status
+    // ═══════════════════════════════════════════════════════════════════════
+    // If we reach here, THIS request is the ONE that changed the status.
+    // Only THIS request sends the notification email.
+    // ═══════════════════════════════════════════════════════════════════════
+    console.log('[Public] Processing estimate response:', response, 'for estimateId:', tok.estimateId, '(this request won the race)');
+
+    // Mark ALL tokens for this estimate as used (prevents other email links from triggering)
+    try {
+      await db.query("UPDATE public_tokens SET usedAt=COALESCE(usedAt,NOW()), response=COALESCE(response,?) WHERE estimateId=? AND type='estimate_review'",
+        [response, tok.estimateId]);
+    } catch (e) { /* non-fatal */ }
+
+    // If accepted, update work order to Approved
     try {
       if (response === 'accepted') {
         const [[est]] = await db.query('SELECT * FROM estimates WHERE id = ?', [tok.estimateId]);
         const woId = est?.workOrderId || est?.work_order_id;
-        console.log('[Public Estimate] Accepted. Estimate ID:', tok.estimateId, 'Work Order ID:', woId, 'Raw workOrderId:', est?.workOrderId, 'Raw work_order_id:', est?.work_order_id);
+        console.log('[Public Estimate] Accepted. Estimate ID:', tok.estimateId, 'Work Order ID:', woId);
         if (woId) {
           const [woResult] = await db.query("UPDATE work_orders SET status='Approved', updatedAt=NOW() WHERE id=?", [woId]);
           console.log('[Public Estimate] Updated work order', woId, 'to Approved. Rows affected:', woResult.affectedRows);
@@ -7783,7 +7790,7 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
       console.error('[Public Estimate] Work order update FAILED:', woErr.message, woErr.stack);
     }
 
-    // Send ONE notification email to the company (for both accept and decline)
+    // Send exactly ONE notification email
     try {
       const [[est]] = await db.query(`
         SELECT e.*, c.companyName, c.name AS custName
