@@ -4153,9 +4153,9 @@ app.post('/email/send-estimate/:estimateId', authenticate, requireNumericParam('
     const logoUrl = appUrl ? `${appUrl}/assets/logo-green` : '';
     let htmlBody = `
       <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-        <div style="background:white;padding:24px;text-align:center;border-radius:12px 12px 0 0;border-bottom:3px solid #1b5e20">
+        <div style="background:#1a1a1a;padding:24px;text-align:center;border-radius:12px 12px 0 0">
           ${logoUrl ? `<img src="${logoUrl}" alt="First Class Glass" style="height:80px;margin-bottom:8px" onerror="this.style.display='none'">` : ''}
-          <div style="color:#1c1c1e;font-size:16px;font-weight:600">First Class Glass &amp; Mirror, Inc.</div>
+          <div style="color:white;font-size:16px;font-weight:600;letter-spacing:1px;text-transform:uppercase">First Class Glass &amp; Mirror, Inc.</div>
         </div>
         <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
           ${body.replace(/\n/g, '<br>')}
@@ -4293,9 +4293,9 @@ app.post('/email/send-invoice/:invoiceId', authenticate, requireNumericParam('in
     const invoiceLogoUrl = appUrl ? `${appUrl}/assets/logo-green` : '';
     let htmlBody = `
       <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-        <div style="background:white;padding:24px;text-align:center;border-radius:12px 12px 0 0;border-bottom:3px solid #1b5e20">
+        <div style="background:#1a1a1a;padding:24px;text-align:center;border-radius:12px 12px 0 0">
           ${invoiceLogoUrl ? `<img src="${invoiceLogoUrl}" alt="First Class Glass" style="height:80px;margin-bottom:8px" onerror="this.style.display='none'">` : ''}
-          <div style="color:#1c1c1e;font-size:16px;font-weight:600">First Class Glass &amp; Mirror, Inc.</div>
+          <div style="color:white;font-size:16px;font-weight:600;letter-spacing:1px;text-transform:uppercase">First Class Glass &amp; Mirror, Inc.</div>
         </div>
         <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
           ${body.replace(/\n/g, '<br>')}
@@ -4419,9 +4419,9 @@ app.post('/email/send-reminder/:invoiceId', authenticate, requireNumericParam('i
     const reminderLogoUrl = reminderAppUrl ? `${reminderAppUrl}/assets/logo-green` : '';
     const reminderHtml = `
       <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-        <div style="background:white;padding:24px;text-align:center;border-radius:12px 12px 0 0;border-bottom:3px solid #1b5e20">
+        <div style="background:#1a1a1a;padding:24px;text-align:center;border-radius:12px 12px 0 0">
           ${reminderLogoUrl ? `<img src="${reminderLogoUrl}" alt="First Class Glass" style="height:80px;margin-bottom:8px" onerror="this.style.display='none'">` : ''}
-          <div style="color:#1c1c1e;font-size:16px;font-weight:600">First Class Glass &amp; Mirror, Inc.</div>
+          <div style="color:white;font-size:16px;font-weight:600;letter-spacing:1px;text-transform:uppercase">First Class Glass &amp; Mirror, Inc.</div>
         </div>
         <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
           ${body.replace(/\n/g, '<br>')}
@@ -7636,11 +7636,12 @@ function publicPageShell(title, bodyContent) {
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#333}
-.header{background:white;padding:30px 20px;text-align:center;border-bottom:3px solid #1b5e20}
-.header img{height:100px;margin-bottom:12px}
-.header h2{font-size:18px;font-weight:600;color:#1c1c1e}
-.header .subtext{color:#666;font-size:14px;margin-top:4px}
-.container{max-width:700px;margin:-30px auto 40px;padding:0 16px}
+.top-bar{background:#c0392b;padding:8px;text-align:center;color:white;font-size:13px;font-weight:500}
+.top-bar a{color:white;text-decoration:none;font-weight:700}
+.header{background:#1a1a1a;padding:24px 20px;text-align:center}
+.header img{height:90px;margin-bottom:10px}
+.header h2{font-size:18px;font-weight:600;color:white;letter-spacing:1px;text-transform:uppercase}
+.container{max-width:700px;margin:24px auto 40px;padding:0 16px}
 .card{background:white;border-radius:12px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.1);margin-bottom:20px}
 h1{font-size:28px;text-align:center;margin-bottom:4px;color:#1b5e20}
 .subtitle{text-align:center;color:#666;margin-bottom:24px;font-size:15px}
@@ -7686,10 +7687,10 @@ th:last-child,td:last-child{text-align:right}
 @media(max-width:600px){.buttons{flex-direction:column}.btn{width:100%}.detail-grid{grid-template-columns:1fr}.card{padding:20px}.header{padding:20px 16px}.header img{height:60px}}
 </style>
 </head><body>
+<div class="top-bar">24/7 Emergency Glass Service &mdash; Call Now: <a href="tel:6302509777">630-250-9777</a></div>
 <div class="header">
 <img src="/assets/logo-green" alt="First Class Glass & Mirror" onerror="this.style.display='none'">
 <h2>First Class Glass &amp; Mirror, Inc.</h2>
-<div class="subtext">1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777</div>
 </div>
 <div class="container">
 ${bodyContent}
