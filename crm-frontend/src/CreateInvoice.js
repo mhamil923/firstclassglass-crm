@@ -700,32 +700,20 @@ export default function CreateInvoice() {
           </div>
         </div>
 
-        {/* Notes & Terms */}
+        {/* Notes */}
         <div className="ci-card">
-          <div className="ci-card-header">Notes & Terms</div>
+          <div className="ci-card-header">Additional Notes</div>
           <div className="ci-card-body">
-            <div className="ci-grid ci-grid-2">
-              <div className="ci-field">
-                <div className="ci-label">Notes</div>
-                <textarea
-                  name="notes"
-                  value={invoice.notes}
-                  onChange={handleChange}
-                  className="ci-textarea"
-                  placeholder="Additional notes..."
-                  rows={3}
-                />
-              </div>
-              <div className="ci-field">
-                <div className="ci-label">Payment Terms</div>
-                <textarea
-                  name="terms"
-                  value={invoice.terms}
-                  onChange={handleChange}
-                  className="ci-textarea"
-                  rows={3}
-                />
-              </div>
+            <div className="ci-field">
+              <div className="ci-label">Notes</div>
+              <textarea
+                name="notes"
+                value={invoice.notes}
+                onChange={handleChange}
+                className="ci-textarea"
+                placeholder="Additional notes (will appear as a line item on the PDF)..."
+                rows={3}
+              />
             </div>
           </div>
         </div>

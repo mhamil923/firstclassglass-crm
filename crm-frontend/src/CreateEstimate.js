@@ -641,32 +641,20 @@ export default function CreateEstimate() {
           </div>
         </div>
 
-        {/* Notes & Terms */}
+        {/* Notes */}
         <div className="ce-card">
-          <div className="ce-card-header">Notes & Terms</div>
+          <div className="ce-card-header">Additional Notes</div>
           <div className="ce-card-body">
-            <div className="ce-grid ce-grid-2">
-              <div className="ce-field">
-                <div className="ce-label">Notes</div>
-                <textarea
-                  name="notes"
-                  value={estimate.notes}
-                  onChange={handleChange}
-                  className="ce-textarea"
-                  placeholder="Additional notes..."
-                  rows={3}
-                />
-              </div>
-              <div className="ce-field">
-                <div className="ce-label">Payment Terms</div>
-                <textarea
-                  name="terms"
-                  value={estimate.terms}
-                  onChange={handleChange}
-                  className="ce-textarea"
-                  rows={3}
-                />
-              </div>
+            <div className="ce-field">
+              <div className="ce-label">Notes</div>
+              <textarea
+                name="notes"
+                value={estimate.notes}
+                onChange={handleChange}
+                className="ce-textarea"
+                placeholder="Additional notes (will appear as a line item on the PDF)..."
+                rows={3}
+              />
             </div>
           </div>
         </div>

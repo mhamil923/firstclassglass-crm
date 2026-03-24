@@ -2425,7 +2425,10 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
         doc.font(boldFont).fontSize(cfg.lineItems?.headerFontSize || 9).fillColor(textColor);
         doc.text(bidLabel + ':', liX, tableTop);
         rowY = tableTop + 16;
-        const bidDesc = lineItems.map(item => U(item.description || '')).filter(Boolean).join(', ');
+        let bidDesc = lineItems.map(item => U(item.description || '')).filter(Boolean).join(', ');
+        if (data.notes && data.notes.trim()) {
+          bidDesc += (bidDesc ? '\n\n' : '') + U(data.notes.trim());
+        }
         doc.font(bodyFont).fontSize(bodyFontSize);
         const descH = doc.heightOfString(bidDesc, { width: liW - 8 });
         doc.text(bidDesc, liX, rowY, { width: liW });
@@ -2440,8 +2443,15 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
         const headers = docType === 'invoice'
           ? (cfg.lineItems?.invoiceHeaders || { description: 'DESCRIPTION' })
           : (cfg.lineItems?.estimateHeaders || { description: 'DESCRIPTION' });
+
+        // Build items including notes
+        const summaryItems = [...lineItems];
+        if (data.notes && data.notes.trim()) {
+          summaryItems.push({ description: data.notes.trim() });
+        }
+
         doc.font(bodyFont).fontSize(bodyFontSize);
-        const itemHeights = lineItems.map(item => {
+        const itemHeights = summaryItems.map(item => {
           const desc = U(item.description || '');
           const descH = doc.heightOfString(desc, { width: liW - 8 });
           return Math.max(descH + 6, 16);
@@ -2455,8 +2465,8 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
         doc.text(headers.description || 'DESCRIPTION', liX + 4, tableTop + 5);
         rowY = tableTop + tHeaderH;
         doc.font(bodyFont).fontSize(bodyFontSize);
-        for (let i = 0; i < lineItems.length; i++) {
-          const item = lineItems[i];
+        for (let i = 0; i < summaryItems.length; i++) {
+          const item = summaryItems[i];
           const cellH = Math.max(itemHeights[i], 14);
           doc.lineWidth(0.5);
           doc.rect(liX, rowY, liW, cellH).stroke();
@@ -2472,8 +2482,14 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
         const colTotal = liX + liW - totalW;
         const tHeaderH = 18;
 
+        // Build items list including notes as a final row if present
+        const allItems = [...lineItems];
+        if (data.notes && data.notes.trim()) {
+          allItems.push({ description: data.notes.trim(), quantity: null, amount: 0, _isNote: true });
+        }
+
         doc.font(bodyFont).fontSize(bodyFontSize);
-        const itemHeights = lineItems.map(item => {
+        const itemHeights = allItems.map(item => {
           const desc = U(item.description || '');
           const descH = doc.heightOfString(desc, { width: colTotal - colDesc - 8 });
           return Math.max(descH + 6, 16);
@@ -2508,8 +2524,8 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
 
         rowY = tableTop + tHeaderH;
         doc.font(bodyFont).fontSize(bodyFontSize);
-        for (let i = 0; i < lineItems.length; i++) {
-          const item = lineItems[i];
+        for (let i = 0; i < allItems.length; i++) {
+          const item = allItems[i];
           const cellH = Math.max(itemHeights[i] * scale, 14);
           const desc = U(item.description || '');
 
@@ -7753,14 +7769,18 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
     // If accepted and estimate has a work order, update WO status
     try {
       if (response === 'accepted') {
-        const [[est]] = await db.query('SELECT workOrderId FROM estimates WHERE id = ?', [tok.estimateId]);
-        if (est?.workOrderId) {
-          await db.query("UPDATE work_orders SET status='Approved', updatedAt=NOW() WHERE id=?", [est.workOrderId]);
-          console.log('[Public] Updated work order', est.workOrderId, 'to Approved');
+        const [[est]] = await db.query('SELECT * FROM estimates WHERE id = ?', [tok.estimateId]);
+        const woId = est?.workOrderId || est?.work_order_id;
+        console.log('[Public Estimate] Accepted. Estimate ID:', tok.estimateId, 'Work Order ID:', woId, 'Raw workOrderId:', est?.workOrderId, 'Raw work_order_id:', est?.work_order_id);
+        if (woId) {
+          const [woResult] = await db.query("UPDATE work_orders SET status='Approved', updatedAt=NOW() WHERE id=?", [woId]);
+          console.log('[Public Estimate] Updated work order', woId, 'to Approved. Rows affected:', woResult.affectedRows);
+        } else {
+          console.log('[Public Estimate] No work order linked to estimate', tok.estimateId);
         }
       }
     } catch (woErr) {
-      console.warn('[Public] Work order update failed (non-fatal):', woErr.message);
+      console.error('[Public Estimate] Work order update FAILED:', woErr.message, woErr.stack);
     }
 
     // Send ONE notification email to the company (for both accept and decline)
@@ -7830,10 +7850,17 @@ app.get('/public/invoice/:token', async (req, res) => {
     let stripeConfigured = false;
     try {
       const [[settings]] = await db.query('SELECT stripeEnabled, stripeSecretKey FROM email_settings WHERE id = 1');
-      stripeConfigured = settings?.stripeEnabled && (settings?.stripeSecretKey || STRIPE_SECRET_KEY);
-    } catch (e) { /* */ }
+      const hasKey = !!(settings?.stripeSecretKey || STRIPE_SECRET_KEY);
+      stripeConfigured = hasKey && (settings?.stripeEnabled === 1 || settings?.stripeEnabled === true || STRIPE_SECRET_KEY);
+      console.log('[Public Invoice] Stripe check — enabled:', settings?.stripeEnabled, 'hasKey:', hasKey, 'configured:', stripeConfigured);
+    } catch (e) {
+      // If email_settings table doesn't have stripe columns, fall back to env var
+      stripeConfigured = !!STRIPE_SECRET_KEY;
+      console.log('[Public Invoice] Stripe fallback to env var:', stripeConfigured);
+    }
 
     const showPayButton = !isPaid && !paymentSuccess && balanceDue > 0 && stripeConfigured;
+    const showContactInfo = !isPaid && !paymentSuccess && balanceDue > 0 && !stripeConfigured;
 
     // Calculate fees
     const cardFee = Math.round((balanceDue * 0.029 + 0.30) * 100) / 100;
@@ -7887,6 +7914,11 @@ app.get('/public/invoice/:token', async (req, res) => {
           }
         }
       </script>
+    ` : showContactInfo ? `
+      <div style="margin-top:24px;text-align:center;padding:20px;border:1px solid #ddd;border-radius:8px;background:#f9f9f9">
+        <div style="font-size:16px;font-weight:600;margin-bottom:8px">Ready to pay?</div>
+        <div style="color:#666;font-size:14px">To arrange payment, please contact us at <strong>630-250-9777</strong></div>
+      </div>
     ` : '';
 
     res.send(publicPageShell('Invoice from First Class Glass & Mirror', `
