@@ -123,9 +123,12 @@ function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
 
   // Email settings
   const [emailSettings, setEmailSettings] = useState({
-    senderEmail: "", senderPassword: "", senderName: "", replyTo: ""
+    senderEmail: "", senderPassword: "", senderName: "", replyTo: "",
+    stripePublishableKey: "", stripeSecretKey: "", stripeWebhookSecret: "",
+    stripeEnabled: false, appPublicUrl: "",
   });
   const [showPassword, setShowPassword] = useState(false);
+  const [showStripeSecret, setShowStripeSecret] = useState(false);
   const [testingEmail, setTestingEmail] = useState(false);
   const [emailTestResult, setEmailTestResult] = useState("");
 
@@ -154,6 +157,11 @@ function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
         senderPassword: es.senderPassword || "",
         senderName: es.senderName || "",
         replyTo: es.replyTo || "",
+        stripePublishableKey: es.stripePublishableKey || "",
+        stripeSecretKey: es.stripeSecretKey || "",
+        stripeWebhookSecret: es.stripeWebhookSecret || "",
+        stripeEnabled: !!es.stripeEnabled,
+        appPublicUrl: es.appPublicUrl || "",
       });
     } catch (err) {
       console.error("Error fetching settings:", err);
@@ -385,6 +393,97 @@ function SettingsModal({ onClose, navOrder, onNavOrderChange }) {
                 </span>
               )}
             </div>
+
+            <div className="settings-divider" />
+
+            {/* Stripe Payment Configuration */}
+            <div className="settings-field">
+              <label className="settings-label">Stripe Payment Configuration</label>
+              <p className="settings-hint">
+                Enable online payments for invoices via Stripe. Get your API keys at{" "}
+                <a href="https://dashboard.stripe.com/apikeys" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent-blue)" }}>
+                  dashboard.stripe.com/apikeys
+                </a>
+              </p>
+            </div>
+
+            <div className="settings-field">
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>
+                <input
+                  type="checkbox"
+                  checked={emailSettings.stripeEnabled}
+                  onChange={(e) => setEmailSettings((s) => ({ ...s, stripeEnabled: e.target.checked }))}
+                  style={{ width: 16, height: 16, accentColor: "var(--accent-blue)" }}
+                />
+                Enable Stripe Payments
+              </label>
+            </div>
+
+            {emailSettings.stripeEnabled && (
+              <>
+                <div className="settings-field">
+                  <label className="settings-label" style={{ fontSize: 11 }}>Publishable Key</label>
+                  <input
+                    className="settings-input"
+                    value={emailSettings.stripePublishableKey}
+                    onChange={(e) => setEmailSettings((s) => ({ ...s, stripePublishableKey: e.target.value }))}
+                    placeholder="pk_test_... or pk_live_..."
+                  />
+                </div>
+
+                <div className="settings-field">
+                  <label className="settings-label" style={{ fontSize: 11 }}>Secret Key</label>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      className="settings-input"
+                      type={showStripeSecret ? "text" : "password"}
+                      value={emailSettings.stripeSecretKey}
+                      onChange={(e) => setEmailSettings((s) => ({ ...s, stripeSecretKey: e.target.value }))}
+                      placeholder="sk_test_... or sk_live_..."
+                      style={{ paddingRight: 60 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowStripeSecret(!showStripeSecret)}
+                      style={{
+                        position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                        background: "none", border: "none", color: "var(--accent-blue)",
+                        cursor: "pointer", fontSize: 12, fontWeight: 600
+                      }}
+                    >
+                      {showStripeSecret ? "Hide" : "Show"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="settings-field">
+                  <label className="settings-label" style={{ fontSize: 11 }}>Webhook Secret (optional)</label>
+                  <input
+                    className="settings-input"
+                    type="password"
+                    value={emailSettings.stripeWebhookSecret}
+                    onChange={(e) => setEmailSettings((s) => ({ ...s, stripeWebhookSecret: e.target.value }))}
+                    placeholder="whsec_..."
+                  />
+                  <p className="settings-hint" style={{ marginTop: 4 }}>
+                    Set up a webhook at dashboard.stripe.com/webhooks pointing to your backend URL + /api/stripe/webhook
+                  </p>
+                </div>
+
+                <div className="settings-field">
+                  <label className="settings-label" style={{ fontSize: 11 }}>Backend Public URL</label>
+                  <input
+                    className="settings-input"
+                    value={emailSettings.appPublicUrl}
+                    onChange={(e) => setEmailSettings((s) => ({ ...s, appPublicUrl: e.target.value }))}
+                    placeholder="https://your-app.elasticbeanstalk.com"
+                  />
+                  <p className="settings-hint" style={{ marginTop: 4 }}>
+                    The public URL where customers access estimate review and invoice payment pages.
+                  </p>
+                </div>
+              </>
+            )}
 
             <div className="settings-divider" />
 

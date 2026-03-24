@@ -21,6 +21,7 @@ const jwt        = require('jsonwebtoken');
 // ✅ use axios so we don't depend on Node's global fetch() (EB can be Node < 18)
 const axios      = require('axios');
 const nodemailer = require('nodemailer');
+const crypto     = require('crypto');
 
 // PO PDF vendor/number detection from PDF content (with OCR support)
 const { analyzePoPdf, detectSupplierFromText, detectPoNumberFromText, extractWorkOrderFields, extractTextSmart, extractTextFromPdf, extractTextFromScannedPdf } = require('./utils/poVendorDetector');
@@ -56,6 +57,9 @@ const {
   // Interval: 60 minutes (less DB activity)
   AUTO_NEW_TO_NEEDS_SCHEDULED_INTERVAL_MINUTES = process.env.AUTO_NEW_TO_NEEDS_SCHEDULED_INTERVAL_MINUTES || '60',
   AUTO_NEW_TO_NEEDS_SCHEDULED_ENABLED = process.env.AUTO_NEW_TO_NEEDS_SCHEDULED_ENABLED || '1',
+  STRIPE_SECRET_KEY = '',
+  STRIPE_WEBHOOK_SECRET = '',
+  APP_PUBLIC_URL = '',
 } = process.env;
 
 const DEFAULT_WINDOW = Math.max(15, Number(DEFAULT_WINDOW_MINUTES) || 120);
@@ -82,6 +86,11 @@ if (GOOGLE_MAPS_API_KEY) {
 const app = express();
 app.set('trust proxy', true);
 app.use(cors({ origin: true, credentials: true }));
+
+// Stripe webhook needs raw body BEFORE global JSON parser
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  await handleStripeWebhook(req, res);
+});
 
 // Parse JSON + URL-encoded as usual
 app.use(bodyParser.json({ limit: '20mb' }));
@@ -1174,6 +1183,132 @@ Phone: 630-250-9777`,
 }
 ensureEmailTables().catch(() => {});
 
+// ─── PUBLIC TOKEN + PAYMENT TABLES ──────────────────────────────────────────
+async function ensurePublicTokenTables() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS public_tokens (
+        id            INT AUTO_INCREMENT PRIMARY KEY,
+        token         VARCHAR(64) NOT NULL UNIQUE,
+        type          ENUM('estimate_review','invoice_payment') NOT NULL,
+        estimateId    INT NULL,
+        invoiceId     INT NULL,
+        recipientEmail VARCHAR(255) NULL,
+        expiresAt     DATETIME NULL,
+        usedAt        DATETIME NULL,
+        response      VARCHAR(50) NULL,
+        responseNotes TEXT NULL,
+        respondedAt   DATETIME NULL,
+        createdAt     DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_token (token),
+        INDEX idx_estimate (estimateId),
+        INDEX idx_invoice (invoiceId)
+      )
+    `);
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS payments (
+        id                    INT AUTO_INCREMENT PRIMARY KEY,
+        invoiceId             INT NOT NULL,
+        amount                DECIMAL(10,2) NOT NULL,
+        paymentMethod         VARCHAR(50) DEFAULT 'card',
+        stripeSessionId       VARCHAR(255) NULL,
+        stripePaymentIntentId VARCHAR(255) NULL,
+        stripeChargeId        VARCHAR(255) NULL,
+        status                VARCHAR(50) DEFAULT 'completed',
+        customerEmail         VARCHAR(255) NULL,
+        paidAt                DATETIME DEFAULT CURRENT_TIMESTAMP,
+        notes                 TEXT NULL,
+        createdAt             DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_invoice (invoiceId)
+      )
+    `);
+
+    // Add Stripe columns to email_settings
+    const cols = [
+      { name: 'stripePublishableKey', def: 'VARCHAR(255) NULL' },
+      { name: 'stripeSecretKey', def: 'VARCHAR(500) NULL' },
+      { name: 'stripeWebhookSecret', def: 'VARCHAR(255) NULL' },
+      { name: 'stripeEnabled', def: "TINYINT(1) DEFAULT 0" },
+      { name: 'appPublicUrl', def: 'VARCHAR(500) NULL' },
+    ];
+    for (const col of cols) {
+      try {
+        const [[exists]] = await db.query(
+          "SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='email_settings' AND COLUMN_NAME=?",
+          [col.name]
+        );
+        if (!exists.cnt) await db.query(`ALTER TABLE email_settings ADD COLUMN ${col.name} ${col.def}`);
+      } catch (e) { /* column may already exist */ }
+    }
+
+    // Add publicToken/tokenExpiresAt to estimates
+    const estCols = [
+      { name: 'publicToken', def: 'VARCHAR(64) NULL' },
+      { name: 'tokenExpiresAt', def: 'DATETIME NULL' },
+    ];
+    for (const col of estCols) {
+      try {
+        const [[exists]] = await db.query(
+          "SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='estimates' AND COLUMN_NAME=?",
+          [col.name]
+        );
+        if (!exists.cnt) await db.query(`ALTER TABLE estimates ADD COLUMN ${col.name} ${col.def}`);
+      } catch (e) { /* */ }
+    }
+
+    // Add publicToken/tokenExpiresAt/payment columns to invoices
+    const invCols = [
+      { name: 'publicToken', def: 'VARCHAR(64) NULL' },
+      { name: 'tokenExpiresAt', def: 'DATETIME NULL' },
+      { name: 'stripePaymentIntentId', def: 'VARCHAR(255) NULL' },
+      { name: 'paidAt', def: 'DATETIME NULL' },
+      { name: 'paidAmount', def: 'DECIMAL(10,2) NULL' },
+      { name: 'paymentMethod', def: "VARCHAR(50) NULL" },
+    ];
+    for (const col of invCols) {
+      try {
+        const [[exists]] = await db.query(
+          "SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='invoices' AND COLUMN_NAME=?",
+          [col.name]
+        );
+        if (!exists.cnt) await db.query(`ALTER TABLE invoices ADD COLUMN ${col.name} ${col.def}`);
+      } catch (e) { /* */ }
+    }
+
+    console.log('[Migration] Public token + payment tables ensured');
+  } catch (e) {
+    console.warn('[Migration] Public token tables:', e.message);
+  }
+}
+ensurePublicTokenTables().catch(() => {});
+
+// ─── PUBLIC TOKEN HELPERS ───────────────────────────────────────────────────
+function generatePublicToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+async function getAppPublicUrl() {
+  if (APP_PUBLIC_URL) return APP_PUBLIC_URL.replace(/\/$/, '');
+  try {
+    const [[settings]] = await db.query('SELECT appPublicUrl FROM email_settings WHERE id = 1');
+    if (settings?.appPublicUrl) return settings.appPublicUrl.replace(/\/$/, '');
+  } catch (e) { /* */ }
+  return '';
+}
+
+async function getStripeInstance() {
+  let key = STRIPE_SECRET_KEY;
+  if (!key) {
+    try {
+      const [[settings]] = await db.query('SELECT stripeSecretKey FROM email_settings WHERE id = 1');
+      key = settings?.stripeSecretKey || '';
+    } catch (e) { /* */ }
+  }
+  if (!key) throw new Error('Stripe is not configured. Go to Settings → Stripe Configuration.');
+  return require('stripe')(key);
+}
+
 // ─── EMAIL UTILITIES ────────────────────────────────────────────────────────
 
 function mergeEmailFields(template, data) {
@@ -1195,7 +1330,9 @@ function mergeEmailFields(template, data) {
     daysOverdue: data.daysOverdue || '0',
     terms: data.terms || '',
     companyName: 'First Class Glass & Mirror, Inc.',
-    companyPhone: '630-250-9777'
+    companyPhone: '630-250-9777',
+    estimateLink: data.estimateLink || '',
+    paymentLink: data.paymentLink || '',
   };
   for (const [key, value] of Object.entries(fields)) {
     result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
@@ -3731,8 +3868,10 @@ app.get('/assets/logo', (req, res) => {
 app.get('/email-settings', authenticate, async (req, res) => {
   try {
     const [[settings]] = await db.query('SELECT * FROM email_settings WHERE id = 1');
-    if (settings && settings.senderPassword) {
-      settings.senderPassword = '••••••••';
+    if (settings) {
+      if (settings.senderPassword) settings.senderPassword = '••••••••';
+      if (settings.stripeSecretKey) settings.stripeSecretKey = '••••••••';
+      if (settings.stripeWebhookSecret) settings.stripeWebhookSecret = '••••••••';
     }
     res.json(settings || {});
   } catch (err) {
@@ -3756,6 +3895,15 @@ app.put('/email-settings', authenticate, async (req, res) => {
     }
     if (b.senderName !== undefined)    { fields.push('senderName=?');    params.push(b.senderName); }
     if (b.replyTo !== undefined)       { fields.push('replyTo=?');       params.push(b.replyTo || null); }
+    if (b.stripePublishableKey !== undefined) { fields.push('stripePublishableKey=?'); params.push(b.stripePublishableKey || null); }
+    if (b.stripeSecretKey !== undefined && b.stripeSecretKey !== '••••••••') {
+      fields.push('stripeSecretKey=?'); params.push(b.stripeSecretKey || null);
+    }
+    if (b.stripeWebhookSecret !== undefined && b.stripeWebhookSecret !== '••••••••') {
+      fields.push('stripeWebhookSecret=?'); params.push(b.stripeWebhookSecret || null);
+    }
+    if (b.stripeEnabled !== undefined) { fields.push('stripeEnabled=?'); params.push(b.stripeEnabled ? 1 : 0); }
+    if (b.appPublicUrl !== undefined)  { fields.push('appPublicUrl=?');  params.push(b.appPublicUrl || null); }
 
     if (fields.length === 0) return res.json({ message: 'No changes.' });
     await db.query(`UPDATE email_settings SET ${fields.join(', ')} WHERE id = 1`, params);
@@ -3938,6 +4086,19 @@ app.post('/email/send-estimate/:estimateId', authenticate, requireNumericParam('
     // Resolve PDF for attachment
     const attachment = await resolvePdfAttachment(pdfPath);
 
+    // Generate public review token
+    const pubToken = generatePublicToken();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await db.query(
+      'INSERT INTO public_tokens (token, type, estimateId, recipientEmail, expiresAt) VALUES (?, ?, ?, ?, ?)',
+      [pubToken, 'estimate_review', estimateId, recipientEmail, expiresAt]
+    );
+    await db.query('UPDATE estimates SET publicToken=?, tokenExpiresAt=? WHERE id=?', [pubToken, expiresAt, estimateId]);
+
+    const appUrl = await getAppPublicUrl();
+    const reviewUrl = appUrl ? `${appUrl}/public/estimate/${pubToken}` : '';
+    est.estimateLink = reviewUrl;
+
     // Get subject/body from request (already merged by frontend) or merge now
     let subject = b.subject;
     let body = b.body;
@@ -3954,6 +4115,20 @@ app.post('/email/send-estimate/:estimateId', authenticate, requireNumericParam('
       }
     }
 
+    // Append review link to email body if we have a public URL
+    let htmlBody = body.replace(/\n/g, '<br>');
+    if (reviewUrl) {
+      htmlBody += `
+        <br><br>
+        <div style="text-align:center;margin:24px 0;">
+          <a href="${reviewUrl}" style="display:inline-block;padding:14px 32px;background:#007AFF;color:white;text-decoration:none;border-radius:8px;font-weight:600;font-size:16px;">
+            View &amp; Respond to Estimate
+          </a>
+        </div>
+        <p style="text-align:center;font-size:12px;color:#999;">Or copy this link: ${reviewUrl}</p>
+      `;
+    }
+
     // Send email
     const { transport, settings } = await createEmailTransport();
     await transport.sendMail({
@@ -3961,7 +4136,8 @@ app.post('/email/send-estimate/:estimateId', authenticate, requireNumericParam('
       replyTo: settings.replyTo || settings.senderEmail,
       to: recipientEmail,
       subject,
-      text: body,
+      text: body + (reviewUrl ? `\n\nView & respond to this estimate: ${reviewUrl}` : ''),
+      html: htmlBody,
       attachments: [{
         filename: attachment.filename,
         content: attachment.buffer,
@@ -4028,6 +4204,19 @@ app.post('/email/send-invoice/:invoiceId', authenticate, requireNumericParam('in
 
     const attachment = await resolvePdfAttachment(pdfPath);
 
+    // Generate public payment token
+    const pubToken = generatePublicToken();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await db.query(
+      'INSERT INTO public_tokens (token, type, invoiceId, recipientEmail, expiresAt) VALUES (?, ?, ?, ?, ?)',
+      [pubToken, 'invoice_payment', invoiceId, recipientEmail, expiresAt]
+    );
+    await db.query('UPDATE invoices SET publicToken=?, tokenExpiresAt=? WHERE id=?', [pubToken, expiresAt, invoiceId]);
+
+    const appUrl = await getAppPublicUrl();
+    const paymentUrl = appUrl ? `${appUrl}/public/invoice/${pubToken}` : '';
+    inv.paymentLink = paymentUrl;
+
     // Calculate daysOverdue for merge
     if (inv.dueDate) {
       const due = new Date(inv.dueDate);
@@ -4051,13 +4240,28 @@ app.post('/email/send-invoice/:invoiceId', authenticate, requireNumericParam('in
       }
     }
 
+    // Append payment link to email body
+    let htmlBody = body.replace(/\n/g, '<br>');
+    if (paymentUrl) {
+      htmlBody += `
+        <br><br>
+        <div style="text-align:center;margin:24px 0;">
+          <a href="${paymentUrl}" style="display:inline-block;padding:16px 40px;background:#30D158;color:white;text-decoration:none;border-radius:8px;font-weight:700;font-size:18px;">
+            View and Pay Invoice
+          </a>
+        </div>
+        <p style="text-align:center;font-size:12px;color:#999;">Or copy this link: ${paymentUrl}</p>
+      `;
+    }
+
     const { transport, settings } = await createEmailTransport();
     await transport.sendMail({
       from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
       replyTo: settings.replyTo || settings.senderEmail,
       to: recipientEmail,
       subject,
-      text: body,
+      text: body + (paymentUrl ? `\n\nView and pay this invoice: ${paymentUrl}` : ''),
+      html: htmlBody,
       attachments: [{
         filename: attachment.filename,
         content: attachment.buffer,
@@ -7328,6 +7532,450 @@ app.get('/files', async (req, res) => {
     res.status(500).json({ error: 'Failed to resolve file' });
   }
 });
+
+// ─── PUBLIC PAGES (NO AUTH) ──────────────────────────────────────────────────
+
+function fmtPublicDate(d) {
+  if (!d) return '';
+  return new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+function fmtPublicMoney(v) {
+  return '$' + (Number(v) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function publicPageShell(title, bodyContent) {
+  return `<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escHtml(title)}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f7;color:#1c1c1e;padding:20px}
+.container{max-width:700px;margin:0 auto}
+.card{background:white;border-radius:12px;padding:32px;box-shadow:0 2px 12px rgba(0,0,0,0.08);margin-bottom:20px}
+.company-name{text-align:center;font-size:20px;font-weight:700;margin-bottom:4px}
+.company-info{text-align:center;color:#666;font-size:14px;margin-bottom:24px}
+h1{font-size:28px;text-align:center;margin-bottom:8px}
+.subtitle{text-align:center;color:#666;margin-bottom:24px;font-size:14px}
+.section{margin-bottom:20px}
+.section-title{font-size:12px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px}
+.detail-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f0f0}
+.detail-label{color:#666}
+.detail-value{font-weight:500}
+table{width:100%;border-collapse:collapse;margin:16px 0}
+th{background:#f5f5f7;padding:10px 12px;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;color:#666}
+td{padding:10px 12px;border-bottom:1px solid #f0f0f0}
+.total-row{font-size:20px;font-weight:700;text-align:right;padding:16px 0;border-top:2px solid #1c1c1e}
+.buttons{display:flex;gap:16px;justify-content:center;margin-top:24px;flex-wrap:wrap}
+.btn{padding:14px 32px;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;border:none;transition:all 0.2s;text-decoration:none;display:inline-block;text-align:center}
+.btn-accept{background:#30D158;color:white}
+.btn-accept:hover{background:#28b84d}
+.btn-decline{background:#FF453A;color:white}
+.btn-decline:hover{background:#e03e34}
+.btn-pay{background:#30D158;color:white;font-size:18px;font-weight:700;padding:16px 40px}
+.btn-pay:hover{background:#28b84d}
+.btn:disabled{opacity:0.5;cursor:not-allowed}
+.status-badge{display:inline-block;padding:6px 16px;border-radius:20px;font-size:14px;font-weight:600}
+.status-accepted{background:#d4edda;color:#155724}
+.status-declined{background:#f8d7da;color:#721c24}
+.status-sent{background:#fff3cd;color:#856404}
+.status-paid{background:#d4edda;color:#155724}
+.status-overdue{background:#f8d7da;color:#721c24}
+.notes-input{width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-top:8px;resize:vertical;min-height:60px;font-family:inherit}
+.footer{text-align:center;color:#999;font-size:12px;padding:20px}
+.msg{text-align:center;padding:40px;font-size:16px}
+.msg.success{color:#155724}
+.msg.error{color:#721c24}
+@media(max-width:600px){.buttons{flex-direction:column}.btn{width:100%}.card{padding:20px}}
+</style>
+</head><body>
+<div class="container">
+${bodyContent}
+<div class="footer">First Class Glass &amp; Mirror, Inc. | 630-250-9777</div>
+</div>
+</body></html>`;
+}
+
+// GET /public/estimate/:token — view estimate + accept/decline
+app.get('/public/estimate/:token', async (req, res) => {
+  try {
+    const [[tok]] = await db.query(
+      "SELECT * FROM public_tokens WHERE token = ? AND type = 'estimate_review' AND expiresAt > NOW()",
+      [req.params.token]
+    );
+    if (!tok) return res.status(404).send(publicPageShell('Estimate Not Found',
+      '<div class="card"><div class="msg error">This estimate link has expired or is no longer valid.</div></div>'));
+
+    const [[est]] = await db.query(`
+      SELECT e.*, c.companyName, c.name AS custName
+      FROM estimates e LEFT JOIN customers c ON e.customerId = c.id
+      WHERE e.id = ?
+    `, [tok.estimateId]);
+    if (!est) return res.status(404).send(publicPageShell('Estimate Not Found',
+      '<div class="card"><div class="msg error">Estimate not found.</div></div>'));
+
+    const [lineItems] = await db.query('SELECT * FROM estimate_line_items WHERE estimateId = ? ORDER BY sortOrder ASC, id ASC', [tok.estimateId]);
+
+    const alreadyResponded = est.status === 'Accepted' || est.status === 'Declined';
+    const statusBadge = alreadyResponded
+      ? `<div style="text-align:center;margin-bottom:20px"><span class="status-badge ${est.status === 'Accepted' ? 'status-accepted' : 'status-declined'}">${est.status === 'Accepted' ? '✓ Accepted' : '✗ Declined'}</span></div>`
+      : '';
+
+    const lineItemsHtml = lineItems.map(li =>
+      `<tr><td>${escHtml(li.quantity)}</td><td>${escHtml(li.description)}</td><td style="text-align:right">${fmtPublicMoney(li.amount)}</td></tr>`
+    ).join('');
+
+    const actionsHtml = alreadyResponded ? '' : `
+      <div style="margin-top:24px">
+        <label class="section-title">Notes (optional)</label>
+        <textarea id="notes" class="notes-input" placeholder="Add any notes or comments..."></textarea>
+      </div>
+      <div class="buttons">
+        <button class="btn btn-accept" onclick="respond('accepted')">Accept Estimate</button>
+        <button class="btn btn-decline" onclick="respond('declined')">Decline Estimate</button>
+      </div>
+      <script>
+        async function respond(response) {
+          var notes = document.getElementById('notes').value;
+          var btns = document.querySelectorAll('.btn');
+          btns.forEach(function(b){b.disabled=true});
+          try {
+            var res = await fetch('/public/estimate/${req.params.token}/respond', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({response:response,notes:notes})
+            });
+            var data = await res.json();
+            if (data.success) {
+              document.querySelector('.buttons').innerHTML =
+                response === 'accepted'
+                  ? '<span class="status-badge status-accepted" style="font-size:18px;padding:12px 24px">✓ Estimate Accepted — Thank you!</span>'
+                  : '<span class="status-badge status-declined" style="font-size:18px;padding:12px 24px">Estimate Declined</span>';
+              var noteDiv = document.querySelector('.notes-input');
+              if(noteDiv && noteDiv.parentNode) noteDiv.parentNode.style.display='none';
+            } else { alert(data.error||'Error'); btns.forEach(function(b){b.disabled=false}); }
+          } catch(e) { alert('Error submitting response. Please try again.'); btns.forEach(function(b){b.disabled=false}); }
+        }
+      </script>
+    `;
+
+    res.send(publicPageShell('Estimate from First Class Glass & Mirror', `
+      <div class="card">
+        <div class="company-name">First Class Glass &amp; Mirror, Inc.</div>
+        <div class="company-info">1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777</div>
+        <h1>Estimate</h1>
+        <div class="subtitle">Date: ${fmtPublicDate(est.issueDate)} | P.O. #${escHtml(est.poNumber || 'N/A')}</div>
+        ${statusBadge}
+        <div class="section">
+          <div class="section-title">Customer</div>
+          <div class="detail-row"><span class="detail-label">Company</span><span class="detail-value">${escHtml(est.companyName || est.custName || '')}</span></div>
+        </div>
+        <div class="section">
+          <div class="section-title">Project Details</div>
+          <div class="detail-row"><span class="detail-label">Project</span><span class="detail-value">${escHtml(est.projectName || '')}</span></div>
+          <div class="detail-row"><span class="detail-label">Location</span><span class="detail-value">${escHtml([est.projectAddress, est.projectCity, est.projectState, est.projectZip].filter(Boolean).join(', '))}</span></div>
+        </div>
+        <table>
+          <thead><tr><th>Qty</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+          <tbody>${lineItemsHtml}</tbody>
+        </table>
+        ${est.taxAmount && Number(est.taxAmount) > 0 ? `<div class="detail-row"><span class="detail-label">Subtotal</span><span class="detail-value">${fmtPublicMoney(est.subtotal)}</span></div><div class="detail-row"><span class="detail-label">Tax</span><span class="detail-value">${fmtPublicMoney(est.taxAmount)}</span></div>` : ''}
+        <div class="total-row">Total: ${fmtPublicMoney(est.total)}</div>
+        ${actionsHtml}
+      </div>
+    `));
+  } catch (err) {
+    console.error('Error rendering public estimate:', err);
+    res.status(500).send(publicPageShell('Error', '<div class="card"><div class="msg error">An error occurred. Please try again later.</div></div>'));
+  }
+});
+
+// POST /public/estimate/:token/respond — accept or decline
+app.post('/public/estimate/:token/respond', async (req, res) => {
+  try {
+    const [[tok]] = await db.query(
+      "SELECT * FROM public_tokens WHERE token = ? AND type = 'estimate_review' AND expiresAt > NOW()",
+      [req.params.token]
+    );
+    if (!tok) return res.status(404).json({ error: 'Token expired or invalid.' });
+
+    const { response, notes } = req.body || {};
+    if (!response || !['accepted', 'declined'].includes(response)) {
+      return res.status(400).json({ error: 'Invalid response.' });
+    }
+
+    const newStatus = response === 'accepted' ? 'Accepted' : 'Declined';
+
+    // Update estimate
+    await db.query('UPDATE estimates SET status=?, updatedAt=NOW() WHERE id=?', [newStatus, tok.estimateId]);
+
+    // Mark token as used
+    await db.query('UPDATE public_tokens SET usedAt=NOW(), response=?, responseNotes=?, respondedAt=NOW() WHERE id=?',
+      [response, notes || null, tok.id]);
+
+    // If accepted and estimate has a work order, update WO status
+    if (response === 'accepted') {
+      const [[est]] = await db.query('SELECT workOrderId FROM estimates WHERE id = ?', [tok.estimateId]);
+      if (est?.workOrderId) {
+        await db.query("UPDATE work_orders SET status='Approved', updatedAt=NOW() WHERE id=?", [est.workOrderId]);
+      }
+    }
+
+    // Send notification email to the company
+    try {
+      const [[est]] = await db.query(`
+        SELECT e.*, c.companyName, c.name AS custName
+        FROM estimates e LEFT JOIN customers c ON e.customerId = c.id WHERE e.id = ?
+      `, [tok.estimateId]);
+      const { transport, settings } = await createEmailTransport();
+      const custLabel = est.companyName || est.custName || tok.recipientEmail;
+      await transport.sendMail({
+        from: `"CRM Notification" <${settings.senderEmail}>`,
+        to: settings.senderEmail,
+        subject: `Estimate ${newStatus} — ${custLabel} — ${est.projectName || 'N/A'}`,
+        text: `${custLabel} has ${response} the estimate for ${est.projectName || 'N/A'}.\n\nTotal: $${Number(est.total || 0).toFixed(2)}\nDate: ${new Date().toLocaleString()}\n${notes ? 'Customer Notes: ' + notes : ''}`,
+      });
+    } catch (emailErr) {
+      console.warn('[Public] Failed to send notification email:', emailErr.message);
+    }
+
+    res.json({ success: true, status: newStatus });
+  } catch (err) {
+    console.error('Error processing estimate response:', err);
+    res.status(500).json({ error: 'Failed to process response.' });
+  }
+});
+
+// GET /public/invoice/:token — view invoice + pay
+app.get('/public/invoice/:token', async (req, res) => {
+  try {
+    const [[tok]] = await db.query(
+      "SELECT * FROM public_tokens WHERE token = ? AND type = 'invoice_payment' AND expiresAt > NOW()",
+      [req.params.token]
+    );
+    if (!tok) return res.status(404).send(publicPageShell('Invoice Not Found',
+      '<div class="card"><div class="msg error">This invoice link has expired or is no longer valid.</div></div>'));
+
+    const [[inv]] = await db.query(`
+      SELECT i.*, c.companyName, c.name AS custName
+      FROM invoices i LEFT JOIN customers c ON i.customerId = c.id
+      WHERE i.id = ?
+    `, [tok.invoiceId]);
+    if (!inv) return res.status(404).send(publicPageShell('Invoice Not Found',
+      '<div class="card"><div class="msg error">Invoice not found.</div></div>'));
+
+    const [lineItems] = await db.query('SELECT * FROM invoice_line_items WHERE invoiceId = ? ORDER BY sortOrder ASC, id ASC', [tok.invoiceId]);
+
+    const isPaid = inv.status === 'Paid';
+    const balanceDue = Number(inv.balanceDue ?? inv.total) || 0;
+    const isOverdue = inv.dueDate && new Date(inv.dueDate) < new Date() && !isPaid;
+
+    const paymentSuccess = req.query.payment === 'success';
+
+    let statusHtml = '';
+    if (isPaid || paymentSuccess) {
+      statusHtml = `<div style="text-align:center;margin-bottom:20px"><span class="status-badge status-paid">✓ Paid${inv.paidAt ? ' on ' + fmtPublicDate(inv.paidAt) : ''} — Thank you!</span></div>`;
+    } else if (isOverdue) {
+      statusHtml = `<div style="text-align:center;margin-bottom:20px"><span class="status-badge status-overdue">Overdue</span></div>`;
+    }
+
+    const lineItemsHtml = lineItems.map(li =>
+      `<tr><td>${escHtml(li.quantity)}</td><td>${escHtml(li.description)}</td><td style="text-align:right">${fmtPublicMoney(li.amount)}</td></tr>`
+    ).join('');
+
+    // Check if Stripe is configured
+    let stripeConfigured = false;
+    try {
+      const [[settings]] = await db.query('SELECT stripeEnabled, stripeSecretKey FROM email_settings WHERE id = 1');
+      stripeConfigured = settings?.stripeEnabled && (settings?.stripeSecretKey || STRIPE_SECRET_KEY);
+    } catch (e) { /* */ }
+
+    const showPayButton = !isPaid && !paymentSuccess && balanceDue > 0 && stripeConfigured;
+
+    const payHtml = showPayButton ? `
+      <div class="buttons" style="margin-top:24px">
+        <form action="/public/invoice/${req.params.token}/pay" method="POST">
+          <button type="submit" class="btn btn-pay">Pay ${fmtPublicMoney(balanceDue)} Now</button>
+        </form>
+      </div>
+    ` : '';
+
+    res.send(publicPageShell('Invoice from First Class Glass & Mirror', `
+      <div class="card">
+        <div class="company-name">First Class Glass &amp; Mirror, Inc.</div>
+        <div class="company-info">1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777</div>
+        <h1>Invoice #${escHtml(inv.invoiceNumber)}</h1>
+        <div class="subtitle">Date: ${fmtPublicDate(inv.issueDate)}${inv.dueDate ? ' | Due: ' + fmtPublicDate(inv.dueDate) : ''}</div>
+        ${statusHtml}
+        <div class="section">
+          <div class="section-title">Customer</div>
+          <div class="detail-row"><span class="detail-label">Company</span><span class="detail-value">${escHtml(inv.companyName || inv.custName || '')}</span></div>
+        </div>
+        <div class="section">
+          <div class="section-title">Project Details</div>
+          <div class="detail-row"><span class="detail-label">Project</span><span class="detail-value">${escHtml(inv.projectName || inv.shipToName || '')}</span></div>
+          <div class="detail-row"><span class="detail-label">Location</span><span class="detail-value">${escHtml([inv.shipToAddress || inv.projectAddress, inv.shipToCity || inv.projectCity, inv.shipToState || inv.projectState, inv.shipToZip || inv.projectZip].filter(Boolean).join(', '))}</span></div>
+          ${inv.poNumber ? `<div class="detail-row"><span class="detail-label">P.O. #</span><span class="detail-value">${escHtml(inv.poNumber)}</span></div>` : ''}
+        </div>
+        <table>
+          <thead><tr><th>Qty</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+          <tbody>${lineItemsHtml}</tbody>
+        </table>
+        ${inv.taxAmount && Number(inv.taxAmount) > 0 ? `<div class="detail-row"><span class="detail-label">Subtotal</span><span class="detail-value">${fmtPublicMoney(inv.subtotal)}</span></div><div class="detail-row"><span class="detail-label">Tax</span><span class="detail-value">${fmtPublicMoney(inv.taxAmount)}</span></div>` : ''}
+        <div class="total-row">Total: ${fmtPublicMoney(inv.total)}</div>
+        ${!isPaid && !paymentSuccess && balanceDue > 0 && balanceDue !== Number(inv.total) ? `<div style="text-align:right;font-size:16px;font-weight:600;color:#FF453A;margin-top:8px">Balance Due: ${fmtPublicMoney(balanceDue)}</div>` : ''}
+        ${inv.terms ? `<div class="section" style="margin-top:16px"><div class="section-title">Terms</div><p style="font-size:13px;color:#666;line-height:1.5">${escHtml(inv.terms)}</p></div>` : ''}
+        ${payHtml}
+      </div>
+    `));
+  } catch (err) {
+    console.error('Error rendering public invoice:', err);
+    res.status(500).send(publicPageShell('Error', '<div class="card"><div class="msg error">An error occurred. Please try again later.</div></div>'));
+  }
+});
+
+// POST /public/invoice/:token/pay — create Stripe Checkout Session
+app.post('/public/invoice/:token/pay', async (req, res) => {
+  try {
+    const [[tok]] = await db.query(
+      "SELECT * FROM public_tokens WHERE token = ? AND type = 'invoice_payment' AND expiresAt > NOW()",
+      [req.params.token]
+    );
+    if (!tok) return res.status(404).send(publicPageShell('Error', '<div class="card"><div class="msg error">This payment link has expired or is no longer valid.</div></div>'));
+
+    const [[inv]] = await db.query(`
+      SELECT i.*, c.companyName, c.name AS custName
+      FROM invoices i LEFT JOIN customers c ON i.customerId = c.id WHERE i.id = ?
+    `, [tok.invoiceId]);
+    if (!inv) return res.status(404).send(publicPageShell('Error', '<div class="card"><div class="msg error">Invoice not found.</div></div>'));
+
+    if (inv.status === 'Paid') return res.redirect(`/public/invoice/${req.params.token}?payment=success`);
+
+    const stripe = await getStripeInstance();
+    const balanceDue = Number(inv.balanceDue ?? inv.total) || 0;
+    const appUrl = await getAppPublicUrl();
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: `Invoice #${inv.invoiceNumber} — First Class Glass & Mirror`,
+            description: inv.projectName || inv.shipToName || 'Services rendered',
+          },
+          unit_amount: Math.round(balanceDue * 100),
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      success_url: `${appUrl}/public/invoice/${req.params.token}?payment=success`,
+      cancel_url: `${appUrl}/public/invoice/${req.params.token}`,
+      customer_email: tok.recipientEmail || undefined,
+      metadata: {
+        invoiceId: String(inv.id),
+        invoiceNumber: inv.invoiceNumber || '',
+        token: req.params.token,
+      },
+    });
+
+    // Record pending payment
+    await db.query(
+      'INSERT INTO payments (invoiceId, amount, paymentMethod, stripeSessionId, status, customerEmail) VALUES (?, ?, ?, ?, ?, ?)',
+      [inv.id, balanceDue, 'card', session.id, 'pending', tok.recipientEmail || null]
+    );
+
+    res.redirect(303, session.url);
+  } catch (err) {
+    console.error('Error creating Stripe session:', err);
+    res.status(500).send(publicPageShell('Payment Error',
+      `<div class="card"><div class="msg error">Failed to start payment: ${escHtml(err.message)}</div></div>`));
+  }
+});
+
+// ─── STRIPE WEBHOOK HANDLER ────────────────────────────────────────────────
+async function handleStripeWebhook(req, res) {
+  let event;
+  try {
+    const stripe = await getStripeInstance();
+    const sig = req.headers['stripe-signature'];
+    const webhookSecret = STRIPE_WEBHOOK_SECRET || (await (async () => {
+      try {
+        const [[s]] = await db.query('SELECT stripeWebhookSecret FROM email_settings WHERE id = 1');
+        return s?.stripeWebhookSecret || '';
+      } catch (e) { return ''; }
+    })());
+
+    if (webhookSecret) {
+      event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    } else {
+      // No webhook secret configured, parse raw body
+      event = JSON.parse(req.body.toString());
+      console.warn('[Stripe] No webhook secret configured — skipping signature verification');
+    }
+  } catch (err) {
+    console.error('[Stripe] Webhook signature verification failed:', err.message);
+    return res.status(400).json({ error: 'Webhook verification failed.' });
+  }
+
+  try {
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const invoiceId = session.metadata?.invoiceId;
+      if (!invoiceId) {
+        console.warn('[Stripe] checkout.session.completed without invoiceId in metadata');
+        return res.json({ received: true });
+      }
+
+      const amountPaid = (session.amount_total || 0) / 100;
+      const paymentIntent = session.payment_intent || null;
+
+      // Update invoice
+      await db.query(
+        "UPDATE invoices SET status='Paid', paidAt=NOW(), paidAmount=?, stripePaymentIntentId=?, paymentMethod='card', updatedAt=NOW() WHERE id=?",
+        [amountPaid, paymentIntent, invoiceId]
+      );
+
+      // Update balanceDue
+      await db.query('UPDATE invoices SET balanceDue = GREATEST(0, COALESCE(total,0) - ?) WHERE id = ?', [amountPaid, invoiceId]);
+
+      // Update payment record
+      await db.query(
+        "UPDATE payments SET status='completed', stripePaymentIntentId=?, paidAt=NOW() WHERE stripeSessionId=?",
+        [paymentIntent, session.id]
+      );
+
+      // Mark token as used
+      if (session.metadata?.token) {
+        await db.query('UPDATE public_tokens SET usedAt=NOW() WHERE token=?', [session.metadata.token]);
+      }
+
+      // Send notification email
+      try {
+        const [[inv]] = await db.query(`
+          SELECT i.*, c.companyName, c.name AS custName
+          FROM invoices i LEFT JOIN customers c ON i.customerId = c.id WHERE i.id = ?
+        `, [invoiceId]);
+        const { transport, settings } = await createEmailTransport();
+        const custLabel = inv?.companyName || inv?.custName || 'Unknown';
+        await transport.sendMail({
+          from: `"CRM Notification" <${settings.senderEmail}>`,
+          to: settings.senderEmail,
+          subject: `Payment Received — Invoice #${inv?.invoiceNumber || invoiceId} — ${fmtPublicMoney(amountPaid)}`,
+          text: `Payment of ${fmtPublicMoney(amountPaid)} received from ${custLabel} for Invoice #${inv?.invoiceNumber || invoiceId}.\n\nProject: ${inv?.projectName || 'N/A'}\nDate: ${new Date().toLocaleString()}`,
+        });
+      } catch (emailErr) {
+        console.warn('[Stripe] Failed to send payment notification:', emailErr.message);
+      }
+
+      console.log(`[Stripe] Payment completed: Invoice #${invoiceId}, $${amountPaid}`);
+    }
+  } catch (err) {
+    console.error('[Stripe] Error processing webhook event:', err);
+  }
+
+  res.json({ received: true });
+}
 
 // ─── GLOBAL ERROR HANDLER ────────────────────────────────────────────────────
 app.use((err, req, res, next) => {

@@ -28,6 +28,7 @@
     "pdf-lib": "^1.17.1",
     "pdf-parse": "1.1.1",
     "pdfkit": "0.17.2",
+    "stripe": "20.4.1",
     "tesseract.js": "^5.0.4"
   },
   "author": "Mark Hamilton",
