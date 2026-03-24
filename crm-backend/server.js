@@ -7710,12 +7710,19 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
       return res.status(400).json({ error: 'Invalid response.' });
     }
 
-    const newStatus = response === 'accepted' ? 'Accepted' : 'Declined';
+    // If already responded, return success without re-processing
+    if (tok.usedAt) {
+      console.log('[Public] Token already used, returning cached response:', tok.response);
+      return res.json({ success: true, status: tok.response === 'accepted' ? 'Accepted' : 'Declined' });
+    }
 
-    // Update estimate
+    const newStatus = response === 'accepted' ? 'Accepted' : 'Declined';
+    console.log('[Public] Processing estimate response:', response, 'for estimateId:', tok.estimateId);
+
+    // Update estimate status — this is the critical operation
     await db.query('UPDATE estimates SET status=?, updatedAt=NOW() WHERE id=?', [newStatus, tok.estimateId]);
 
-    // Mark token as used
+    // Mark token as used immediately to prevent duplicate processing
     try {
       await db.query('UPDATE public_tokens SET usedAt=NOW(), response=?, responseNotes=?, respondedAt=NOW() WHERE id=?',
         [response, notes || null, tok.id]);
@@ -7729,13 +7736,14 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
         const [[est]] = await db.query('SELECT workOrderId FROM estimates WHERE id = ?', [tok.estimateId]);
         if (est?.workOrderId) {
           await db.query("UPDATE work_orders SET status='Approved', updatedAt=NOW() WHERE id=?", [est.workOrderId]);
+          console.log('[Public] Updated work order', est.workOrderId, 'to Approved');
         }
       }
     } catch (woErr) {
       console.warn('[Public] Work order update failed (non-fatal):', woErr.message);
     }
 
-    // Send notification email to the company
+    // Send ONE notification email to the company (for both accept and decline)
     try {
       const [[est]] = await db.query(`
         SELECT e.*, c.companyName, c.name AS custName
@@ -7749,13 +7757,14 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
         subject: `Estimate ${newStatus} — ${custLabel} — ${est.projectName || 'N/A'}`,
         text: `${custLabel} has ${response} the estimate for ${est.projectName || 'N/A'}.\n\nTotal: $${Number(est.total || 0).toFixed(2)}\nDate: ${new Date().toLocaleString()}\n${notes ? 'Customer Notes: ' + notes : ''}`,
       });
+      console.log('[Public] Notification email sent for estimate', tok.estimateId, '- response:', response);
     } catch (emailErr) {
-      console.warn('[Public] Failed to send notification email:', emailErr.message);
+      console.warn('[Public] Failed to send notification email (non-fatal):', emailErr.message);
     }
 
     res.json({ success: true, status: newStatus });
   } catch (err) {
-    console.error('Error processing estimate response:', err);
+    console.error('[Public] Error processing estimate response:', err.message, err.stack);
     res.status(500).json({ error: 'Failed to process response.' });
   }
 });
