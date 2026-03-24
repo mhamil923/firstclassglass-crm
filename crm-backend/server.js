@@ -1288,12 +1288,17 @@ function generatePublicToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-async function getAppPublicUrl() {
+async function getAppPublicUrl(req) {
   if (APP_PUBLIC_URL) return APP_PUBLIC_URL.replace(/\/$/, '');
   try {
     const [[settings]] = await db.query('SELECT appPublicUrl FROM email_settings WHERE id = 1');
     if (settings?.appPublicUrl) return settings.appPublicUrl.replace(/\/$/, '');
   } catch (e) { /* */ }
+  // Fallback: derive from the incoming request
+  if (req && req.get && req.get('host')) {
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    return `${proto}://${req.get('host')}`;
+  }
   return '';
 }
 
@@ -4095,8 +4100,9 @@ app.post('/email/send-estimate/:estimateId', authenticate, requireNumericParam('
     );
     await db.query('UPDATE estimates SET publicToken=?, tokenExpiresAt=? WHERE id=?', [pubToken, expiresAt, estimateId]);
 
-    const appUrl = await getAppPublicUrl();
+    const appUrl = await getAppPublicUrl(req);
     const reviewUrl = appUrl ? `${appUrl}/public/estimate/${pubToken}` : '';
+    console.log('[Email] Estimate review URL:', reviewUrl || '(empty — no appUrl)', '| appUrl:', appUrl || '(empty)');
     est.estimateLink = reviewUrl;
 
     // Get subject/body from request (already merged by frontend) or merge now
@@ -4213,7 +4219,7 @@ app.post('/email/send-invoice/:invoiceId', authenticate, requireNumericParam('in
     );
     await db.query('UPDATE invoices SET publicToken=?, tokenExpiresAt=? WHERE id=?', [pubToken, expiresAt, invoiceId]);
 
-    const appUrl = await getAppPublicUrl();
+    const appUrl = await getAppPublicUrl(req);
     const paymentUrl = appUrl ? `${appUrl}/public/invoice/${pubToken}` : '';
     inv.paymentLink = paymentUrl;
 
@@ -7853,7 +7859,7 @@ app.post('/public/invoice/:token/pay', async (req, res) => {
 
     const stripe = await getStripeInstance();
     const balanceDue = Number(inv.balanceDue ?? inv.total) || 0;
-    const appUrl = await getAppPublicUrl();
+    const appUrl = await getAppPublicUrl(req);
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
