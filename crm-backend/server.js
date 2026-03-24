@@ -4155,7 +4155,7 @@ app.post('/email/send-estimate/:estimateId', authenticate, requireNumericParam('
       <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
         <div style="background-color:#2d5a27;padding:40px 20px 30px;text-align:center;border-radius:12px 12px 0 0">
           ${logoUrl ? `<img src="${logoUrl}" alt="First Class Glass" style="height:100px;margin-bottom:16px" onerror="this.style.display='none'">` : ''}
-          <div style="color:white;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">ESTIMATE</div>
+          <div style="color:#000000;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">ESTIMATE</div>
         </div>
         <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
           ${body.replace(/\n/g, '<br>')}
@@ -4295,7 +4295,7 @@ app.post('/email/send-invoice/:invoiceId', authenticate, requireNumericParam('in
       <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
         <div style="background-color:#2d5a27;padding:40px 20px 30px;text-align:center;border-radius:12px 12px 0 0">
           ${invoiceLogoUrl ? `<img src="${invoiceLogoUrl}" alt="First Class Glass" style="height:100px;margin-bottom:16px" onerror="this.style.display='none'">` : ''}
-          <div style="color:white;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">INVOICE #${escHtml(inv.invoiceNumber)}</div>
+          <div style="color:#000000;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">INVOICE #${escHtml(inv.invoiceNumber)}</div>
         </div>
         <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
           ${body.replace(/\n/g, '<br>')}
@@ -4421,7 +4421,7 @@ app.post('/email/send-reminder/:invoiceId', authenticate, requireNumericParam('i
       <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
         <div style="background-color:#2d5a27;padding:40px 20px 30px;text-align:center;border-radius:12px 12px 0 0">
           ${reminderLogoUrl ? `<img src="${reminderLogoUrl}" alt="First Class Glass" style="height:100px;margin-bottom:16px" onerror="this.style.display='none'">` : ''}
-          <div style="color:white;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">PAYMENT REMINDER</div>
+          <div style="color:#000000;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">PAYMENT REMINDER</div>
         </div>
         <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
           ${body.replace(/\n/g, '<br>')}
@@ -7638,7 +7638,7 @@ function publicPageShell(title, bodyContent, headerTitle) {
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#333}
 .green-header{background-color:#2d5a27;text-align:center;padding:40px 20px 30px}
 .green-header img{height:120px;margin-bottom:16px}
-.green-header .header-title{color:white;font-size:24px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
+.green-header .header-title{color:#000000;font-size:24px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
 .container{max-width:700px;margin:24px auto 40px;padding:0 16px}
 .card{background:white;border-radius:12px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.1);margin-bottom:20px}
 .subtitle{text-align:center;color:#666;margin-bottom:24px;font-size:15px}
