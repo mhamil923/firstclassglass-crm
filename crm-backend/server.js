@@ -4137,19 +4137,35 @@ app.post('/email/send-estimate/:estimateId', authenticate, requireNumericParam('
       }
     }
 
-    // Append review link to email body if we have a public URL
-    let htmlBody = body.replace(/\n/g, '<br>');
+    // Build branded HTML email with green header
+    const appUrl = await getAppPublicUrl(req);
+    const logoUrl = appUrl ? `${appUrl}/assets/logo` : '';
+    let htmlBody = `
+      <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+        <div style="background:linear-gradient(135deg,#1b5e20,#2e7d32);padding:24px;text-align:center;border-radius:12px 12px 0 0">
+          ${logoUrl ? `<img src="${logoUrl}" alt="First Class Glass" style="height:60px;margin-bottom:8px" onerror="this.style.display='none'">` : ''}
+          <div style="color:white;font-size:16px;font-weight:500">First Class Glass &amp; Mirror, Inc.</div>
+        </div>
+        <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
+          ${body.replace(/\n/g, '<br>')}
+    `;
     if (reviewUrl) {
       htmlBody += `
-        <br><br>
-        <div style="text-align:center;margin:24px 0;">
-          <a href="${reviewUrl}" style="display:inline-block;padding:14px 32px;background:#007AFF;color:white;text-decoration:none;border-radius:8px;font-weight:600;font-size:16px;">
-            View &amp; Respond to Estimate
-          </a>
-        </div>
-        <p style="text-align:center;font-size:12px;color:#999;">Or copy this link: ${reviewUrl}</p>
+          <div style="text-align:center;margin:24px 0">
+            <a href="${reviewUrl}" style="display:inline-block;padding:14px 40px;background:#1b5e20;color:white;text-decoration:none;border-radius:8px;font-size:16px;font-weight:600">
+              View &amp; Respond to Estimate
+            </a>
+          </div>
+          <p style="text-align:center;font-size:12px;color:#999">Or copy this link: ${reviewUrl}</p>
       `;
     }
+    htmlBody += `
+        </div>
+        <div style="text-align:center;padding:16px;color:#999;font-size:11px">
+          First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777
+        </div>
+      </div>
+    `;
 
     // Send email
     const { transport, settings } = await createEmailTransport();
@@ -4262,26 +4278,36 @@ app.post('/email/send-invoice/:invoiceId', authenticate, requireNumericParam('in
       }
     }
 
-    // Append payment link and fee info to email body
-    let htmlBody = body.replace(/\n/g, '<br>');
+    // Build branded HTML email with green header
+    const invoiceAppUrl = await getAppPublicUrl(req);
+    const invoiceLogoUrl = invoiceAppUrl ? `${invoiceAppUrl}/assets/logo` : '';
+    let htmlBody = `
+      <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+        <div style="background:linear-gradient(135deg,#1b5e20,#2e7d32);padding:24px;text-align:center;border-radius:12px 12px 0 0">
+          ${invoiceLogoUrl ? `<img src="${invoiceLogoUrl}" alt="First Class Glass" style="height:60px;margin-bottom:8px" onerror="this.style.display='none'">` : ''}
+          <div style="color:white;font-size:16px;font-weight:500">First Class Glass &amp; Mirror, Inc.</div>
+        </div>
+        <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
+          ${body.replace(/\n/g, '<br>')}
+    `;
     if (paymentUrl) {
-      const balDue = Number(inv.balanceDue ?? inv.total) || 0;
-      const emailCardFee = Math.round((balDue * 0.029 + 0.30) * 100) / 100;
-      const emailAchFee = Math.round(Math.min(balDue * 0.008, 5.00) * 100) / 100;
       htmlBody += `
-        <br><br>
-        <div style="text-align:center;margin:24px 0;">
-          <a href="${paymentUrl}" style="display:inline-block;padding:16px 40px;background:#30D158;color:white;text-decoration:none;border-radius:8px;font-weight:700;font-size:18px;">
-            View and Pay Invoice
-          </a>
-        </div>
-        <div style="text-align:center;margin:16px 0;font-size:13px;color:#666;">
-          <p style="margin:4px 0;">Payment options: Credit/Debit Card or ACH Bank Transfer</p>
-          <p style="margin:4px 0;">Card fee: 2.9% + $0.30 ($${emailCardFee.toFixed(2)}) | ACH fee: 0.8%, max $5 ($${emailAchFee.toFixed(2)})</p>
-        </div>
-        <p style="text-align:center;font-size:12px;color:#999;">Or copy this link: ${paymentUrl}</p>
+          <div style="text-align:center;margin:24px 0">
+            <a href="${paymentUrl}" style="display:inline-block;padding:14px 40px;background:#1b5e20;color:white;text-decoration:none;border-radius:8px;font-size:16px;font-weight:600">
+              View Invoice
+            </a>
+          </div>
+          <p style="text-align:center;font-size:12px;color:#999">Or copy this link: ${paymentUrl}</p>
       `;
     }
+    // Close the branded email wrapper
+    htmlBody += `
+        </div>
+        <div style="text-align:center;padding:16px;color:#999;font-size:11px">
+          First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777
+        </div>
+      </div>
+    `;
 
     const { transport, settings } = await createEmailTransport();
     await transport.sendMail({
@@ -4289,7 +4315,7 @@ app.post('/email/send-invoice/:invoiceId', authenticate, requireNumericParam('in
       replyTo: settings.replyTo || settings.senderEmail,
       to: recipientEmail,
       subject,
-      text: body + (paymentUrl ? `\n\nView and pay this invoice: ${paymentUrl}` : ''),
+      text: body + (paymentUrl ? `\n\nView this invoice: ${paymentUrl}` : ''),
       html: htmlBody,
       attachments: [{
         filename: attachment.filename,
@@ -4378,6 +4404,24 @@ app.post('/email/send-reminder/:invoiceId', authenticate, requireNumericParam('i
       }
     }
 
+    // Build branded HTML email
+    const reminderAppUrl = await getAppPublicUrl(req);
+    const reminderLogoUrl = reminderAppUrl ? `${reminderAppUrl}/assets/logo` : '';
+    const reminderHtml = `
+      <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+        <div style="background:linear-gradient(135deg,#1b5e20,#2e7d32);padding:24px;text-align:center;border-radius:12px 12px 0 0">
+          ${reminderLogoUrl ? `<img src="${reminderLogoUrl}" alt="First Class Glass" style="height:60px;margin-bottom:8px" onerror="this.style.display='none'">` : ''}
+          <div style="color:white;font-size:16px;font-weight:500">First Class Glass &amp; Mirror, Inc.</div>
+        </div>
+        <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
+          ${body.replace(/\n/g, '<br>')}
+        </div>
+        <div style="text-align:center;padding:16px;color:#999;font-size:11px">
+          First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777
+        </div>
+      </div>
+    `;
+
     const { transport, settings } = await createEmailTransport();
     await transport.sendMail({
       from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
@@ -4385,6 +4429,7 @@ app.post('/email/send-reminder/:invoiceId', authenticate, requireNumericParam('i
       to: recipientEmail,
       subject,
       text: body,
+      html: reminderHtml,
       attachments: [{
         filename: attachment.filename,
         content: attachment.buffer,
@@ -7580,48 +7625,63 @@ function publicPageShell(title, bodyContent) {
 <title>${escHtml(title)}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f7;color:#1c1c1e;padding:20px}
-.container{max-width:700px;margin:0 auto}
-.card{background:white;border-radius:12px;padding:32px;box-shadow:0 2px 12px rgba(0,0,0,0.08);margin-bottom:20px}
-.company-name{text-align:center;font-size:20px;font-weight:700;margin-bottom:4px}
-.company-info{text-align:center;color:#666;font-size:14px;margin-bottom:24px}
-h1{font-size:28px;text-align:center;margin-bottom:8px}
-.subtitle{text-align:center;color:#666;margin-bottom:24px;font-size:14px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#333}
+.header{background:linear-gradient(135deg,#1b5e20,#2e7d32);color:white;padding:30px 20px;text-align:center}
+.header img{height:80px;margin-bottom:12px}
+.header h2{font-size:18px;font-weight:400;opacity:0.9}
+.container{max-width:700px;margin:-30px auto 40px;padding:0 16px}
+.card{background:white;border-radius:12px;padding:32px;box-shadow:0 4px 20px rgba(0,0,0,0.1);margin-bottom:20px}
+h1{font-size:28px;text-align:center;margin-bottom:4px;color:#1b5e20}
+.subtitle{text-align:center;color:#666;margin-bottom:24px;font-size:15px}
 .section{margin-bottom:20px}
-.section-title{font-size:12px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px}
+.section-title{font-size:11px;font-weight:700;color:#1b5e20;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #e8f5e9}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.detail-item .label{font-size:12px;color:#999;text-transform:uppercase}
+.detail-item .value{font-size:15px;font-weight:500;margin-top:2px}
 .detail-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f0f0f0}
-.detail-label{color:#666}
-.detail-value{font-weight:500}
+.detail-label{color:#666;font-size:14px}
+.detail-value{font-weight:500;font-size:14px}
 table{width:100%;border-collapse:collapse;margin:16px 0}
-th{background:#f5f5f7;padding:10px 12px;text-align:left;font-size:12px;font-weight:600;text-transform:uppercase;color:#666}
-td{padding:10px 12px;border-bottom:1px solid #f0f0f0}
-.total-row{font-size:20px;font-weight:700;text-align:right;padding:16px 0;border-top:2px solid #1c1c1e}
+th{background:#e8f5e9;padding:10px 12px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;color:#1b5e20;letter-spacing:0.5px}
+td{padding:12px;border-bottom:1px solid #f0f0f0;font-size:14px}
+th:last-child,td:last-child{text-align:right}
+.total-row{text-align:right;padding:20px 0;border-top:3px solid #1b5e20;font-size:22px;font-weight:700;color:#1b5e20}
 .buttons{display:flex;gap:16px;justify-content:center;margin-top:24px;flex-wrap:wrap}
-.btn{padding:14px 32px;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;border:none;transition:all 0.2s;text-decoration:none;display:inline-block;text-align:center}
-.btn-accept{background:#30D158;color:white}
-.btn-accept:hover{background:#28b84d}
-.btn-decline{background:#FF453A;color:white}
-.btn-decline:hover{background:#e03e34}
-.btn-pay{background:#30D158;color:white;font-size:18px;font-weight:700;padding:16px 40px}
-.btn-pay:hover{background:#28b84d}
-.btn:disabled{opacity:0.5;cursor:not-allowed}
+.btn{padding:14px 36px;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;border:none;transition:all 0.2s;text-decoration:none;display:inline-block;text-align:center;min-width:180px}
+.btn-accept{background:#1b5e20;color:white}
+.btn-accept:hover{background:#2e7d32;transform:translateY(-1px);box-shadow:0 4px 12px rgba(27,94,32,0.3)}
+.btn-decline{background:white;color:#c62828;border:2px solid #c62828}
+.btn-decline:hover{background:#ffebee}
+.btn-pay{background:#1b5e20;color:white;font-size:18px;font-weight:700;padding:16px 40px}
+.btn-pay:hover{background:#2e7d32}
+.btn:disabled{opacity:0.5;cursor:not-allowed;transform:none}
 .status-badge{display:inline-block;padding:6px 16px;border-radius:20px;font-size:14px;font-weight:600}
-.status-accepted{background:#d4edda;color:#155724}
-.status-declined{background:#f8d7da;color:#721c24}
-.status-sent{background:#fff3cd;color:#856404}
-.status-paid{background:#d4edda;color:#155724}
-.status-overdue{background:#f8d7da;color:#721c24}
+.status-accepted{background:#e8f5e9;color:#1b5e20}
+.status-declined{background:#ffebee;color:#c62828}
+.status-sent{background:#fff8e1;color:#f57f17}
+.status-paid{background:#e8f5e9;color:#1b5e20}
+.status-overdue{background:#ffebee;color:#c62828}
 .notes-input{width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;font-size:14px;margin-top:8px;resize:vertical;min-height:60px;font-family:inherit}
-.footer{text-align:center;color:#999;font-size:12px;padding:20px}
+.page-footer{text-align:center;color:#999;font-size:12px;padding:20px}
 .msg{text-align:center;padding:40px;font-size:16px}
-.msg.success{color:#155724}
-.msg.error{color:#721c24}
-@media(max-width:600px){.buttons{flex-direction:column}.btn{width:100%}.card{padding:20px}}
+.msg.success{color:#1b5e20}
+.msg.error{color:#c62828}
+.contact-card{text-align:center;border:2px solid #e8f5e9;border-radius:12px;padding:28px;margin-top:24px}
+.contact-card .contact-title{font-size:18px;font-weight:600;color:#1b5e20;margin-bottom:8px}
+.contact-card .contact-desc{color:#666;font-size:14px;margin-bottom:16px}
+.contact-card .contact-phone{font-size:20px;font-weight:700;color:#1b5e20;margin-bottom:8px}
+.contact-card .contact-email{color:#666;font-size:13px}
+.contact-card .contact-note{color:#999;font-size:12px;margin-top:16px}
+@media(max-width:600px){.buttons{flex-direction:column}.btn{width:100%}.detail-grid{grid-template-columns:1fr}.card{padding:20px}.header{padding:20px 16px}.header img{height:60px}}
 </style>
 </head><body>
+<div class="header">
+<img src="/assets/logo" alt="First Class Glass & Mirror" onerror="this.style.display='none'">
+<h2>First Class Glass &amp; Mirror, Inc.</h2>
+</div>
 <div class="container">
 ${bodyContent}
-<div class="footer">First Class Glass &amp; Mirror, Inc. | 630-250-9777</div>
+<div class="page-footer">First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777</div>
 </div>
 </body></html>`;
 }
@@ -7648,16 +7708,16 @@ app.get('/public/estimate/:token', async (req, res) => {
 
     const alreadyResponded = est.status === 'Accepted' || est.status === 'Declined';
     const statusBadge = alreadyResponded
-      ? `<div style="text-align:center;margin-bottom:20px"><span class="status-badge ${est.status === 'Accepted' ? 'status-accepted' : 'status-declined'}">${est.status === 'Accepted' ? '✓ Accepted' : '✗ Declined'}</span></div>`
+      ? `<div style="text-align:center;margin:20px 0"><span class="status-badge ${est.status === 'Accepted' ? 'status-accepted' : 'status-declined'}" style="font-size:16px;padding:10px 24px">${est.status === 'Accepted' ? '✓ Estimate Accepted' : '✗ Estimate Declined'}</span></div>`
       : '';
 
     const lineItemsHtml = lineItems.map(li =>
-      `<tr><td>${escHtml(li.quantity)}</td><td>${escHtml(li.description)}</td><td style="text-align:right">${fmtPublicMoney(li.amount)}</td></tr>`
+      `<tr><td>${escHtml(li.quantity)}</td><td>${escHtml(li.description)}</td><td>${fmtPublicMoney(li.amount)}</td></tr>`
     ).join('');
 
     const actionsHtml = alreadyResponded ? '' : `
       <div style="margin-top:24px">
-        <label class="section-title">Notes (optional)</label>
+        <div class="section-title">Notes (optional)</div>
         <textarea id="notes" class="notes-input" placeholder="Add any notes or comments..."></textarea>
       </div>
       <div class="buttons">
@@ -7685,30 +7745,28 @@ app.get('/public/estimate/:token', async (req, res) => {
                   : '<span class="status-badge status-declined" style="font-size:18px;padding:12px 24px">Estimate Declined</span>';
               var noteDiv = document.querySelector('.notes-input');
               if(noteDiv && noteDiv.parentNode) noteDiv.parentNode.style.display='none';
-            } else { alert(data.error||'Error'); btns.forEach(function(b){b.disabled=false}); }
-          } catch(e) { alert('Error submitting response. Please try again.'); btns.forEach(function(b){b.disabled=false}); }
+            } else { alert(data.error||'Error'); _submitting=false; btns.forEach(function(b){b.disabled=false;b.style.opacity='1'}); }
+          } catch(e) { alert('Error submitting response. Please try again.'); _submitting=false; btns.forEach(function(b){b.disabled=false;b.style.opacity='1'}); }
         }
       </script>
     `;
 
     res.send(publicPageShell('Estimate from First Class Glass & Mirror', `
       <div class="card">
-        <div class="company-name">First Class Glass &amp; Mirror, Inc.</div>
-        <div class="company-info">1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777</div>
         <h1>Estimate</h1>
-        <div class="subtitle">Date: ${fmtPublicDate(est.issueDate)} | P.O. #${escHtml(est.poNumber || 'N/A')}</div>
+        <div class="subtitle">Date: ${fmtPublicDate(est.issueDate)}${est.poNumber ? ' | P.O. #' + escHtml(est.poNumber) : ''}</div>
         ${statusBadge}
         <div class="section">
           <div class="section-title">Customer</div>
-          <div class="detail-row"><span class="detail-label">Company</span><span class="detail-value">${escHtml(est.companyName || est.custName || '')}</span></div>
+          <div class="detail-grid">
+            <div class="detail-item"><div class="label">Company</div><div class="value">${escHtml(est.companyName || est.custName || '')}</div></div>
+            <div class="detail-item"><div class="label">Project</div><div class="value">${escHtml(est.projectName || '')}</div></div>
+            <div class="detail-item" style="grid-column:1/-1"><div class="label">Location</div><div class="value">${escHtml([est.projectAddress, est.projectCity, est.projectState, est.projectZip].filter(Boolean).join(', ') || 'N/A')}</div></div>
+          </div>
         </div>
-        <div class="section">
-          <div class="section-title">Project Details</div>
-          <div class="detail-row"><span class="detail-label">Project</span><span class="detail-value">${escHtml(est.projectName || '')}</span></div>
-          <div class="detail-row"><span class="detail-label">Location</span><span class="detail-value">${escHtml([est.projectAddress, est.projectCity, est.projectState, est.projectZip].filter(Boolean).join(', '))}</span></div>
-        </div>
+        <div class="section-title">Line Items</div>
         <table>
-          <thead><tr><th>Qty</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+          <thead><tr><th>Qty</th><th>Description</th><th>Amount</th></tr></thead>
           <tbody>${lineItemsHtml}</tbody>
         </table>
         ${est.taxAmount && Number(est.taxAmount) > 0 ? `<div class="detail-row"><span class="detail-label">Subtotal</span><span class="detail-value">${fmtPublicMoney(est.subtotal)}</span></div><div class="detail-row"><span class="detail-label">Tax</span><span class="detail-value">${fmtPublicMoney(est.taxAmount)}</span></div>` : ''}
@@ -7844,114 +7902,49 @@ app.get('/public/invoice/:token', async (req, res) => {
 
     let statusHtml = '';
     if (isPaid || paymentSuccess) {
-      statusHtml = `<div style="text-align:center;margin-bottom:20px"><span class="status-badge status-paid">✓ Paid${inv.paidAt ? ' on ' + fmtPublicDate(inv.paidAt) : ''} — Thank you!</span></div>`;
+      statusHtml = `<div style="text-align:center;margin:20px 0"><span class="status-badge status-paid" style="font-size:16px;padding:10px 24px">✓ Paid${inv.paidAt ? ' on ' + fmtPublicDate(inv.paidAt) : ''} — Thank you!</span></div>`;
     } else if (isOverdue) {
-      statusHtml = `<div style="text-align:center;margin-bottom:20px"><span class="status-badge status-overdue">Overdue</span></div>`;
+      statusHtml = `<div style="text-align:center;margin:20px 0"><span class="status-badge status-overdue" style="font-size:16px;padding:10px 24px">Overdue</span></div>`;
     }
 
     const lineItemsHtml = lineItems.map(li =>
-      `<tr><td>${escHtml(li.quantity)}</td><td>${escHtml(li.description)}</td><td style="text-align:right">${fmtPublicMoney(li.amount)}</td></tr>`
+      `<tr><td>${escHtml(li.quantity)}</td><td>${escHtml(li.description)}</td><td>${fmtPublicMoney(li.amount)}</td></tr>`
     ).join('');
 
-    // Check if Stripe is configured
-    let stripeConfigured = false;
-    try {
-      const [[settings]] = await db.query('SELECT stripeEnabled, stripeSecretKey FROM email_settings WHERE id = 1');
-      const hasKey = !!(settings?.stripeSecretKey || STRIPE_SECRET_KEY);
-      stripeConfigured = hasKey && (settings?.stripeEnabled === 1 || settings?.stripeEnabled === true || STRIPE_SECRET_KEY);
-      console.log('[Public Invoice] Stripe check — enabled:', settings?.stripeEnabled, 'hasKey:', hasKey, 'configured:', stripeConfigured);
-    } catch (e) {
-      // If email_settings table doesn't have stripe columns, fall back to env var
-      stripeConfigured = !!STRIPE_SECRET_KEY;
-      console.log('[Public Invoice] Stripe fallback to env var:', stripeConfigured);
-    }
+    const showContactPay = !isPaid && !paymentSuccess && balanceDue > 0;
 
-    const showPayButton = !isPaid && !paymentSuccess && balanceDue > 0 && stripeConfigured;
-    const showContactInfo = !isPaid && !paymentSuccess && balanceDue > 0 && !stripeConfigured;
-
-    // Calculate fees
-    const cardFee = Math.round((balanceDue * 0.029 + 0.30) * 100) / 100;
-    const achFee = Math.round(Math.min(balanceDue * 0.008, 5.00) * 100) / 100;
-    const cardTotal = Math.round((balanceDue + cardFee) * 100) / 100;
-    const achTotal = Math.round((balanceDue + achFee) * 100) / 100;
-
-    const payHtml = showPayButton ? `
-      <div style="margin-top:24px">
-        <div class="section-title" style="margin-bottom:12px">Payment Options</div>
-        <div style="display:flex;gap:16px;flex-wrap:wrap">
-          <div style="flex:1;min-width:220px;border:1px solid #ddd;border-radius:8px;padding:16px;text-align:center">
-            <div style="font-weight:600;font-size:16px;margin-bottom:8px">💳 Credit/Debit Card</div>
-            <div style="color:#666;font-size:13px;margin-bottom:4px">Invoice: ${fmtPublicMoney(balanceDue)}</div>
-            <div style="color:#666;font-size:13px;margin-bottom:4px">Processing fee (2.9% + $0.30): ${fmtPublicMoney(cardFee)}</div>
-            <div style="font-weight:700;font-size:18px;margin-bottom:12px;color:#1a1a2e">Total: ${fmtPublicMoney(cardTotal)}</div>
-            <button onclick="pay('card')" class="btn btn-pay" style="width:100%" id="btn-card">Pay ${fmtPublicMoney(cardTotal)} with Card</button>
-          </div>
-          <div style="flex:1;min-width:220px;border:1px solid #ddd;border-radius:8px;padding:16px;text-align:center">
-            <div style="font-weight:600;font-size:16px;margin-bottom:8px">🏦 Bank Transfer (ACH)</div>
-            <div style="color:#666;font-size:13px;margin-bottom:4px">Invoice: ${fmtPublicMoney(balanceDue)}</div>
-            <div style="color:#666;font-size:13px;margin-bottom:4px">Processing fee (0.8%, max $5): ${fmtPublicMoney(achFee)}</div>
-            <div style="font-weight:700;font-size:18px;margin-bottom:12px;color:#1a1a2e">Total: ${fmtPublicMoney(achTotal)}</div>
-            <button onclick="pay('ach')" class="btn btn-pay" style="width:100%;background:#28a745" id="btn-ach">Pay ${fmtPublicMoney(achTotal)} with ACH</button>
-          </div>
-        </div>
-      </div>
-      <script>
-        async function pay(method) {
-          var btn = document.getElementById('btn-' + method);
-          btn.disabled = true;
-          btn.textContent = 'Processing...';
-          try {
-            var resp = await fetch('/public/invoice/${req.params.token}/pay', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ paymentMethod: method })
-            });
-            var data = await resp.json();
-            if (data.url) {
-              window.location.href = data.url;
-            } else {
-              alert(data.error || 'Payment failed. Please try again.');
-              btn.disabled = false;
-              btn.textContent = method === 'card' ? 'Pay with Card' : 'Pay with ACH';
-            }
-          } catch (e) {
-            alert('Payment failed. Please try again.');
-            btn.disabled = false;
-            btn.textContent = method === 'card' ? 'Pay with Card' : 'Pay with ACH';
-          }
-        }
-      </script>
-    ` : showContactInfo ? `
-      <div style="margin-top:24px;text-align:center;padding:20px;border:1px solid #ddd;border-radius:8px;background:#f9f9f9">
-        <div style="font-size:16px;font-weight:600;margin-bottom:8px">Ready to pay?</div>
-        <div style="color:#666;font-size:14px">To arrange payment, please contact us at <strong>630-250-9777</strong></div>
+    const payHtml = showContactPay ? `
+      <div class="contact-card">
+        <div class="contact-title">Ready to pay?</div>
+        <div class="contact-desc">To arrange payment, please contact us:</div>
+        <div class="contact-phone">630-250-9777</div>
+        <div class="contact-email">jefflawson360@yahoo.com</div>
+        <div class="contact-note">We accept checks, ACH bank transfers, and credit cards.<br>Online payment coming soon.</div>
       </div>
     ` : '';
 
     res.send(publicPageShell('Invoice from First Class Glass & Mirror', `
       <div class="card">
-        <div class="company-name">First Class Glass &amp; Mirror, Inc.</div>
-        <div class="company-info">1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777</div>
         <h1>Invoice #${escHtml(inv.invoiceNumber)}</h1>
         <div class="subtitle">Date: ${fmtPublicDate(inv.issueDate)}${inv.dueDate ? ' | Due: ' + fmtPublicDate(inv.dueDate) : ''}</div>
         ${statusHtml}
         <div class="section">
           <div class="section-title">Customer</div>
-          <div class="detail-row"><span class="detail-label">Company</span><span class="detail-value">${escHtml(inv.companyName || inv.custName || '')}</span></div>
+          <div class="detail-grid">
+            <div class="detail-item"><div class="label">Company</div><div class="value">${escHtml(inv.companyName || inv.custName || '')}</div></div>
+            <div class="detail-item"><div class="label">Project</div><div class="value">${escHtml(inv.projectName || inv.shipToName || '')}</div></div>
+            <div class="detail-item" style="grid-column:1/-1"><div class="label">Location</div><div class="value">${escHtml([inv.shipToAddress || inv.projectAddress, inv.shipToCity || inv.projectCity, inv.shipToState || inv.projectState, inv.shipToZip || inv.projectZip].filter(Boolean).join(', ') || 'N/A')}</div></div>
+            ${inv.poNumber ? `<div class="detail-item"><div class="label">P.O. #</div><div class="value">${escHtml(inv.poNumber)}</div></div>` : ''}
+          </div>
         </div>
-        <div class="section">
-          <div class="section-title">Project Details</div>
-          <div class="detail-row"><span class="detail-label">Project</span><span class="detail-value">${escHtml(inv.projectName || inv.shipToName || '')}</span></div>
-          <div class="detail-row"><span class="detail-label">Location</span><span class="detail-value">${escHtml([inv.shipToAddress || inv.projectAddress, inv.shipToCity || inv.projectCity, inv.shipToState || inv.projectState, inv.shipToZip || inv.projectZip].filter(Boolean).join(', '))}</span></div>
-          ${inv.poNumber ? `<div class="detail-row"><span class="detail-label">P.O. #</span><span class="detail-value">${escHtml(inv.poNumber)}</span></div>` : ''}
-        </div>
+        <div class="section-title">Line Items</div>
         <table>
-          <thead><tr><th>Qty</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+          <thead><tr><th>Qty</th><th>Description</th><th>Amount</th></tr></thead>
           <tbody>${lineItemsHtml}</tbody>
         </table>
         ${inv.taxAmount && Number(inv.taxAmount) > 0 ? `<div class="detail-row"><span class="detail-label">Subtotal</span><span class="detail-value">${fmtPublicMoney(inv.subtotal)}</span></div><div class="detail-row"><span class="detail-label">Tax</span><span class="detail-value">${fmtPublicMoney(inv.taxAmount)}</span></div>` : ''}
         <div class="total-row">Total: ${fmtPublicMoney(inv.total)}</div>
-        ${!isPaid && !paymentSuccess && balanceDue > 0 && balanceDue !== Number(inv.total) ? `<div style="text-align:right;font-size:16px;font-weight:600;color:#FF453A;margin-top:8px">Balance Due: ${fmtPublicMoney(balanceDue)}</div>` : ''}
+        ${!isPaid && !paymentSuccess && balanceDue > 0 && balanceDue !== Number(inv.total) ? `<div style="text-align:right;font-size:16px;font-weight:600;color:#c62828;margin-top:8px">Balance Due: ${fmtPublicMoney(balanceDue)}</div>` : ''}
         ${inv.terms ? `<div class="section" style="margin-top:16px"><div class="section-title">Terms</div><p style="font-size:13px;color:#666;line-height:1.5">${escHtml(inv.terms)}</p></div>` : ''}
         ${payHtml}
       </div>
