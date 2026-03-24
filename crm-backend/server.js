@@ -4246,15 +4246,22 @@ app.post('/email/send-invoice/:invoiceId', authenticate, requireNumericParam('in
       }
     }
 
-    // Append payment link to email body
+    // Append payment link and fee info to email body
     let htmlBody = body.replace(/\n/g, '<br>');
     if (paymentUrl) {
+      const balDue = Number(inv.balanceDue ?? inv.total) || 0;
+      const emailCardFee = Math.round((balDue * 0.029 + 0.30) * 100) / 100;
+      const emailAchFee = Math.round(Math.min(balDue * 0.008, 5.00) * 100) / 100;
       htmlBody += `
         <br><br>
         <div style="text-align:center;margin:24px 0;">
           <a href="${paymentUrl}" style="display:inline-block;padding:16px 40px;background:#30D158;color:white;text-decoration:none;border-radius:8px;font-weight:700;font-size:18px;">
             View and Pay Invoice
           </a>
+        </div>
+        <div style="text-align:center;margin:16px 0;font-size:13px;color:#666;">
+          <p style="margin:4px 0;">Payment options: Credit/Debit Card or ACH Bank Transfer</p>
+          <p style="margin:4px 0;">Card fee: 2.9% + $0.30 ($${emailCardFee.toFixed(2)}) | ACH fee: 0.8%, max $5 ($${emailAchFee.toFixed(2)})</p>
         </div>
         <p style="text-align:center;font-size:12px;color:#999;">Or copy this link: ${paymentUrl}</p>
       `;
@@ -7713,7 +7720,16 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
     // If already responded, return success without re-processing
     if (tok.usedAt) {
       console.log('[Public] Token already used, returning cached response:', tok.response);
-      return res.json({ success: true, status: tok.response === 'accepted' ? 'Accepted' : 'Declined' });
+      return res.json({ success: true, status: tok.response === 'accepted' ? 'Accepted' : 'Declined', message: 'Already responded' });
+    }
+
+    // Also check estimate's current status to prevent duplicates from race conditions
+    const [[currentEst]] = await db.query('SELECT status FROM estimates WHERE id = ?', [tok.estimateId]);
+    if (currentEst && (currentEst.status === 'Accepted' || currentEst.status === 'Declined')) {
+      console.log('[Public] Estimate already has status:', currentEst.status, '— skipping re-processing');
+      // Mark token as used so future requests hit the usedAt guard above
+      try { await db.query('UPDATE public_tokens SET usedAt=NOW(), response=?, respondedAt=NOW() WHERE id=? AND usedAt IS NULL', [response, tok.id]); } catch (e) {}
+      return res.json({ success: true, status: currentEst.status, message: 'Already responded' });
     }
 
     const newStatus = response === 'accepted' ? 'Accepted' : 'Declined';
@@ -7722,10 +7738,14 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
     // Update estimate status — this is the critical operation
     await db.query('UPDATE estimates SET status=?, updatedAt=NOW() WHERE id=?', [newStatus, tok.estimateId]);
 
-    // Mark token as used immediately to prevent duplicate processing
+    // Mark token as used immediately to prevent duplicate processing (atomic with usedAt IS NULL)
     try {
-      await db.query('UPDATE public_tokens SET usedAt=NOW(), response=?, responseNotes=?, respondedAt=NOW() WHERE id=?',
+      const [tokResult] = await db.query('UPDATE public_tokens SET usedAt=NOW(), response=?, responseNotes=?, respondedAt=NOW() WHERE id=? AND usedAt IS NULL',
         [response, notes || null, tok.id]);
+      if (tokResult.affectedRows === 0) {
+        console.log('[Public] Token was already marked used by concurrent request — skipping notification');
+        return res.json({ success: true, status: newStatus, message: 'Already responded' });
+      }
     } catch (tokErr) {
       console.warn('[Public] Token update failed (non-fatal):', tokErr.message);
     }
@@ -7815,12 +7835,58 @@ app.get('/public/invoice/:token', async (req, res) => {
 
     const showPayButton = !isPaid && !paymentSuccess && balanceDue > 0 && stripeConfigured;
 
+    // Calculate fees
+    const cardFee = Math.round((balanceDue * 0.029 + 0.30) * 100) / 100;
+    const achFee = Math.round(Math.min(balanceDue * 0.008, 5.00) * 100) / 100;
+    const cardTotal = Math.round((balanceDue + cardFee) * 100) / 100;
+    const achTotal = Math.round((balanceDue + achFee) * 100) / 100;
+
     const payHtml = showPayButton ? `
-      <div class="buttons" style="margin-top:24px">
-        <form action="/public/invoice/${req.params.token}/pay" method="POST">
-          <button type="submit" class="btn btn-pay">Pay ${fmtPublicMoney(balanceDue)} Now</button>
-        </form>
+      <div style="margin-top:24px">
+        <div class="section-title" style="margin-bottom:12px">Payment Options</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px;border:1px solid #ddd;border-radius:8px;padding:16px;text-align:center">
+            <div style="font-weight:600;font-size:16px;margin-bottom:8px">💳 Credit/Debit Card</div>
+            <div style="color:#666;font-size:13px;margin-bottom:4px">Invoice: ${fmtPublicMoney(balanceDue)}</div>
+            <div style="color:#666;font-size:13px;margin-bottom:4px">Processing fee (2.9% + $0.30): ${fmtPublicMoney(cardFee)}</div>
+            <div style="font-weight:700;font-size:18px;margin-bottom:12px;color:#1a1a2e">Total: ${fmtPublicMoney(cardTotal)}</div>
+            <button onclick="pay('card')" class="btn btn-pay" style="width:100%" id="btn-card">Pay ${fmtPublicMoney(cardTotal)} with Card</button>
+          </div>
+          <div style="flex:1;min-width:220px;border:1px solid #ddd;border-radius:8px;padding:16px;text-align:center">
+            <div style="font-weight:600;font-size:16px;margin-bottom:8px">🏦 Bank Transfer (ACH)</div>
+            <div style="color:#666;font-size:13px;margin-bottom:4px">Invoice: ${fmtPublicMoney(balanceDue)}</div>
+            <div style="color:#666;font-size:13px;margin-bottom:4px">Processing fee (0.8%, max $5): ${fmtPublicMoney(achFee)}</div>
+            <div style="font-weight:700;font-size:18px;margin-bottom:12px;color:#1a1a2e">Total: ${fmtPublicMoney(achTotal)}</div>
+            <button onclick="pay('ach')" class="btn btn-pay" style="width:100%;background:#28a745" id="btn-ach">Pay ${fmtPublicMoney(achTotal)} with ACH</button>
+          </div>
+        </div>
       </div>
+      <script>
+        async function pay(method) {
+          var btn = document.getElementById('btn-' + method);
+          btn.disabled = true;
+          btn.textContent = 'Processing...';
+          try {
+            var resp = await fetch('/public/invoice/${req.params.token}/pay', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ paymentMethod: method })
+            });
+            var data = await resp.json();
+            if (data.url) {
+              window.location.href = data.url;
+            } else {
+              alert(data.error || 'Payment failed. Please try again.');
+              btn.disabled = false;
+              btn.textContent = method === 'card' ? 'Pay with Card' : 'Pay with ACH';
+            }
+          } catch (e) {
+            alert('Payment failed. Please try again.');
+            btn.disabled = false;
+            btn.textContent = method === 'card' ? 'Pay with Card' : 'Pay with ACH';
+          }
+        }
+      </script>
     ` : '';
 
     res.send(publicPageShell('Invoice from First Class Glass & Mirror', `
@@ -7857,30 +7923,42 @@ app.get('/public/invoice/:token', async (req, res) => {
   }
 });
 
-// POST /public/invoice/:token/pay — create Stripe Checkout Session
+// POST /public/invoice/:token/pay — create Stripe Checkout Session with card or ACH
 app.post('/public/invoice/:token/pay', async (req, res) => {
   try {
     const [[tok]] = await db.query(
       "SELECT * FROM public_tokens WHERE token = ? AND type = 'invoice_payment' AND expiresAt > NOW()",
       [req.params.token]
     );
-    if (!tok) return res.status(404).send(publicPageShell('Error', '<div class="card"><div class="msg error">This payment link has expired or is no longer valid.</div></div>'));
+    if (!tok) return res.status(404).json({ error: 'This payment link has expired or is no longer valid.' });
 
     const [[inv]] = await db.query(`
       SELECT i.*, c.companyName, c.name AS custName
       FROM invoices i LEFT JOIN customers c ON i.customerId = c.id WHERE i.id = ?
     `, [tok.invoiceId]);
-    if (!inv) return res.status(404).send(publicPageShell('Error', '<div class="card"><div class="msg error">Invoice not found.</div></div>'));
+    if (!inv) return res.status(404).json({ error: 'Invoice not found.' });
 
-    if (inv.status === 'Paid') return res.redirect(`/public/invoice/${req.params.token}?payment=success`);
+    if (inv.status === 'Paid') return res.json({ url: `/public/invoice/${req.params.token}?payment=success` });
 
+    const paymentMethod = req.body?.paymentMethod || 'card';
     const stripe = await getStripeInstance();
     const balanceDue = Number(inv.balanceDue ?? inv.total) || 0;
     const appUrl = await getAppPublicUrl(req);
 
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [{
+    // Calculate processing fee
+    let processingFee;
+    let paymentMethodTypes;
+    if (paymentMethod === 'ach') {
+      processingFee = Math.round(Math.min(balanceDue * 0.008, 5.00) * 100) / 100;
+      paymentMethodTypes = ['us_bank_account'];
+    } else {
+      processingFee = Math.round((balanceDue * 0.029 + 0.30) * 100) / 100;
+      paymentMethodTypes = ['card'];
+    }
+    const totalCharge = Math.round((balanceDue + processingFee) * 100) / 100;
+
+    const lineItems = [
+      {
         price_data: {
           currency: 'usd',
           product_data: {
@@ -7890,7 +7968,23 @@ app.post('/public/invoice/:token/pay', async (req, res) => {
           unit_amount: Math.round(balanceDue * 100),
         },
         quantity: 1,
-      }],
+      },
+      {
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: 'Processing Fee',
+            description: paymentMethod === 'ach' ? 'ACH processing fee (0.8%, max $5)' : 'Card processing fee (2.9% + $0.30)',
+          },
+          unit_amount: Math.round(processingFee * 100),
+        },
+        quantity: 1,
+      },
+    ];
+
+    const sessionParams = {
+      payment_method_types: paymentMethodTypes,
+      line_items: lineItems,
       mode: 'payment',
       success_url: `${appUrl}/public/invoice/${req.params.token}?payment=success`,
       cancel_url: `${appUrl}/public/invoice/${req.params.token}`,
@@ -7899,20 +7993,33 @@ app.post('/public/invoice/:token/pay', async (req, res) => {
         invoiceId: String(inv.id),
         invoiceNumber: inv.invoiceNumber || '',
         token: req.params.token,
+        paymentMethod,
+        processingFee: String(processingFee),
+        invoiceAmount: String(balanceDue),
       },
-    });
+    };
+
+    // ACH requires additional options
+    if (paymentMethod === 'ach') {
+      sessionParams.payment_method_options = {
+        us_bank_account: {
+          financial_connections: { permissions: ['payment_method'] },
+        },
+      };
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionParams);
 
     // Record pending payment
     await db.query(
       'INSERT INTO payments (invoiceId, amount, paymentMethod, stripeSessionId, status, customerEmail) VALUES (?, ?, ?, ?, ?, ?)',
-      [inv.id, balanceDue, 'card', session.id, 'pending', tok.recipientEmail || null]
+      [inv.id, totalCharge, paymentMethod, session.id, 'pending', tok.recipientEmail || null]
     );
 
-    res.redirect(303, session.url);
+    res.json({ url: session.url });
   } catch (err) {
     console.error('Error creating Stripe session:', err);
-    res.status(500).send(publicPageShell('Payment Error',
-      `<div class="card"><div class="msg error">Failed to start payment: ${escHtml(err.message)}</div></div>`));
+    res.status(500).json({ error: 'Failed to start payment: ' + err.message });
   }
 });
 
@@ -7952,15 +8059,17 @@ async function handleStripeWebhook(req, res) {
 
       const amountPaid = (session.amount_total || 0) / 100;
       const paymentIntent = session.payment_intent || null;
+      const paidVia = session.metadata?.paymentMethod || 'card';
 
-      // Update invoice
+      // Update invoice — paidAmount is the invoice amount (without fee)
+      const invoiceAmount = Number(session.metadata?.invoiceAmount || amountPaid);
       await db.query(
-        "UPDATE invoices SET status='Paid', paidAt=NOW(), paidAmount=?, stripePaymentIntentId=?, paymentMethod='card', updatedAt=NOW() WHERE id=?",
-        [amountPaid, paymentIntent, invoiceId]
+        "UPDATE invoices SET status='Paid', paidAt=NOW(), paidAmount=?, stripePaymentIntentId=?, paymentMethod=?, updatedAt=NOW() WHERE id=?",
+        [invoiceAmount, paymentIntent, paidVia, invoiceId]
       );
 
-      // Update balanceDue
-      await db.query('UPDATE invoices SET balanceDue = GREATEST(0, COALESCE(total,0) - ?) WHERE id = ?', [amountPaid, invoiceId]);
+      // Update balanceDue based on the invoice amount (not including processing fee)
+      await db.query('UPDATE invoices SET balanceDue = GREATEST(0, COALESCE(total,0) - ?) WHERE id = ?', [invoiceAmount, invoiceId]);
 
       // Update payment record
       await db.query(
