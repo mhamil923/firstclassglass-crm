@@ -284,21 +284,16 @@
   font-size: 15px;
 }
 
-/* Merge dropdown */
-.vc-merge-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  min-width: 420px;
+/* Merge dropdown - portal version */
+.vc-merge-dropdown-portal {
+  position: fixed;
   max-height: 360px;
   overflow-y: auto;
   background: var(--bg-card-solid, #1c1c1e);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0,0,0,0.28), 0 4px 12px rgba(0,0,0,0.12);
-  z-index: 9999;
-  margin-top: 6px;
+  z-index: 99999;
 }
 
 .vc-merge-option {
@@ -430,6 +425,94 @@
   border-top: 1px solid var(--border-color);
 }
 
+/* Merge comparison cards */
+.vc-merge-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.vc-merge-compare-card {
+  display: block;
+  cursor: pointer;
+  padding: 16px;
+  border: 2px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-secondary, rgba(255,255,255,0.03));
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.vc-merge-compare-card:hover {
+  border-color: var(--accent-blue, #0071e3);
+}
+
+.vc-merge-compare-card.vc-merge-selected {
+  border-color: var(--accent-blue, #0071e3);
+  background: rgba(0,113,227,0.06);
+}
+
+.vc-merge-compare-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.vc-merge-compare-radio input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-blue, #0071e3);
+}
+
+.vc-merge-radio-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.vc-merge-compare-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.vc-merge-compare-details {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.vc-merge-compare-counts {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.vc-merge-compare-counts span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  background: var(--bg-hover, rgba(255,255,255,0.06));
+  padding: 3px 10px;
+  border-radius: 6px;
+}
+
+.vc-merge-summary-box {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: rgba(255,149,0,0.06);
+  border-radius: 8px;
+  border: 1px solid rgba(255,149,0,0.15);
+  line-height: 1.5;
+}
+
 @media (max-width: 768px) {
   .vc-page { padding: 16px; }
   .vc-title { font-size: 24px; }
@@ -438,4 +521,5 @@
   .vc-grid-4 { grid-template-columns: 1fr; }
   .vc-topbar { flex-direction: column; align-items: flex-start; }
   .vc-actions { width: 100%; flex-wrap: wrap; }
+  .vc-merge-compare { grid-template-columns: 1fr; }
 }

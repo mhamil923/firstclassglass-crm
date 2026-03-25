@@ -1,5 +1,6 @@
 // File: src/ViewCustomer.js
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import ReactDOM from "react-dom";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import api from "./api";
 import "./ViewCustomer.css";
@@ -49,7 +50,10 @@ export default function ViewCustomer() {
   const [mergePreview, setMergePreview] = useState(null);
   const [merging, setMerging] = useState(false);
   const [mergeDropdownOpen, setMergeDropdownOpen] = useState(false);
+  const [mergeKeep, setMergeKeep] = useState("current"); // "current" or "duplicate"
   const mergeDropdownRef = useRef(null);
+  const mergeInputRef = useRef(null);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
 
   /* ---------- fetch customer ---------- */
   const fetchCustomer = useCallback(async () => {
@@ -116,10 +120,12 @@ export default function ViewCustomer() {
     fetchInvoices();
   }, [fetchCustomer, fetchWorkOrders, fetchEstimates, fetchInvoices]);
 
-  // Close merge dropdown on outside click
+  // Close merge dropdown on outside click (accounts for portal)
   useEffect(() => {
     const handler = (e) => {
-      if (mergeDropdownRef.current && !mergeDropdownRef.current.contains(e.target)) {
+      const inInput = mergeDropdownRef.current && mergeDropdownRef.current.contains(e.target);
+      const inPortal = e.target.closest && e.target.closest(".vc-merge-dropdown-portal");
+      if (!inInput && !inPortal) {
         setMergeDropdownOpen(false);
       }
     };
@@ -195,6 +201,7 @@ export default function ViewCustomer() {
     setMergeSearch("");
     setMergeTarget(null);
     setMergePreview(null);
+    setMergeKeep("current");
     try {
       const res = await api.get("/customers");
       const all = (Array.isArray(res.data) ? res.data : []).filter((c) => c.id !== Number(id));
@@ -221,24 +228,34 @@ export default function ViewCustomer() {
 
   const executeMerge = async () => {
     if (!mergeTarget) return;
-    const sourceName = mergeTarget.companyName || mergeTarget.name;
-    const targetName = customer.companyName || customer.name;
+    // Determine keep vs delete based on user choice
+    const keepCurrent = mergeKeep === "current";
+    const keepId = keepCurrent ? id : mergeTarget.id;
+    const sourceId = keepCurrent ? mergeTarget.id : Number(id);
+    const keepName = keepCurrent ? (customer.companyName || customer.name) : (mergeTarget.companyName || mergeTarget.name);
+    const deleteName = keepCurrent ? (mergeTarget.companyName || mergeTarget.name) : (customer.companyName || customer.name);
+
     if (!window.confirm(
-      `MERGE "${sourceName}" into "${targetName}"?\n\nAll work orders, estimates, and invoices from "${sourceName}" will be moved to "${targetName}".\n\n"${sourceName}" will be permanently deleted.\n\nThis cannot be undone.`
+      `MERGE "${deleteName}" into "${keepName}"?\n\nAll work orders, estimates, and invoices from "${deleteName}" will be moved to "${keepName}".\n\n"${deleteName}" will be permanently deleted.\n\nThis cannot be undone.`
     )) return;
 
     setMerging(true);
     try {
-      const res = await api.post(`/customers/${id}/merge`, { sourceId: mergeTarget.id });
+      const res = await api.post(`/customers/${keepId}/merge`, { sourceId });
       const u = res.data.updated || {};
       alert(`Merge complete! Updated ${u.workOrders || 0} work orders, ${u.estimates || 0} estimates, ${u.invoices || 0} invoices.`);
       setShowMerge(false);
       setMergeTarget(null);
-      // Refresh all data
-      fetchCustomer();
-      fetchWorkOrders();
-      fetchEstimates();
-      fetchInvoices();
+      if (keepCurrent) {
+        // Refresh current customer page
+        fetchCustomer();
+        fetchWorkOrders();
+        fetchEstimates();
+        fetchInvoices();
+      } else {
+        // Navigate to the kept customer's page
+        navigate(`/customers/${mergeTarget.id}`);
+      }
     } catch (err) {
       console.error("Merge error:", err);
       alert("Failed to merge customers. " + (err.response?.data?.error || ""));
@@ -358,8 +375,9 @@ export default function ViewCustomer() {
               </p>
 
               <div ref={mergeDropdownRef} style={{ position: "relative", maxWidth: 500 }}>
-                <div className="vc-label">Search Customer to Merge In</div>
+                <div className="vc-label">Search Customer to Merge</div>
                 <input
+                  ref={mergeInputRef}
                   type="text"
                   className="vc-input"
                   placeholder="Type customer name..."
@@ -370,11 +388,23 @@ export default function ViewCustomer() {
                     setMergePreview(null);
                     setMergeDropdownOpen(true);
                   }}
-                  onFocus={() => setMergeDropdownOpen(true)}
+                  onFocus={() => {
+                    setMergeDropdownOpen(true);
+                    if (mergeInputRef.current) {
+                      const rect = mergeInputRef.current.getBoundingClientRect();
+                      setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 420) });
+                    }
+                  }}
+                  onKeyDown={() => {
+                    if (mergeInputRef.current) {
+                      const rect = mergeInputRef.current.getBoundingClientRect();
+                      setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 420) });
+                    }
+                  }}
                   autoComplete="off"
                 />
-                {mergeDropdownOpen && mergeSearch.trim().length > 0 && (
-                  <div className="vc-merge-dropdown">
+                {mergeDropdownOpen && mergeSearch.trim().length > 0 && ReactDOM.createPortal(
+                  <div className="vc-merge-dropdown-portal" style={{ top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}>
                     {filteredMergeCustomers.map((c) => {
                       const addr = [c.billingAddress, c.billingCity, c.billingState, c.billingZip].filter(Boolean).join(", ");
                       return (
@@ -392,7 +422,8 @@ export default function ViewCustomer() {
                     {filteredMergeCustomers.length === 0 && (
                       <div className="vc-merge-option" style={{ color: "var(--text-tertiary)", cursor: "default" }}>No customers found</div>
                     )}
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
 
@@ -411,59 +442,61 @@ export default function ViewCustomer() {
                 ];
                 const src = mergeTarget;
                 const tgt = customer;
+                const currentPreview = { customer: tgt, workOrders: workOrders.length, estimates: estimates.length, invoices: invoices.length };
+                const keepCustomer = mergeKeep === "current" ? tgt : src;
+                const deleteCustomer = mergeKeep === "current" ? src : tgt;
                 return (
                   <div className="vc-merge-preview">
                     <div className="vc-merge-preview-title">
-                      Merge Preview: "{src.companyName || src.name}" &rarr; "{tgt.companyName || tgt.name}"
+                      Choose Which Customer to Keep
                     </div>
 
-                    <div className="vc-merge-record-summary">
-                      Records to be moved: <strong>{mergePreview.workOrders}</strong> work orders, <strong>{mergePreview.estimates}</strong> estimates, <strong>{mergePreview.invoices}</strong> invoices
+                    <div className="vc-merge-compare">
+                      {/* Current customer */}
+                      <label className={`vc-merge-compare-card${mergeKeep === "current" ? " vc-merge-selected" : ""}`}>
+                        <div className="vc-merge-compare-radio">
+                          <input type="radio" name="mergeKeep" value="current" checked={mergeKeep === "current"} onChange={() => setMergeKeep("current")} />
+                          <span className="vc-merge-radio-label">Keep This Customer</span>
+                        </div>
+                        <div className="vc-merge-compare-name">{tgt.companyName || tgt.name || "—"}</div>
+                        <div className="vc-merge-compare-details">
+                          {tgt.contactName && <div>{tgt.contactName}</div>}
+                          {tgt.phone && <div>{tgt.phone}</div>}
+                          {tgt.email && <div>{tgt.email}</div>}
+                          {tgt.billingAddress && <div>{[tgt.billingAddress, tgt.billingCity, tgt.billingState, tgt.billingZip].filter(Boolean).join(", ")}</div>}
+                        </div>
+                        <div className="vc-merge-compare-counts">
+                          <span>{currentPreview.workOrders} work orders</span>
+                          <span>{currentPreview.estimates} estimates</span>
+                          <span>{currentPreview.invoices} invoices</span>
+                        </div>
+                      </label>
+
+                      {/* Duplicate customer */}
+                      <label className={`vc-merge-compare-card${mergeKeep === "duplicate" ? " vc-merge-selected" : ""}`}>
+                        <div className="vc-merge-compare-radio">
+                          <input type="radio" name="mergeKeep" value="duplicate" checked={mergeKeep === "duplicate"} onChange={() => setMergeKeep("duplicate")} />
+                          <span className="vc-merge-radio-label">Keep This Customer</span>
+                        </div>
+                        <div className="vc-merge-compare-name">{src.companyName || src.name || "—"}</div>
+                        <div className="vc-merge-compare-details">
+                          {src.contactName && <div>{src.contactName}</div>}
+                          {src.phone && <div>{src.phone}</div>}
+                          {src.email && <div>{src.email}</div>}
+                          {src.billingAddress && <div>{[src.billingAddress, src.billingCity, src.billingState, src.billingZip].filter(Boolean).join(", ")}</div>}
+                        </div>
+                        <div className="vc-merge-compare-counts">
+                          <span>{mergePreview.workOrders} work orders</span>
+                          <span>{mergePreview.estimates} estimates</span>
+                          <span>{mergePreview.invoices} invoices</span>
+                        </div>
+                      </label>
                     </div>
 
-                    <table className="vc-merge-table">
-                      <thead>
-                        <tr>
-                          <th>Field</th>
-                          <th>Keep (Target)</th>
-                          <th>From Duplicate</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {fields.map(({ key, label }) => {
-                          const tgtVal = tgt[key];
-                          const srcVal = src[key];
-                          const tgtEmpty = isEmpty(tgtVal);
-                          const srcHasData = !isEmpty(srcVal);
-                          const willFill = tgtEmpty && srcHasData;
-                          return (
-                            <tr key={key}>
-                              <td style={{ fontWeight: 600, fontSize: 12, color: "var(--text-secondary)" }}>{label}</td>
-                              <td>
-                                {tgtEmpty ? (
-                                  <span>
-                                    <span className="vc-merge-empty">(empty)</span>
-                                    {willFill && <span className="vc-merge-fill-tag">FILL</span>}
-                                  </span>
-                                ) : (
-                                  <span>{tgtVal}</span>
-                                )}
-                              </td>
-                              <td>
-                                {srcHasData ? (
-                                  <span style={willFill ? { fontWeight: 600, color: "#34c759" } : undefined}>{srcVal}</span>
-                                ) : (
-                                  <span className="vc-merge-empty">(empty)</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-
-                    <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginBottom: 12 }}>
-                      Fields marked <span className="vc-merge-fill-tag">FILL</span> will be copied from the duplicate to fill in missing data.
+                    <div className="vc-merge-summary-box">
+                      <strong>Result:</strong> Keep "{keepCustomer.companyName || keepCustomer.name}" — all records from
+                      "{deleteCustomer.companyName || deleteCustomer.name}" will be moved over. Empty fields on the kept customer
+                      will be filled from the deleted one. "{deleteCustomer.companyName || deleteCustomer.name}" will be permanently deleted.
                     </div>
 
                     <div className="vc-merge-actions">
