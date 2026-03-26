@@ -7851,7 +7851,7 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
         console.log('[DEBUG] Estimate row:', JSON.stringify(est));
         console.log('[DEBUG] woId resolved to:', woId);
         if (woId) {
-          const [woResult] = await db.query("UPDATE work_orders SET status='Approved', updatedAt=NOW() WHERE id=?", [woId]);
+          const [woResult] = await db.query("UPDATE work_orders SET status='Approved' WHERE id=?", [woId]);
           console.log('[DEBUG] WO update affectedRows:', woResult.affectedRows);
         } else {
           console.log('[DEBUG] No workOrderId on estimate — work order NOT updated');
