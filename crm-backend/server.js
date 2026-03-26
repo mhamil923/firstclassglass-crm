@@ -4119,9 +4119,13 @@ app.post('/email/send-estimate/:estimateId', authenticate, requireNumericParam('
     // Resolve PDF for attachment
     const attachment = await resolvePdfAttachment(pdfPath);
 
-    // Generate public review token
+    // Generate public review token — delete any existing unused tokens first to prevent duplicates
     const pubToken = generatePublicToken();
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await db.query(
+      "DELETE FROM public_tokens WHERE estimateId = ? AND type = 'estimate_review' AND usedAt IS NULL",
+      [estimateId]
+    );
     await db.query(
       'INSERT INTO public_tokens (token, type, estimateId, recipientEmail, expiresAt) VALUES (?, ?, ?, ?, ?)',
       [pubToken, 'estimate_review', estimateId, recipientEmail, expiresAt]
@@ -7842,14 +7846,15 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
     // If accepted, update work order to Approved
     try {
       if (response === 'accepted') {
-        const [[est]] = await db.query('SELECT * FROM estimates WHERE id = ?', [tok.estimateId]);
-        const woId = est?.workOrderId || est?.work_order_id;
-        console.log('[Public Estimate] Accepted. Estimate ID:', tok.estimateId, 'Work Order ID:', woId);
+        const [[est]] = await db.query('SELECT id, workOrderId, status FROM estimates WHERE id = ?', [tok.estimateId]);
+        const woId = est?.workOrderId;
+        console.log('[DEBUG] Estimate row:', JSON.stringify(est));
+        console.log('[DEBUG] woId resolved to:', woId);
         if (woId) {
           const [woResult] = await db.query("UPDATE work_orders SET status='Approved', updatedAt=NOW() WHERE id=?", [woId]);
-          console.log('[Public Estimate] Updated work order', woId, 'to Approved. Rows affected:', woResult.affectedRows);
+          console.log('[DEBUG] WO update affectedRows:', woResult.affectedRows);
         } else {
-          console.log('[Public Estimate] No work order linked to estimate', tok.estimateId);
+          console.log('[DEBUG] No workOrderId on estimate — work order NOT updated');
         }
       }
     } catch (woErr) {
