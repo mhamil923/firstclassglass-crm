@@ -7809,18 +7809,29 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
     const newStatus = response === 'accepted' ? 'Accepted' : 'Declined';
 
     // ═══════════════════════════════════════════════════════════════════════
-    // ATOMIC GUARD: Use UPDATE ... WHERE status NOT IN ('Accepted','Declined')
-    // This is the ONLY way to prevent double-processing across multiple tokens.
-    // If affectedRows === 0, the estimate was already accepted/declined — skip everything.
+    // Mark token as used IMMEDIATELY — this is the real race-condition lock
     // ═══════════════════════════════════════════════════════════════════════
+    const [tokenLock] = await db.query(
+      "UPDATE public_tokens SET usedAt=NOW() WHERE id=? AND usedAt IS NULL",
+      [tok.id]
+    );
+
+    if (tokenLock.affectedRows === 0) {
+      // Another request already claimed this token
+      console.log('[Public] Token already used — duplicate request blocked');
+      const [[est]] = await db.query('SELECT status FROM estimates WHERE id = ?', [tok.estimateId]);
+      return res.json({ success: true, status: est?.status || newStatus, message: 'Already responded' });
+    }
+
+    // Token claimed — now update estimate status
     const [updateResult] = await db.query(
       "UPDATE estimates SET status=?, updatedAt=NOW() WHERE id=? AND status NOT IN ('Accepted','Declined')",
       [newStatus, tok.estimateId]
     );
 
-    // Mark this token as used regardless
+    // Save response details on the token
     try {
-      await db.query('UPDATE public_tokens SET usedAt=NOW(), response=?, responseNotes=?, respondedAt=NOW() WHERE id=?',
+      await db.query('UPDATE public_tokens SET response=?, responseNotes=?, respondedAt=NOW() WHERE id=?',
         [response, notes || null, tok.id]);
     } catch (e) { /* non-fatal */ }
 
