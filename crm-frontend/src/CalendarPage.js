@@ -384,6 +384,254 @@ StackedWeekView.title = (date, { localizer: loc }) => {
   return loc.format({ start, end }, "dayRangeHeaderFormat");
 };
 
+/* ============================================================
+   ✅ Day View (custom card-based view — no time grid)
+============================================================ */
+function StackedDayView(props) {
+  const {
+    date,
+    events = [],
+    onSelectEvent,
+    onDoubleClickEvent,
+    dragFromOutsideItem,
+    onDropFromOutside,
+  } = props;
+
+  const day = moment(date).startOf("day");
+
+  const list = useMemo(() => {
+    const items = events.filter((ev) => {
+      const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
+      return s && isSameDay(s, day.toDate());
+    });
+    items.sort((a, b) => {
+      const sa = fromDbString(a.start) || fromDbString(a.scheduledDate) || new Date(0);
+      const sb = fromDbString(b.start) || fromDbString(b.scheduledDate) || new Date(0);
+      return +sa - +sb;
+    });
+    return items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events, date]);
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const item = typeof dragFromOutsideItem === "function" ? dragFromOutsideItem() : null;
+    if (!item || typeof onDropFromOutside !== "function") return;
+    const startTime = day.clone().add(8, "hours").toDate();
+    onDropFromOutside({ start: startTime });
+  };
+
+  const isToday = day.isSame(moment(), "day");
+
+  return (
+    <div className="stacked-week stacked-day-view-wrap">
+      <div
+        className="stacked-day stacked-day-single"
+        style={{
+          minHeight: "72vh",
+          outline: isToday ? "2px solid var(--accent-blue)" : "none",
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleDrop}
+      >
+        <div className="stacked-day-header">
+          <div style={{ minWidth: 0 }}>
+            <div className="dow">{day.format("dddd")}</div>
+            <div className="date">{day.format("MMMM D, YYYY")}</div>
+          </div>
+          <div className="cw-day-count" title={`${list.length} work order(s)`}>
+            {list.length}
+          </div>
+        </div>
+
+        <div className="stacked-day-body">
+          {list.length ? (
+            list.map((ev) => {
+              const idLabel = displayWOThenPO(ev);
+              const title = ev.customer ? `${ev.customer} — ${idLabel}` : idLabel;
+
+              const siteLoc = ev.siteLocation ?? ev.meta?.siteLocation ?? getSiteLocation(ev);
+              const siteAddr =
+                ev.siteAddress ?? ev.meta?.siteAddress ?? ev.serviceAddress ?? ev.address ?? "";
+
+              return (
+                <button
+                  key={ev.id}
+                  type="button"
+                  className="week-event-card"
+                  onClick={() => onSelectEvent && onSelectEvent(ev)}
+                  onDoubleClick={() => onDoubleClickEvent && onDoubleClickEvent(ev)}
+                  title={title}
+                >
+                  <div className="title" style={{ ...clamp2 }}>
+                    {title}
+                  </div>
+                  {siteLoc ? (
+                    <div className="meta" style={{ ...clamp1 }}>
+                      {siteLoc}
+                    </div>
+                  ) : null}
+                  {siteAddr ? (
+                    <div className="meta" style={{ ...clamp2 }}>
+                      {siteAddr}
+                    </div>
+                  ) : null}
+                </button>
+              );
+            })
+          ) : (
+            <div className="empty-text">No work orders</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+StackedDayView.range = (date) => {
+  const start = moment(date).startOf("day").toDate();
+  const end = moment(date).endOf("day").toDate();
+  return { start, end };
+};
+
+StackedDayView.navigate = (date, action) => {
+  switch (action) {
+    case "PREV":
+      return moment(date).subtract(1, "day").toDate();
+    case "NEXT":
+      return moment(date).add(1, "day").toDate();
+    default:
+      return date;
+  }
+};
+
+StackedDayView.title = (date) => moment(date).format("dddd, MMMM D, YYYY");
+
+/* ============================================================
+   ✅ Agenda View (custom card-based, grouped by day)
+============================================================ */
+const AGENDA_DAYS = 30;
+
+function CardAgendaView(props) {
+  const { date, events = [], onSelectEvent, onDoubleClickEvent } = props;
+
+  const groups = useMemo(() => {
+    const start = moment(date).startOf("day");
+    const end = moment(date).add(AGENDA_DAYS, "days").endOf("day");
+
+    const filtered = events.filter((ev) => {
+      const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
+      return s && moment(s).isBetween(start, end, null, "[]");
+    });
+    filtered.sort((a, b) => {
+      const sa = fromDbString(a.start) || fromDbString(a.scheduledDate) || new Date(0);
+      const sb = fromDbString(b.start) || fromDbString(b.scheduledDate) || new Date(0);
+      return +sa - +sb;
+    });
+
+    const map = new Map();
+    for (const ev of filtered) {
+      const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
+      const key = fmtDate(s);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(ev);
+    }
+    return Array.from(map.entries());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events, date]);
+
+  return (
+    <div className="agenda-cards">
+      {groups.length ? (
+        groups.map(([key, list]) => {
+          const d = moment(key);
+          const isToday = d.isSame(moment(), "day");
+          return (
+            <div
+              key={key}
+              className="agenda-day-group"
+              style={{ outline: isToday ? "2px solid var(--accent-blue)" : "none" }}
+            >
+              <div className="agenda-day-header">
+                <div style={{ minWidth: 0 }}>
+                  <div className="dow">{d.format("dddd")}</div>
+                  <div className="date">{d.format("MMMM D, YYYY")}</div>
+                </div>
+                <div className="cw-day-count" title={`${list.length} work order(s)`}>
+                  {list.length}
+                </div>
+              </div>
+
+              <div className="agenda-day-body">
+                {list.map((ev) => {
+                  const idLabel = displayWOThenPO(ev);
+                  const title = ev.customer ? `${ev.customer} — ${idLabel}` : idLabel;
+                  const siteLoc =
+                    ev.siteLocation ?? ev.meta?.siteLocation ?? getSiteLocation(ev);
+                  const siteAddr =
+                    ev.siteAddress ?? ev.meta?.siteAddress ?? ev.serviceAddress ?? ev.address ?? "";
+
+                  return (
+                    <button
+                      key={ev.id}
+                      type="button"
+                      className="week-event-card"
+                      onClick={() => onSelectEvent && onSelectEvent(ev)}
+                      onDoubleClick={() => onDoubleClickEvent && onDoubleClickEvent(ev)}
+                      title={title}
+                    >
+                      <div className="title" style={{ ...clamp2 }}>
+                        {title}
+                      </div>
+                      {siteLoc ? (
+                        <div className="meta" style={{ ...clamp1 }}>
+                          {siteLoc}
+                        </div>
+                      ) : null}
+                      {siteAddr ? (
+                        <div className="meta" style={{ ...clamp2 }}>
+                          {siteAddr}
+                        </div>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })
+      ) : (
+        <div className="empty-text" style={{ padding: "40px", textAlign: "center" }}>
+          No work orders in this range
+        </div>
+      )}
+    </div>
+  );
+}
+
+CardAgendaView.range = (date) => {
+  const start = moment(date).startOf("day").toDate();
+  const end = moment(date).add(AGENDA_DAYS, "days").endOf("day").toDate();
+  return { start, end };
+};
+
+CardAgendaView.navigate = (date, action) => {
+  switch (action) {
+    case "PREV":
+      return moment(date).subtract(AGENDA_DAYS, "days").toDate();
+    case "NEXT":
+      return moment(date).add(AGENDA_DAYS, "days").toDate();
+    default:
+      return date;
+  }
+};
+
+CardAgendaView.title = (date) => {
+  const start = moment(date);
+  const end = moment(date).add(AGENDA_DAYS, "days");
+  return `${start.format("MMM D, YYYY")} – ${end.format("MMM D, YYYY")}`;
+};
+
 export default function WorkOrderCalendar() {
   // Full work order list (for search in the Unscheduled bar)
   const [allOrders, setAllOrders] = useState([]);
@@ -422,8 +670,8 @@ export default function WorkOrderCalendar() {
   const [editEndTime, setEditEndTime] = useState(""); // HH:mm (window end)
 
   // Drag from Unscheduled OR Day modal → calendar
-  // ✅ IMPORTANT: Keep a ref so dragFromOutsideItem ALWAYS works (even if state updates mid-drag)
-  const [dragItem, setDragItem] = useState(null);
+  // ✅ Use ONLY a ref (no state) so drag start/end never triggers a re-render of the
+  // entire calendar tree. This was the main source of drag lag.
   const dragItemRef = useRef(null);
 
   // Status modal
@@ -548,29 +796,18 @@ export default function WorkOrderCalendar() {
     const onKeyDown = (e) => {
       if (e.key === "Escape") {
         dragItemRef.current = null;
-        setDragItem(null);
         stopDragScroll();
       }
     };
 
-    // Capture events (document + window)
+    // ✅ Single capture-phase dragover listener is enough — previously we
+    // registered 5 listeners (dragover/dragenter/drag on both document and
+    // window) which fired the handler many times per pointer move.
     document.addEventListener("dragover", updatePointer, true);
-    document.addEventListener("dragenter", updatePointer, true);
-    document.addEventListener("drag", updatePointer, true);
-
-    window.addEventListener("dragover", updatePointer, true);
-    window.addEventListener("dragenter", updatePointer, true);
-
     window.addEventListener("keydown", onKeyDown);
 
     return () => {
       document.removeEventListener("dragover", updatePointer, true);
-      document.removeEventListener("dragenter", updatePointer, true);
-      document.removeEventListener("drag", updatePointer, true);
-
-      window.removeEventListener("dragover", updatePointer, true);
-      window.removeEventListener("dragenter", updatePointer, true);
-
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [stopDragScroll]);
@@ -625,7 +862,11 @@ export default function WorkOrderCalendar() {
         const end = m.clone().endOf("week");
         return { start: start.format("YYYY-MM-DD"), end: end.format("YYYY-MM-DD") };
       }
-      case "agenda":
+      case "agenda": {
+        const start = m.clone().startOf("day");
+        const end = m.clone().add(30, "days").endOf("day");
+        return { start: start.format("YYYY-MM-DD"), end: end.format("YYYY-MM-DD") };
+      }
       case "month":
       default: {
         const start = m.clone().startOf("month").startOf("week");
@@ -911,7 +1152,6 @@ export default function WorkOrderCalendar() {
   //  - actual dragend of the draggable item
   function endGlobalDrag() {
     dragItemRef.current = null;
-    setDragItem(null);
     stopDragScroll();
   }
 
@@ -949,7 +1189,7 @@ export default function WorkOrderCalendar() {
   }
 
   function handleDropFromOutside({ start }) {
-    const item = dragItemRef.current || dragItem;
+    const item = dragItemRef.current;
     if (!item) return;
 
     const minutes = minutesWindowForOrder(item);
@@ -1072,7 +1312,6 @@ export default function WorkOrderCalendar() {
   // ✅ FIXED: make HTML5 drag reliable across browsers (esp. Firefox)
   function beginGlobalDrag(order, e) {
     dragItemRef.current = order;
-    setDragItem(order);
 
     // Prime pointer immediately (helps prevent “no scroll until I move a lot”)
     if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
@@ -1094,14 +1333,7 @@ export default function WorkOrderCalendar() {
 
   // PART 3 starts with: return (
   return (
-    <div
-      ref={pageRootRef}
-      className="calendar-page"
-      onDragOver={(e) => {
-        if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
-        if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
-      }}
-    >
+    <div ref={pageRootRef} className="calendar-page">
       <div className="container-fluid p-0">
         <h2 className="calendar-title">Work Order Calendar</h2>
 
@@ -1236,14 +1468,8 @@ export default function WorkOrderCalendar() {
         {/* Calendar */}
         <div
           className="calendar-container"
-          onDragOver={(e) => {
-            e.preventDefault();
-            if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
-            if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-          }}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => e.preventDefault()}
         >
           <DnDCalendar
             localizer={localizer}
@@ -1267,8 +1493,8 @@ export default function WorkOrderCalendar() {
             views={{
               month: true,
               week: StackedWeekView,
-              day: true,
-              agenda: true,
+              day: StackedDayView,
+              agenda: CardAgendaView,
             }}
             view={view}
             onView={(v) => setView(v)}
@@ -1283,7 +1509,7 @@ export default function WorkOrderCalendar() {
               minHeight: view === "week" ? "86vh" : "78vh",
             }}
             showAllEvents
-            resizable={view === "day"}
+            resizable={false}
             popup={false}
           />
         </div>

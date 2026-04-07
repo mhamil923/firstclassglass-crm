@@ -106,7 +106,11 @@
   box-shadow: var(--shadow-md);
   cursor: grab;
   user-select: none;
-  transition: all 0.2s ease;
+  /* ✅ Promote to its own compositor layer + isolate paint so drag is smooth */
+  will-change: transform;
+  transform: translateZ(0);
+  contain: layout paint style;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 [data-theme="dark"] .unscheduled-item {
@@ -1626,5 +1630,94 @@
   }
   .dm-tech-select {
     width: 100%;
+  }
+}
+
+/* ===========================
+   Stacked Day View (single column)
+   =========================== */
+
+.stacked-day-view-wrap {
+  display: block;
+}
+
+.stacked-day-single {
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ===========================
+   Card-based Agenda View
+   =========================== */
+
+.agenda-cards {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--bg-secondary);
+}
+
+[data-theme="dark"] .agenda-cards {
+  background: var(--bg-secondary);
+}
+
+.agenda-day-group {
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+[data-theme="dark"] .agenda-day-group {
+  background: var(--bg-secondary);
+  border-color: var(--border-primary);
+}
+
+.agenda-day-header {
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-primary);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+[data-theme="dark"] .agenda-day-header {
+  background: var(--bg-tertiary);
+  border-color: var(--border-primary);
+}
+
+.agenda-day-header .dow {
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.agenda-day-header .date {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.agenda-day-body {
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.agenda-cards .empty-text {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .agenda-day-body {
+    grid-template-columns: 1fr;
   }
 }
