@@ -1,5 +1,13 @@
 // File: src/CalendarPage.js
-import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+} from "react";
 import api from "./api";
 import { Calendar, momentLocalizer } from "react-big-calendar";
 import moment from "moment";
@@ -13,6 +21,14 @@ import "./Calendar.css";
 
 const localizer = momentLocalizer(moment);
 const DnDCalendar = withDragAndDrop(Calendar);
+
+// ✅ Context lets the custom Day view (defined at module scope) access
+// parent state like the tech list and the assign-tech handler.
+const CalendarTechContext = createContext({
+  techs: [],
+  onAssignTech: () => {},
+  techSavedId: null,
+});
 
 // Keep this in sync with server DEFAULT_WINDOW_MINUTES
 const DEFAULT_WINDOW_MIN = 120;
@@ -397,6 +413,8 @@ function StackedDayView(props) {
     onDropFromOutside,
   } = props;
 
+  const { techs, onAssignTech, techSavedId } = useContext(CalendarTechContext);
+
   const day = moment(date).startOf("day");
 
   const list = useMemo(() => {
@@ -454,29 +472,78 @@ function StackedDayView(props) {
               const siteAddr =
                 ev.siteAddress ?? ev.meta?.siteAddress ?? ev.serviceAddress ?? ev.address ?? "";
 
+              // Coerce assigned tech id to string so <select value> matches <option value>
+              const techId = ev.assignedTo ? String(ev.assignedTo) : "";
+
               return (
-                <button
-                  key={ev.id}
-                  type="button"
-                  className="week-event-card"
-                  onClick={() => onSelectEvent && onSelectEvent(ev)}
-                  onDoubleClick={() => onDoubleClickEvent && onDoubleClickEvent(ev)}
-                  title={title}
-                >
-                  <div className="title" style={{ ...clamp2 }}>
-                    {title}
+                <div key={ev.id} className="week-event-card week-event-card-day">
+                  <div
+                    className="week-event-card-body"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onSelectEvent && onSelectEvent(ev)}
+                    onDoubleClick={() => onDoubleClickEvent && onDoubleClickEvent(ev)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSelectEvent && onSelectEvent(ev);
+                      }
+                    }}
+                    title={title}
+                  >
+                    <div className="title" style={{ ...clamp2 }}>
+                      {title}
+                    </div>
+                    {siteLoc ? (
+                      <div className="meta" style={{ ...clamp1 }}>
+                        {siteLoc}
+                      </div>
+                    ) : null}
+                    {siteAddr ? (
+                      <div className="meta" style={{ ...clamp2 }}>
+                        {siteAddr}
+                      </div>
+                    ) : null}
                   </div>
-                  {siteLoc ? (
-                    <div className="meta" style={{ ...clamp1 }}>
-                      {siteLoc}
-                    </div>
-                  ) : null}
-                  {siteAddr ? (
-                    <div className="meta" style={{ ...clamp2 }}>
-                      {siteAddr}
-                    </div>
-                  ) : null}
-                </button>
+
+                  {/* Tech assignment row — same control as the day modal */}
+                  <div
+                    className="week-event-card-tech"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <label className="week-event-tech-label">Tech</label>
+                    <select
+                      className="dm-tech-select"
+                      value={techId}
+                      onChange={(e) => onAssignTech(ev.id, e.target.value)}
+                      style={{
+                        WebkitAppearance: "auto",
+                        MozAppearance: "auto",
+                        appearance: "auto",
+                        backgroundColor: "#2c2c2e",
+                        color: "#f5f5f7",
+                        border: "1px solid rgba(255, 255, 255, 0.15)",
+                        borderRadius: "8px",
+                        padding: "6px 12px",
+                        fontSize: "13px",
+                        cursor: "pointer",
+                        outline: "none",
+                        minWidth: "120px",
+                        backgroundImage: "none",
+                      }}
+                    >
+                      <option value="">Unassigned</option>
+                      {techs.map((t) => (
+                        <option key={t.id} value={String(t.id)}>
+                          {t.username}
+                        </option>
+                      ))}
+                    </select>
+                    {techSavedId === ev.id && (
+                      <span className="dm-saved-check">✓</span>
+                    )}
+                  </div>
+                </div>
               );
             })
           ) : (
@@ -681,140 +748,68 @@ export default function WorkOrderCalendar() {
   const [statusSaving, setStatusSaving] = useState(false);
 
   /* ============================================================
-     ✅ DRAG-SCROLL (FAST + PAGE FIRST)
+     ✅ DRAG AUTO-SCROLL (setInterval — reliable during HTML5 drag)
+     RAF callbacks are throttled in some browsers while a native
+     drag is in progress, which made the previous scroll lag. A
+     plain setInterval keeps firing.
   ============================================================ */
   const pageRootRef = useRef(null);
+  // eslint-disable-next-line no-unused-vars
+  const [isDragging, setIsDragging] = useState(false);
+  const scrollIntervalRef = useRef(null);
 
-  const isDraggingRef = useRef(false);
-  const dragRafRef = useRef(null);
-  const pointerRef = useRef({ x: null, y: null });
-  const primaryScrollerRef = useRef(null);
+  const startAutoScroll = useCallback(() => {
+    if (scrollIntervalRef.current) return;
+    scrollIntervalRef.current = setInterval(() => {
+      const mouseY = window._dragMouseY || 0;
+      const threshold = 120;
+      const maxSpeed = 25;
 
-  // ✅ Faster + more responsive than before
-  const DRAG_SCROLL_EDGE_PX = 220; // bigger edge zone = easier to trigger
-  const DRAG_SCROLL_MAX_PX_PER_FRAME = 70; // 🚀 much faster
-  const DRAG_SCROLL_MIN_PX_PER_FRAME = 14; // stronger baseline
-  const DRAG_SCROLL_BOOST = 1.25; // extra acceleration near edges
-
-  const isScrollableY = (el) => {
-    if (!el) return false;
-    const style = window.getComputedStyle(el);
-    const oy = style.overflowY;
-    return (
-      (oy === "auto" || oy === "scroll" || oy === "overlay") &&
-      el.scrollHeight > el.clientHeight
-    );
-  };
-
-  // Find the real scroll container for this page.
-  const resolvePrimaryScroller = useCallback(() => {
-    const docEl = document.scrollingElement || document.documentElement;
-    const body = document.body;
-
-    // If document scrolls, prefer it
-    if (docEl && docEl.scrollHeight > docEl.clientHeight && !isScrollableY(pageRootRef.current)) {
-      return docEl;
-    }
-
-    // Otherwise find nearest scroll parent
-    let el = pageRootRef.current;
-    while (el && el !== body && el !== docEl) {
-      if (isScrollableY(el)) return el;
-      el = el.parentElement;
-    }
-
-    return docEl;
+      if (mouseY < threshold) {
+        const speed = Math.round(maxSpeed * (1 - mouseY / threshold));
+        window.scrollBy(0, -speed);
+      } else if (mouseY > window.innerHeight - threshold) {
+        const speed = Math.round(
+          maxSpeed * (1 - (window.innerHeight - mouseY) / threshold)
+        );
+        window.scrollBy(0, speed);
+      }
+    }, 16); // ~60fps
   }, []);
 
-  const stopDragScroll = useCallback(() => {
-    isDraggingRef.current = false;
-    pointerRef.current = { x: null, y: null };
-    if (dragRafRef.current) cancelAnimationFrame(dragRafRef.current);
-    dragRafRef.current = null;
+  const stopAutoScroll = useCallback(() => {
+    if (scrollIntervalRef.current) {
+      clearInterval(scrollIntervalRef.current);
+      scrollIntervalRef.current = null;
+    }
   }, []);
 
-  const dragScrollStep = useCallback(() => {
-    if (!isDraggingRef.current) return;
-
-    const { y } = pointerRef.current;
-    if (typeof y === "number") {
-      const vh = window.innerHeight || 800;
-
-      const topDist = DRAG_SCROLL_EDGE_PX - y;
-      const bottomDist = y - (vh - DRAG_SCROLL_EDGE_PX);
-
-      let delta = 0;
-
-      if (topDist > 0) {
-        const t = Math.min(1, topDist / DRAG_SCROLL_EDGE_PX);
-        const speed = Math.max(
-          DRAG_SCROLL_MIN_PX_PER_FRAME,
-          Math.ceil(Math.pow(t, 0.65) * DRAG_SCROLL_MAX_PX_PER_FRAME * DRAG_SCROLL_BOOST)
-        );
-        delta = -speed;
-      } else if (bottomDist > 0) {
-        const t = Math.min(1, bottomDist / DRAG_SCROLL_EDGE_PX);
-        const speed = Math.max(
-          DRAG_SCROLL_MIN_PX_PER_FRAME,
-          Math.ceil(Math.pow(t, 0.65) * DRAG_SCROLL_MAX_PX_PER_FRAME * DRAG_SCROLL_BOOST)
-        );
-        delta = speed;
-      }
-
-      if (delta !== 0) {
-        const scroller = primaryScrollerRef.current || resolvePrimaryScroller();
-        if (!primaryScrollerRef.current) primaryScrollerRef.current = scroller;
-
-        if (scroller === document.documentElement || scroller === document.body) {
-          window.scrollBy(0, delta);
-        } else if (typeof scroller.scrollBy === "function") {
-          scroller.scrollBy({ top: delta, left: 0, behavior: "auto" });
-        } else {
-          scroller.scrollTop = (scroller.scrollTop || 0) + delta;
-        }
-      }
-    }
-
-    dragRafRef.current = requestAnimationFrame(dragScrollStep);
-  }, [resolvePrimaryScroller]);
-
-  const startDragScroll = useCallback(() => {
-    if (isDraggingRef.current) return;
-    primaryScrollerRef.current = resolvePrimaryScroller();
-    isDraggingRef.current = true;
-    dragRafRef.current = requestAnimationFrame(dragScrollStep);
-  }, [dragScrollStep, resolvePrimaryScroller]);
-
-  // Track pointer during HTML5 drag (capture phase so RBC can’t block it)
+  // Track mouse Y globally during drag
   useEffect(() => {
-    const updatePointer = (e) => {
-      if (!isDraggingRef.current) return;
-      if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
-      if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
+    const trackMouse = (e) => {
+      window._dragMouseY = e.clientY;
     };
+    window.addEventListener("dragover", trackMouse);
+    return () => window.removeEventListener("dragover", trackMouse);
+  }, []);
 
+  // ESC cancels in-flight drag + stop scrolling
+  useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key === "Escape") {
         dragItemRef.current = null;
-        stopDragScroll();
+        setIsDragging(false);
+        stopAutoScroll();
       }
     };
-
-    // ✅ Single capture-phase dragover listener is enough — previously we
-    // registered 5 listeners (dragover/dragenter/drag on both document and
-    // window) which fired the handler many times per pointer move.
-    document.addEventListener("dragover", updatePointer, true);
     window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [stopAutoScroll]);
 
-    return () => {
-      document.removeEventListener("dragover", updatePointer, true);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [stopDragScroll]);
-
+  // Cleanup interval on unmount
   useEffect(() => {
-    return () => stopDragScroll();
-  }, [stopDragScroll]);
+    return () => stopAutoScroll();
+  }, [stopAutoScroll]);
 
   /* ========= initial fetches ========= */
   useEffect(() => {
@@ -1152,7 +1147,8 @@ export default function WorkOrderCalendar() {
   //  - actual dragend of the draggable item
   function endGlobalDrag() {
     dragItemRef.current = null;
-    stopDragScroll();
+    setIsDragging(false);
+    stopAutoScroll();
   }
 
   /* ===== react-big-calendar interactions ===== */
@@ -1227,12 +1223,21 @@ export default function WorkOrderCalendar() {
 
   /* ===== Build RBC events from server events ===== */
   const rbcEvents = useMemo(() => {
+    // Cross-reference with /work-orders so each event carries the
+    // authoritative assignedTo / assignedToName (the /calendar/events
+    // payload doesn't always include it).
+    const allOrdersById = {};
+    allOrders.forEach((wo) => {
+      allOrdersById[wo.id] = wo;
+    });
+
     return events.map((o) => {
       const start = fromDbString(o.start) || new Date();
       const end = fromDbString(o.end) || moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
 
       const idLabel = displayWOThenPO(o);
       const title = o.customer ? `${o.customer} — ${idLabel}` : idLabel;
+      const full = allOrdersById[o.id];
 
       return {
         ...o,
@@ -1240,9 +1245,16 @@ export default function WorkOrderCalendar() {
         start,
         end,
         allDay: false,
+        assignedTo: full?.assignedTo ?? o.meta?.assignedTo ?? o.assignedTo ?? null,
+        assignedToName:
+          full?.assignedToName ?? o.meta?.assignedToName ?? o.assignedToName ?? "",
       };
     });
-  }, [events]);
+  }, [events, allOrders]);
+
+  // Context value for the custom Day view's tech dropdown.
+  // Built fresh each render so the handler always closes over current state.
+  const techContextValue = { techs, onAssignTech: handleAssignTech, techSavedId };
 
   /* ===== Unscheduled bar search (includes Site Address) ===== */
   const listForStrip = useMemo(() => {
@@ -1313,9 +1325,8 @@ export default function WorkOrderCalendar() {
   function beginGlobalDrag(order, e) {
     dragItemRef.current = order;
 
-    // Prime pointer immediately (helps prevent “no scroll until I move a lot”)
-    if (typeof e?.clientX === "number") pointerRef.current.x = e.clientX;
-    if (typeof e?.clientY === "number") pointerRef.current.y = e.clientY;
+    // Prime mouse Y immediately so the auto-scroll has a starting value
+    if (typeof e?.clientY === "number") window._dragMouseY = e.clientY;
 
     // REQUIRED for some browsers to consider it a valid drag
     try {
@@ -1328,7 +1339,8 @@ export default function WorkOrderCalendar() {
       // ignore
     }
 
-    startDragScroll();
+    setIsDragging(true);
+    startAutoScroll();
   }
 
   // PART 3 starts with: return (
@@ -1471,6 +1483,7 @@ export default function WorkOrderCalendar() {
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => e.preventDefault()}
         >
+          <CalendarTechContext.Provider value={techContextValue}>
           <DnDCalendar
             localizer={localizer}
             events={rbcEvents}
@@ -1512,6 +1525,7 @@ export default function WorkOrderCalendar() {
             resizable={false}
             popup={false}
           />
+          </CalendarTechContext.Provider>
         </div>
       </div>
 

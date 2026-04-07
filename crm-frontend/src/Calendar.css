@@ -1647,6 +1647,52 @@
   width: 100%;
 }
 
+/* Day-view card variant — card is a div (not a button) so we can
+   embed a real <select> for tech assignment without invalid HTML. */
+.week-event-card-day {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: default;
+  padding: 12px 12px 10px 12px;
+}
+
+.week-event-card-day .week-event-card-body {
+  cursor: pointer;
+  outline: none;
+  border-radius: var(--radius-md);
+}
+
+.week-event-card-day .week-event-card-body:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.week-event-card-tech {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-secondary);
+}
+
+[data-theme="dark"] .week-event-card-tech {
+  border-top-color: var(--border-primary);
+}
+
+.week-event-tech-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.week-event-card-tech .dm-tech-select {
+  flex: 1;
+}
+
 /* ===========================
    Card-based Agenda View
    =========================== */
