@@ -1915,50 +1915,7 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* ======================= ESTIMATE PDF ======================= */}
-        <div className="section-card">
-          <h3 className="section-header">Estimate PDF</h3>
-
-          {estimateHref ? (
-            <div className="po-pdf-grid">
-              <div className="po-pdf-card">
-                <div className="po-pdf-thumbnail">
-                  <iframe title="Estimate PDF" src={estimateHref} />
-                </div>
-                <div className="po-pdf-label" title={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}>
-                  {(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
-                </div>
-                <div className="po-pdf-actions">
-                  <button
-                    type="button"
-                    className="po-btn-expand"
-                    onClick={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
-                  >
-                    Expand
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <p className="empty-text" style={{ padding: "20px" }}>No estimate PDF attached.</p>
-          )}
-
-          <div className="row-actions" style={{ padding: "0 20px 16px" }}>
-            <label className="btn btn-light po-add-btn">
-              <span className="po-add-icon">+</span>
-              {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={handleUploadOrReplaceEstimatePdf}
-                style={{ display: "none" }}
-                disabled={busyEstimateUpload}
-              />
-            </label>
-          </div>
-        </div>
-
-        {/* ======================= Linked Estimates ======================= */}
+        {/* ======================= Estimates (combined: CRM estimates + uploaded PDF) ======================= */}
         <div className="section-card">
           <h3 className="section-header">
             Estimates
@@ -1970,7 +1927,9 @@ export default function ViewWorkOrder() {
               + Create Estimate
             </Link>
           </h3>
-          {linkedEstimates.length > 0 ? (
+
+          {/* CRM-created estimates list */}
+          {linkedEstimates.length > 0 && (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
@@ -2017,9 +1976,52 @@ export default function ViewWorkOrder() {
                 </tbody>
               </table>
             </div>
-          ) : (
-            <p className="empty-text" style={{ padding: "20px" }}>No estimates linked to this work order.</p>
           )}
+
+          {/* Uploaded estimate PDF preview */}
+          {estimateHref && (
+            <div className="po-pdf-grid">
+              <div className="po-pdf-card">
+                <div className="po-pdf-thumbnail">
+                  <iframe title="Estimate PDF" src={estimateHref} />
+                </div>
+                <div className="po-pdf-label" title={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}>
+                  {(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
+                </div>
+                <div className="po-pdf-actions">
+                  <button
+                    type="button"
+                    className="po-btn-expand"
+                    onClick={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
+                  >
+                    Expand
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Empty state — only when neither CRM estimates nor uploaded PDF exist */}
+          {linkedEstimates.length === 0 && !estimateHref && (
+            <p className="empty-text" style={{ padding: "20px" }}>
+              No estimates linked to this work order.
+            </p>
+          )}
+
+          {/* Upload / replace PDF button — always available */}
+          <div className="row-actions" style={{ padding: "0 20px 16px" }}>
+            <label className="btn btn-light po-add-btn">
+              <span className="po-add-icon">+</span>
+              {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handleUploadOrReplaceEstimatePdf}
+                style={{ display: "none" }}
+                disabled={busyEstimateUpload}
+              />
+            </label>
+          </div>
         </div>
 
         {/* ======================= Linked Invoices ======================= */}
