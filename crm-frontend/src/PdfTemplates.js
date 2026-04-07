@@ -64,6 +64,15 @@ export default function PdfTemplates() {
     } catch { return {}; }
   };
 
+  // Canvas templates store { kind: "canvas", canvasData: [...] } in config
+  const isCanvasTemplate = (tpl) => {
+    const cfg = parseConfig(tpl);
+    return cfg && cfg.kind === "canvas";
+  };
+
+  const editPathFor = (tpl) =>
+    isCanvasTemplate(tpl) ? `/pdf-templates/canvas/${tpl.id}` : `/pdf-templates/${tpl.id}`;
+
   // Determine which template is the effective default for each type
   const getDefaultInfo = () => {
     const estSpecific = templates.find(t => t.isDefault === 1 && t.type === "estimate");
@@ -78,6 +87,18 @@ export default function PdfTemplates() {
   const defaultInfo = templates.length > 0 ? getDefaultInfo() : { estimateDefaultId: null, invoiceDefaultId: null };
 
   const renderMiniPreview = (tpl) => {
+    // Canvas templates don't have the form-based config keys; show a placeholder.
+    if (isCanvasTemplate(tpl)) {
+      const cfg = parseConfig(tpl);
+      const count = Array.isArray(cfg.canvasData) ? cfg.canvasData.length : 0;
+      return (
+        <div className="pt-preview-page" style={{ display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 6, color: "#6e6e73" }}>
+          <div style={{ fontSize: 24 }}>🎨</div>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.05em" }}>CANVAS TEMPLATE</div>
+          <div style={{ fontSize: 10 }}>{count} element{count === 1 ? "" : "s"}</div>
+        </div>
+      );
+    }
     const cfg = parseConfig(tpl);
     const headerBg = cfg.lineItems?.headerBgColor || cfg.colors?.headerBg || "#E0E0E0";
     const showCompany = cfg.companyInfo?.show !== false;
@@ -232,9 +253,14 @@ export default function PdfTemplates() {
             <h1 className="pt-title">PDF Templates</h1>
             <p className="pt-subtitle">Customize the layout and styling of estimate and invoice PDFs</p>
           </div>
-          <button className="pt-btn pt-btn-primary" onClick={() => navigate("/pdf-templates/new")}>
-            + Create Template
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="pt-btn pt-btn-primary" onClick={() => navigate("/pdf-templates/new")}>
+              + Create Template
+            </button>
+            <button className="pt-btn pt-btn-primary" onClick={() => navigate("/pdf-templates/canvas/new")}>
+              + New Canvas Template
+            </button>
+          </div>
         </div>
 
         {templates.length === 0 ? (
@@ -248,10 +274,23 @@ export default function PdfTemplates() {
                   <h3 className="pt-card-name">{tpl.name}</h3>
                   <div className="pt-card-badges">
                     <span className="pt-badge pt-badge-type">{tpl.type}</span>
+                    {isCanvasTemplate(tpl) && (
+                      <span
+                        className="pt-badge"
+                        style={{
+                          background: "rgba(0,122,255,0.12)",
+                          color: "#007aff",
+                          fontWeight: 700,
+                          letterSpacing: "0.05em",
+                        }}
+                      >
+                        CANVAS
+                      </span>
+                    )}
                     {renderDefaultBadges(tpl)}
                   </div>
                   <div className="pt-card-actions">
-                    <button className="pt-btn" onClick={() => navigate(`/pdf-templates/${tpl.id}`)}>
+                    <button className="pt-btn" onClick={() => navigate(editPathFor(tpl))}>
                       Edit
                     </button>
                     <button className="pt-btn" onClick={() => handleDuplicate(tpl.id)}>
