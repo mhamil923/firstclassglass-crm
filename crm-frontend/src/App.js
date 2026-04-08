@@ -30,6 +30,7 @@ import RouteBuilder from "./RouteBuilder";
 import LineItemTemplates from "./LineItemTemplates";
 import PdfTemplates from "./PdfTemplates";
 import PdfTemplateBuilder from "./PdfTemplateBuilder";
+import PdfTemplateBuilderLegacy from "./PdfTemplateBuilderLegacy";
 import CanvasTemplateEditor from "./CanvasTemplateEditor";
 import EmailTemplates from "./EmailTemplates";
 // Note: Bootstrap is imported in index.js before our custom styles
@@ -246,6 +247,14 @@ export default function App() {
               element={
                 <PrivateRoute>
                   <CanvasTemplateEditor />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/pdf-templates/legacy/:id"
+              element={
+                <PrivateRoute>
+                  <PdfTemplateBuilderLegacy />
                 </PrivateRoute>
               }
             />

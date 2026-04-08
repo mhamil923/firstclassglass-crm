@@ -2179,7 +2179,326 @@ async function loadTemplateConfig(templateId, docType) {
   return tplConfig;
 }
 
+/* ════════════════════════════════════════════════════════════════
+   ZONE-BASED PDF RENDERER
+   Used by the rebuilt PdfTemplateBuilder. Templates store an array of
+   elements per named zone. We render zones top-to-bottom, applying the
+   selected font theme and color scheme. Live data values are
+   substituted in for `data` elements.
+   ════════════════════════════════════════════════════════════════ */
+
+const ZONE_FONT_THEMES = {
+  modern:  { body: 'Helvetica',  bold: 'Helvetica-Bold' },
+  classic: { body: 'Times-Roman', bold: 'Times-Bold' },
+  clean:   { body: 'Helvetica',  bold: 'Helvetica-Bold' },
+};
+
+const ZONE_COLOR_SCHEMES = {
+  default: { primary: '#000000', tableHeader: '#e5e7eb', titleColor: '#000000' },
+  blue:    { primary: '#1a56db', tableHeader: '#e8f0fe', titleColor: '#1a56db' },
+  green:   { primary: '#166534', tableHeader: '#dcfce7', titleColor: '#166534' },
+  gray:    { primary: '#374151', tableHeader: '#f3f4f6', titleColor: '#374151' },
+  navy:    { primary: '#1e3a5f', tableHeader: '#dbeafe', titleColor: '#1e3a5f' },
+  custom:  { primary: '#000000', tableHeader: '#e5e7eb', titleColor: '#000000' },
+};
+
+function generateZonePdf(data, lineItems, cfg, docType) {
+  return new Promise((resolve, reject) => {
+    try {
+      const PAGE_W = 612;
+      const PAGE_H = 792;
+      const MARGIN_X = 50;
+      const MARGIN_TOP = 40;
+      const MARGIN_BOTTOM = 40;
+      const COL_GAP = 20;
+      const CONTENT_W = PAGE_W - MARGIN_X * 2;
+      const COL_W = (CONTENT_W - COL_GAP) / 2;
+
+      const doc = new PDFDocument({ size: 'LETTER', margins: { top: MARGIN_TOP, bottom: MARGIN_BOTTOM, left: MARGIN_X, right: MARGIN_X } });
+      const chunks = [];
+      doc.on('data', (c) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      const theme = ZONE_FONT_THEMES[cfg.fontTheme] || ZONE_FONT_THEMES.modern;
+      const baseScheme = ZONE_COLOR_SCHEMES[cfg.colorScheme] || ZONE_COLOR_SCHEMES.default;
+      const scheme = cfg.colorScheme === 'custom' && cfg.customColors
+        ? { ...baseScheme, primary: cfg.customColors.primary || baseScheme.primary, titleColor: cfg.customColors.primary || baseScheme.titleColor }
+        : baseScheme;
+
+      const zones = cfg.zones || {};
+      const isInvoice = docType === 'invoice';
+
+      // ───── data lookup ─────
+      const fmtMoneyZ = (v) => '$' + (Number(v) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      const fmtDate = (d) => {
+        if (!d) return new Date().toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
+        return new Date(d).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
+      };
+
+      const billToBlock = () => {
+        const out = [];
+        const name = (data.companyName || data.custName || '').toUpperCase();
+        if (name) out.push(name);
+        const addr = (data.effectiveBillingAddress || data.billingAddress || '').trim();
+        if (addr) out.push(addr.toUpperCase());
+        const csz = [data.effectiveBillingCity || data.billingCity, data.effectiveBillingState || data.billingState].filter(Boolean).join(', ');
+        const zip = data.effectiveBillingZip || data.billingZip;
+        const cszLine = (csz + (zip ? ' ' + zip : '')).trim();
+        if (cszLine) out.push(cszLine.toUpperCase());
+        if (data.custPhone) out.push(data.custPhone);
+        return out.join('\n');
+      };
+
+      const shipToBlock = () => {
+        const out = [];
+        if (isInvoice) {
+          if (data.projectName) out.push(String(data.projectName).toUpperCase());
+          if (data.shipToAddress) out.push(String(data.shipToAddress).toUpperCase());
+          const csz = [data.shipToCity, data.shipToState].filter(Boolean).join(' ');
+          if (csz || data.shipToZip) out.push(((csz || '') + (data.shipToZip ? ' ' + data.shipToZip : '')).toUpperCase());
+        } else {
+          if (data.projectName) out.push(String(data.projectName).toUpperCase());
+          if (data.projectAddress) out.push(String(data.projectAddress).toUpperCase());
+          const csz = [data.projectCity, data.projectState].filter(Boolean).join(' ');
+          if (csz || data.projectZip) out.push(((csz || '') + (data.projectZip ? ' ' + data.projectZip : '')).toUpperCase());
+        }
+        return out.join('\n');
+      };
+
+      const dataValue = (key) => {
+        switch (key) {
+          case 'companyName':    return 'First Class Glass & Mirror, Inc.';
+          case 'companyAddress': return '1513 Industrial Drive\nItasca, IL 60143';
+          case 'companyPhoneFax':return 'Phone: 630-250-9777\nFax: 630-250-9727';
+          case 'companyEmail':   return 'office@firstclassglass.com';
+          case 'documentTitle':  return isInvoice ? 'INVOICE' : 'ESTIMATE';
+          case 'documentNumber': return String(isInvoice ? (data.invoiceNumber || '') : (data.id || data.estimateNumber || ''));
+          case 'date':           return fmtDate(data.issueDate);
+          case 'dueDate':        return fmtDate(data.expirationDate || data.dueDate);
+          case 'poNumber':       return String(data.poNumber || '');
+          case 'billToBlock':    return billToBlock();
+          case 'shipToBlock':    return shipToBlock();
+          case 'paymentTerms':   return String(data.terms || '');
+          case 'notes':          return String(data.notes || '');
+          default: return '';
+        }
+      };
+
+      const totals = {
+        subtotal: Number(data.subtotal || data.total || 0),
+        tax:      Number(data.taxAmount || 0),
+        total:    Number(data.total || 0),
+        balance:  Number(data.balance ?? data.total ?? 0),
+      };
+
+      // ───── element renderer ─────
+      // Returns the height (in pt) consumed by this element.
+      const renderElement = (el, x, y, w) => {
+        const padTop = el.paddingTop ?? 4;
+        const padBot = el.paddingBottom ?? 4;
+        const fontSize = el.fontSize || 10;
+        const fontName = el.bold ? theme.bold : theme.body;
+        const align = el.align || 'left';
+        const color = el.color || '#000000';
+
+        let drawn = 0;
+
+        if (el.type === 'text') {
+          doc.font(fontName).fontSize(fontSize).fillColor(color);
+          const txt = el.text || '';
+          const h = doc.heightOfString(txt, { width: w, align });
+          doc.text(txt, x, y + padTop, { width: w, align });
+          drawn = h;
+        } else if (el.type === 'data') {
+          let val = dataValue(el.dataKey);
+          if (el.dataKey === 'documentTitle') {
+            doc.font(theme.bold).fontSize(Math.max(fontSize, 18)).fillColor(scheme.titleColor);
+            const h = doc.heightOfString(val, { width: w, align });
+            doc.text(val, x, y + padTop, { width: w, align });
+            drawn = h;
+          } else {
+            let labelH = 0;
+            if (el.showLabel && el.label) {
+              doc.font(theme.bold).fontSize(Math.max(7, fontSize - 2)).fillColor(scheme.primary);
+              const lh = doc.heightOfString(String(el.label).toUpperCase(), { width: w, align });
+              doc.text(String(el.label).toUpperCase(), x, y + padTop, { width: w, align });
+              labelH = lh + 1;
+            }
+            doc.font(fontName).fontSize(fontSize).fillColor(color);
+            const h = doc.heightOfString(val, { width: w, align });
+            doc.text(val, x, y + padTop + labelH, { width: w, align });
+            drawn = labelH + h;
+          }
+        } else if (el.type === 'logo' || el.type === 'image') {
+          const logoPath = path.resolve(__dirname, 'assets', 'logo.png');
+          if (fs.existsSync(logoPath)) {
+            const iw = el.width || 90;
+            const ih = el.height || 90;
+            let ix = x;
+            if (align === 'center') ix = x + (w - iw) / 2;
+            if (align === 'right')  ix = x + (w - iw);
+            try { doc.image(logoPath, ix, y + padTop, { width: iw, height: ih }); } catch (e) {}
+            drawn = ih;
+          }
+        } else if (el.type === 'divider') {
+          const yy = y + padTop + 1;
+          doc.lineWidth(el.thickness || 1).strokeColor(el.color || '#000000');
+          doc.moveTo(x, yy).lineTo(x + w, yy).stroke();
+          doc.strokeColor('#000000').lineWidth(0.75);
+          drawn = (el.thickness || 1) + 2;
+        } else if (el.type === 'colorBar') {
+          const t = el.thickness || 8;
+          doc.save();
+          doc.rect(x, y + padTop, w, t).fill(el.color || scheme.primary);
+          doc.restore();
+          drawn = t;
+        } else if (el.type === 'borderBox') {
+          const h = el.height || 60;
+          doc.lineWidth(el.borderWidth || 1).strokeColor(el.borderColor || '#000000');
+          doc.rect(x, y + padTop, w, h).stroke();
+          doc.strokeColor('#000000').lineWidth(0.75);
+          drawn = h;
+        } else if (el.type === 'spacer') {
+          drawn = el.height || 12;
+        } else if (el.type === 'signature') {
+          const lineY = y + padTop + 18;
+          doc.lineWidth(0.75).strokeColor('#000000');
+          doc.moveTo(x, lineY).lineTo(x + Math.min(w, 240), lineY).stroke();
+          doc.font(theme.body).fontSize(fontSize || 9).fillColor('#000000');
+          doc.text(el.signatureLabel || 'Authorized Signature', x, lineY + 4, { width: w });
+          drawn = 30;
+        } else if (el.type === 'totals') {
+          const lines = [];
+          if (el.totalsKind === 'subtotal' || el.totalsKind === 'block') lines.push(['Subtotal', totals.subtotal]);
+          if (el.totalsKind === 'tax'      || el.totalsKind === 'block') lines.push(['Tax',      totals.tax]);
+          if (el.totalsKind === 'total'    || el.totalsKind === 'block') lines.push(['Total',    totals.total]);
+          if (el.totalsKind === 'balance') lines.push(['Balance Due', totals.balance]);
+          doc.font(fontName).fontSize(fontSize).fillColor(color);
+          let yy = y + padTop;
+          for (const [k, v] of lines) {
+            doc.text(k, x, yy, { width: w / 2 });
+            doc.text(fmtMoneyZ(v), x + w / 2, yy, { width: w / 2, align: 'right' });
+            yy += fontSize + 4;
+          }
+          drawn = yy - (y + padTop);
+        } else if (el.type === 'table') {
+          const cols = el.columns || { qty: true, description: true, amount: true };
+          const labels = el.columnLabels || {};
+          const colList = [];
+          if (cols.qty)         colList.push({ key: 'qty',         label: labels.qty || 'QTY',                 width: 50,  align: 'center' });
+          if (cols.description) colList.push({ key: 'description', label: labels.description || 'DESCRIPTION', width: null, align: 'left' });
+          if (cols.unitPrice)   colList.push({ key: 'unitPrice',   label: labels.unitPrice || 'UNIT PRICE',    width: 75,  align: 'right' });
+          if (cols.amount)      colList.push({ key: 'amount',      label: labels.amount || 'AMOUNT',           width: 75,  align: 'right' });
+
+          const fixedW = colList.reduce((s, c) => s + (c.width || 0), 0);
+          const flexCols = colList.filter((c) => c.width == null);
+          const flexW = Math.max(80, w - fixedW);
+          flexCols.forEach((c) => { c.width = flexW / flexCols.length; });
+
+          const headerH = 18;
+          const headerBg = el.headerBgColor || scheme.tableHeader;
+          let cx = x;
+          doc.save();
+          doc.rect(x, y + padTop, w, headerH).fill(headerBg);
+          doc.restore();
+          if (el.showBorders !== false) {
+            doc.lineWidth(0.75).strokeColor('#000000');
+            doc.rect(x, y + padTop, w, headerH).stroke();
+          }
+          doc.font(theme.bold).fontSize(8).fillColor('#000000');
+          for (const c of colList) {
+            doc.text(c.label, cx + 4, y + padTop + 5, { width: c.width - 8, align: c.align });
+            cx += c.width;
+          }
+
+          let ry = y + padTop + headerH;
+          doc.font(theme.body).fontSize(9).fillColor(color);
+          (lineItems || []).forEach((row, i) => {
+            const desc = String(row.description || '').toUpperCase();
+            const descCol = colList.find((c) => c.key === 'description');
+            const descW = descCol ? descCol.width - 8 : w - 8;
+            const rowH = Math.max(16, doc.heightOfString(desc, { width: descW }) + 6);
+            if (el.altRowColor && i % 2 === 1) {
+              doc.save();
+              doc.rect(x, ry, w, rowH).fill('#f9fafb');
+              doc.restore();
+            }
+            if (el.showBorders !== false) {
+              doc.lineWidth(0.5).strokeColor('#e5e7eb');
+              doc.rect(x, ry, w, rowH).stroke();
+            }
+            let ccx = x;
+            doc.fillColor(color).font(theme.body).fontSize(9);
+            for (const c of colList) {
+              let val = '';
+              if (c.key === 'qty')         val = row.qty != null ? String(row.qty) : (row.quantity != null ? String(row.quantity) : '');
+              else if (c.key === 'description') val = desc;
+              else if (c.key === 'unitPrice')   val = row.unitPrice != null ? fmtMoneyZ(row.unitPrice) : '';
+              else if (c.key === 'amount')      val = fmtMoneyZ(row.amount || 0);
+              doc.text(val, ccx + 4, ry + 3, { width: c.width - 8, align: c.align });
+              ccx += c.width;
+            }
+            ry += rowH;
+          });
+          drawn = ry - (y + padTop);
+        }
+
+        doc.fillColor('#000000');
+        return padTop + drawn + padBot;
+      };
+
+      // ───── render zone(s) at given x/y/width — return new y ─────
+      const renderZone = (zoneId, x, y, w) => {
+        const list = zones[zoneId] || [];
+        let yy = y;
+        for (const el of list) {
+          const h = renderElement(el, x, yy, w);
+          yy += h;
+        }
+        return yy;
+      };
+
+      // ───── lay out the document top to bottom ─────
+      let y = MARGIN_TOP;
+
+      // Header row — left/right columns share the same starting y, advance to max
+      const leftEnd  = renderZone('header-left',  MARGIN_X,                          y, COL_W);
+      const rightEnd = renderZone('header-right', MARGIN_X + COL_W + COL_GAP,        y, COL_W);
+      y = Math.max(leftEnd, rightEnd) + 12;
+
+      // Bill-to / ship-to row
+      const billEnd = renderZone('bill-to', MARGIN_X,                       y, COL_W);
+      const shipEnd = renderZone('ship-to', MARGIN_X + COL_W + COL_GAP,     y, COL_W);
+      y = Math.max(billEnd, shipEnd) + 12;
+
+      // Line items — full width
+      y = renderZone('line-items', MARGIN_X, y, CONTENT_W) + 8;
+
+      // Totals — right-aligned column
+      const TOTAL_W = 240;
+      y = renderZone('totals', MARGIN_X + CONTENT_W - TOTAL_W, y, TOTAL_W) + 8;
+
+      // Footer — full width
+      renderZone('footer', MARGIN_X, y, CONTENT_W);
+
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 function generatePdfWithConfig(data, lineItems, cfg, docType) {
+  // ─── New zone-based templates (QuickBooks-style designer) ───
+  // Templates created in the rebuilt PdfTemplateBuilder are saved with
+  // `layoutMode: "zones"`. They are rendered by a separate top-to-bottom
+  // zone renderer. Legacy free-form templates fall through to the
+  // original absolute-coordinate code path below.
+  if (cfg && cfg.layoutMode === 'zones' && cfg.zones) {
+    return generateZonePdf(data, lineItems, cfg, docType);
+  }
+
   // ============ TEMPORARY DEBUG LOGGING ============
   console.log('============ PDF GENERATION DEBUG START ============');
   console.log('FULL CONFIG:', JSON.stringify(cfg, null, 2));
