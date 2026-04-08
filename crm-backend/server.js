@@ -6137,6 +6137,18 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       }
     }
 
+    // Allow the frontend to clear an existing estimate PDF without uploading
+    // a replacement. Best-effort delete the underlying file.
+    if (!estimatePdf && isTruthy(req.body.removeEstimatePdf)) {
+      const oldPath = existing.estimatePdfPath;
+      if (oldPath) {
+        try { await deleteStoredFileByKey(oldPath); } catch (e) {
+          console.warn('[Estimate PDF Remove] Failed to delete file:', e.message);
+        }
+      }
+      estimatePdfPath = null;
+    }
+
     // Track if we're setting a new PO PDF for vendor detection
     let newPoPdfFile = null;
     if (poPdf) {

@@ -1204,6 +1204,9 @@ export default function ViewWorkOrder() {
     try {
       const form = new FormData();
       form.append("estimatePdf", file);
+      // Tell the backend this upload should overwrite an existing estimate PDF
+      // (rather than being added as an attachment).
+      form.append("replaceEstimatePdf", "1");
       await api.put(`/work-orders/${id}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
       });
@@ -1214,6 +1217,24 @@ export default function ViewWorkOrder() {
     } finally {
       setBusyEstimateUpload(false);
       e.target.value = "";
+    }
+  };
+
+  const handleRemoveEstimatePdf = async () => {
+    if (!window.confirm("Remove the uploaded estimate PDF? This cannot be undone.")) return;
+    setBusyEstimateUpload(true);
+    try {
+      const form = new FormData();
+      form.append("removeEstimatePdf", "1");
+      await api.put(`/work-orders/${id}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+      });
+      await fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error removing Estimate PDF:", error);
+      alert(error?.response?.data?.error || "Failed to remove Estimate PDF.");
+    } finally {
+      setBusyEstimateUpload(false);
     }
   };
 
@@ -1989,6 +2010,14 @@ export default function ViewWorkOrder() {
                   {(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
                 </div>
                 <div className="po-pdf-actions">
+                  <a
+                    href={estimateHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="po-btn-expand"
+                  >
+                    View / Download
+                  </a>
                   <button
                     type="button"
                     className="po-btn-expand"
@@ -2008,11 +2037,18 @@ export default function ViewWorkOrder() {
             </p>
           )}
 
-          {/* Upload / replace PDF button — always available */}
-          <div className="row-actions" style={{ padding: "0 20px 16px" }}>
+          {/* Upload / Replace / Remove actions */}
+          <div
+            className="row-actions"
+            style={{ padding: "0 20px 16px", display: "flex", gap: 8, flexWrap: "wrap" }}
+          >
             <label className="btn btn-light po-add-btn">
               <span className="po-add-icon">+</span>
-              {busyEstimateUpload ? "Uploading…" : estimateHref ? "Replace Estimate PDF" : "Upload Estimate PDF"}
+              {busyEstimateUpload
+                ? "Uploading…"
+                : estimateHref
+                ? "Replace Estimate PDF"
+                : "Upload Estimate PDF"}
               <input
                 type="file"
                 accept="application/pdf"
@@ -2021,6 +2057,22 @@ export default function ViewWorkOrder() {
                 disabled={busyEstimateUpload}
               />
             </label>
+
+            {estimateHref && (
+              <button
+                type="button"
+                className="btn"
+                onClick={handleRemoveEstimatePdf}
+                disabled={busyEstimateUpload}
+                style={{
+                  background: "#dc2626",
+                  color: "#ffffff",
+                  border: "1px solid #dc2626",
+                }}
+              >
+                {busyEstimateUpload ? "Working…" : "Remove Estimate PDF"}
+              </button>
+            )}
           </div>
         </div>
 
