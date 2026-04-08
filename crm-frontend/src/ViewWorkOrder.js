@@ -2006,18 +2006,16 @@ export default function ViewWorkOrder() {
                 <div className="po-pdf-thumbnail">
                   <iframe title="Estimate PDF" src={estimateHref} />
                 </div>
-                <div className="po-pdf-label" title={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}>
+                <a
+                  href={estimateHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="po-pdf-label"
+                  title={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
+                >
                   {(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
-                </div>
+                </a>
                 <div className="po-pdf-actions">
-                  <a
-                    href={estimateHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="po-btn-expand"
-                  >
-                    View / Download
-                  </a>
                   <button
                     type="button"
                     className="po-btn-expand"
