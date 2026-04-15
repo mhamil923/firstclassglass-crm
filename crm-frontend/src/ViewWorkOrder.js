@@ -1200,19 +1200,19 @@ export default function ViewWorkOrder() {
       e.target.value = "";
       return;
     }
+    console.log("[Estimate PDF Replace] file:", file.name, "size:", file.size, "type:", file.type);
+    console.log("[Estimate PDF Replace] PUT", `/work-orders/${id}/edit`, "fields: estimatePdf (file), replaceEstimatePdf=1");
     setBusyEstimateUpload(true);
     try {
       const form = new FormData();
       form.append("estimatePdf", file);
-      // Tell the backend this upload should overwrite an existing estimate PDF
-      // (rather than being added as an attachment).
       form.append("replaceEstimatePdf", "1");
-      await api.put(`/work-orders/${id}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-      });
+      const resp = await api.put(`/work-orders/${id}/edit`, form);
+      console.log("[Estimate PDF Replace] success:", resp.status, resp.data?.estimatePdfPath);
       await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error uploading/replacing Estimate PDF:", error);
+      console.error("[Estimate PDF Replace] response:", error?.response?.status, error?.response?.data);
       alert(error?.response?.data?.error || "Failed to upload Estimate PDF.");
     } finally {
       setBusyEstimateUpload(false);
@@ -1222,16 +1222,17 @@ export default function ViewWorkOrder() {
 
   const handleRemoveEstimatePdf = async () => {
     if (!window.confirm("Remove the uploaded estimate PDF? This cannot be undone.")) return;
+    console.log("[Estimate PDF Remove] PUT", `/work-orders/${id}/edit`, "fields: removeEstimatePdf=1");
     setBusyEstimateUpload(true);
     try {
       const form = new FormData();
       form.append("removeEstimatePdf", "1");
-      await api.put(`/work-orders/${id}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-      });
+      const resp = await api.put(`/work-orders/${id}/edit`, form);
+      console.log("[Estimate PDF Remove] success:", resp.status, "estimatePdfPath:", resp.data?.estimatePdfPath);
       await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error removing Estimate PDF:", error);
+      console.error("[Estimate PDF Remove] response:", error?.response?.status, error?.response?.data);
       alert(error?.response?.data?.error || "Failed to remove Estimate PDF.");
     } finally {
       setBusyEstimateUpload(false);
