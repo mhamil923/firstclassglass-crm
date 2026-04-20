@@ -21,6 +21,11 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
   const [activeDropdown, setActiveDropdown] = useState(null); // tempId of open row
   const [dropdownIndex, setDropdownIndex] = useState(-1);
 
+  // Catalog picker state
+  const [catalogOpen, setCatalogOpen] = useState(null); // tempId of row with catalog open
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const catalogRefs = useRef({});
+
   // Refs for focus management — keyed by tempId
   const qtyRefs = useRef({});
   const descRefs = useRef({});
@@ -49,16 +54,25 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
   // Close dropdown on click outside
   useEffect(() => {
     const handler = (e) => {
-      if (activeDropdown == null) return;
-      const rowEl = rowRefs.current[activeDropdown];
-      if (rowEl && !rowEl.contains(e.target)) {
-        setActiveDropdown(null);
-        setDropdownIndex(-1);
+      if (activeDropdown == null && catalogOpen == null) return;
+      if (activeDropdown != null) {
+        const rowEl = rowRefs.current[activeDropdown];
+        if (rowEl && !rowEl.contains(e.target)) {
+          setActiveDropdown(null);
+          setDropdownIndex(-1);
+        }
+      }
+      if (catalogOpen != null) {
+        const catEl = catalogRefs.current[catalogOpen];
+        if (catEl && !catEl.contains(e.target)) {
+          setCatalogOpen(null);
+          setCatalogSearch("");
+        }
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [activeDropdown]);
+  }, [activeDropdown, catalogOpen]);
 
   // --- Line item CRUD ---
   const addLineItem = useCallback(() => {
@@ -97,6 +111,40 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
     if (!q) return templates;
     return templates.filter((t) => t.description.toLowerCase().includes(q));
   }, [templates]);
+
+  // --- Catalog picker: select template (fills description + amount, preserves qty) ---
+  const selectFromCatalog = useCallback((tempId, template) => {
+    setLineItems((prev) =>
+      prev.map((li) => {
+        if (li.tempId !== tempId) return li;
+        return {
+          ...li,
+          description: template.description,
+          amount: template.defaultAmount != null ? String(template.defaultAmount) : li.amount,
+        };
+      })
+    );
+    setCatalogOpen(null);
+    setCatalogSearch("");
+    setTimeout(() => {
+      if (amtRefs.current[tempId]) amtRefs.current[tempId].focus();
+    }, 0);
+  }, [setLineItems]);
+
+  // Catalog: filtered + grouped templates
+  const catalogTemplates = useMemo(() => {
+    const q = catalogSearch.toLowerCase().trim();
+    const list = q
+      ? templates.filter((t) => t.description.toLowerCase().includes(q) || (t.category || "").toLowerCase().includes(q))
+      : templates;
+    const groups = {};
+    for (const t of list) {
+      const cat = t.category || "Uncategorized";
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(t);
+    }
+    return groups;
+  }, [templates, catalogSearch]);
 
   // --- Select a template ---
   const selectTemplate = useCallback((tempId, template) => {
@@ -220,6 +268,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
     <>
       {lineItems.length > 0 && (
         <div className={`${p}-li-header`}>
+          <span></span>
           <span>Qty</span>
           <span>Description</span>
           <span style={{ textAlign: "right" }}>Amount ($)</span>
@@ -240,6 +289,81 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
             key={li.tempId}
             ref={(el) => { rowRefs.current[li.tempId] = el; }}
           >
+            {/* Catalog picker */}
+            <div
+              className="li-catalog-wrapper"
+              ref={(el) => { catalogRefs.current[li.tempId] = el; }}
+            >
+              <button
+                type="button"
+                className="li-catalog-btn"
+                title="Pick from templates"
+                onClick={() => {
+                  if (catalogOpen === li.tempId) {
+                    setCatalogOpen(null);
+                    setCatalogSearch("");
+                  } else {
+                    setCatalogOpen(li.tempId);
+                    setCatalogSearch("");
+                    setActiveDropdown(null);
+                    setDropdownIndex(-1);
+                  }
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                  <rect x="1" y="1" width="6" height="6" rx="1" />
+                  <rect x="9" y="1" width="6" height="6" rx="1" />
+                  <rect x="1" y="9" width="6" height="6" rx="1" />
+                  <rect x="9" y="9" width="6" height="6" rx="1" />
+                </svg>
+              </button>
+
+              {catalogOpen === li.tempId && (
+                <div className="li-catalog-dropdown">
+                  <div className="li-catalog-search-wrap">
+                    <input
+                      type="text"
+                      className="li-catalog-search"
+                      placeholder="Search templates…"
+                      value={catalogSearch}
+                      onChange={(e) => setCatalogSearch(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="li-catalog-list">
+                    {Object.keys(catalogTemplates).length === 0 ? (
+                      <div className="li-catalog-empty">
+                        No templates yet —{" "}
+                        <Link to="/line-item-templates" className="li-catalog-empty-link">
+                          Manage Templates
+                        </Link>
+                      </div>
+                    ) : (
+                      Object.entries(catalogTemplates).map(([cat, items]) => (
+                        <div key={cat}>
+                          {(Object.keys(catalogTemplates).length > 1 || cat !== "Uncategorized") && (
+                            <div className="li-catalog-category">{cat}</div>
+                          )}
+                          {items.map((t) => (
+                            <div
+                              key={t.id}
+                              className="li-catalog-item"
+                              onMouseDown={() => selectFromCatalog(li.tempId, t)}
+                            >
+                              <span className="li-catalog-item-name">{t.description}</span>
+                              <span className="li-catalog-item-price">
+                                {t.defaultAmount != null ? fmtMoney(t.defaultAmount) : ""}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Qty */}
             <input
               type="number"
