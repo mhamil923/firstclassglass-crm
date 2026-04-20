@@ -1,5 +1,6 @@
 // File: src/LineItemEditor.js
-// Shared line item editor with template autocomplete and keyboard navigation.
+// Shared line item editor with template autocomplete on ITEM field.
+// Column order: ITEM | QTY | DESCRIPTION | AMOUNT
 // Used by both CreateEstimate.js and CreateInvoice.js.
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -24,6 +25,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
   const [dropdownIndex, setDropdownIndex] = useState(-1);
 
   // Refs for focus management — keyed by tempId
+  const itemRefs = useRef({});
   const qtyRefs = useRef({});
   const descRefs = useRef({});
   const amtRefs = useRef({});
@@ -37,13 +39,13 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
       .catch(() => {});
   }, []);
 
-  // Focus new row's quantity field after state update
+  // Focus new row's ITEM field after state update
   useEffect(() => {
     if (pendingFocus.current != null) {
       const tid = pendingFocus.current;
       pendingFocus.current = null;
       setTimeout(() => {
-        if (qtyRefs.current[tid]) qtyRefs.current[tid].focus();
+        if (itemRefs.current[tid]) itemRefs.current[tid].focus();
       }, 0);
     }
   }, [lineItems]);
@@ -67,7 +69,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
     const newId = nextTempId.current++;
     setLineItems((prev) => [
       ...prev,
-      { tempId: newId, description: "", quantity: "", amount: "", sortOrder: prev.length },
+      { tempId: newId, itemName: "", description: "", quantity: "", amount: "", sortOrder: prev.length },
     ]);
     pendingFocus.current = newId;
     return newId;
@@ -102,21 +104,20 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
     return list.slice(0, MAX_DROPDOWN);
   }, [templates]);
 
-  // --- Select a template (fills description + amount, preserves qty, focuses qty) ---
+  // --- Select a template (fills itemName + amount, preserves qty, focuses qty) ---
   const selectTemplate = useCallback((tempId, template) => {
     setLineItems((prev) =>
       prev.map((li) => {
         if (li.tempId !== tempId) return li;
         return {
           ...li,
-          description: template.description,
+          itemName: template.description,
           amount: template.defaultAmount != null ? String(template.defaultAmount) : li.amount,
         };
       })
     );
     setActiveDropdown(null);
     setDropdownIndex(-1);
-    // Focus qty field after selection so user can set quantity
     setTimeout(() => {
       if (qtyRefs.current[tempId]) qtyRefs.current[tempId].focus();
     }, 0);
@@ -126,7 +127,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
   const saveAsTemplate = useCallback(async (li) => {
     try {
       const res = await api.post("/line-item-templates", {
-        description: li.description.trim(),
+        description: (li.itemName || "").trim(),
         defaultQuantity: li.quantity ? Number(li.quantity) : 1,
         defaultAmount: li.amount ? Number(li.amount) : null,
       });
@@ -136,17 +137,17 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
     }
   }, []);
 
-  // Check if description matches an existing template exactly
-  const isExactMatch = useCallback((desc) => {
-    if (!desc || !desc.trim()) return true; // empty = don't show save button
-    const lower = desc.trim().toLowerCase();
+  // Check if itemName matches an existing template exactly
+  const isExactMatch = useCallback((name) => {
+    if (!name || !name.trim()) return true;
+    const lower = name.trim().toLowerCase();
     return templates.some((t) => t.description.toLowerCase() === lower);
   }, [templates]);
 
-  // --- Keyboard handlers ---
-  const handleDescKeyDown = useCallback((e, tempId, idx) => {
+  // --- Keyboard handler for ITEM field ---
+  const handleItemKeyDown = useCallback((e, tempId, idx) => {
     const filtered = getFilteredTemplates(
-      lineItems.find((li) => li.tempId === tempId)?.description
+      lineItems.find((li) => li.tempId === tempId)?.itemName
     );
 
     if (activeDropdown === tempId && filtered.length > 0) {
@@ -176,14 +177,13 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
     if (e.key === "Tab") {
       setActiveDropdown(null);
       setDropdownIndex(-1);
-      // Let default tab go to amount field
       return;
     }
 
     // Backspace on empty row: remove and focus previous
     if (e.key === "Backspace") {
       const li = lineItems.find((l) => l.tempId === tempId);
-      if (li && !li.description && !li.quantity && !li.amount && lineItems.length > 1) {
+      if (li && !li.itemName && !li.description && !li.quantity && !li.amount && lineItems.length > 1) {
         e.preventDefault();
         const prevItem = idx > 0 ? lineItems[idx - 1] : null;
         removeLineItem(tempId);
@@ -223,6 +223,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
     <>
       {lineItems.length > 0 && (
         <div className={`${p}-li-header`}>
+          <span>Item</span>
           <span>Qty</span>
           <span>Description</span>
           <span style={{ textAlign: "right" }}>Amount ($)</span>
@@ -234,7 +235,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
 
       {lineItems.map((li, idx) => {
         const filtered = activeDropdown === li.tempId
-          ? getFilteredTemplates(li.description)
+          ? getFilteredTemplates(li.itemName)
           : [];
 
         return (
@@ -243,26 +244,14 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
             key={li.tempId}
             ref={(el) => { rowRefs.current[li.tempId] = el; }}
           >
-            {/* Qty */}
-            <input
-              type="number"
-              step="any"
-              min="0"
-              value={li.quantity}
-              onChange={(e) => updateLineItem(li.tempId, "quantity", e.target.value)}
-              className={`${p}-li-input`}
-              placeholder="Qty"
-              ref={(el) => { qtyRefs.current[li.tempId] = el; }}
-            />
-
-            {/* Description with autocomplete */}
+            {/* ITEM — autocomplete from templates */}
             <div style={{ position: "relative" }}>
               <div className="li-desc-wrapper">
                 <input
                   type="text"
-                  value={li.description}
+                  value={li.itemName || ""}
                   onChange={(e) => {
-                    updateLineItem(li.tempId, "description", e.target.value);
+                    updateLineItem(li.tempId, "itemName", e.target.value);
                     setActiveDropdown(li.tempId);
                     setDropdownIndex(-1);
                   }}
@@ -270,14 +259,14 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
                     setActiveDropdown(li.tempId);
                     setDropdownIndex(-1);
                   }}
-                  onKeyDown={(e) => handleDescKeyDown(e, li.tempId, idx)}
+                  onKeyDown={(e) => handleItemKeyDown(e, li.tempId, idx)}
                   className={`${p}-li-input`}
-                  placeholder="Description — type to search templates"
+                  placeholder="Search item..."
                   autoComplete="off"
-                  ref={(el) => { descRefs.current[li.tempId] = el; }}
+                  ref={(el) => { itemRefs.current[li.tempId] = el; }}
                 />
                 {/* Save as template icon (skipped by tab) */}
-                {li.description && li.description.trim() && !isExactMatch(li.description) && (
+                {li.itemName && li.itemName.trim() && !isExactMatch(li.itemName) && (
                   <button
                     type="button"
                     className="li-save-template-btn"
@@ -301,7 +290,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
                       onMouseEnter={() => setDropdownIndex(tIdx)}
                     >
                       <span className="li-template-option-desc">
-                        {highlightMatch(t.description, li.description)}
+                        {highlightMatch(t.description, li.itemName)}
                       </span>
                       <span className="li-template-option-amount">
                         {t.defaultAmount != null ? fmtMoney(t.defaultAmount) : ""}
@@ -312,7 +301,30 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
               )}
             </div>
 
-            {/* Amount */}
+            {/* QTY */}
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={li.quantity}
+              onChange={(e) => updateLineItem(li.tempId, "quantity", e.target.value)}
+              className={`${p}-li-input`}
+              placeholder="Qty"
+              ref={(el) => { qtyRefs.current[li.tempId] = el; }}
+            />
+
+            {/* DESCRIPTION */}
+            <input
+              type="text"
+              value={li.description}
+              onChange={(e) => updateLineItem(li.tempId, "description", e.target.value)}
+              className={`${p}-li-input`}
+              placeholder="Description"
+              autoComplete="off"
+              ref={(el) => { descRefs.current[li.tempId] = el; }}
+            />
+
+            {/* AMOUNT */}
             <input
               type="number"
               step="0.01"

@@ -741,6 +741,12 @@ async function ensureEstimateTables() {
       )
     `);
     console.log('[Estimates] estimate_line_items table ready');
+    // Add itemName column if missing
+    const [estLiCols] = await db.query("SHOW COLUMNS FROM estimate_line_items LIKE 'itemName'");
+    if (!estLiCols.length) {
+      await db.query("ALTER TABLE estimate_line_items ADD COLUMN itemName VARCHAR(500) NULL AFTER sortOrder");
+      console.log('[Estimates] Added itemName column to estimate_line_items');
+    }
   } catch (e) {
     console.warn('[Estimates] Could not create estimate_line_items table:', e.message);
   }
@@ -841,6 +847,12 @@ async function ensureInvoiceTables() {
       )
     `);
     console.log('[Invoices] invoice_line_items table ready');
+    // Add itemName column if missing
+    const [invLiCols] = await db.query("SHOW COLUMNS FROM invoice_line_items LIKE 'itemName'");
+    if (!invLiCols.length) {
+      await db.query("ALTER TABLE invoice_line_items ADD COLUMN itemName VARCHAR(500) NULL AFTER sortOrder");
+      console.log('[Invoices] Added itemName column to invoice_line_items');
+    }
   } catch (e) {
     console.warn('[Invoices] Could not create invoice_line_items table:', e.message);
   }
@@ -3168,12 +3180,12 @@ app.delete('/estimates/:id', authenticate, requireNumericParam('id'), async (req
 app.post('/estimates/:id/line-items', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const body = coerceBody(req);
-    if (!body.description) return res.status(400).json({ error: 'description is required.' });
+    if (!body.description && !body.itemName) return res.status(400).json({ error: 'description or itemName is required.' });
     if (body.amount === undefined) return res.status(400).json({ error: 'amount is required.' });
 
     await db.query(
-      'INSERT INTO estimate_line_items (estimateId, description, quantity, amount, sortOrder) VALUES (?,?,?,?,?)',
-      [req.params.id, body.description, body.quantity ?? null, Number(body.amount), body.sortOrder || 0]
+      'INSERT INTO estimate_line_items (estimateId, itemName, description, quantity, amount, sortOrder) VALUES (?,?,?,?,?,?)',
+      [req.params.id, body.itemName || null, body.description || '', body.quantity ?? null, Number(body.amount), body.sortOrder || 0]
     );
     await recalcEstimateTotals(req.params.id);
 
@@ -3197,6 +3209,7 @@ app.put('/estimates/:id/line-items/:itemId', authenticate, requireNumericParam('
     const sets = [];
     const params = [];
 
+    if (body.itemName !== undefined) { sets.push('itemName=?'); params.push(body.itemName || null); }
     if (body.description !== undefined) { sets.push('description=?'); params.push(body.description); }
     if (body.quantity !== undefined) { sets.push('quantity=?'); params.push(body.quantity); }
     if (body.amount !== undefined) { sets.push('amount=?'); params.push(Number(body.amount)); }
@@ -3608,8 +3621,8 @@ app.post('/invoices/:id/line-items', authenticate, requireNumericParam('id'), as
   try {
     const b = coerceBody(req);
     await db.query(
-      'INSERT INTO invoice_line_items (invoiceId, description, quantity, amount, sortOrder) VALUES (?, ?, ?, ?, ?)',
-      [req.params.id, b.description || '', b.quantity != null ? b.quantity : null, Number(b.amount) || 0, Number(b.sortOrder) || 0]
+      'INSERT INTO invoice_line_items (invoiceId, itemName, description, quantity, amount, sortOrder) VALUES (?, ?, ?, ?, ?, ?)',
+      [req.params.id, b.itemName || null, b.description || '', b.quantity != null ? b.quantity : null, Number(b.amount) || 0, Number(b.sortOrder) || 0]
     );
     await recalcInvoiceTotals(req.params.id);
     const [[invoice]] = await db.query('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
@@ -3628,6 +3641,7 @@ app.put('/invoices/:id/line-items/:itemId', authenticate, requireNumericParam('i
     const b = coerceBody(req);
     const sets = [];
     const params = [];
+    if (b.itemName !== undefined) { sets.push('itemName=?'); params.push(b.itemName || null); }
     if (b.description !== undefined) { sets.push('description=?'); params.push(b.description); }
     if (b.quantity !== undefined) { sets.push('quantity=?'); params.push(b.quantity); }
     if (b.amount !== undefined) { sets.push('amount=?'); params.push(Number(b.amount) || 0); }
@@ -3812,8 +3826,8 @@ app.post('/invoices/:id/duplicate', authenticate, requireNumericParam('id'), asy
     const [origItems] = await db.query('SELECT * FROM invoice_line_items WHERE invoiceId = ? ORDER BY sortOrder ASC', [req.params.id]);
     for (const li of origItems) {
       await db.query(
-        'INSERT INTO invoice_line_items (invoiceId, sortOrder, description, quantity, amount) VALUES (?, ?, ?, ?, ?)',
-        [newId, li.sortOrder, li.description, li.quantity, li.amount]
+        'INSERT INTO invoice_line_items (invoiceId, sortOrder, itemName, description, quantity, amount) VALUES (?, ?, ?, ?, ?, ?)',
+        [newId, li.sortOrder, li.itemName || null, li.description, li.quantity, li.amount]
       );
     }
     await recalcInvoiceTotals(newId);
@@ -3858,8 +3872,8 @@ app.post('/estimates/:id/convert-to-invoice', authenticate, requireNumericParam(
     const [estItems] = await db.query('SELECT * FROM estimate_line_items WHERE estimateId = ? ORDER BY sortOrder ASC', [req.params.id]);
     for (const li of estItems) {
       await db.query(
-        'INSERT INTO invoice_line_items (invoiceId, sortOrder, description, quantity, amount) VALUES (?, ?, ?, ?, ?)',
-        [newId, li.sortOrder, li.description, li.quantity, li.amount]
+        'INSERT INTO invoice_line_items (invoiceId, sortOrder, itemName, description, quantity, amount) VALUES (?, ?, ?, ?, ?, ?)',
+        [newId, li.sortOrder, li.itemName || null, li.description, li.quantity, li.amount]
       );
     }
     await recalcInvoiceTotals(newId);

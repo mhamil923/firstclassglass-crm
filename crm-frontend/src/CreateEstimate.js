@@ -143,6 +143,7 @@ export default function CreateEstimate() {
           e.lineItems.map((li) => ({
             id: li.id,
             tempId: nextTempId.current++,
+            itemName: li.itemName || "",
             description: li.description || "",
             quantity: li.quantity != null ? String(li.quantity) : "",
             amount: li.amount != null ? String(li.amount) : "",
@@ -324,7 +325,7 @@ export default function CreateEstimate() {
 
       // Filter out empty line items (e.g. blank rows from Tab-to-add)
       const validLineItems = lineItems.filter(
-        (li) => li.description && li.description.trim()
+        (li) => (li.itemName && li.itemName.trim()) || (li.description && li.description.trim())
       );
 
       // Sync line items: delete removed, update existing, create new
@@ -346,6 +347,7 @@ export default function CreateEstimate() {
       for (let i = 0; i < validLineItems.length; i++) {
         const li = validLineItems[i];
         const itemPayload = {
+          itemName: li.itemName || "",
           description: li.description,
           quantity: li.quantity !== "" ? Number(li.quantity) : null,
           amount: Number(li.amount) || 0,
