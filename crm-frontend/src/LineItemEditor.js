@@ -2,7 +2,7 @@
 // Shared line item editor with template autocomplete and keyboard navigation.
 // Used by both CreateEstimate.js and CreateInvoice.js.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "./api";
 import "./LineItemEditor.css";
@@ -13,6 +13,8 @@ function fmtMoney(val) {
   return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+const MAX_DROPDOWN = 6;
+
 export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cssPrefix }) {
   const p = cssPrefix; // shorthand
 
@@ -20,11 +22,6 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
   const [templates, setTemplates] = useState([]);
   const [activeDropdown, setActiveDropdown] = useState(null); // tempId of open row
   const [dropdownIndex, setDropdownIndex] = useState(-1);
-
-  // Catalog picker state
-  const [catalogOpen, setCatalogOpen] = useState(null); // tempId of row with catalog open
-  const [catalogSearch, setCatalogSearch] = useState("");
-  const catalogRefs = useRef({});
 
   // Refs for focus management — keyed by tempId
   const qtyRefs = useRef({});
@@ -54,25 +51,16 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
   // Close dropdown on click outside
   useEffect(() => {
     const handler = (e) => {
-      if (activeDropdown == null && catalogOpen == null) return;
-      if (activeDropdown != null) {
-        const rowEl = rowRefs.current[activeDropdown];
-        if (rowEl && !rowEl.contains(e.target)) {
-          setActiveDropdown(null);
-          setDropdownIndex(-1);
-        }
-      }
-      if (catalogOpen != null) {
-        const catEl = catalogRefs.current[catalogOpen];
-        if (catEl && !catEl.contains(e.target)) {
-          setCatalogOpen(null);
-          setCatalogSearch("");
-        }
+      if (activeDropdown == null) return;
+      const rowEl = rowRefs.current[activeDropdown];
+      if (rowEl && !rowEl.contains(e.target)) {
+        setActiveDropdown(null);
+        setDropdownIndex(-1);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [activeDropdown, catalogOpen]);
+  }, [activeDropdown]);
 
   // --- Line item CRUD ---
   const addLineItem = useCallback(() => {
@@ -105,15 +93,17 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
     });
   }, [setLineItems]);
 
-  // --- Template filtering ---
+  // --- Template filtering (max 6 results) ---
   const getFilteredTemplates = useCallback((query) => {
     const q = (query || "").toLowerCase().trim();
-    if (!q) return templates;
-    return templates.filter((t) => t.description.toLowerCase().includes(q));
+    const list = q
+      ? templates.filter((t) => t.description.toLowerCase().includes(q))
+      : templates;
+    return list.slice(0, MAX_DROPDOWN);
   }, [templates]);
 
-  // --- Catalog picker: select template (fills description + amount, preserves qty) ---
-  const selectFromCatalog = useCallback((tempId, template) => {
+  // --- Select a template (fills description + amount, preserves qty, focuses qty) ---
+  const selectTemplate = useCallback((tempId, template) => {
     setLineItems((prev) =>
       prev.map((li) => {
         if (li.tempId !== tempId) return li;
@@ -124,46 +114,11 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
         };
       })
     );
-    setCatalogOpen(null);
-    setCatalogSearch("");
-    setTimeout(() => {
-      if (amtRefs.current[tempId]) amtRefs.current[tempId].focus();
-    }, 0);
-  }, [setLineItems]);
-
-  // Catalog: filtered + grouped templates
-  const catalogTemplates = useMemo(() => {
-    const q = catalogSearch.toLowerCase().trim();
-    const list = q
-      ? templates.filter((t) => t.description.toLowerCase().includes(q) || (t.category || "").toLowerCase().includes(q))
-      : templates;
-    const groups = {};
-    for (const t of list) {
-      const cat = t.category || "Uncategorized";
-      if (!groups[cat]) groups[cat] = [];
-      groups[cat].push(t);
-    }
-    return groups;
-  }, [templates, catalogSearch]);
-
-  // --- Select a template ---
-  const selectTemplate = useCallback((tempId, template) => {
-    setLineItems((prev) =>
-      prev.map((li) => {
-        if (li.tempId !== tempId) return li;
-        return {
-          ...li,
-          description: template.description,
-          quantity: template.defaultQuantity != null ? String(template.defaultQuantity) : "",
-          amount: template.defaultAmount != null ? String(template.defaultAmount) : "",
-        };
-      })
-    );
     setActiveDropdown(null);
     setDropdownIndex(-1);
-    // Focus amount field after selection
+    // Focus qty field after selection so user can set quantity
     setTimeout(() => {
-      if (amtRefs.current[tempId]) amtRefs.current[tempId].focus();
+      if (qtyRefs.current[tempId]) qtyRefs.current[tempId].focus();
     }, 0);
   }, [setLineItems]);
 
@@ -205,7 +160,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
         setDropdownIndex((prev) => Math.max(prev - 1, -1));
         return;
       }
-      if (e.key === "Enter" && dropdownIndex >= 0) {
+      if ((e.key === "Enter" || e.key === "Tab") && dropdownIndex >= 0) {
         e.preventDefault();
         selectTemplate(tempId, filtered[dropdownIndex]);
         return;
@@ -268,7 +223,6 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
     <>
       {lineItems.length > 0 && (
         <div className={`${p}-li-header`}>
-          <span></span>
           <span>Qty</span>
           <span>Description</span>
           <span style={{ textAlign: "right" }}>Amount ($)</span>
@@ -289,81 +243,6 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
             key={li.tempId}
             ref={(el) => { rowRefs.current[li.tempId] = el; }}
           >
-            {/* Catalog picker */}
-            <div
-              className="li-catalog-wrapper"
-              ref={(el) => { catalogRefs.current[li.tempId] = el; }}
-            >
-              <button
-                type="button"
-                className="li-catalog-btn"
-                title="Pick from templates"
-                onClick={() => {
-                  if (catalogOpen === li.tempId) {
-                    setCatalogOpen(null);
-                    setCatalogSearch("");
-                  } else {
-                    setCatalogOpen(li.tempId);
-                    setCatalogSearch("");
-                    setActiveDropdown(null);
-                    setDropdownIndex(-1);
-                  }
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                  <rect x="1" y="1" width="6" height="6" rx="1" />
-                  <rect x="9" y="1" width="6" height="6" rx="1" />
-                  <rect x="1" y="9" width="6" height="6" rx="1" />
-                  <rect x="9" y="9" width="6" height="6" rx="1" />
-                </svg>
-              </button>
-
-              {catalogOpen === li.tempId && (
-                <div className="li-catalog-dropdown">
-                  <div className="li-catalog-search-wrap">
-                    <input
-                      type="text"
-                      className="li-catalog-search"
-                      placeholder="Search templates…"
-                      value={catalogSearch}
-                      onChange={(e) => setCatalogSearch(e.target.value)}
-                      autoFocus
-                    />
-                  </div>
-                  <div className="li-catalog-list">
-                    {Object.keys(catalogTemplates).length === 0 ? (
-                      <div className="li-catalog-empty">
-                        No templates yet —{" "}
-                        <Link to="/line-item-templates" className="li-catalog-empty-link">
-                          Manage Templates
-                        </Link>
-                      </div>
-                    ) : (
-                      Object.entries(catalogTemplates).map(([cat, items]) => (
-                        <div key={cat}>
-                          {(Object.keys(catalogTemplates).length > 1 || cat !== "Uncategorized") && (
-                            <div className="li-catalog-category">{cat}</div>
-                          )}
-                          {items.map((t) => (
-                            <div
-                              key={t.id}
-                              className="li-catalog-item"
-                              onMouseDown={() => selectFromCatalog(li.tempId, t)}
-                            >
-                              <span className="li-catalog-item-name">{t.description}</span>
-                              <span className="li-catalog-item-price">
-                                {t.defaultAmount != null ? fmtMoney(t.defaultAmount) : ""}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
             {/* Qty */}
             <input
               type="number"
@@ -388,22 +267,21 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
                     setDropdownIndex(-1);
                   }}
                   onFocus={() => {
-                    if (li.description) {
-                      setActiveDropdown(li.tempId);
-                      setDropdownIndex(-1);
-                    }
+                    setActiveDropdown(li.tempId);
+                    setDropdownIndex(-1);
                   }}
                   onKeyDown={(e) => handleDescKeyDown(e, li.tempId, idx)}
                   className={`${p}-li-input`}
-                  placeholder="Description"
+                  placeholder="Description — type to search templates"
                   autoComplete="off"
                   ref={(el) => { descRefs.current[li.tempId] = el; }}
                 />
-                {/* Save as template icon */}
+                {/* Save as template icon (skipped by tab) */}
                 {li.description && li.description.trim() && !isExactMatch(li.description) && (
                   <button
                     type="button"
                     className="li-save-template-btn"
+                    tabIndex={-1}
                     onClick={() => saveAsTemplate(li)}
                     title="Save as template"
                   >
@@ -452,6 +330,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
             <button
               type="button"
               className={`${p}-li-btn`}
+              tabIndex={-1}
               onClick={() => moveLineItem(idx, -1)}
               disabled={idx === 0}
               title="Move up"
@@ -463,6 +342,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
             <button
               type="button"
               className={`${p}-li-btn`}
+              tabIndex={-1}
               onClick={() => moveLineItem(idx, 1)}
               disabled={idx === lineItems.length - 1}
               title="Move down"
@@ -474,6 +354,7 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
             <button
               type="button"
               className={`${p}-li-btn danger`}
+              tabIndex={-1}
               onClick={() => removeLineItem(li.tempId)}
               title="Remove"
             >

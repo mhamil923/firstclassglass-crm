@@ -2643,13 +2643,12 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
       const bZip = (data.billingZip || '').trim();
       const cityStateZip = [bCity, bState].filter(Boolean).join(', ') + (bZip ? ' ' + bZip : '');
       if (rawAddr) {
+        // Split address on newlines or commas to prevent text stacking/overlap
+        const addrParts = rawAddr.split(/[\n\r]+|,\s*/).map(s => s.trim()).filter(Boolean);
         const addrUpper = rawAddr.toUpperCase();
-        if (cityStateZip && bCity && addrUpper.includes(bCity.toUpperCase()) && bZip && addrUpper.includes(bZip)) {
-          billLines.push(U(rawAddr));
-        } else {
-          billLines.push(U(rawAddr));
-          if (cityStateZip) billLines.push(U(cityStateZip));
-        }
+        const hasCityZipInAddr = cityStateZip && bCity && addrUpper.includes(bCity.toUpperCase()) && bZip && addrUpper.includes(bZip);
+        for (const part of addrParts) billLines.push(U(part));
+        if (!hasCityZipInAddr && cityStateZip) billLines.push(U(cityStateZip));
       } else if (cityStateZip) {
         billLines.push(U(cityStateZip));
       }
@@ -2681,7 +2680,10 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
         const btX = cfg.billTo?.x ?? 50;
         const btY = cfg.billTo?.y ?? 155;
         const btW = cfg.billTo?.width ?? 245;
-        const btH = cfg.billTo?.height ?? 90;
+        const cfgH = cfg.billTo?.height ?? 90;
+        // Ensure box is tall enough for all content lines
+        const contentH = hdrH + 3 + billLines.length * lineH + 4;
+        const btH = Math.max(cfgH, contentH);
         doc.lineWidth(stroke);
         doc.rect(btX, btY, btW, btH).stroke();
         doc.font(boldFont).fontSize(7).fillColor(textColor);
@@ -2689,7 +2691,10 @@ function generatePdfWithConfig(data, lineItems, cfg, docType) {
         doc.moveTo(btX, btY + hdrH).lineTo(btX + btW, btY + hdrH).lineWidth(0.5).stroke();
         doc.font(bodyFont).fontSize(8);
         let bY = btY + hdrH + 3;
-        for (const line of billLines) { doc.text(line, btX + 4, bY, { width: btW - 8 }); bY += lineH; }
+        for (const line of billLines) {
+          doc.text(line, btX + 4, bY, { width: btW - 8, lineBreak: false, ellipsis: true });
+          bY += lineH;
+        }
       }
 
       // Project Box — absolute position from config
