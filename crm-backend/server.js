@@ -508,6 +508,27 @@ async function ensurePoTable() {
 
 ensurePoTable().catch(() => {});
 
+// ─── WORK_ORDER_ESTIMATE_PDFS TABLE (multi estimate PDFs) ───────────────────
+async function ensureEstimatePdfsTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS work_order_estimate_pdfs (
+        id           INT AUTO_INCREMENT PRIMARY KEY,
+        workOrderId  INT NOT NULL,
+        filename     VARCHAR(500) NULL,
+        originalName VARCHAR(500) NULL,
+        uploadedAt   DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (workOrderId) REFERENCES work_orders(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('[Estimate PDF Table] work_order_estimate_pdfs table ready');
+  } catch (e) {
+    console.warn('[Estimate PDF Table] Could not create work_order_estimate_pdfs:', e.message);
+  }
+}
+
+ensureEstimatePdfsTable().catch(() => {});
+
 /**
  * Sync the first (oldest) PO from work_order_pos back to the legacy columns
  * on work_orders so existing code that reads those columns still works.
@@ -6678,6 +6699,91 @@ app.put('/work-orders/:id/pos/:poId/mark-picked-up', authenticate, requireNumeri
     res.status(500).json({ error: 'Failed to mark PO as picked up.' });
   }
 });
+
+// ─── WORK ORDER ESTIMATE PDFS (multiple uploaded estimate PDFs per WO) ─────
+
+// GET /work-orders/:id/estimate-pdfs — list all uploaded estimate PDFs
+app.get('/work-orders/:id/estimate-pdfs', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const [rows] = await db.query(
+      'SELECT id, workOrderId, filename, originalName, uploadedAt FROM work_order_estimate_pdfs WHERE workOrderId = ? ORDER BY uploadedAt ASC, id ASC',
+      [wid]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Estimate PDFs list error:', err);
+    res.status(500).json({ error: 'Failed to fetch estimate PDFs for this work order.' });
+  }
+});
+
+// POST /work-orders/:id/estimate-pdfs — upload a new estimate PDF (adds, does not replace)
+app.post(
+  '/work-orders/:id/estimate-pdfs',
+  authenticate,
+  requireNumericParam('id'),
+  withMulter(upload.any()),
+  async (req, res) => {
+    try {
+      const wid = Number(req.params.id);
+
+      const [[wo]] = await db.query('SELECT id FROM work_orders WHERE id = ?', [wid]);
+      if (!wo) return res.status(404).json({ error: 'Work order not found.' });
+
+      const files = Array.isArray(req.files) ? req.files : [];
+      const pdfFile = files.find((f) => isPdf(f));
+      if (!pdfFile) return res.status(400).json({ error: 'Please upload a PDF file.' });
+
+      const key = fileKey(pdfFile);
+      const originalName = pdfFile.originalname || '';
+
+      const [result] = await db.query(
+        'INSERT INTO work_order_estimate_pdfs (workOrderId, filename, originalName) VALUES (?, ?, ?)',
+        [wid, key, originalName]
+      );
+
+      const [[row]] = await db.query(
+        'SELECT id, workOrderId, filename, originalName, uploadedAt FROM work_order_estimate_pdfs WHERE id = ?',
+        [result.insertId]
+      );
+      res.status(201).json(row);
+    } catch (err) {
+      console.error('Estimate PDF upload error:', err);
+      res.status(500).json({ error: 'Failed to upload estimate PDF.' });
+    }
+  }
+);
+
+// DELETE /work-orders/:id/estimate-pdfs/:pdfId — remove one estimate PDF
+app.delete(
+  '/work-orders/:id/estimate-pdfs/:pdfId',
+  authenticate,
+  requireNumericParam('id'),
+  requireNumericParam('pdfId'),
+  async (req, res) => {
+    try {
+      const wid = Number(req.params.id);
+      const pdfId = Number(req.params.pdfId);
+
+      const [[row]] = await db.query(
+        'SELECT * FROM work_order_estimate_pdfs WHERE id = ? AND workOrderId = ?',
+        [pdfId, wid]
+      );
+      if (!row) return res.status(404).json({ error: 'Estimate PDF not found on this work order.' });
+
+      await db.query('DELETE FROM work_order_estimate_pdfs WHERE id = ?', [pdfId]);
+
+      if (row.filename) {
+        await deleteStoredFileByKey(row.filename);
+      }
+
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('Estimate PDF delete error:', err);
+      res.status(500).json({ error: 'Failed to delete estimate PDF.' });
+    }
+  }
+);
 
 // ─── PURCHASE ORDERS (derived from work_order_pos) ──────────────────────────
 

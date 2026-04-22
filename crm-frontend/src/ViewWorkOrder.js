@@ -400,6 +400,7 @@ export default function ViewWorkOrder() {
   const [poList, setPoList] = useState([]);
   const [linkedEstimates, setLinkedEstimates] = useState([]);
   const [linkedInvoices, setLinkedInvoices] = useState([]);
+  const [estimatePdfs, setEstimatePdfs] = useState([]);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
   const [busyImageUpload, setBusyImageUpload] = useState(false);
 
@@ -576,6 +577,18 @@ export default function ViewWorkOrder() {
     }
   };
 
+  const fetchEstimatePdfs = async () => {
+    try {
+      const res = await api.get(`/work-orders/${id}/estimate-pdfs`, {
+        headers: authHeaders(),
+      });
+      setEstimatePdfs(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Error fetching estimate PDFs:", err);
+      setEstimatePdfs([]);
+    }
+  };
+
   useEffect(() => {
     // Reset init state when id changes
     quickScheduleInitializedRef.current = false;
@@ -585,6 +598,7 @@ export default function ViewWorkOrder() {
     fetchWorkOrderPos();
     fetchLinkedEstimates();
     fetchLinkedInvoices();
+    fetchEstimatePdfs();
     fetchTechUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -1192,7 +1206,7 @@ export default function ViewWorkOrder() {
     }
   };
 
-  const handleUploadOrReplaceEstimatePdf = async (e) => {
+  const handleAddEstimatePdf = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!isPdfFile(file)) {
@@ -1200,19 +1214,21 @@ export default function ViewWorkOrder() {
       e.target.value = "";
       return;
     }
-    console.log("[Estimate PDF Replace] file:", file.name, "size:", file.size, "type:", file.type);
-    console.log("[Estimate PDF Replace] PUT", `/work-orders/${id}/edit`, "fields: estimatePdf (file), replaceEstimatePdf=1");
     setBusyEstimateUpload(true);
     try {
       const form = new FormData();
       form.append("estimatePdf", file);
-      form.append("replaceEstimatePdf", "1");
-      const resp = await api.put(`/work-orders/${id}/edit`, form);
-      console.log("[Estimate PDF Replace] success:", resp.status, resp.data?.estimatePdfPath);
-      await fetchWorkOrder();
+      const resp = await api.post(`/work-orders/${id}/estimate-pdfs`, form, {
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+      });
+      const newPdf = resp.data;
+      if (newPdf && newPdf.id) {
+        setEstimatePdfs((prev) => [...prev, newPdf]);
+      } else {
+        await fetchEstimatePdfs();
+      }
     } catch (error) {
-      console.error("⚠️ Error uploading/replacing Estimate PDF:", error);
-      console.error("[Estimate PDF Replace] response:", error?.response?.status, error?.response?.data);
+      console.error("⚠️ Error uploading Estimate PDF:", error);
       alert(error?.response?.data?.error || "Failed to upload Estimate PDF.");
     } finally {
       setBusyEstimateUpload(false);
@@ -1220,19 +1236,33 @@ export default function ViewWorkOrder() {
     }
   };
 
-  const handleRemoveEstimatePdf = async () => {
-    if (!window.confirm("Remove the uploaded estimate PDF? This cannot be undone.")) return;
-    console.log("[Estimate PDF Remove] PUT", `/work-orders/${id}/edit`, "fields: removeEstimatePdf=1");
+  const handleRemoveEstimatePdf = async (pdfId) => {
+    if (!pdfId) return;
+    if (!window.confirm("Remove this estimate PDF? This cannot be undone.")) return;
+    setBusyEstimateUpload(true);
+    try {
+      await api.delete(`/work-orders/${id}/estimate-pdfs/${pdfId}`, {
+        headers: authHeaders(),
+      });
+      setEstimatePdfs((prev) => prev.filter((p) => p.id !== pdfId));
+    } catch (error) {
+      console.error("⚠️ Error removing Estimate PDF:", error);
+      alert(error?.response?.data?.error || "Failed to remove Estimate PDF.");
+    } finally {
+      setBusyEstimateUpload(false);
+    }
+  };
+
+  const handleRemoveLegacyEstimatePdf = async () => {
+    if (!window.confirm("Remove this estimate PDF? This cannot be undone.")) return;
     setBusyEstimateUpload(true);
     try {
       const form = new FormData();
       form.append("removeEstimatePdf", "1");
-      const resp = await api.put(`/work-orders/${id}/edit`, form);
-      console.log("[Estimate PDF Remove] success:", resp.status, "estimatePdfPath:", resp.data?.estimatePdfPath);
+      await api.put(`/work-orders/${id}/edit`, form);
       await fetchWorkOrder();
     } catch (error) {
-      console.error("⚠️ Error removing Estimate PDF:", error);
-      console.error("[Estimate PDF Remove] response:", error?.response?.status, error?.response?.data);
+      console.error("⚠️ Error removing legacy Estimate PDF:", error);
       alert(error?.response?.data?.error || "Failed to remove Estimate PDF.");
     } finally {
       setBusyEstimateUpload(false);
@@ -1937,17 +1967,32 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* ======================= Estimates (combined: CRM estimates + uploaded PDF) ======================= */}
+        {/* ======================= Estimates (combined: CRM estimates + uploaded PDFs) ======================= */}
         <div className="section-card">
           <h3 className="section-header">
             Estimates
-            <Link
-              to={`/estimates/new?workOrderId=${woId}`}
-              className="btn btn-light"
-              style={{ fontSize: 12, padding: "4px 12px", textDecoration: "none" }}
-            >
-              + Create Estimate
-            </Link>
+            <span style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+              <label
+                className="btn btn-light"
+                style={{ fontSize: 12, padding: "4px 12px", cursor: busyEstimateUpload ? "not-allowed" : "pointer", marginBottom: 0 }}
+              >
+                + {busyEstimateUpload ? "Uploading…" : "Upload Estimate PDF"}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleAddEstimatePdf}
+                  style={{ display: "none" }}
+                  disabled={busyEstimateUpload}
+                />
+              </label>
+              <Link
+                to={`/estimates/new?workOrderId=${woId}`}
+                className="btn btn-light"
+                style={{ fontSize: 12, padding: "4px 12px", textDecoration: "none" }}
+              >
+                + Create Estimate
+              </Link>
+            </span>
           </h3>
 
           {/* CRM-created estimates list */}
@@ -2000,79 +2045,92 @@ export default function ViewWorkOrder() {
             </div>
           )}
 
-          {/* Uploaded estimate PDF preview */}
-          {estimateHref && (
+          {/* Uploaded estimate PDFs — each is its own card */}
+          {(estimatePdfs.length > 0 || estimateHref) && (
             <div className="po-pdf-grid">
-              <div className="po-pdf-card">
-                <div className="po-pdf-thumbnail">
-                  <iframe title="Estimate PDF" src={estimateHref} />
-                </div>
-                <a
-                  href={estimateHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="po-pdf-label"
-                  title={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
-                >
-                  {(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
-                </a>
-                <div className="po-pdf-actions">
-                  <button
-                    type="button"
-                    className="po-btn-expand"
-                    onClick={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
+              {estimatePdfs.map((pdf) => {
+                const href = pdfThumbUrl(pdf.filename);
+                const name = pdf.originalName || (pdf.filename || "").split("/").pop() || "estimate.pdf";
+                return (
+                  <div className="po-pdf-card" key={`pdf-${pdf.id}`}>
+                    <div className="po-pdf-thumbnail">
+                      <iframe title={`Estimate PDF ${pdf.id}`} src={href} />
+                    </div>
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="po-pdf-label"
+                      title={name}
+                    >
+                      {name}
+                    </a>
+                    <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className="po-btn-expand"
+                        onClick={() => openLightbox("pdf", href, name)}
+                      >
+                        Expand
+                      </button>
+                      <button
+                        type="button"
+                        className="po-btn-expand"
+                        onClick={() => handleRemoveEstimatePdf(pdf.id)}
+                        disabled={busyEstimateUpload}
+                        style={{ background: "#dc2626", color: "#ffffff", borderColor: "#dc2626" }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Legacy single estimatePdfPath card (backward compat) */}
+              {estimateHref && (
+                <div className="po-pdf-card" key="legacy-estimate-pdf">
+                  <div className="po-pdf-thumbnail">
+                    <iframe title="Estimate PDF" src={estimateHref} />
+                  </div>
+                  <a
+                    href={estimateHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="po-pdf-label"
+                    title={(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
                   >
-                    Expand
-                  </button>
+                    {(estimatePdfPath || "").split("/").pop() || "estimate.pdf"}
+                  </a>
+                  <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="po-btn-expand"
+                      onClick={() => openLightbox("pdf", estimateHref, "Estimate PDF")}
+                    >
+                      Expand
+                    </button>
+                    <button
+                      type="button"
+                      className="po-btn-expand"
+                      onClick={handleRemoveLegacyEstimatePdf}
+                      disabled={busyEstimateUpload}
+                      style={{ background: "#dc2626", color: "#ffffff", borderColor: "#dc2626" }}
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
-          {/* Empty state — only when neither CRM estimates nor uploaded PDF exist */}
-          {linkedEstimates.length === 0 && !estimateHref && (
+          {/* Empty state — only when no estimates of any kind exist */}
+          {linkedEstimates.length === 0 && estimatePdfs.length === 0 && !estimateHref && (
             <p className="empty-text" style={{ padding: "20px" }}>
               No estimates linked to this work order.
             </p>
           )}
-
-          {/* Upload / Replace / Remove actions */}
-          <div
-            className="row-actions"
-            style={{ padding: "0 20px 16px", display: "flex", gap: 8, flexWrap: "wrap" }}
-          >
-            <label className="btn btn-light po-add-btn">
-              <span className="po-add-icon">+</span>
-              {busyEstimateUpload
-                ? "Uploading…"
-                : estimateHref
-                ? "Replace Estimate PDF"
-                : "Upload Estimate PDF"}
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={handleUploadOrReplaceEstimatePdf}
-                style={{ display: "none" }}
-                disabled={busyEstimateUpload}
-              />
-            </label>
-
-            {estimateHref && (
-              <button
-                type="button"
-                className="btn"
-                onClick={handleRemoveEstimatePdf}
-                disabled={busyEstimateUpload}
-                style={{
-                  background: "#dc2626",
-                  color: "#ffffff",
-                  border: "1px solid #dc2626",
-                }}
-              >
-                {busyEstimateUpload ? "Working…" : "Remove Estimate PDF"}
-              </button>
-            )}
-          </div>
         </div>
 
         {/* ======================= Linked Invoices ======================= */}
