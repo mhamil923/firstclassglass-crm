@@ -315,6 +315,30 @@ function StackedWeekView(props) {
               <div className="stacked-day-body">
                 {list.length ? (
                   list.map((ev) => {
+                    if (ev.kind === "pickup") {
+                      return (
+                        <button
+                          key={ev.id}
+                          type="button"
+                          className="week-event-card"
+                          onClick={() => onSelectEvent && onSelectEvent(ev)}
+                          title={`Pickup — ${ev.supplier}`}
+                          style={{
+                            background: "rgba(234,88,12,0.12)",
+                            borderLeft: "4px solid #ea580c",
+                          }}
+                        >
+                          <div className="title" style={{ ...clamp2, color: "#ea580c" }}>
+                            📦 Pickup — {ev.supplier}
+                          </div>
+                          {ev.assignedTech ? (
+                            <div className="meta" style={{ ...clamp1 }}>
+                              Tech: {ev.assignedTech}
+                            </div>
+                          ) : null}
+                        </button>
+                      );
+                    }
                     const idLabel = displayWOThenPO(ev);
                     const title = ev.customer ? `${ev.customer} — ${idLabel}` : idLabel;
 
@@ -465,6 +489,40 @@ function StackedDayView(props) {
         <div className="stacked-day-body">
           {list.length ? (
             list.map((ev) => {
+              if (ev.kind === "pickup") {
+                return (
+                  <div
+                    key={ev.id}
+                    className="week-event-card week-event-card-day"
+                    style={{
+                      background: "rgba(234,88,12,0.12)",
+                      borderLeft: "4px solid #ea580c",
+                    }}
+                  >
+                    <div
+                      className="week-event-card-body"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onSelectEvent && onSelectEvent(ev)}
+                      title={`Pickup — ${ev.supplier}`}
+                    >
+                      <div className="title" style={{ ...clamp2, color: "#ea580c" }}>
+                        📦 Pickup — {ev.supplier}
+                      </div>
+                      {ev.assignedTech ? (
+                        <div className="meta" style={{ ...clamp1 }}>
+                          Tech: {ev.assignedTech}
+                        </div>
+                      ) : null}
+                      {ev.notes ? (
+                        <div className="meta" style={{ ...clamp2 }}>
+                          {ev.notes}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              }
               const idLabel = displayWOThenPO(ev);
               const title = ev.customer ? `${ev.customer} — ${idLabel}` : idLabel;
 
@@ -631,6 +689,30 @@ function CardAgendaView(props) {
 
               <div className="agenda-day-body">
                 {list.map((ev) => {
+                  if (ev.kind === "pickup") {
+                    return (
+                      <button
+                        key={ev.id}
+                        type="button"
+                        className="week-event-card"
+                        onClick={() => onSelectEvent && onSelectEvent(ev)}
+                        title={`Pickup — ${ev.supplier}`}
+                        style={{
+                          background: "rgba(234,88,12,0.12)",
+                          borderLeft: "4px solid #ea580c",
+                        }}
+                      >
+                        <div className="title" style={{ ...clamp2, color: "#ea580c" }}>
+                          📦 Pickup — {ev.supplier}
+                        </div>
+                        {ev.assignedTech ? (
+                          <div className="meta" style={{ ...clamp1 }}>
+                            Tech: {ev.assignedTech}
+                          </div>
+                        ) : null}
+                      </button>
+                    );
+                  }
                   const idLabel = displayWOThenPO(ev);
                   const title = ev.customer ? `${ev.customer} — ${idLabel}` : idLabel;
                   const siteLoc =
@@ -707,6 +789,17 @@ export default function WorkOrderCalendar() {
   // Unscheduled strip data
   const [unscheduledOrders, setUnscheduledOrders] = useState([]);
   const [unscheduledSearch, setUnscheduledSearch] = useState("");
+
+  // Supplier pickups (a separate calendar event type rendered in orange)
+  const [supplierPickups, setSupplierPickups] = useState([]);
+  const [pickupSuppliers, setPickupSuppliers] = useState([]);
+  const [pickupModalOpen, setPickupModalOpen] = useState(false);
+  const [pickupForm, setPickupForm] = useState({
+    supplier: "",
+    notes: "",
+    assignedTech: "",
+  });
+  const [pickupSaving, setPickupSaving] = useState(false);
 
   // Calendar view/range
   const [view, setView] = useState("month");
@@ -832,12 +925,16 @@ export default function WorkOrderCalendar() {
 
   const refreshLists = useCallback(async () => {
     try {
-      const [allRes, unRes] = await Promise.all([
+      const [allRes, unRes, pickupsRes, supRes] = await Promise.all([
         api.get("/work-orders"),
         api.get("/work-orders/unscheduled"),
+        api.get("/supplier-pickups").catch(() => ({ data: [] })),
+        api.get("/supplier-pickups/suppliers").catch(() => ({ data: [] })),
       ]);
       setAllOrders(Array.isArray(allRes.data) ? allRes.data : []);
       setUnscheduledOrders(Array.isArray(unRes.data) ? unRes.data : []);
+      setSupplierPickups(Array.isArray(pickupsRes.data) ? pickupsRes.data : []);
+      setPickupSuppliers(Array.isArray(supRes.data) ? supRes.data : []);
     } catch (e) {
       console.error("⚠️ Error loading lists:", e);
     }
@@ -1153,6 +1250,15 @@ export default function WorkOrderCalendar() {
 
   /* ===== react-big-calendar interactions ===== */
   function handleEventDrop({ event, start, end }) {
+    if (event?.kind === "pickup") {
+      api
+        .put(`/supplier-pickups/${event.pickupId}`, { scheduledDate: fmtDate(start) })
+        .then(async () => {
+          await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
+        })
+        .catch((e) => console.error("⚠️ Error rescheduling pickup:", e));
+      return;
+    }
     let minutes = end ? diffMinutes(start, end) : minutesWindowForOrder(event);
     if (!Number.isFinite(minutes) || minutes <= 0) minutes = DEFAULT_WINDOW_MIN;
 
@@ -1188,6 +1294,17 @@ export default function WorkOrderCalendar() {
     const item = dragItemRef.current;
     if (!item) return;
 
+    if (item.__kind === "pickup") {
+      api
+        .put(`/supplier-pickups/${item.id}`, { scheduledDate: fmtDate(start) })
+        .then(async () => {
+          endGlobalDrag();
+          await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
+        })
+        .catch((e) => console.error("⚠️ Error scheduling pickup:", e));
+      return;
+    }
+
     const minutes = minutesWindowForOrder(item);
 
     setSchedulePayload(item.id, {
@@ -1205,6 +1322,19 @@ export default function WorkOrderCalendar() {
   }
 
   function onSelectEvent(event) {
+    if (event?.kind === "pickup") {
+      // For pickups, clicking offers to delete (simple confirm; full editor not in scope)
+      const ok = window.confirm(
+        `Supplier Pickup\n\nSupplier: ${event.supplier}\nTech: ${event.assignedTech || "Unassigned"}\n\nDelete this pickup?`
+      );
+      if (ok && event.pickupId) {
+        api
+          .delete(`/supplier-pickups/${event.pickupId}`)
+          .then(() => Promise.all([fetchCalendarForVisibleRange(), refreshLists()]))
+          .catch((e) => console.error("⚠️ Error deleting pickup:", e));
+      }
+      return;
+    }
     const full = allOrders.find((o) => Number(o.id) === Number(event.id)) || event;
     openEditModal(full);
   }
@@ -1231,7 +1361,7 @@ export default function WorkOrderCalendar() {
       allOrdersById[wo.id] = wo;
     });
 
-    return events.map((o) => {
+    const woEvents = events.map((o) => {
       const start = fromDbString(o.start) || new Date();
       const end = fromDbString(o.end) || moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
 
@@ -1245,12 +1375,35 @@ export default function WorkOrderCalendar() {
         start,
         end,
         allDay: false,
+        kind: "wo",
         assignedTo: full?.assignedTo ?? o.meta?.assignedTo ?? o.assignedTo ?? null,
         assignedToName:
           full?.assignedToName ?? o.meta?.assignedToName ?? o.assignedToName ?? "",
       };
     });
-  }, [events, allOrders]);
+
+    const pickupEvents = supplierPickups
+      .filter((p) => !!p.scheduledDate)
+      .map((p) => {
+        const start = moment(p.scheduledDate).startOf("day").add(8, "hours").toDate();
+        const end = moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
+        const techLabel = p.assignedTech ? ` · ${p.assignedTech}` : "";
+        return {
+          id: `pickup-${p.id}`,
+          pickupId: p.id,
+          kind: "pickup",
+          supplier: p.supplier,
+          assignedTech: p.assignedTech || "",
+          notes: p.notes || "",
+          title: `📦 Pickup — ${p.supplier}${techLabel}`,
+          start,
+          end,
+          allDay: false,
+        };
+      });
+
+    return [...woEvents, ...pickupEvents];
+  }, [events, allOrders, supplierPickups]);
 
   // Context value for the custom Day view's tech dropdown.
   // Built fresh each render so the handler always closes over current state.
@@ -1321,6 +1474,76 @@ export default function WorkOrderCalendar() {
     setStatusChoice("");
   }
 
+  /* ===== Supplier Pickup modal + drag ===== */
+  function openPickupModal() {
+    setPickupForm({ supplier: "", notes: "", assignedTech: "" });
+    setPickupModalOpen(true);
+  }
+
+  function closePickupModal() {
+    if (pickupSaving) return;
+    setPickupModalOpen(false);
+  }
+
+  async function savePickup() {
+    const supplier = (pickupForm.supplier || "").trim();
+    if (!supplier) {
+      alert("Please choose a supplier.");
+      return;
+    }
+    setPickupSaving(true);
+    try {
+      await api.post("/supplier-pickups", {
+        supplier,
+        notes: pickupForm.notes || null,
+        assignedTech: pickupForm.assignedTech || null,
+        // No scheduledDate — pickup starts in the unscheduled row
+      });
+      setPickupModalOpen(false);
+      await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
+    } catch (e) {
+      console.error("⚠️ Error creating pickup:", e);
+      alert("Failed to create supplier pickup.");
+    } finally {
+      setPickupSaving(false);
+    }
+  }
+
+  function beginPickupDrag(pickup, e) {
+    dragItemRef.current = { ...pickup, __kind: "pickup" };
+    if (typeof e?.clientY === "number") window._dragMouseY = e.clientY;
+    try {
+      if (e?.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.dropEffect = "move";
+        e.dataTransfer.setData("text/plain", String(pickup?.id ?? ""));
+      }
+    } catch {
+      /* ignore */
+    }
+    setIsDragging(true);
+    startAutoScroll();
+  }
+
+  const unscheduledPickups = useMemo(
+    () => supplierPickups.filter((p) => !p.scheduledDate),
+    [supplierPickups]
+  );
+
+  /* RBC event styling — orange for pickups, default for work orders */
+  const eventPropGetter = useCallback((event) => {
+    if (event?.kind === "pickup") {
+      return {
+        style: {
+          background: "#ea580c",
+          border: "1px solid #c2410c",
+          color: "#fff",
+        },
+      };
+    }
+    return {};
+  }, []);
+
   // ✅ FIXED: make HTML5 drag reliable across browsers (esp. Firefox)
   function beginGlobalDrag(order, e) {
     dragItemRef.current = order;
@@ -1359,19 +1582,30 @@ export default function WorkOrderCalendar() {
               {unscheduledSearch ? "Search Results (All Work Orders)" : "Unscheduled Work Orders"}
             </h4>
 
-            <div className="input-group" style={{ maxWidth: 620 }}>
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Search customer, site location, site address, WO #, or PO # (includes scheduled)"
-                value={unscheduledSearch}
-                onChange={(e) => setUnscheduledSearch(e.target.value)}
-              />
-              {unscheduledSearch ? (
-                <button className="btn btn-outline-secondary" onClick={clearUnscheduledSearch}>
-                  Clear
-                </button>
-              ) : null}
+            <div className="d-flex align-items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="btn btn-warning"
+                style={{ background: "#ea580c", borderColor: "#ea580c", color: "#fff", fontWeight: 700 }}
+                onClick={openPickupModal}
+                type="button"
+              >
+                + Supplier Pickup
+              </button>
+
+              <div className="input-group" style={{ maxWidth: 620 }}>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Search customer, site location, site address, WO #, or PO # (includes scheduled)"
+                  value={unscheduledSearch}
+                  onChange={(e) => setUnscheduledSearch(e.target.value)}
+                />
+                {unscheduledSearch ? (
+                  <button className="btn btn-outline-secondary" onClick={clearUnscheduledSearch}>
+                    Clear
+                  </button>
+                ) : null}
+              </div>
             </div>
           </div>
 
@@ -1475,6 +1709,74 @@ export default function WorkOrderCalendar() {
             })}
             {!listForStrip.length && <div className="empty-text">No matches.</div>}
           </div>
+
+          {/* Unscheduled Supplier Pickups row */}
+          <div className="d-flex align-items-center mt-3 mb-2" style={{ gap: 8 }}>
+            <h5 className="mb-0" style={{ color: "#ea580c" }}>📦 Supplier Pickups</h5>
+            <span className="text-muted" style={{ fontSize: 12 }}>
+              ({unscheduledPickups.length} unscheduled — drag onto a calendar day)
+            </span>
+          </div>
+          <div className="unscheduled-list">
+            {unscheduledPickups.map((p) => (
+              <div
+                key={p.id}
+                className="unscheduled-item"
+                draggable
+                onDragStart={(e) => beginPickupDrag(p, e)}
+                onDragEnd={endGlobalDrag}
+                title={`Pickup — ${p.supplier}`}
+                style={{
+                  background: "rgba(234,88,12,0.12)",
+                  borderLeft: "4px solid #ea580c",
+                }}
+              >
+                <div className="d-flex align-items-center justify-content-between" style={{ gap: 8 }}>
+                  <div className="fw-bold" style={clamp1}>
+                    📦 {p.supplier}
+                  </div>
+                  <span className="badge" style={{ background: "#ea580c", color: "#fff" }}>
+                    Pickup
+                  </span>
+                </div>
+                {p.assignedTech ? (
+                  <small className="text-muted" style={clamp1}>
+                    Tech: {p.assignedTech}
+                  </small>
+                ) : null}
+                {p.notes ? (
+                  <div>
+                    <small className="text-muted" style={clamp2}>
+                      {p.notes}
+                    </small>
+                  </div>
+                ) : null}
+                <div
+                  className="unscheduled-actions"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
+                >
+                  <button
+                    className="btn btn-xs btn-light"
+                    onClick={() => {
+                      if (!window.confirm(`Delete pickup for ${p.supplier}?`)) return;
+                      api
+                        .delete(`/supplier-pickups/${p.id}`)
+                        .then(() => Promise.all([fetchCalendarForVisibleRange(), refreshLists()]))
+                        .catch((e) => console.error("⚠️ Error deleting pickup:", e));
+                    }}
+                    type="button"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+            {!unscheduledPickups.length && (
+              <div className="empty-text">No unscheduled supplier pickups.</div>
+            )}
+          </div>
         </div>
 
         {/* Calendar */}
@@ -1516,6 +1818,7 @@ export default function WorkOrderCalendar() {
             components={{
               event: CustomEvent,
             }}
+            eventPropGetter={eventPropGetter}
             className={`rbc-enhanced ${view === "week" ? "rbc-week-pretty" : ""}`}
             style={{
               height: "auto",
@@ -1845,6 +2148,96 @@ export default function WorkOrderCalendar() {
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Supplier Pickup creation modal ---------- */}
+      {pickupModalOpen && (
+        <div className="modal-overlay" onClick={closePickupModal}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>📦 New Supplier Pickup</h3>
+              <button
+                className="modal-close"
+                onClick={closePickupModal}
+                aria-label="Close"
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="mb-3">
+                <label className="form-label small">Supplier *</label>
+                <select
+                  className="form-select"
+                  value={pickupForm.supplier}
+                  onChange={(e) =>
+                    setPickupForm((f) => ({ ...f, supplier: e.target.value }))
+                  }
+                >
+                  <option value="">— Select supplier —</option>
+                  {pickupSuppliers.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mb-3">
+                <label className="form-label small">Assign Tech</label>
+                <select
+                  className="form-select"
+                  value={pickupForm.assignedTech}
+                  onChange={(e) =>
+                    setPickupForm((f) => ({ ...f, assignedTech: e.target.value }))
+                  }
+                >
+                  <option value="">— Unassigned —</option>
+                  {techs.map((t) => (
+                    <option key={t.id} value={t.username}>
+                      {t.username}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mb-3">
+                <label className="form-label small">Notes</label>
+                <textarea
+                  className="form-control"
+                  rows={3}
+                  value={pickupForm.notes}
+                  onChange={(e) =>
+                    setPickupForm((f) => ({ ...f, notes: e.target.value }))
+                  }
+                  placeholder="Optional notes…"
+                />
+              </div>
+
+              <div className="d-flex justify-content-end">
+                <button
+                  className="btn btn-outline-secondary me-2"
+                  onClick={closePickupModal}
+                  disabled={pickupSaving}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={savePickup}
+                  disabled={pickupSaving}
+                  type="button"
+                  style={{ background: "#ea580c", borderColor: "#ea580c" }}
+                >
+                  {pickupSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

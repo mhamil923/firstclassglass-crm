@@ -529,6 +529,27 @@ async function ensureEstimatePdfsTable() {
 
 ensureEstimatePdfsTable().catch(() => {});
 
+// ─── SUPPLIER_PICKUPS TABLE ─────────────────────────────────────────────────
+async function ensureSupplierPickupsTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS supplier_pickups (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        supplier VARCHAR(255) NOT NULL,
+        scheduledDate DATE NULL,
+        notes TEXT,
+        assignedTech VARCHAR(100),
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('[Supplier Pickups Table] supplier_pickups table ready');
+  } catch (e) {
+    console.warn('[Supplier Pickups Table] Could not create supplier_pickups:', e.message);
+  }
+}
+
+ensureSupplierPickupsTable().catch(() => {});
+
 /**
  * Sync the first (oldest) PO from work_order_pos back to the legacy columns
  * on work_orders so existing code that reads those columns still works.
@@ -6923,6 +6944,124 @@ app.put('/purchase-orders/:id/mark-picked-up', authenticate, requireNumericParam
   } catch (err) {
     console.error('Purchase-order mark-picked-up error:', err);
     res.status(500).json({ error: 'Failed to mark purchase order as picked up.' });
+  }
+});
+
+// ─── SUPPLIER PICKUPS (calendar event type) ─────────────────────────────────
+
+// GET /supplier-pickups?date=YYYY-MM-DD  (date is optional)
+app.get('/supplier-pickups', authenticate, async (req, res) => {
+  try {
+    const dateQ = String(req.query.date || '').trim();
+    let sql = `SELECT id, supplier, scheduledDate, notes, assignedTech, createdAt
+               FROM supplier_pickups`;
+    const params = [];
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateQ)) {
+      sql += ` WHERE DATE(scheduledDate) = ?`;
+      params.push(dateQ);
+    }
+    sql += ` ORDER BY scheduledDate IS NULL, scheduledDate ASC, id DESC`;
+    const [rows] = await db.execute(sql, params);
+    res.json(rows);
+  } catch (err) {
+    console.error('Supplier pickups list error:', err);
+    res.status(500).json({ error: 'Failed to fetch supplier pickups.' });
+  }
+});
+
+// GET /supplier-pickups/suppliers — distinct supplier list (from work_order_pos.poSupplier)
+app.get('/supplier-pickups/suppliers', authenticate, async (req, res) => {
+  try {
+    const [rows] = await db.execute(`
+      SELECT DISTINCT TRIM(poSupplier) AS supplier
+      FROM work_order_pos
+      WHERE poSupplier IS NOT NULL AND TRIM(poSupplier) <> ''
+      ORDER BY supplier ASC
+    `);
+    res.json(rows.map((r) => r.supplier));
+  } catch (err) {
+    console.error('Supplier list error:', err);
+    res.status(500).json({ error: 'Failed to fetch supplier list.' });
+  }
+});
+
+// POST /supplier-pickups  { supplier, scheduledDate, notes, assignedTech }
+app.post('/supplier-pickups', authenticate, async (req, res) => {
+  try {
+    const supplier = String(req.body?.supplier || '').trim();
+    const scheduledDateRaw = String(req.body?.scheduledDate || '').trim();
+    const notes = req.body?.notes != null ? String(req.body.notes) : null;
+    const assignedTech = req.body?.assignedTech != null ? String(req.body.assignedTech) : null;
+
+    if (!supplier) {
+      return res.status(400).json({ error: 'supplier is required.' });
+    }
+    const scheduledDate = /^\d{4}-\d{2}-\d{2}$/.test(scheduledDateRaw) ? scheduledDateRaw : null;
+
+    const [result] = await db.execute(
+      `INSERT INTO supplier_pickups (supplier, scheduledDate, notes, assignedTech)
+       VALUES (?, ?, ?, ?)`,
+      [supplier, scheduledDate, notes, assignedTech]
+    );
+    const [[row]] = await db.query('SELECT * FROM supplier_pickups WHERE id = ?', [result.insertId]);
+    res.status(201).json(row);
+  } catch (err) {
+    console.error('Supplier pickup create error:', err);
+    res.status(500).json({ error: 'Failed to create supplier pickup.' });
+  }
+});
+
+// PUT /supplier-pickups/:id  (used for drag-and-drop reschedule; partial update)
+app.put('/supplier-pickups/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const fields = [];
+    const params = [];
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'supplier')) {
+      fields.push('supplier = ?');
+      params.push(String(req.body.supplier || '').trim());
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'scheduledDate')) {
+      const raw = String(req.body.scheduledDate || '').trim();
+      const v = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+      fields.push('scheduledDate = ?');
+      params.push(v);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'notes')) {
+      fields.push('notes = ?');
+      params.push(req.body.notes != null ? String(req.body.notes) : null);
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'assignedTech')) {
+      fields.push('assignedTech = ?');
+      params.push(req.body.assignedTech != null ? String(req.body.assignedTech) : null);
+    }
+
+    if (!fields.length) {
+      return res.status(400).json({ error: 'No fields to update.' });
+    }
+
+    params.push(id);
+    await db.execute(`UPDATE supplier_pickups SET ${fields.join(', ')} WHERE id = ?`, params);
+    const [[row]] = await db.query('SELECT * FROM supplier_pickups WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'Supplier pickup not found.' });
+    res.json(row);
+  } catch (err) {
+    console.error('Supplier pickup update error:', err);
+    res.status(500).json({ error: 'Failed to update supplier pickup.' });
+  }
+});
+
+// DELETE /supplier-pickups/:id
+app.delete('/supplier-pickups/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [result] = await db.execute('DELETE FROM supplier_pickups WHERE id = ?', [id]);
+    if (!result.affectedRows) return res.status(404).json({ error: 'Supplier pickup not found.' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Supplier pickup delete error:', err);
+    res.status(500).json({ error: 'Failed to delete supplier pickup.' });
   }
 });
 
