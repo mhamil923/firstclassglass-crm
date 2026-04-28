@@ -1583,15 +1583,6 @@ export default function WorkOrderCalendar() {
             </h4>
 
             <div className="d-flex align-items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-              <button
-                className="btn btn-warning"
-                style={{ background: "#ea580c", borderColor: "#ea580c", color: "#fff", fontWeight: 700 }}
-                onClick={openPickupModal}
-                type="button"
-              >
-                + Supplier Pickup
-              </button>
-
               <div className="input-group" style={{ maxWidth: 620 }}>
                 <input
                   type="text"
@@ -1606,6 +1597,14 @@ export default function WorkOrderCalendar() {
                   </button>
                 ) : null}
               </div>
+
+              <button
+                className="btn btn-primary"
+                onClick={openPickupModal}
+                type="button"
+              >
+                + Supplier Pickup
+              </button>
             </div>
           </div>
 
@@ -1707,37 +1706,20 @@ export default function WorkOrderCalendar() {
                 </div>
               );
             })}
-            {!listForStrip.length && <div className="empty-text">No matches.</div>}
-          </div>
-
-          {/* Unscheduled Supplier Pickups row */}
-          <div className="d-flex align-items-center mt-3 mb-2" style={{ gap: 8 }}>
-            <h5 className="mb-0" style={{ color: "#ea580c" }}>📦 Supplier Pickups</h5>
-            <span className="text-muted" style={{ fontSize: 12 }}>
-              ({unscheduledPickups.length} unscheduled — drag onto a calendar day)
-            </span>
-          </div>
-          <div className="unscheduled-list">
             {unscheduledPickups.map((p) => (
               <div
-                key={p.id}
+                key={`pickup-${p.id}`}
                 className="unscheduled-item"
                 draggable
                 onDragStart={(e) => beginPickupDrag(p, e)}
                 onDragEnd={endGlobalDrag}
                 title={`Pickup — ${p.supplier}`}
-                style={{
-                  background: "rgba(234,88,12,0.12)",
-                  borderLeft: "4px solid #ea580c",
-                }}
               >
                 <div className="d-flex align-items-center justify-content-between" style={{ gap: 8 }}>
                   <div className="fw-bold" style={clamp1}>
                     📦 {p.supplier}
                   </div>
-                  <span className="badge" style={{ background: "#ea580c", color: "#fff" }}>
-                    Pickup
-                  </span>
+                  <span className="badge text-bg-secondary">Pickup</span>
                 </div>
                 {p.assignedTech ? (
                   <small className="text-muted" style={clamp1}>
@@ -1773,8 +1755,8 @@ export default function WorkOrderCalendar() {
                 </div>
               </div>
             ))}
-            {!unscheduledPickups.length && (
-              <div className="empty-text">No unscheduled supplier pickups.</div>
+            {!listForStrip.length && !unscheduledPickups.length && (
+              <div className="empty-text">No matches.</div>
             )}
           </div>
         </div>
@@ -2233,7 +2215,6 @@ export default function WorkOrderCalendar() {
                   onClick={savePickup}
                   disabled={pickupSaving}
                   type="button"
-                  style={{ background: "#ea580c", borderColor: "#ea580c" }}
                 >
                   {pickupSaving ? "Saving…" : "Save"}
                 </button>
