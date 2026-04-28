@@ -1602,6 +1602,7 @@ export default function WorkOrderCalendar() {
                 className="btn btn-primary"
                 onClick={openPickupModal}
                 type="button"
+                style={{ marginBottom: 12 }}
               >
                 + Supplier Pickup
               </button>
