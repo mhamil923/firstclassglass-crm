@@ -793,13 +793,12 @@ export default function WorkOrderCalendar() {
   // Supplier pickups (a separate calendar event type rendered in orange)
   const [supplierPickups, setSupplierPickups] = useState([]);
   const [pickupSuppliers, setPickupSuppliers] = useState([]);
-  const [pickupModalOpen, setPickupModalOpen] = useState(false);
-  const [pickupForm, setPickupForm] = useState({
+  const [showPickupModal, setShowPickupModal] = useState(false);
+  const [newPickup, setNewPickup] = useState({
     supplier: "",
     notes: "",
     assignedTech: "",
   });
-  const [pickupSaving, setPickupSaving] = useState(false);
 
   // Pickup detail modal (opened when clicking an orange pickup event on the calendar)
   const [pickupDetailOpen, setPickupDetailOpen] = useState(false);
@@ -1402,7 +1401,12 @@ export default function WorkOrderCalendar() {
     const pickupEvents = supplierPickups
       .filter((p) => !!p.scheduledDate)
       .map((p) => {
-        const start = moment(p.scheduledDate).startOf("day").add(8, "hours").toDate();
+        // Backend may return scheduledDate as UTC ISO ("2026-04-29T00:00:00.000Z")
+        // when it's just a DATE column. Strip to "YYYY-MM-DD" and parse as LOCAL
+        // so the pickup lands on the day the user picked, not the day before in
+        // their timezone.
+        const dateStr = String(p.scheduledDate).split("T")[0];
+        const start = moment(dateStr, "YYYY-MM-DD").startOf("day").add(8, "hours").toDate();
         const end = moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
         const techLabel = p.assignedTech ? ` · ${p.assignedTech}` : "";
         return {
@@ -1493,64 +1497,35 @@ export default function WorkOrderCalendar() {
 
   /* ===== Supplier Pickup modal + drag ===== */
   function openPickupModal() {
-    setPickupForm({ supplier: "", notes: "", assignedTech: "" });
-    setPickupModalOpen(true);
+    setNewPickup({ supplier: "", notes: "", assignedTech: "" });
+    setShowPickupModal(true);
   }
 
   function closePickupModal() {
-    if (pickupSaving) return;
-    setPickupModalOpen(false);
+    setShowPickupModal(false);
   }
 
-  async function savePickup() {
-    const supplier = (pickupForm.supplier || "").trim();
-    if (!supplier) {
-      alert("Please select a supplier.");
+  const handleSavePickup = async () => {
+    if (!newPickup.supplier) {
+      alert("Please select a supplier");
       return;
     }
-    setPickupSaving(true);
-
-    // Default scheduledDate to today (LOCAL time, not UTC) so it lands on
-    // the calendar day the user actually expects.
     const today = new Date();
-    const scheduledDate = `${today.getFullYear()}-${String(
-      today.getMonth() + 1
-    ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-
-    const payload = {
-      supplier,
-      scheduledDate,
-      notes: pickupForm.notes || null,
-      assignedTech: pickupForm.assignedTech || null,
-    };
-    console.log("[SupplierPickup] Saving:", payload);
-
+    const scheduledDate = today.toISOString().split("T")[0];
     try {
-      const res = await api.post("/supplier-pickups", payload);
-      const data = res?.data;
-      console.log("[SupplierPickup] Save response:", data);
-
-      if (data && data.id != null) {
-        // Optimistic state update — orange card appears without waiting for refresh.
-        setSupplierPickups((prev) => [...prev, data]);
-        setPickupModalOpen(false);
-        setPickupForm({ supplier: "", notes: "", assignedTech: "" });
-        await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
-      } else {
-        alert("Failed to save: " + JSON.stringify(data));
-      }
+      const { data } = await api.post("/supplier-pickups", {
+        supplier: newPickup.supplier,
+        assignedTech: newPickup.assignedTech || null,
+        notes: newPickup.notes || null,
+        scheduledDate,
+      });
+      setSupplierPickups((prev) => [...prev, data]);
+      setShowPickupModal(false);
+      setNewPickup({ supplier: "", assignedTech: "", notes: "" });
     } catch (err) {
-      console.error("[SupplierPickup] Save error:", err);
-      const serverMsg =
-        err?.response?.data?.error ||
-        err?.response?.data ||
-        err?.message ||
-        "Unknown error";
-      alert("Error saving pickup: " + serverMsg);
-    } finally {
-      setPickupSaving(false);
+      alert("Failed to save pickup: " + (err.response?.data?.error || err.message));
     }
-  }
+  };
 
   function beginPickupDrag(pickup, e) {
     dragItemRef.current = { ...pickup, __kind: "pickup" };
@@ -2180,7 +2155,7 @@ export default function WorkOrderCalendar() {
       )}
 
       {/* ---------- Supplier Pickup creation modal ---------- */}
-      {pickupModalOpen && (
+      {showPickupModal && (
         <div className="modal-overlay" onClick={closePickupModal}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
@@ -2200,9 +2175,9 @@ export default function WorkOrderCalendar() {
                 <label className="form-label small">Supplier *</label>
                 <select
                   className="form-select"
-                  value={pickupForm.supplier}
+                  value={newPickup.supplier}
                   onChange={(e) =>
-                    setPickupForm((f) => ({ ...f, supplier: e.target.value }))
+                    setNewPickup((f) => ({ ...f, supplier: e.target.value }))
                   }
                 >
                   <option value="">— Select supplier —</option>
@@ -2218,9 +2193,9 @@ export default function WorkOrderCalendar() {
                 <label className="form-label small">Assign Tech</label>
                 <select
                   className="form-select"
-                  value={pickupForm.assignedTech}
+                  value={newPickup.assignedTech}
                   onChange={(e) =>
-                    setPickupForm((f) => ({ ...f, assignedTech: e.target.value }))
+                    setNewPickup((f) => ({ ...f, assignedTech: e.target.value }))
                   }
                 >
                   <option value="">— Unassigned —</option>
@@ -2237,9 +2212,9 @@ export default function WorkOrderCalendar() {
                 <textarea
                   className="form-control"
                   rows={3}
-                  value={pickupForm.notes}
+                  value={newPickup.notes}
                   onChange={(e) =>
-                    setPickupForm((f) => ({ ...f, notes: e.target.value }))
+                    setNewPickup((f) => ({ ...f, notes: e.target.value }))
                   }
                   placeholder="Optional notes…"
                 />
@@ -2249,18 +2224,16 @@ export default function WorkOrderCalendar() {
                 <button
                   className="btn btn-outline-secondary me-2"
                   onClick={closePickupModal}
-                  disabled={pickupSaving}
                   type="button"
                 >
                   Cancel
                 </button>
                 <button
                   className="btn btn-primary"
-                  onClick={savePickup}
-                  disabled={pickupSaving}
+                  onClick={handleSavePickup}
                   type="button"
                 >
-                  {pickupSaving ? "Saving…" : "Save"}
+                  Save
                 </button>
               </div>
             </div>
