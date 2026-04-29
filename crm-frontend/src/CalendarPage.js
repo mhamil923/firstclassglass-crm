@@ -28,6 +28,7 @@ const CalendarTechContext = createContext({
   techs: [],
   onAssignTech: () => {},
   techSavedId: null,
+  supplierPickups: [],
 });
 
 // Keep this in sync with server DEFAULT_WINDOW_MINUTES
@@ -244,6 +245,8 @@ function StackedWeekView(props) {
     onDropFromOutside,
   } = props;
 
+  const { supplierPickups = [] } = useContext(CalendarTechContext);
+
   const start = moment(date).startOf("week");
   const days = Array.from({ length: 7 }).map((_, i) => start.clone().add(i, "day").toDate());
 
@@ -252,6 +255,8 @@ function StackedWeekView(props) {
     for (const d of days) map.set(fmtDate(d), []);
 
     for (const ev of events) {
+      // Skip pickup events — rendered separately from supplierPickups state below.
+      if (ev.kind === "pickup") continue;
       const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate) || null;
       if (!s) continue;
       const key = fmtDate(s);
@@ -313,81 +318,75 @@ function StackedWeekView(props) {
               </div>
 
               <div className="stacked-day-body">
-                {list.length ? (
-                  list.map((ev) => {
-                    if (ev.kind === "pickup") {
-                      return (
-                        <button
-                          key={ev.id}
-                          type="button"
-                          className="week-event-card"
-                          onClick={() => onSelectEvent && onSelectEvent(ev)}
-                          title={`Pickup — ${ev.supplier}`}
-                          style={{
-                            background: "rgba(234,88,12,0.12)",
-                            borderLeft: "4px solid #ea580c",
-                          }}
-                        >
-                          <div className="title" style={{ ...clamp2, color: "#ea580c" }}>
-                            📦 Pickup — {ev.supplier}
-                          </div>
-                          {ev.assignedTech ? (
-                            <div className="meta" style={{ ...clamp1 }}>
-                              Tech: {ev.assignedTech}
-                            </div>
-                          ) : null}
-                        </button>
-                      );
-                    }
-                    const idLabel = displayWOThenPO(ev);
-                    const title = ev.customer ? `${ev.customer} — ${idLabel}` : idLabel;
+                {list.map((ev) => {
+                  const idLabel = displayWOThenPO(ev);
+                  const title = ev.customer ? `${ev.customer} — ${idLabel}` : idLabel;
 
-                    const siteLoc = ev.siteLocation ?? ev.meta?.siteLocation ?? getSiteLocation(ev);
-                    const siteAddr =
-                      ev.siteAddress ?? ev.meta?.siteAddress ?? ev.serviceAddress ?? ev.address ?? "";
+                  const siteLoc = ev.siteLocation ?? ev.meta?.siteLocation ?? getSiteLocation(ev);
+                  const siteAddr =
+                    ev.siteAddress ?? ev.meta?.siteAddress ?? ev.serviceAddress ?? ev.address ?? "";
 
-                    const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
-                    const e2 = fromDbString(ev.end) || fromDbString(ev.scheduledEnd);
-                    const timeLabel =
-                      s && e2
-                        ? `${moment(s).format("h:mm A")} – ${moment(e2).format("h:mm A")}`
-                        : s
-                        ? moment(s).format("h:mm A")
-                        : "";
+                  const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
+                  const e2 = fromDbString(ev.end) || fromDbString(ev.scheduledEnd);
+                  const timeLabel =
+                    s && e2
+                      ? `${moment(s).format("h:mm A")} – ${moment(e2).format("h:mm A")}`
+                      : s
+                      ? moment(s).format("h:mm A")
+                      : "";
 
-                    return (
-                      <button
-                        key={ev.id}
-                        type="button"
-                        className="week-event-card"
-                        onClick={() => onSelectEvent && onSelectEvent(ev)}
-                        onDoubleClick={() => onDoubleClickEvent && onDoubleClickEvent(ev)}
-                        title={title}
-                      >
-                        <div className="title" style={{ ...clamp2 }}>
-                          {title}
+                  return (
+                    <button
+                      key={ev.id}
+                      type="button"
+                      className="week-event-card"
+                      onClick={() => onSelectEvent && onSelectEvent(ev)}
+                      onDoubleClick={() => onDoubleClickEvent && onDoubleClickEvent(ev)}
+                      title={title}
+                    >
+                      <div className="title" style={{ ...clamp2 }}>
+                        {title}
+                      </div>
+                      {timeLabel ? (
+                        <div className="meta" style={{ ...clamp1 }}>
+                          {timeLabel}
                         </div>
-                        {timeLabel ? (
-                          <div className="meta" style={{ ...clamp1 }}>
-                            {timeLabel}
-                          </div>
-                        ) : null}
-                        {siteLoc ? (
-                          <div className="meta" style={{ ...clamp1 }}>
-                            {siteLoc}
-                          </div>
-                        ) : null}
-                        {siteAddr ? (
-                          <div className="meta" style={{ ...clamp2 }}>
-                            {siteAddr}
-                          </div>
-                        ) : null}
-                      </button>
-                    );
-                  })
-                ) : (
-                  <div className="empty-text">No work orders</div>
-                )}
+                      ) : null}
+                      {siteLoc ? (
+                        <div className="meta" style={{ ...clamp1 }}>
+                          {siteLoc}
+                        </div>
+                      ) : null}
+                      {siteAddr ? (
+                        <div className="meta" style={{ ...clamp2 }}>
+                          {siteAddr}
+                        </div>
+                      ) : null}
+                    </button>
+                  );
+                })}
+                {supplierPickups
+                  .filter((p) => (p.scheduledDate || "").split("T")[0] === key)
+                  .map((p) => (
+                    <div
+                      key={"sp-" + p.id}
+                      style={{
+                        background: "#f97316",
+                        borderRadius: 6,
+                        padding: "2px 6px",
+                        marginBottom: 2,
+                        fontSize: 12,
+                        color: "#fff",
+                        cursor: "pointer",
+                      }}
+                    >
+                      📦 {p.supplier}
+                    </div>
+                  ))}
+                {!list.length &&
+                  !supplierPickups.some(
+                    (p) => (p.scheduledDate || "").split("T")[0] === key
+                  ) && <div className="empty-text">No work orders</div>}
               </div>
             </div>
           );
@@ -437,12 +436,15 @@ function StackedDayView(props) {
     onDropFromOutside,
   } = props;
 
-  const { techs, onAssignTech, techSavedId } = useContext(CalendarTechContext);
+  const { techs, onAssignTech, techSavedId, supplierPickups = [] } = useContext(CalendarTechContext);
 
   const day = moment(date).startOf("day");
+  const dayKey = day.format("YYYY-MM-DD");
 
   const list = useMemo(() => {
     const items = events.filter((ev) => {
+      // Skip pickup events — rendered separately from supplierPickups state below.
+      if (ev.kind === "pickup") return false;
       const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
       return s && isSameDay(s, day.toDate());
     });
@@ -487,42 +489,9 @@ function StackedDayView(props) {
         </div>
 
         <div className="stacked-day-body">
-          {list.length ? (
-            list.map((ev) => {
-              if (ev.kind === "pickup") {
-                return (
-                  <div
-                    key={ev.id}
-                    className="week-event-card week-event-card-day"
-                    style={{
-                      background: "rgba(234,88,12,0.12)",
-                      borderLeft: "4px solid #ea580c",
-                    }}
-                  >
-                    <div
-                      className="week-event-card-body"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => onSelectEvent && onSelectEvent(ev)}
-                      title={`Pickup — ${ev.supplier}`}
-                    >
-                      <div className="title" style={{ ...clamp2, color: "#ea580c" }}>
-                        📦 Pickup — {ev.supplier}
-                      </div>
-                      {ev.assignedTech ? (
-                        <div className="meta" style={{ ...clamp1 }}>
-                          Tech: {ev.assignedTech}
-                        </div>
-                      ) : null}
-                      {ev.notes ? (
-                        <div className="meta" style={{ ...clamp2 }}>
-                          {ev.notes}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              }
+          {list.length || supplierPickups.some((p) => (p.scheduledDate || "").split("T")[0] === dayKey) ? (
+            <>
+            {list.map((ev) => {
               const idLabel = displayWOThenPO(ev);
               const title = ev.customer ? `${ev.customer} — ${idLabel}` : idLabel;
 
@@ -603,7 +572,26 @@ function StackedDayView(props) {
                   </div>
                 </div>
               );
-            })
+            })}
+            {supplierPickups
+              .filter((p) => (p.scheduledDate || "").split("T")[0] === dayKey)
+              .map((p) => (
+                <div
+                  key={"sp-" + p.id}
+                  style={{
+                    background: "#f97316",
+                    borderRadius: 6,
+                    padding: "2px 6px",
+                    marginBottom: 2,
+                    fontSize: 12,
+                    color: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  📦 {p.supplier}
+                </div>
+              ))}
+            </>
           ) : (
             <div className="empty-text">No work orders</div>
           )}
@@ -640,11 +628,15 @@ const AGENDA_DAYS = 30;
 function CardAgendaView(props) {
   const { date, events = [], onSelectEvent, onDoubleClickEvent } = props;
 
+  const { supplierPickups = [] } = useContext(CalendarTechContext);
+
   const groups = useMemo(() => {
     const start = moment(date).startOf("day");
     const end = moment(date).add(AGENDA_DAYS, "days").endOf("day");
 
     const filtered = events.filter((ev) => {
+      // Skip pickup events — rendered separately from supplierPickups state below.
+      if (ev.kind === "pickup") return false;
       const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
       return s && moment(s).isBetween(start, end, null, "[]");
     });
@@ -689,30 +681,6 @@ function CardAgendaView(props) {
 
               <div className="agenda-day-body">
                 {list.map((ev) => {
-                  if (ev.kind === "pickup") {
-                    return (
-                      <button
-                        key={ev.id}
-                        type="button"
-                        className="week-event-card"
-                        onClick={() => onSelectEvent && onSelectEvent(ev)}
-                        title={`Pickup — ${ev.supplier}`}
-                        style={{
-                          background: "rgba(234,88,12,0.12)",
-                          borderLeft: "4px solid #ea580c",
-                        }}
-                      >
-                        <div className="title" style={{ ...clamp2, color: "#ea580c" }}>
-                          📦 Pickup — {ev.supplier}
-                        </div>
-                        {ev.assignedTech ? (
-                          <div className="meta" style={{ ...clamp1 }}>
-                            Tech: {ev.assignedTech}
-                          </div>
-                        ) : null}
-                      </button>
-                    );
-                  }
                   const idLabel = displayWOThenPO(ev);
                   const title = ev.customer ? `${ev.customer} — ${idLabel}` : idLabel;
                   const siteLoc =
@@ -745,6 +713,24 @@ function CardAgendaView(props) {
                     </button>
                   );
                 })}
+                {supplierPickups
+                  .filter((p) => (p.scheduledDate || "").split("T")[0] === key)
+                  .map((p) => (
+                    <div
+                      key={"sp-" + p.id}
+                      style={{
+                        background: "#f97316",
+                        borderRadius: 6,
+                        padding: "2px 6px",
+                        marginBottom: 2,
+                        fontSize: 12,
+                        color: "#fff",
+                        cursor: "pointer",
+                      }}
+                    >
+                      📦 {p.supplier}
+                    </div>
+                  ))}
               </div>
             </div>
           );
@@ -1428,7 +1414,7 @@ export default function WorkOrderCalendar() {
 
   // Context value for the custom Day view's tech dropdown.
   // Built fresh each render so the handler always closes over current state.
-  const techContextValue = { techs, onAssignTech: handleAssignTech, techSavedId };
+  const techContextValue = { techs, onAssignTech: handleAssignTech, techSavedId, supplierPickups };
 
   /* ===== Unscheduled bar search (includes Site Address) ===== */
   const listForStrip = useMemo(() => {
@@ -1504,28 +1490,6 @@ export default function WorkOrderCalendar() {
   function closePickupModal() {
     setShowPickupModal(false);
   }
-
-  const handleSavePickup = async () => {
-    if (!newPickup.supplier) {
-      alert("Please select a supplier");
-      return;
-    }
-    const today = new Date();
-    const scheduledDate = today.toISOString().split("T")[0];
-    try {
-      const { data } = await api.post("/supplier-pickups", {
-        supplier: newPickup.supplier,
-        assignedTech: newPickup.assignedTech || null,
-        notes: newPickup.notes || null,
-        scheduledDate,
-      });
-      setSupplierPickups((prev) => [...prev, data]);
-      setShowPickupModal(false);
-      setNewPickup({ supplier: "", assignedTech: "", notes: "" });
-    } catch (err) {
-      alert("Failed to save pickup: " + (err.response?.data?.error || err.message));
-    }
-  };
 
   function beginPickupDrag(pickup, e) {
     dragItemRef.current = { ...pickup, __kind: "pickup" };
@@ -2230,8 +2194,25 @@ export default function WorkOrderCalendar() {
                 </button>
                 <button
                   className="btn btn-primary"
-                  onClick={handleSavePickup}
                   type="button"
+                  onClick={async () => {
+                    if (!newPickup.supplier) { alert('Please select a supplier'); return; }
+                    const today = new Date();
+                    const scheduledDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+                    try {
+                      const { data } = await api.post('/supplier-pickups', {
+                        supplier: newPickup.supplier,
+                        assignedTech: newPickup.assignedTech || null,
+                        notes: newPickup.notes || null,
+                        scheduledDate
+                      });
+                      setSupplierPickups(prev => [...prev, data]);
+                      setShowPickupModal(false);
+                      setNewPickup({ supplier: '', assignedTech: '', notes: '' });
+                    } catch(err) {
+                      alert('Error: ' + (err.response?.data?.error || err.message));
+                    }
+                  }}
                 >
                   Save
                 </button>
