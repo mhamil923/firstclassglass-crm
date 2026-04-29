@@ -1505,34 +1505,48 @@ export default function WorkOrderCalendar() {
   async function savePickup() {
     const supplier = (pickupForm.supplier || "").trim();
     if (!supplier) {
-      alert("Please choose a supplier.");
+      alert("Please select a supplier.");
       return;
     }
     setPickupSaving(true);
+
+    // Default scheduledDate to today (LOCAL time, not UTC) so it lands on
+    // the calendar day the user actually expects.
+    const today = new Date();
+    const scheduledDate = `${today.getFullYear()}-${String(
+      today.getMonth() + 1
+    ).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+    const payload = {
+      supplier,
+      scheduledDate,
+      notes: pickupForm.notes || null,
+      assignedTech: pickupForm.assignedTech || null,
+    };
+    console.log("[SupplierPickup] Saving:", payload);
+
     try {
-      // Default scheduledDate to today so it lands on the calendar immediately.
-      const scheduledDate =
-        (pickupForm.scheduledDate && pickupForm.scheduledDate.trim()) ||
-        new Date().toISOString().split("T")[0];
+      const res = await api.post("/supplier-pickups", payload);
+      const data = res?.data;
+      console.log("[SupplierPickup] Save response:", data);
 
-      const { data: newPickup } = await api.post("/supplier-pickups", {
-        supplier,
-        scheduledDate,
-        notes: pickupForm.notes || null,
-        assignedTech: pickupForm.assignedTech || null,
-      });
-
-      // Optimistically add to state so the orange card shows up without waiting for refresh.
-      if (newPickup && newPickup.id != null) {
-        setSupplierPickups((prev) => [...prev, newPickup]);
+      if (data && data.id != null) {
+        // Optimistic state update — orange card appears without waiting for refresh.
+        setSupplierPickups((prev) => [...prev, data]);
+        setPickupModalOpen(false);
+        setPickupForm({ supplier: "", notes: "", assignedTech: "" });
+        await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
+      } else {
+        alert("Failed to save: " + JSON.stringify(data));
       }
-
-      setPickupModalOpen(false);
-      // Background refresh to sync with server truth (handles assignedTech normalization etc.)
-      await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
-    } catch (e) {
-      console.error("⚠️ Error creating pickup:", e);
-      alert("Failed to create supplier pickup.");
+    } catch (err) {
+      console.error("[SupplierPickup] Save error:", err);
+      const serverMsg =
+        err?.response?.data?.error ||
+        err?.response?.data ||
+        err?.message ||
+        "Unknown error";
+      alert("Error saving pickup: " + serverMsg);
     } finally {
       setPickupSaving(false);
     }
