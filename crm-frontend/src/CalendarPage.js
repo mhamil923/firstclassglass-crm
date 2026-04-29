@@ -801,6 +801,10 @@ export default function WorkOrderCalendar() {
   });
   const [pickupSaving, setPickupSaving] = useState(false);
 
+  // Pickup detail modal (opened when clicking an orange pickup event on the calendar)
+  const [pickupDetailOpen, setPickupDetailOpen] = useState(false);
+  const [pickupDetail, setPickupDetail] = useState(null);
+
   // Calendar view/range
   const [view, setView] = useState("month");
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -1323,20 +1327,33 @@ export default function WorkOrderCalendar() {
 
   function onSelectEvent(event) {
     if (event?.kind === "pickup") {
-      // For pickups, clicking offers to delete (simple confirm; full editor not in scope)
-      const ok = window.confirm(
-        `Supplier Pickup\n\nSupplier: ${event.supplier}\nTech: ${event.assignedTech || "Unassigned"}\n\nDelete this pickup?`
-      );
-      if (ok && event.pickupId) {
-        api
-          .delete(`/supplier-pickups/${event.pickupId}`)
-          .then(() => Promise.all([fetchCalendarForVisibleRange(), refreshLists()]))
-          .catch((e) => console.error("⚠️ Error deleting pickup:", e));
-      }
+      setPickupDetail({
+        id: event.pickupId,
+        supplier: event.supplier,
+        assignedTech: event.assignedTech || "",
+        notes: event.notes || "",
+        scheduledDate: event.start,
+      });
+      setPickupDetailOpen(true);
       return;
     }
     const full = allOrders.find((o) => Number(o.id) === Number(event.id)) || event;
     openEditModal(full);
+  }
+
+  async function deletePickupFromDetail() {
+    if (!pickupDetail?.id) return;
+    if (!window.confirm(`Delete pickup for ${pickupDetail.supplier}?`)) return;
+    try {
+      await api.delete(`/supplier-pickups/${pickupDetail.id}`);
+      // Remove from state immediately
+      setSupplierPickups((prev) => prev.filter((p) => p.id !== pickupDetail.id));
+      setPickupDetailOpen(false);
+      await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
+    } catch (e) {
+      console.error("⚠️ Error deleting pickup:", e);
+      alert("Failed to delete pickup.");
+    }
   }
 
   function onSelectSlot(slotInfo) {
@@ -1493,13 +1510,25 @@ export default function WorkOrderCalendar() {
     }
     setPickupSaving(true);
     try {
-      await api.post("/supplier-pickups", {
+      // Default scheduledDate to today so it lands on the calendar immediately.
+      const scheduledDate =
+        (pickupForm.scheduledDate && pickupForm.scheduledDate.trim()) ||
+        new Date().toISOString().split("T")[0];
+
+      const { data: newPickup } = await api.post("/supplier-pickups", {
         supplier,
+        scheduledDate,
         notes: pickupForm.notes || null,
         assignedTech: pickupForm.assignedTech || null,
-        // No scheduledDate — pickup starts in the unscheduled row
       });
+
+      // Optimistically add to state so the orange card shows up without waiting for refresh.
+      if (newPickup && newPickup.id != null) {
+        setSupplierPickups((prev) => [...prev, newPickup]);
+      }
+
       setPickupModalOpen(false);
+      // Background refresh to sync with server truth (handles assignedTech normalization etc.)
       await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
     } catch (e) {
       console.error("⚠️ Error creating pickup:", e);
@@ -2218,6 +2247,64 @@ export default function WorkOrderCalendar() {
                   type="button"
                 >
                   {pickupSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- Supplier Pickup detail modal ---------- */}
+      {pickupDetailOpen && pickupDetail && (
+        <div className="modal-overlay" onClick={() => setPickupDetailOpen(false)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>📦 Supplier Pickup</h3>
+              <button
+                className="modal-close"
+                onClick={() => setPickupDetailOpen(false)}
+                aria-label="Close"
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="mb-2">
+                <strong>Supplier:</strong> {pickupDetail.supplier}
+              </div>
+              <div className="mb-2">
+                <strong>Tech:</strong>{" "}
+                {pickupDetail.assignedTech || <span className="text-muted">Unassigned</span>}
+              </div>
+              {pickupDetail.scheduledDate ? (
+                <div className="mb-2">
+                  <strong>Date:</strong>{" "}
+                  {moment(pickupDetail.scheduledDate).format("MMM D, YYYY")}
+                </div>
+              ) : null}
+              {pickupDetail.notes ? (
+                <div className="mb-2">
+                  <strong>Notes:</strong>
+                  <div style={{ whiteSpace: "pre-wrap" }}>{pickupDetail.notes}</div>
+                </div>
+              ) : null}
+
+              <div className="d-flex justify-content-end mt-3">
+                <button
+                  className="btn btn-outline-danger me-2"
+                  onClick={deletePickupFromDetail}
+                  type="button"
+                >
+                  Delete
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setPickupDetailOpen(false)}
+                  type="button"
+                >
+                  Close
                 </button>
               </div>
             </div>
