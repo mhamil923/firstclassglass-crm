@@ -365,24 +365,11 @@ function StackedWeekView(props) {
                     </button>
                   );
                 })}
-                {supplierPickups
-                  .filter((p) => (p.scheduledDate || "").split("T")[0] === key)
-                  .map((p) => (
-                    <div
-                      key={"sp-" + p.id}
-                      style={{
-                        background: "#f97316",
-                        borderRadius: 6,
-                        padding: "2px 6px",
-                        marginBottom: 2,
-                        fontSize: 12,
-                        color: "#fff",
-                        cursor: "pointer",
-                      }}
-                    >
-                      📦 {p.supplier}
-                    </div>
-                  ))}
+                {supplierPickups.filter(p=>(p.scheduledDate||'').split('T')[0]===key).map(p=>(
+                  <div key={'sp'+p.id} style={{background:'#f97316',borderRadius:6,padding:'2px 6px',marginBottom:2,fontSize:11,color:'#fff',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>
+                    📦 {p.supplier}
+                  </div>
+                ))}
                 {!list.length &&
                   !supplierPickups.some(
                     (p) => (p.scheduledDate || "").split("T")[0] === key
@@ -573,23 +560,10 @@ function StackedDayView(props) {
                 </div>
               );
             })}
-            {supplierPickups
-              .filter((p) => (p.scheduledDate || "").split("T")[0] === dayKey)
-              .map((p) => (
-                <div
-                  key={"sp-" + p.id}
-                  style={{
-                    background: "#f97316",
-                    borderRadius: 6,
-                    padding: "2px 6px",
-                    marginBottom: 2,
-                    fontSize: 12,
-                    color: "#fff",
-                    cursor: "pointer",
-                  }}
-                >
-                  📦 {p.supplier}
-                </div>
+            {supplierPickups.filter(p=>(p.scheduledDate||'').split('T')[0]===dayKey).map(p=>(
+              <div key={'sp'+p.id} style={{background:'#f97316',borderRadius:6,padding:'2px 6px',marginBottom:2,fontSize:11,color:'#fff',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>
+                📦 {p.supplier}
+              </div>
               ))}
             </>
           ) : (
@@ -713,24 +687,11 @@ function CardAgendaView(props) {
                     </button>
                   );
                 })}
-                {supplierPickups
-                  .filter((p) => (p.scheduledDate || "").split("T")[0] === key)
-                  .map((p) => (
-                    <div
-                      key={"sp-" + p.id}
-                      style={{
-                        background: "#f97316",
-                        borderRadius: 6,
-                        padding: "2px 6px",
-                        marginBottom: 2,
-                        fontSize: 12,
-                        color: "#fff",
-                        cursor: "pointer",
-                      }}
-                    >
-                      📦 {p.supplier}
-                    </div>
-                  ))}
+                {supplierPickups.filter(p=>(p.scheduledDate||'').split('T')[0]===key).map(p=>(
+                  <div key={'sp'+p.id} style={{background:'#f97316',borderRadius:6,padding:'2px 6px',marginBottom:2,fontSize:11,color:'#fff',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>
+                    📦 {p.supplier}
+                  </div>
+                ))}
               </div>
             </div>
           );
@@ -778,17 +739,11 @@ export default function WorkOrderCalendar() {
 
   // Supplier pickups (a separate calendar event type rendered in orange)
   const [supplierPickups, setSupplierPickups] = useState([]);
-  const [pickupSuppliers, setPickupSuppliers] = useState([]);
   const [showPickupModal, setShowPickupModal] = useState(false);
-  const [newPickup, setNewPickup] = useState({
-    supplier: "",
-    notes: "",
-    assignedTech: "",
-  });
-
-  // Pickup detail modal (opened when clicking an orange pickup event on the calendar)
-  const [pickupDetailOpen, setPickupDetailOpen] = useState(false);
-  const [pickupDetail, setPickupDetail] = useState(null);
+  const [pickupSupplier, setPickupSupplier] = useState('');
+  const [pickupTech, setPickupTech] = useState('');
+  const [pickupNotes, setPickupNotes] = useState('');
+  const [supplierList, setSupplierList] = useState([]);
 
   // Calendar view/range
   const [view, setView] = useState("month");
@@ -923,7 +878,7 @@ export default function WorkOrderCalendar() {
       setAllOrders(Array.isArray(allRes.data) ? allRes.data : []);
       setUnscheduledOrders(Array.isArray(unRes.data) ? unRes.data : []);
       setSupplierPickups(Array.isArray(pickupsRes.data) ? pickupsRes.data : []);
-      setPickupSuppliers(Array.isArray(supRes.data) ? supRes.data : []);
+      setSupplierList(Array.isArray(supRes.data) ? supRes.data : []);
     } catch (e) {
       console.error("⚠️ Error loading lists:", e);
     }
@@ -1311,34 +1266,9 @@ export default function WorkOrderCalendar() {
   }
 
   function onSelectEvent(event) {
-    if (event?.kind === "pickup") {
-      setPickupDetail({
-        id: event.pickupId,
-        supplier: event.supplier,
-        assignedTech: event.assignedTech || "",
-        notes: event.notes || "",
-        scheduledDate: event.start,
-      });
-      setPickupDetailOpen(true);
-      return;
-    }
+    if (event?.kind === "pickup") return;
     const full = allOrders.find((o) => Number(o.id) === Number(event.id)) || event;
     openEditModal(full);
-  }
-
-  async function deletePickupFromDetail() {
-    if (!pickupDetail?.id) return;
-    if (!window.confirm(`Delete pickup for ${pickupDetail.supplier}?`)) return;
-    try {
-      await api.delete(`/supplier-pickups/${pickupDetail.id}`);
-      // Remove from state immediately
-      setSupplierPickups((prev) => prev.filter((p) => p.id !== pickupDetail.id));
-      setPickupDetailOpen(false);
-      await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
-    } catch (e) {
-      console.error("⚠️ Error deleting pickup:", e);
-      alert("Failed to delete pickup.");
-    }
   }
 
   function onSelectSlot(slotInfo) {
@@ -1481,16 +1411,7 @@ export default function WorkOrderCalendar() {
     setStatusChoice("");
   }
 
-  /* ===== Supplier Pickup modal + drag ===== */
-  function openPickupModal() {
-    setNewPickup({ supplier: "", notes: "", assignedTech: "" });
-    setShowPickupModal(true);
-  }
-
-  function closePickupModal() {
-    setShowPickupModal(false);
-  }
-
+  /* ===== Supplier Pickup drag ===== */
   function beginPickupDrag(pickup, e) {
     dragItemRef.current = { ...pickup, __kind: "pickup" };
     if (typeof e?.clientY === "number") window._dragMouseY = e.clientY;
@@ -1582,7 +1503,7 @@ export default function WorkOrderCalendar() {
 
               <button
                 className="btn btn-primary"
-                onClick={openPickupModal}
+                onClick={() => { setPickupSupplier(''); setPickupTech(''); setPickupNotes(''); setShowPickupModal(true); }}
                 type="button"
                 style={{ marginBottom: 12 }}
               >
@@ -2120,161 +2041,41 @@ export default function WorkOrderCalendar() {
 
       {/* ---------- Supplier Pickup creation modal ---------- */}
       {showPickupModal && (
-        <div className="modal-overlay" onClick={closePickupModal}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>📦 New Supplier Pickup</h3>
-              <button
-                className="modal-close"
-                onClick={closePickupModal}
-                aria-label="Close"
-                type="button"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <div className="mb-3">
-                <label className="form-label small">Supplier *</label>
-                <select
-                  className="form-select"
-                  value={newPickup.supplier}
-                  onChange={(e) =>
-                    setNewPickup((f) => ({ ...f, supplier: e.target.value }))
-                  }
-                >
-                  <option value="">— Select supplier —</option>
-                  {pickupSuppliers.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="mb-3">
-                <label className="form-label small">Assign Tech</label>
-                <select
-                  className="form-select"
-                  value={newPickup.assignedTech}
-                  onChange={(e) =>
-                    setNewPickup((f) => ({ ...f, assignedTech: e.target.value }))
-                  }
-                >
-                  <option value="">— Unassigned —</option>
-                  {techs.map((t) => (
-                    <option key={t.id} value={t.username}>
-                      {t.username}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="mb-3">
-                <label className="form-label small">Notes</label>
-                <textarea
-                  className="form-control"
-                  rows={3}
-                  value={newPickup.notes}
-                  onChange={(e) =>
-                    setNewPickup((f) => ({ ...f, notes: e.target.value }))
-                  }
-                  placeholder="Optional notes…"
-                />
-              </div>
-
-              <div className="d-flex justify-content-end">
-                <button
-                  className="btn btn-outline-secondary me-2"
-                  onClick={closePickupModal}
-                  type="button"
-                >
-                  Cancel
-                </button>
-                <button
-                  className="btn btn-primary"
-                  type="button"
-                  onClick={async () => {
-                    if (!newPickup.supplier) { alert('Please select a supplier'); return; }
-                    const today = new Date();
-                    const scheduledDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-                    try {
-                      const { data } = await api.post('/supplier-pickups', {
-                        supplier: newPickup.supplier,
-                        assignedTech: newPickup.assignedTech || null,
-                        notes: newPickup.notes || null,
-                        scheduledDate
-                      });
-                      setSupplierPickups(prev => [...prev, data]);
-                      setShowPickupModal(false);
-                      setNewPickup({ supplier: '', assignedTech: '', notes: '' });
-                    } catch(err) {
-                      alert('Error: ' + (err.response?.data?.error || err.message));
-                    }
-                  }}
-                >
-                  Save
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ---------- Supplier Pickup detail modal ---------- */}
-      {pickupDetailOpen && pickupDetail && (
-        <div className="modal-overlay" onClick={() => setPickupDetailOpen(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>📦 Supplier Pickup</h3>
-              <button
-                className="modal-close"
-                onClick={() => setPickupDetailOpen(false)}
-                aria-label="Close"
-                type="button"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <div className="mb-2">
-                <strong>Supplier:</strong> {pickupDetail.supplier}
-              </div>
-              <div className="mb-2">
-                <strong>Tech:</strong>{" "}
-                {pickupDetail.assignedTech || <span className="text-muted">Unassigned</span>}
-              </div>
-              {pickupDetail.scheduledDate ? (
-                <div className="mb-2">
-                  <strong>Date:</strong>{" "}
-                  {moment(pickupDetail.scheduledDate).format("MMM D, YYYY")}
-                </div>
-              ) : null}
-              {pickupDetail.notes ? (
-                <div className="mb-2">
-                  <strong>Notes:</strong>
-                  <div style={{ whiteSpace: "pre-wrap" }}>{pickupDetail.notes}</div>
-                </div>
-              ) : null}
-
-              <div className="d-flex justify-content-end mt-3">
-                <button
-                  className="btn btn-outline-danger me-2"
-                  onClick={deletePickupFromDetail}
-                  type="button"
-                >
-                  Delete
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setPickupDetailOpen(false)}
-                  type="button"
-                >
-                  Close
-                </button>
-              </div>
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div style={{background:'#1f2937',borderRadius:12,padding:24,width:500,maxWidth:'90vw'}}>
+            <h3 style={{color:'#fff',marginBottom:16}}>New Supplier Pickup</h3>
+            <label style={{color:'#9ca3af',fontSize:12}}>SUPPLIER *</label>
+            <select value={pickupSupplier} onChange={e=>setPickupSupplier(e.target.value)}
+              style={{width:'100%',padding:8,borderRadius:6,background:'#374151',color:'#fff',border:'1px solid #4b5563',marginBottom:12,marginTop:4}}>
+              <option value=''>— Select supplier —</option>
+              {supplierList.map(s=><option key={s} value={s}>{s}</option>)}
+            </select>
+            <label style={{color:'#9ca3af',fontSize:12}}>ASSIGN TECH</label>
+            <select value={pickupTech} onChange={e=>setPickupTech(e.target.value)}
+              style={{width:'100%',padding:8,borderRadius:6,background:'#374151',color:'#fff',border:'1px solid #4b5563',marginBottom:12,marginTop:4}}>
+              <option value=''>— Unassigned —</option>
+              {['Jeff','Mikey','Adin','jeffsr'].map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+            <label style={{color:'#9ca3af',fontSize:12}}>NOTES</label>
+            <textarea value={pickupNotes} onChange={e=>setPickupNotes(e.target.value)}
+              style={{width:'100%',padding:8,borderRadius:6,background:'#374151',color:'#fff',border:'1px solid #4b5563',marginBottom:16,marginTop:4,height:80}}
+              placeholder='Optional notes...' />
+            <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
+              <button onClick={()=>setShowPickupModal(false)}
+                style={{padding:'8px 16px',borderRadius:6,background:'#374151',color:'#fff',border:'none',cursor:'pointer'}}>Cancel</button>
+              <button onClick={async()=>{
+                if(!pickupSupplier){alert('Please select a supplier');return;}
+                const today=new Date();
+                const scheduledDate=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+                try{
+                  const {data}=await api.post('/supplier-pickups',{supplier:pickupSupplier,assignedTech:pickupTech||null,notes:pickupNotes||null,scheduledDate});
+                  console.log('Pickup saved:',data);
+                  setSupplierPickups(prev=>[...prev,data]);
+                  setShowPickupModal(false);
+                }catch(err){
+                  alert('Failed: '+(err.response?.data?.error||err.message));
+                }
+              }} style={{padding:'8px 16px',borderRadius:6,background:'#3b82f6',color:'#fff',border:'none',cursor:'pointer'}}>Save</button>
             </div>
           </div>
         </div>
