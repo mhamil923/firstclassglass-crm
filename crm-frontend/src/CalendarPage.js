@@ -1987,7 +1987,24 @@ export default function WorkOrderCalendar() {
                       {p.assignedTech && <div style={{color:'#9ca3af',fontSize:13}}>Tech: {p.assignedTech}</div>}
                       {p.notes && <div style={{color:'#9ca3af',fontSize:13}}>{p.notes}</div>}
                     </div>
-                    <div style={{color:'#f97316',fontSize:12}}>View POs →</div>
+                    <div style={{display:'flex',alignItems:'center'}}>
+                      <div style={{color:'#f97316',fontSize:12}}>View POs →</div>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!window.confirm('Delete this supplier pickup?')) return;
+                          try {
+                            await api.delete(`/supplier-pickups/${p.id}`);
+                            setSupplierPickups(prev => prev.filter(sp => sp.id !== p.id));
+                          } catch(err) {
+                            alert('Failed to delete: ' + (err.response?.data?.error || err.message));
+                          }
+                        }}
+                        style={{color:'#ef4444',background:'none',border:'none',cursor:'pointer',fontSize:12,marginLeft:8}}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 ))}
             </div>
