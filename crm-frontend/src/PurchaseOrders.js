@@ -96,6 +96,16 @@ export default function PurchaseOrders() {
 
   const [supplierFilter, setSupplierFilter] = useState("All Suppliers");
   const [statusFilter, setStatusFilter] = useState("On Order");
+
+  // Pre-select supplier from ?supplier= URL param (used by Calendar pickup → POs deep link).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const supplierParam = params.get("supplier");
+    if (!supplierParam) return;
+    const match = SUPPLIERS.find((s) => s.toLowerCase() === supplierParam.toLowerCase());
+    if (match) setSupplierFilter(match);
+    else setSupplierFilter(supplierParam);
+  }, []);
   const [search, setSearch] = useState("");
   const [searchApplied, setSearchApplied] = useState("");
 

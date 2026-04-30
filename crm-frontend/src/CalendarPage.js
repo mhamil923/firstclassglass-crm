@@ -180,6 +180,33 @@ const clamp4 = {
    Event bubble (calendar)
 ========================= */
 function CustomEvent({ event }) {
+  // Supplier pickups render as a distinct orange pill card (no popover, click → POs filtered)
+  if (event?.kind === "pickup") {
+    return (
+      <div
+        onClick={(e) => {
+          e.stopPropagation();
+          window.location.href = `/purchase-orders?supplier=${encodeURIComponent(event.supplier || "")}`;
+        }}
+        style={{
+          background: "#f97316",
+          borderRadius: 20,
+          padding: "3px 10px",
+          fontSize: 12,
+          color: "#fff",
+          cursor: "pointer",
+          overflow: "hidden",
+          whiteSpace: "nowrap",
+          textOverflow: "ellipsis",
+          fontWeight: 500,
+        }}
+        title={`Supplier Pickup — ${event.supplier}${event.assignedTech ? ` · ${event.assignedTech}` : ""}`}
+      >
+        📦 {event.supplier}
+      </div>
+    );
+  }
+
   const when =
     event.start && event.end
       ? `${moment(event.start).format("YYYY-MM-DD HH:mm")} – ${moment(event.end).format("HH:mm")}`
@@ -366,7 +393,9 @@ function StackedWeekView(props) {
                   );
                 })}
                 {supplierPickups.filter(p=>(p.scheduledDate||'').split('T')[0]===key).map(p=>(
-                  <div key={'sp'+p.id} style={{background:'#f97316',borderRadius:6,padding:'2px 6px',marginBottom:2,fontSize:11,color:'#fff',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>
+                  <div key={'sp-'+p.id}
+                    onClick={() => window.location.href = `/purchase-orders?supplier=${encodeURIComponent(p.supplier)}`}
+                    style={{background:'#f97316',borderRadius:20,padding:'3px 10px',marginBottom:3,fontSize:12,color:'#fff',cursor:'pointer',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis',fontWeight:500}}>
                     📦 {p.supplier}
                   </div>
                 ))}
@@ -561,7 +590,9 @@ function StackedDayView(props) {
               );
             })}
             {supplierPickups.filter(p=>(p.scheduledDate||'').split('T')[0]===dayKey).map(p=>(
-              <div key={'sp'+p.id} style={{background:'#f97316',borderRadius:6,padding:'2px 6px',marginBottom:2,fontSize:11,color:'#fff',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>
+              <div key={'sp-'+p.id}
+                onClick={() => window.location.href = `/purchase-orders?supplier=${encodeURIComponent(p.supplier)}`}
+                style={{background:'#f97316',borderRadius:20,padding:'3px 10px',marginBottom:3,fontSize:12,color:'#fff',cursor:'pointer',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis',fontWeight:500}}>
                 📦 {p.supplier}
               </div>
               ))}
@@ -688,7 +719,9 @@ function CardAgendaView(props) {
                   );
                 })}
                 {supplierPickups.filter(p=>(p.scheduledDate||'').split('T')[0]===key).map(p=>(
-                  <div key={'sp'+p.id} style={{background:'#f97316',borderRadius:6,padding:'2px 6px',marginBottom:2,fontSize:11,color:'#fff',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>
+                  <div key={'sp-'+p.id}
+                    onClick={() => window.location.href = `/purchase-orders?supplier=${encodeURIComponent(p.supplier)}`}
+                    style={{background:'#f97316',borderRadius:20,padding:'3px 10px',marginBottom:3,fontSize:12,color:'#fff',cursor:'pointer',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis',fontWeight:500}}>
                     📦 {p.supplier}
                   </div>
                 ))}
@@ -1436,11 +1469,14 @@ export default function WorkOrderCalendar() {
   /* RBC event styling — orange for pickups, default for work orders */
   const eventPropGetter = useCallback((event) => {
     if (event?.kind === "pickup") {
+      // Hide RBC's default event chrome — the pill is rendered inside CustomEvent.
       return {
         style: {
-          background: "#ea580c",
-          border: "1px solid #c2410c",
-          color: "#fff",
+          background: "transparent",
+          border: "none",
+          padding: 0,
+          color: "inherit",
+          boxShadow: "none",
         },
       };
     }
@@ -1927,6 +1963,33 @@ export default function WorkOrderCalendar() {
               ) : (
                 <p className="empty-text mb-0">No work orders scheduled on this day.</p>
               )}
+
+              {/* Supplier pickups for this day */}
+              {dayForModal && supplierPickups
+                .filter((p) => (p.scheduledDate || "").split("T")[0] === fmtDate(dayForModal))
+                .map((p) => (
+                  <div key={'sp-'+p.id}
+                    onClick={() => window.location.href = `/purchase-orders?supplier=${encodeURIComponent(p.supplier)}`}
+                    style={{
+                      background:'rgba(249,115,22,0.15)',
+                      border:'1px solid #f97316',
+                      borderRadius:8,
+                      padding:'12px 16px',
+                      marginBottom:8,
+                      display:'flex',
+                      alignItems:'center',
+                      justifyContent:'space-between',
+                      cursor:'pointer'
+                    }}
+                  >
+                    <div>
+                      <div style={{color:'#f97316',fontWeight:600}}>📦 {p.supplier} — Supplier Pickup</div>
+                      {p.assignedTech && <div style={{color:'#9ca3af',fontSize:13}}>Tech: {p.assignedTech}</div>}
+                      {p.notes && <div style={{color:'#9ca3af',fontSize:13}}>{p.notes}</div>}
+                    </div>
+                    <div style={{color:'#f97316',fontSize:12}}>View POs →</div>
+                  </div>
+                ))}
             </div>
 
             {/* Footer */}
