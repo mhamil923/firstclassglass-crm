@@ -139,6 +139,16 @@ export default function AddWorkOrder() {
   const [submitting, setSubmitting] = useState(false);
   const [loadingRefs, setLoadingRefs] = useState(false);
 
+  // "Same as billing address" — copies billingAddress into siteAddress and locks the input.
+  const [sameAsBilling, setSameAsBilling] = useState(false);
+  useEffect(() => {
+    if (sameAsBilling) {
+      setWorkOrder((prev) =>
+        prev.siteAddress === prev.billingAddress ? prev : { ...prev, siteAddress: prev.billingAddress }
+      );
+    }
+  }, [sameAsBilling, workOrder.billingAddress]);
+
   // Autocomplete for Site Address
   const siteAddressInputRef = useRef(null);
   const autocompleteRef = useRef(null);
@@ -794,6 +804,31 @@ export default function AddWorkOrder() {
 
                 <div className="awo-field">
                   <label className="awo-label">Site Address</label>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginBottom: 8,
+                      cursor: "pointer",
+                      color: "#9ca3af",
+                      fontSize: 13,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={sameAsBilling}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        setSameAsBilling(next);
+                        setWorkOrder((prev) => ({
+                          ...prev,
+                          siteAddress: next ? prev.billingAddress : "",
+                        }));
+                      }}
+                    />
+                    Same as billing address
+                  </label>
                   <input
                     name="siteAddress"
                     ref={siteAddressInputRef}
@@ -802,6 +837,8 @@ export default function AddWorkOrder() {
                     onFocus={handleSiteAddressFocus}
                     placeholder="Start typing address…"
                     className="awo-input"
+                    disabled={sameAsBilling}
+                    readOnly={sameAsBilling}
                   />
                 </div>
               </div>
