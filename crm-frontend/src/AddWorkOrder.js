@@ -797,65 +797,77 @@ export default function AddWorkOrder() {
             <div className="awo-section">
               <div className="awo-section-title">Site</div>
 
-              {/* Site Location takes its own row (full width) */}
-              <div className="awo-grid">
-                <div className="awo-field">
-                  <label className="awo-label">Site Location (Name)</label>
-                  <input
-                    name="siteLocation"
-                    value={workOrder.siteLocation}
-                    onChange={handleChange}
-                    className="awo-input"
-                    placeholder="Business / Building / Suite name"
-                    autoComplete="off"
-                  />
-                </div>
-              </div>
-
-              {/* Site Address + Billing Address side-by-side, equal width */}
-              <div className="awo-grid awo-grid-2" style={{ marginTop: 16 }}>
-                <div className="awo-field">
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#6b7280" }}>
-                      SITE ADDRESS
-                    </span>
-                    <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11, color: "#6b7280" }}>
-                      <input
-                        type="checkbox"
-                        checked={siteFromBilling}
-                        onChange={(e) => {
-                          setSiteFromBilling(e.target.checked);
-                          if (e.target.checked) {
-                            setBillingFromSite(false);
-                            setWorkOrder((prev) => ({ ...prev, siteAddress: prev.billingAddress }));
-                          } else {
-                            setWorkOrder((prev) => ({ ...prev, siteAddress: "" }));
-                          }
-                        }}
-                        style={{ cursor: "pointer" }}
-                      />
-                      Same as billing address
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, alignItems: "stretch" }}>
+                {/* LEFT COLUMN — Site Location + Site Address stacked */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {/* Site Location */}
+                  <div>
+                    <label
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: "0.08em",
+                        color: "#6b7280",
+                        display: "block",
+                        marginBottom: 6,
+                      }}
+                    >
+                      SITE LOCATION (NAME)
                     </label>
+                    <input
+                      name="siteLocation"
+                      value={workOrder.siteLocation}
+                      onChange={handleChange}
+                      className="awo-input"
+                      placeholder="Business / Building / Suite name"
+                      autoComplete="off"
+                    />
                   </div>
-                  <input
-                    name="siteAddress"
-                    ref={siteAddressInputRef}
-                    value={workOrder.siteAddress}
-                    onChange={handleChange}
-                    onFocus={handleSiteAddressFocus}
-                    placeholder="Start typing address…"
-                    className="awo-input"
-                    style={{ height: 100, boxSizing: "border-box" }}
-                    disabled={siteFromBilling}
-                    readOnly={siteFromBilling}
-                  />
+
+                  {/* Site Address */}
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#6b7280" }}>
+                        SITE ADDRESS
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11, color: "#6b7280" }}>
+                        <input
+                          type="checkbox"
+                          checked={siteFromBilling}
+                          onChange={(e) => {
+                            setSiteFromBilling(e.target.checked);
+                            if (e.target.checked) {
+                              setBillingFromSite(false);
+                              setWorkOrder((prev) => ({ ...prev, siteAddress: prev.billingAddress }));
+                            } else {
+                              setWorkOrder((prev) => ({ ...prev, siteAddress: "" }));
+                            }
+                          }}
+                          style={{ cursor: "pointer" }}
+                        />
+                        Same as billing address
+                      </label>
+                    </div>
+                    <input
+                      name="siteAddress"
+                      ref={siteAddressInputRef}
+                      value={workOrder.siteAddress}
+                      onChange={handleChange}
+                      onFocus={handleSiteAddressFocus}
+                      placeholder="Start typing address…"
+                      className="awo-input"
+                      disabled={siteFromBilling}
+                      readOnly={siteFromBilling}
+                    />
+                  </div>
                 </div>
 
-                <div className="awo-field">
+                {/* RIGHT COLUMN — Billing Address full height */}
+                <div style={{ display: "flex", flexDirection: "column" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#6b7280" }}>
-                      BILLING ADDRESS <span style={{ color: "red" }}>*</span>
-                    </span>
+                    <label style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#6b7280" }}>
+                      BILLING ADDRESS <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
                     <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11, color: "#6b7280" }}>
                       <input
                         type="checkbox"
@@ -876,12 +888,11 @@ export default function AddWorkOrder() {
                   </div>
                   <textarea
                     name="billingAddress"
-                    rows={4}
                     value={workOrder.billingAddress}
                     onChange={handleChange}
                     className="awo-textarea"
                     placeholder={"Company / Name\nStreet\nCity, ST ZIP"}
-                    style={{ height: 100, boxSizing: "border-box", resize: "vertical" }}
+                    style={{ flex: 1, minHeight: 110, boxSizing: "border-box", resize: "vertical" }}
                     disabled={billingFromSite}
                     readOnly={billingFromSite}
                   />
