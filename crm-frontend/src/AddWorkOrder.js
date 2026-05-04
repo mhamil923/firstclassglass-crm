@@ -802,33 +802,9 @@ export default function AddWorkOrder() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   {/* Site Location */}
                   <div>
-                    <label
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        letterSpacing: "0.08em",
-                        color: "#6b7280",
-                        display: "block",
-                        marginBottom: 6,
-                      }}
-                    >
-                      SITE LOCATION (NAME)
-                    </label>
-                    <input
-                      name="siteLocation"
-                      value={workOrder.siteLocation}
-                      onChange={handleChange}
-                      className="awo-input"
-                      placeholder="Business / Building / Suite name"
-                      autoComplete="off"
-                    />
-                  </div>
-
-                  {/* Site Address */}
-                  <div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                       <label style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#6b7280" }}>
-                        SITE ADDRESS
+                        SITE LOCATION (NAME)
                       </label>
                       <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11, color: "#6b7280" }}>
                         <input
@@ -848,6 +824,30 @@ export default function AddWorkOrder() {
                         Same as billing address
                       </label>
                     </div>
+                    <input
+                      name="siteLocation"
+                      value={workOrder.siteLocation}
+                      onChange={handleChange}
+                      className="awo-input"
+                      placeholder="Business / Building / Suite name"
+                      autoComplete="off"
+                    />
+                  </div>
+
+                  {/* Site Address */}
+                  <div>
+                    <label
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: "0.08em",
+                        color: "#6b7280",
+                        display: "block",
+                        marginBottom: 6,
+                      }}
+                    >
+                      SITE ADDRESS
+                    </label>
                     <input
                       name="siteAddress"
                       ref={siteAddressInputRef}
