@@ -815,11 +815,11 @@ export default function AddWorkOrder() {
               {/* Site Address + Billing Address side-by-side, equal width */}
               <div className="awo-grid awo-grid-2" style={{ marginTop: 16 }}>
                 <div className="awo-field">
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                    <label style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af", letterSpacing: "0.05em" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#6b7280" }}>
                       SITE ADDRESS
-                    </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "#9ca3af", fontSize: 12 }}>
+                    </span>
+                    <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11, color: "#6b7280" }}>
                       <input
                         type="checkbox"
                         checked={siteFromBilling}
@@ -832,6 +832,7 @@ export default function AddWorkOrder() {
                             setWorkOrder((prev) => ({ ...prev, siteAddress: "" }));
                           }
                         }}
+                        style={{ cursor: "pointer" }}
                       />
                       Same as billing address
                     </label>
@@ -844,17 +845,18 @@ export default function AddWorkOrder() {
                     onFocus={handleSiteAddressFocus}
                     placeholder="Start typing address…"
                     className="awo-input"
+                    style={{ height: 100, boxSizing: "border-box" }}
                     disabled={siteFromBilling}
                     readOnly={siteFromBilling}
                   />
                 </div>
 
                 <div className="awo-field">
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                    <label style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af", letterSpacing: "0.05em" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "#6b7280" }}>
                       BILLING ADDRESS <span style={{ color: "red" }}>*</span>
-                    </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "#9ca3af", fontSize: 12 }}>
+                    </span>
+                    <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11, color: "#6b7280" }}>
                       <input
                         type="checkbox"
                         checked={billingFromSite}
@@ -867,6 +869,7 @@ export default function AddWorkOrder() {
                             setWorkOrder((prev) => ({ ...prev, billingAddress: "" }));
                           }
                         }}
+                        style={{ cursor: "pointer" }}
                       />
                       Same as site address
                     </label>
@@ -878,6 +881,7 @@ export default function AddWorkOrder() {
                     onChange={handleChange}
                     className="awo-textarea"
                     placeholder={"Company / Name\nStreet\nCity, ST ZIP"}
+                    style={{ height: 100, boxSizing: "border-box", resize: "vertical" }}
                     disabled={billingFromSite}
                     readOnly={billingFromSite}
                   />
