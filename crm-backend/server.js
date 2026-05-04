@@ -275,6 +275,7 @@ const STATUS_CANON = [
   'Needs to be Scheduled',
   'Scheduled',
   'Waiting for Approval',
+  'Declined',
   'Approved',
   'Waiting on Parts',
   'Needs to be Invoiced',
@@ -330,6 +331,7 @@ const STATUS_SYNONYMS = new Map([
   ['needsinvoiced','Needs to be Invoiced'],
   ['needs to invoice','Needs to be Invoiced'],
   ['approved','Approved'],
+  ['declined','Declined'],
 ]);
 
 const STATUS_SHORT = new Map([
@@ -337,6 +339,7 @@ const STATUS_SHORT = new Map([
   ['sc', 'Scheduled'],
   ['ap', 'Approved'],
   ['wf', 'Waiting for Approval'],
+  ['de', 'Declined'],
   ['wa', 'Waiting on Parts'],
   ['nq', 'Needs to be Quoted'],
   ['ns', 'Needs to be Scheduled'],
@@ -398,6 +401,7 @@ async function ensureCols() {
     { name: 'siteAddress',       type: 'VARCHAR(255) NULL' },
     { name: 'assignedTo',        type: 'INT NULL' },
     { name: 'customerId',        type: 'INT NULL' },
+    { name: 'updatedAt',         type: 'DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP' },
   ];
 
   try {
@@ -8773,6 +8777,26 @@ app.use((err, req, res, next) => {
   }
   next();
 });
+
+// ─── AUTO-DECLINE STALE WORK ORDERS ──────────────────────────────────────────
+// Move work orders that have been "Waiting for Approval" for 60+ days to "Declined".
+const autoDeclineStaleWorkOrders = async () => {
+  try {
+    const [result] = await db.query(`
+      UPDATE work_orders
+      SET status = 'Declined', updatedAt = NOW()
+      WHERE status = 'Waiting for Approval'
+      AND updatedAt <= DATE_SUB(NOW(), INTERVAL 60 DAY)
+    `);
+    if (result.affectedRows > 0) {
+      console.log(`[AutoDecline] Moved ${result.affectedRows} stale work orders to Declined`);
+    }
+  } catch (err) {
+    console.error('[AutoDecline] Failed:', err.message);
+  }
+};
+autoDeclineStaleWorkOrders();
+setInterval(autoDeclineStaleWorkOrders, 24 * 60 * 60 * 1000);
 
 // ─── START ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 80;

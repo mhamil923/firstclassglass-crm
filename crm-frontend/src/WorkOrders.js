@@ -15,6 +15,7 @@ const STATUS_LIST = [
   "Scheduled",
   "Needs to be Quoted",
   "Waiting for Approval",
+  "Declined",
   "Approved",
   "Waiting on Parts",
   "Needs to be Scheduled",
@@ -47,6 +48,8 @@ const STATUS_SYNONYMS = new Map([
   ["waiting on approval", "Waiting for Approval"],
 
   ["approved", "Approved"],
+
+  ["declined", "Declined"],
 
   ["waiting on parts", "Waiting on Parts"],
   ["waiting-on-parts", "Waiting on Parts"],
