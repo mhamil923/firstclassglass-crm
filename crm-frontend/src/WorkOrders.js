@@ -277,28 +277,21 @@ export default function WorkOrders() {
     }
   };
 
-  // assign — try `/assign`, fallback to `/edit` (multipart) if needed
+  // Set primary tech via the multi-tech endpoint (replaces full tech list).
+  // The endpoint also writes work_orders.assignedTo so older code paths keep working.
   const assignToTech = async (orderId, techId, e) => {
     e.stopPropagation();
     try {
+      const userIds = techId ? [Number(techId)] : [];
       await api.put(
-        `/work-orders/${orderId}/assign`,
-        { assignedTo: techId || null },
+        `/work-orders/${orderId}/techs`,
+        { userIds },
         { headers: { "Content-Type": "application/json", ...authHeaders() } }
       );
       await fetchWorkOrders();
     } catch (err) {
-      try {
-        const form = new FormData();
-        form.append("assignedTo", techId || "");
-        await api.put(`/work-orders/${orderId}/edit`, form, {
-          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-        });
-        await fetchWorkOrders();
-      } catch (err2) {
-        console.error("Error assigning tech:", err2);
-        alert(err2?.response?.data?.error || "Failed to assign technician.");
-      }
+      console.error("Error assigning tech:", err);
+      alert(err?.response?.data?.error || "Failed to assign technician.");
     }
   };
 
@@ -482,18 +475,36 @@ export default function WorkOrders() {
 
                     {userRole !== "tech" && (
                       <td onClick={(e) => e.stopPropagation()}>
-                        <select
-                          className="control select"
-                          value={order.assignedTo ?? ""}
-                          onChange={(e) => assignToTech(order.id, e.target.value, e)}
-                        >
-                          <option value="">Unassigned</option>
-                          {techUsers.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.username}
-                            </option>
-                          ))}
-                        </select>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <select
+                            className="control select"
+                            value={order.assignedTo ?? ""}
+                            onChange={(e) => assignToTech(order.id, e.target.value, e)}
+                          >
+                            <option value="">Unassigned</option>
+                            {techUsers.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.username}
+                              </option>
+                            ))}
+                          </select>
+                          {Array.isArray(order.techIds) && order.techIds.length > 1 && (
+                            <span
+                              title={(order.techNames || []).join(", ")}
+                              style={{
+                                fontSize: 11,
+                                fontWeight: 600,
+                                padding: "2px 8px",
+                                borderRadius: 999,
+                                background: "#1d4ed8",
+                                color: "#fff",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              +{order.techIds.length - 1} more
+                            </span>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>

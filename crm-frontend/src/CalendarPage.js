@@ -1155,15 +1155,20 @@ export default function WorkOrderCalendar() {
     const techObj = techs.find((t) => t.id === techId);
     const techName = techObj?.username || "";
     try {
-      const form = new FormData();
-      form.append("assignedTo", techId != null ? String(techId) : "");
-      await api.put(`/work-orders/${orderId}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const userIds = techId != null ? [techId] : [];
+      await api.put(`/work-orders/${orderId}/techs`, { userIds });
       // Update local state immediately
       setDayOrders((prev) =>
         prev.map((o) =>
-          o.id === orderId ? { ...o, assignedTo: techId, assignedToName: techName } : o
+          o.id === orderId
+            ? {
+                ...o,
+                assignedTo: techId,
+                assignedToName: techName,
+                techIds: userIds,
+                techNames: techName ? [techName] : [],
+              }
+            : o
         )
       );
       // Flash success indicator

@@ -391,6 +391,7 @@ export default function ViewWorkOrder() {
   const [techUsers, setTechUsers] = useState([]);
   const [techSaving, setTechSaving] = useState(false);
   const [localAssignedTo, setLocalAssignedTo] = useState(""); // "" or numeric string
+  const [assignedTechIds, setAssignedTechIds] = useState([]); // multi-tech selection
 
   const [newNote, setNewNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
@@ -519,6 +520,16 @@ export default function ViewWorkOrder() {
       // IMPORTANT: assignedTo is numeric ID in your backend
       const assignedToVal = data?.assignedTo ?? "";
       setLocalAssignedTo(assignedToVal === null || assignedToVal === undefined ? "" : String(assignedToVal));
+
+      // Hydrate multi-tech selection. Server attaches techIds when available;
+      // fall back to the primary assignedTo so the chip UI is consistent.
+      if (Array.isArray(data?.techIds) && data.techIds.length > 0) {
+        setAssignedTechIds(data.techIds.map(Number));
+      } else if (assignedToVal !== "" && assignedToVal != null) {
+        setAssignedTechIds([Number(assignedToVal)]);
+      } else {
+        setAssignedTechIds([]);
+      }
 
       // Load draw-note overrides for this WO
       setDrawNoteOverrides(loadDrawNoteOverrides(id));
@@ -1671,39 +1682,60 @@ export default function ViewWorkOrder() {
                     )}
                   </div>
 
-                  <div className="meta-row">
-                    <span className="meta-label">Assigned Tech</span>
-                    {editMode ? (
-                      <select
-                        className="control select"
-                        value={edit.assignedTo}
-                        onChange={(e) => patchEdit({ assignedTo: e.target.value })}
-                      >
-                        <option value="">Unassigned</option>
-                        {techUsers.map((t) => (
-                          <option key={t.id} value={String(t.id)}>
-                            {t.username}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div className="meta-inline">
-                        <select
-                          className="control select"
-                          value={localAssignedTo}
-                          onChange={handleAssignedTechChange}
-                          disabled={techSaving}
-                        >
-                          <option value="">Unassigned</option>
-                          {techUsers.map((t) => (
-                            <option key={t.id} value={String(t.id)}>
+                  <div className="meta-row" style={{ alignItems: "flex-start" }}>
+                    <span className="meta-label">Assigned Techs</span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {techUsers.map((t) => {
+                          const tid = Number(t.id);
+                          const active = assignedTechIds.includes(tid);
+                          return (
+                            <button
+                              key={t.id}
+                              type="button"
+                              disabled={techSaving}
+                              onClick={async () => {
+                                const next = active
+                                  ? assignedTechIds.filter((x) => x !== tid)
+                                  : [...assignedTechIds, tid];
+                                setAssignedTechIds(next);
+                                setLocalAssignedTo(next[0] != null ? String(next[0]) : "");
+                                if (editMode) {
+                                  patchEdit({ assignedTo: next[0] != null ? String(next[0]) : "" });
+                                }
+                                try {
+                                  setTechSaving(true);
+                                  await api.put(
+                                    `/work-orders/${id}/techs`,
+                                    { userIds: next },
+                                    { headers: authHeaders() }
+                                  );
+                                } catch (e) {
+                                  console.error("Failed to save techs:", e);
+                                } finally {
+                                  setTechSaving(false);
+                                }
+                              }}
+                              style={{
+                                padding: "6px 14px",
+                                borderRadius: 20,
+                                border: active ? "2px solid #3b82f6" : "2px solid #4b5563",
+                                background: active ? "#1d4ed8" : "#374151",
+                                color: active ? "#fff" : "#9ca3af",
+                                fontSize: 13,
+                                fontWeight: 500,
+                                cursor: techSaving ? "wait" : "pointer",
+                                opacity: techSaving ? 0.7 : 1,
+                              }}
+                            >
+                              {active ? "✓ " : ""}
                               {t.username}
-                            </option>
-                          ))}
-                        </select>
-                        {techSaving ? <span className="tiny">Saving…</span> : null}
+                            </button>
+                          );
+                        })}
                       </div>
-                    )}
+                      {techSaving ? <span className="tiny">Saving…</span> : null}
+                    </div>
                   </div>
                 </div>
               </div>

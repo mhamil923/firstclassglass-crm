@@ -554,6 +554,75 @@ async function ensureSupplierPickupsTable() {
 
 ensureSupplierPickupsTable().catch(() => {});
 
+// ─── WORK ORDER TECHS (multi-tech assignment) ───────────────────────────────
+async function ensureWorkOrderTechsTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS work_order_techs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        workOrderId INT NOT NULL,
+        userId INT NOT NULL,
+        assignedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_wo_user (workOrderId, userId),
+        FOREIGN KEY (workOrderId) REFERENCES work_orders(id) ON DELETE CASCADE
+      )
+    `);
+    // Backfill: every existing assignedTo becomes a row in the junction table.
+    // INSERT IGNORE skips rows that already exist (so this is idempotent across deploys).
+    const [r] = await db.query(`
+      INSERT IGNORE INTO work_order_techs (workOrderId, userId)
+      SELECT id, assignedTo FROM work_orders
+      WHERE assignedTo IS NOT NULL
+    `);
+    if (r && r.affectedRows > 0) {
+      console.log(`[WorkOrderTechs] Backfilled ${r.affectedRows} primary-tech rows`);
+    }
+    console.log('[WorkOrderTechs] work_order_techs table ready');
+  } catch (e) {
+    console.warn('[WorkOrderTechs] Could not create work_order_techs:', e.message);
+  }
+}
+ensureWorkOrderTechsTable().catch(() => {});
+
+/**
+ * Hydrate `techIds` (number[]) and `techNames` (string[]) on a list of work-order rows.
+ * Mutates rows in place. One query for the whole batch.
+ */
+async function attachTechsToWorkOrders(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+  const ids = rows.map(r => r.id).filter(n => Number.isFinite(Number(n)));
+  if (ids.length === 0) return rows;
+  try {
+    const [techRows] = await db.query(
+      `SELECT wt.workOrderId, wt.userId, u.username
+         FROM work_order_techs wt
+         LEFT JOIN users u ON u.id = wt.userId
+        WHERE wt.workOrderId IN (?)
+        ORDER BY wt.assignedAt ASC`,
+      [ids]
+    );
+    const byWo = new Map();
+    for (const r of techRows) {
+      if (!byWo.has(r.workOrderId)) byWo.set(r.workOrderId, { ids: [], names: [] });
+      const entry = byWo.get(r.workOrderId);
+      entry.ids.push(Number(r.userId));
+      if (r.username) entry.names.push(r.username);
+    }
+    for (const row of rows) {
+      const entry = byWo.get(row.id);
+      row.techIds = entry ? entry.ids : [];
+      row.techNames = entry ? entry.names : [];
+    }
+  } catch (e) {
+    console.warn('[attachTechsToWorkOrders] Failed:', e.message);
+    for (const row of rows) {
+      if (!Array.isArray(row.techIds)) row.techIds = [];
+      if (!Array.isArray(row.techNames)) row.techNames = [];
+    }
+  }
+  return rows;
+}
+
 /**
  * Sync the first (oldest) PO from work_order_pos back to the legacy columns
  * on work_orders so existing code that reads those columns still works.
@@ -5456,6 +5525,7 @@ app.get('/work-orders', authenticate, async (req, res) => {
   try {
     const [raw] = await db.execute(workOrdersSelectSQL({ orderSql: 'ORDER BY w.id DESC' }));
     const rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status), allPoNumbersFormatted: formatPoNumberList(r.allPoNumbers) }));
+    await attachTechsToWorkOrders(rows);
 
     // DEBUG: Log count of "Waiting on Parts" work orders
     const waitingCount = rows.filter(r => r.status === 'Waiting on Parts').length;
@@ -5665,11 +5735,71 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
       ? canonStatus(row.status)
       : displayStatusOrDefault(row.status);
     row.allPoNumbersFormatted = formatPoNumberList(row.allPoNumbers);
+    await attachTechsToWorkOrders([row]);
 
     res.json(row);
   } catch (err) {
     console.error('Work-order get-by-id error:', err);
     res.status(500).json({ error: 'Failed to fetch work order.' });
+  }
+});
+
+// ─── MULTI-TECH ASSIGNMENT ───────────────────────────────────────────────────
+// GET techs assigned to a work order: [{ userId, username }]
+app.get('/work-orders/:id/techs', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [rows] = await db.query(
+      `SELECT wt.userId, u.username
+         FROM work_order_techs wt
+         LEFT JOIN users u ON u.id = wt.userId
+        WHERE wt.workOrderId = ?
+        ORDER BY wt.assignedAt ASC`,
+      [id]
+    );
+    res.json(rows.map(r => ({ userId: Number(r.userId), username: r.username || '' })));
+  } catch (err) {
+    console.error('Get work-order techs error:', err);
+    res.status(500).json({ error: 'Failed to fetch techs.' });
+  }
+});
+
+// PUT replace assigned techs. Body: { userIds: number[] }
+// First entry becomes the primary tech (work_orders.assignedTo).
+app.put('/work-orders/:id/techs', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const raw = Array.isArray(req.body?.userIds) ? req.body.userIds : [];
+    const userIds = Array.from(new Set(
+      raw.map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0)
+    ));
+
+    await db.query('DELETE FROM work_order_techs WHERE workOrderId = ?', [id]);
+    if (userIds.length > 0) {
+      const values = userIds.map(uid => [id, uid]);
+      await db.query('INSERT INTO work_order_techs (workOrderId, userId) VALUES ?', [values]);
+    }
+
+    if (SCHEMA.hasAssignedTo) {
+      const primary = userIds[0] ?? null;
+      await db.query('UPDATE work_orders SET assignedTo = ? WHERE id = ?', [primary, id]);
+    }
+
+    const [rows] = await db.query(
+      `SELECT wt.userId, u.username
+         FROM work_order_techs wt
+         LEFT JOIN users u ON u.id = wt.userId
+        WHERE wt.workOrderId = ?
+        ORDER BY wt.assignedAt ASC`,
+      [id]
+    );
+    res.json({
+      success: true,
+      techs: rows.map(r => ({ userId: Number(r.userId), username: r.username || '' })),
+    });
+  } catch (err) {
+    console.error('Put work-order techs error:', err);
+    res.status(500).json({ error: 'Failed to update techs.' });
   }
 });
 

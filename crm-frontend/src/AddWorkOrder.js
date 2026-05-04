@@ -140,6 +140,15 @@ export default function AddWorkOrder() {
   const [submitting, setSubmitting] = useState(false);
   const [loadingRefs, setLoadingRefs] = useState(false);
 
+  // Multi-tech assignment (drives the primary `assignedTo` and `/techs` endpoint).
+  const [assignedTechIds, setAssignedTechIds] = useState([]);
+  const toggleAssignedTech = (id) => {
+    const n = Number(id);
+    setAssignedTechIds((prev) =>
+      prev.includes(n) ? prev.filter((x) => x !== n) : [...prev, n]
+    );
+  };
+
   // Mutually exclusive: copy one address into the other and lock that field.
   const [siteFromBilling, setSiteFromBilling] = useState(false);
   const [billingFromSite, setBillingFromSite] = useState(false);
@@ -540,7 +549,8 @@ export default function AddWorkOrder() {
 
     form.append("customerPhone", workOrder.customerPhone || "");
     form.append("customerEmail", workOrder.customerEmail || "");
-    if (workOrder.assignedTo) form.append("assignedTo", workOrder.assignedTo);
+    const primaryTechId = assignedTechIds[0] || workOrder.assignedTo || "";
+    if (primaryTechId) form.append("assignedTo", primaryTechId);
     if (workOrder.customerId) form.append("customerId", workOrder.customerId);
 
     if (workOrder.scheduledDate) {
@@ -555,9 +565,19 @@ export default function AddWorkOrder() {
 
     try {
       setSubmitting(true);
-      await api.post("/work-orders", form, {
+      const createRes = await api.post("/work-orders", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
+
+      // Sync the multi-tech junction table with the chip selection.
+      const newId = createRes?.data?.id || createRes?.data?.workOrder?.id;
+      if (newId && assignedTechIds.length > 0) {
+        try {
+          await api.put(`/work-orders/${newId}/techs`, { userIds: assignedTechIds });
+        } catch (e) {
+          console.warn("Failed to sync multi-tech assignment:", e?.message || e);
+        }
+      }
 
       if (willBeScheduled) navigate("/calendar");
       else navigate("/work-orders");
@@ -716,20 +736,43 @@ export default function AddWorkOrder() {
 
                 {role !== "tech" ? (
                   <div className="awo-field">
-                    <label className="awo-label">Assign To</label>
-                    <select
-                      name="assignedTo"
-                      value={workOrder.assignedTo}
-                      onChange={handleChange}
-                      className="awo-select"
+                    <label
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: "0.08em",
+                        color: "#6b7280",
+                        display: "block",
+                        marginBottom: 8,
+                      }}
                     >
-                      <option value="">— Unassigned —</option>
-                      {techs.map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.username}
-                        </option>
-                      ))}
-                    </select>
+                      ASSIGN TO
+                    </label>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {techs.map((u) => {
+                        const active = assignedTechIds.includes(Number(u.id));
+                        return (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onClick={() => toggleAssignedTech(u.id)}
+                            style={{
+                              padding: "6px 14px",
+                              borderRadius: 20,
+                              border: active ? "2px solid #3b82f6" : "2px solid #4b5563",
+                              background: active ? "#1d4ed8" : "#374151",
+                              color: active ? "#fff" : "#9ca3af",
+                              fontSize: 13,
+                              fontWeight: 500,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {active ? "✓ " : ""}
+                            {u.username}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 ) : (
                   <div className="awo-field">
