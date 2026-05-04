@@ -139,15 +139,23 @@ export default function AddWorkOrder() {
   const [submitting, setSubmitting] = useState(false);
   const [loadingRefs, setLoadingRefs] = useState(false);
 
-  // "Same as site address" — copies siteAddress into billingAddress and locks the input.
-  const [sameAsBilling, setSameAsBilling] = useState(false);
+  // Mutually exclusive: copy one address into the other and lock that field.
+  const [siteFromBilling, setSiteFromBilling] = useState(false);
+  const [billingFromSite, setBillingFromSite] = useState(false);
   useEffect(() => {
-    if (sameAsBilling) {
+    if (siteFromBilling) {
+      setWorkOrder((prev) =>
+        prev.siteAddress === prev.billingAddress ? prev : { ...prev, siteAddress: prev.billingAddress }
+      );
+    }
+  }, [siteFromBilling, workOrder.billingAddress]);
+  useEffect(() => {
+    if (billingFromSite) {
       setWorkOrder((prev) =>
         prev.billingAddress === prev.siteAddress ? prev : { ...prev, billingAddress: prev.siteAddress }
       );
     }
-  }, [sameAsBilling, workOrder.siteAddress]);
+  }, [billingFromSite, workOrder.siteAddress]);
 
   // Autocomplete for Site Address
   const siteAddressInputRef = useRef(null);
@@ -807,7 +815,27 @@ export default function AddWorkOrder() {
               {/* Site Address + Billing Address side-by-side, equal width */}
               <div className="awo-grid awo-grid-2" style={{ marginTop: 16 }}>
                 <div className="awo-field">
-                  <label className="awo-label">Site Address</label>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af", letterSpacing: "0.05em" }}>
+                      SITE ADDRESS
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "#9ca3af", fontSize: 12 }}>
+                      <input
+                        type="checkbox"
+                        checked={siteFromBilling}
+                        onChange={(e) => {
+                          setSiteFromBilling(e.target.checked);
+                          if (e.target.checked) {
+                            setBillingFromSite(false);
+                            setWorkOrder((prev) => ({ ...prev, siteAddress: prev.billingAddress }));
+                          } else {
+                            setWorkOrder((prev) => ({ ...prev, siteAddress: "" }));
+                          }
+                        }}
+                      />
+                      Same as billing address
+                    </label>
+                  </div>
                   <input
                     name="siteAddress"
                     ref={siteAddressInputRef}
@@ -816,43 +844,33 @@ export default function AddWorkOrder() {
                     onFocus={handleSiteAddressFocus}
                     placeholder="Start typing address…"
                     className="awo-input"
+                    disabled={siteFromBilling}
+                    readOnly={siteFromBilling}
                   />
                 </div>
 
                 <div className="awo-field">
-                  <label
-                    className="awo-label"
-                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
-                  >
-                    <span>
-                      Billing Address <span className="awo-req">*</span>
-                    </span>
-                    <label
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        cursor: "pointer",
-                        color: "#9ca3af",
-                        fontSize: 13,
-                        fontWeight: 400,
-                      }}
-                    >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af", letterSpacing: "0.05em" }}>
+                      BILLING ADDRESS <span style={{ color: "red" }}>*</span>
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", color: "#9ca3af", fontSize: 12 }}>
                       <input
                         type="checkbox"
-                        checked={sameAsBilling}
+                        checked={billingFromSite}
                         onChange={(e) => {
-                          const next = e.target.checked;
-                          setSameAsBilling(next);
-                          setWorkOrder((prev) => ({
-                            ...prev,
-                            billingAddress: next ? prev.siteAddress : "",
-                          }));
+                          setBillingFromSite(e.target.checked);
+                          if (e.target.checked) {
+                            setSiteFromBilling(false);
+                            setWorkOrder((prev) => ({ ...prev, billingAddress: prev.siteAddress }));
+                          } else {
+                            setWorkOrder((prev) => ({ ...prev, billingAddress: "" }));
+                          }
                         }}
                       />
                       Same as site address
                     </label>
-                  </label>
+                  </div>
                   <textarea
                     name="billingAddress"
                     rows={4}
@@ -860,8 +878,8 @@ export default function AddWorkOrder() {
                     onChange={handleChange}
                     className="awo-textarea"
                     placeholder={"Company / Name\nStreet\nCity, ST ZIP"}
-                    disabled={sameAsBilling}
-                    readOnly={sameAsBilling}
+                    disabled={billingFromSite}
+                    readOnly={billingFromSite}
                   />
                 </div>
               </div>
