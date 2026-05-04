@@ -150,13 +150,26 @@ export default function AddWorkOrder() {
   };
 
   // Mutually exclusive: copy one address into the other and lock that field.
+  // For "site from billing", split the billing textarea so line 1 → Site Location (Name)
+  // and the remaining lines → Site Address.
   const [siteFromBilling, setSiteFromBilling] = useState(false);
   const [billingFromSite, setBillingFromSite] = useState(false);
+
+  function splitBillingForSite(billing) {
+    const lines = String(billing || "").split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length >= 2) {
+      return { siteLocation: lines[0], siteAddress: lines.slice(1).join(", ") };
+    }
+    return { siteLocation: "", siteAddress: String(billing || "").trim() };
+  }
+
   useEffect(() => {
     if (siteFromBilling) {
-      setWorkOrder((prev) =>
-        prev.siteAddress === prev.billingAddress ? prev : { ...prev, siteAddress: prev.billingAddress }
-      );
+      setWorkOrder((prev) => {
+        const { siteLocation, siteAddress } = splitBillingForSite(prev.billingAddress);
+        if (prev.siteLocation === siteLocation && prev.siteAddress === siteAddress) return prev;
+        return { ...prev, siteLocation, siteAddress };
+      });
     }
   }, [siteFromBilling, workOrder.billingAddress]);
   useEffect(() => {
@@ -858,9 +871,12 @@ export default function AddWorkOrder() {
                             setSiteFromBilling(e.target.checked);
                             if (e.target.checked) {
                               setBillingFromSite(false);
-                              setWorkOrder((prev) => ({ ...prev, siteAddress: prev.billingAddress }));
+                              setWorkOrder((prev) => {
+                                const { siteLocation, siteAddress } = splitBillingForSite(prev.billingAddress);
+                                return { ...prev, siteLocation, siteAddress };
+                              });
                             } else {
-                              setWorkOrder((prev) => ({ ...prev, siteAddress: "" }));
+                              setWorkOrder((prev) => ({ ...prev, siteLocation: "", siteAddress: "" }));
                             }
                           }}
                           style={{ cursor: "pointer" }}
@@ -875,6 +891,8 @@ export default function AddWorkOrder() {
                       className="awo-input"
                       placeholder="Business / Building / Suite name"
                       autoComplete="off"
+                      disabled={siteFromBilling}
+                      readOnly={siteFromBilling}
                     />
                   </div>
 
