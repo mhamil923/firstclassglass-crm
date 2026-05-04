@@ -139,15 +139,15 @@ export default function AddWorkOrder() {
   const [submitting, setSubmitting] = useState(false);
   const [loadingRefs, setLoadingRefs] = useState(false);
 
-  // "Same as billing address" — copies billingAddress into siteAddress and locks the input.
+  // "Same as site address" — copies siteAddress into billingAddress and locks the input.
   const [sameAsBilling, setSameAsBilling] = useState(false);
   useEffect(() => {
     if (sameAsBilling) {
       setWorkOrder((prev) =>
-        prev.siteAddress === prev.billingAddress ? prev : { ...prev, siteAddress: prev.billingAddress }
+        prev.billingAddress === prev.siteAddress ? prev : { ...prev, billingAddress: prev.siteAddress }
       );
     }
-  }, [sameAsBilling, workOrder.billingAddress]);
+  }, [sameAsBilling, workOrder.siteAddress]);
 
   // Autocomplete for Site Address
   const siteAddressInputRef = useRef(null);
@@ -789,7 +789,8 @@ export default function AddWorkOrder() {
             <div className="awo-section">
               <div className="awo-section-title">Site</div>
 
-              <div className="awo-grid awo-grid-2">
+              {/* Site Location takes its own row (full width) */}
+              <div className="awo-grid">
                 <div className="awo-field">
                   <label className="awo-label">Site Location (Name)</label>
                   <input
@@ -801,34 +802,12 @@ export default function AddWorkOrder() {
                     autoComplete="off"
                   />
                 </div>
+              </div>
 
+              {/* Site Address + Billing Address side-by-side, equal width */}
+              <div className="awo-grid awo-grid-2" style={{ marginTop: 16 }}>
                 <div className="awo-field">
                   <label className="awo-label">Site Address</label>
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      marginBottom: 8,
-                      cursor: "pointer",
-                      color: "#9ca3af",
-                      fontSize: 13,
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={sameAsBilling}
-                      onChange={(e) => {
-                        const next = e.target.checked;
-                        setSameAsBilling(next);
-                        setWorkOrder((prev) => ({
-                          ...prev,
-                          siteAddress: next ? prev.billingAddress : "",
-                        }));
-                      }}
-                    />
-                    Same as billing address
-                  </label>
                   <input
                     name="siteAddress"
                     ref={siteAddressInputRef}
@@ -837,21 +816,42 @@ export default function AddWorkOrder() {
                     onFocus={handleSiteAddressFocus}
                     placeholder="Start typing address…"
                     className="awo-input"
-                    disabled={sameAsBilling}
-                    readOnly={sameAsBilling}
                   />
                 </div>
-              </div>
-            </div>
 
-            {/* ===== Billing + Problem ===== */}
-            <div className="awo-section">
-              <div className="awo-section-title">Details</div>
-
-              <div className="awo-grid awo-grid-2">
                 <div className="awo-field">
-                  <label className="awo-label">
-                    Billing Address <span className="awo-req">*</span>
+                  <label
+                    className="awo-label"
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+                  >
+                    <span>
+                      Billing Address <span className="awo-req">*</span>
+                    </span>
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        cursor: "pointer",
+                        color: "#9ca3af",
+                        fontSize: 13,
+                        fontWeight: 400,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={sameAsBilling}
+                        onChange={(e) => {
+                          const next = e.target.checked;
+                          setSameAsBilling(next);
+                          setWorkOrder((prev) => ({
+                            ...prev,
+                            billingAddress: next ? prev.siteAddress : "",
+                          }));
+                        }}
+                      />
+                      Same as site address
+                    </label>
                   </label>
                   <textarea
                     name="billingAddress"
@@ -860,9 +860,18 @@ export default function AddWorkOrder() {
                     onChange={handleChange}
                     className="awo-textarea"
                     placeholder={"Company / Name\nStreet\nCity, ST ZIP"}
+                    disabled={sameAsBilling}
+                    readOnly={sameAsBilling}
                   />
                 </div>
+              </div>
+            </div>
 
+            {/* ===== Details ===== */}
+            <div className="awo-section">
+              <div className="awo-section-title">Details</div>
+
+              <div className="awo-grid">
                 <div className="awo-field">
                   <label className="awo-label">
                     Problem Description <span className="awo-req">*</span>
