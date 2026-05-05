@@ -1642,9 +1642,21 @@ export default function ViewWorkOrder() {
               <div className="section-card">
                 <h3 className="section-header">Status & Assignment</h3>
 
-                <div className="meta-grid-2">
-                  <div className="meta-row">
-                    <span className="meta-label">Status</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {/* STATUS */}
+                  <div>
+                    <label
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: "0.08em",
+                        color: "#6b7280",
+                        display: "block",
+                        marginBottom: 6,
+                      }}
+                    >
+                      STATUS
+                    </label>
                     {editMode ? (
                       <select
                         className="control select"
@@ -1682,61 +1694,71 @@ export default function ViewWorkOrder() {
                     )}
                   </div>
 
-                  <div className="meta-row" style={{ alignItems: "flex-start" }}>
-                    <span className="meta-label">Assigned Techs</span>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 4 }}>
-                        {techUsers.map((t) => {
-                          const tid = Number(t.id);
-                          const active = assignedTechIds.includes(tid);
-                          return (
-                            <button
-                              key={t.id}
-                              type="button"
-                              disabled={techSaving}
-                              onClick={async () => {
-                                const next = active
-                                  ? assignedTechIds.filter((x) => x !== tid)
-                                  : [...assignedTechIds, tid];
-                                setAssignedTechIds(next);
-                                setLocalAssignedTo(next[0] != null ? String(next[0]) : "");
-                                if (editMode) {
-                                  patchEdit({ assignedTo: next[0] != null ? String(next[0]) : "" });
-                                }
-                                try {
-                                  setTechSaving(true);
-                                  await api.put(
-                                    `/work-orders/${id}/techs`,
-                                    { userIds: next },
-                                    { headers: authHeaders() }
-                                  );
-                                } catch (e) {
-                                  console.error("Failed to save techs:", e);
-                                } finally {
-                                  setTechSaving(false);
-                                }
-                              }}
-                              style={{
-                                padding: "8px 12px",
-                                borderRadius: 20,
-                                border: active ? "2px solid #3b82f6" : "2px solid #4b5563",
-                                background: active ? "#1d4ed8" : "#374151",
-                                color: active ? "#fff" : "#9ca3af",
-                                fontSize: 13,
-                                fontWeight: 500,
-                                cursor: techSaving ? "wait" : "pointer",
-                                opacity: techSaving ? 0.7 : 1,
-                                textAlign: "center",
-                              }}
-                            >
-                              {active ? "✓ " : ""}
-                              {t.username}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {techSaving ? <span className="tiny">Saving…</span> : null}
+                  {/* ASSIGNED TECHS */}
+                  <div>
+                    <label
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: "0.08em",
+                        color: "#6b7280",
+                        display: "block",
+                        marginBottom: 8,
+                      }}
+                    >
+                      ASSIGNED TECHS
+                    </label>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      {techUsers.map((t) => {
+                        const tid = Number(t.id);
+                        const active = assignedTechIds.includes(tid);
+                        return (
+                          <button
+                            key={t.id}
+                            type="button"
+                            disabled={techSaving}
+                            onClick={async () => {
+                              const next = active
+                                ? assignedTechIds.filter((x) => x !== tid)
+                                : [...assignedTechIds, tid];
+                              setAssignedTechIds(next);
+                              setLocalAssignedTo(next[0] != null ? String(next[0]) : "");
+                              if (editMode) {
+                                patchEdit({ assignedTo: next[0] != null ? String(next[0]) : "" });
+                              }
+                              try {
+                                setTechSaving(true);
+                                await api.put(
+                                  `/work-orders/${id}/techs`,
+                                  { userIds: next },
+                                  { headers: authHeaders() }
+                                );
+                              } catch (e) {
+                                console.error("Failed to save techs:", e);
+                              } finally {
+                                setTechSaving(false);
+                              }
+                            }}
+                            style={{
+                              padding: "8px 12px",
+                              borderRadius: 20,
+                              border: active ? "2px solid #3b82f6" : "2px solid #4b5563",
+                              background: active ? "#1d4ed8" : "#374151",
+                              color: active ? "#fff" : "#9ca3af",
+                              fontSize: 13,
+                              fontWeight: 500,
+                              cursor: techSaving ? "wait" : "pointer",
+                              opacity: techSaving ? 0.7 : 1,
+                              textAlign: "center",
+                            }}
+                          >
+                            {active ? "✓ " : ""}
+                            {t.username}
+                          </button>
+                        );
+                      })}
                     </div>
+                    {techSaving ? <span className="tiny" style={{ marginTop: 6, display: "block" }}>Saving…</span> : null}
                   </div>
                 </div>
               </div>
