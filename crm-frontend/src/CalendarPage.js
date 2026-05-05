@@ -1117,6 +1117,8 @@ export default function WorkOrderCalendar() {
             status: ev.status ?? ev.meta?.status,
             assignedTo: full?.assignedTo ?? ev.meta?.assignedTo ?? ev.assignedTo ?? null,
             assignedToName: full?.assignedToName ?? ev.meta?.assignedToName ?? ev.assignedToName ?? "",
+            techIds: Array.isArray(full?.techIds) ? full.techIds.map(Number) : [],
+            techNames: Array.isArray(full?.techNames) ? full.techNames : [],
           };
         })
         .filter((o) => o.scheduledDate && isSameDay(o.scheduledDate, day));
@@ -1152,33 +1154,37 @@ export default function WorkOrderCalendar() {
   /* ===== Tech assignment handler ===== */
   async function handleAssignTech(orderId, techIdStr) {
     const techId = techIdStr ? Number(techIdStr) : null;
-    const techObj = techs.find((t) => t.id === techId);
-    const techName = techObj?.username || "";
+    const userIds = techId != null ? [techId] : [];
+    return handleSetTechs(orderId, userIds);
+  }
+
+  // Multi-tech: replace the entire tech list for a work order.
+  async function handleSetTechs(orderId, userIds) {
+    const ids = Array.from(new Set((userIds || []).map(Number).filter(Boolean)));
+    const names = ids
+      .map((id) => techs.find((t) => Number(t.id) === id)?.username || "")
+      .filter(Boolean);
     try {
-      const userIds = techId != null ? [techId] : [];
-      await api.put(`/work-orders/${orderId}/techs`, { userIds });
-      // Update local state immediately
+      await api.put(`/work-orders/${orderId}/techs`, { userIds: ids });
       setDayOrders((prev) =>
         prev.map((o) =>
           o.id === orderId
             ? {
                 ...o,
-                assignedTo: techId,
-                assignedToName: techName,
-                techIds: userIds,
-                techNames: techName ? [techName] : [],
+                assignedTo: ids[0] ?? null,
+                assignedToName: names[0] ?? "",
+                techIds: ids,
+                techNames: names,
               }
             : o
         )
       );
-      // Flash success indicator
       setTechSavedId(orderId);
       setTimeout(() => setTechSavedId(null), 1200);
-      // Refresh background data
       await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
     } catch (e) {
-      console.error("⚠️ Error assigning tech:", e);
-      alert("Failed to assign tech.");
+      console.error("⚠️ Error assigning techs:", e);
+      alert("Failed to assign techs.");
     }
   }
 
@@ -1896,33 +1902,47 @@ export default function WorkOrderCalendar() {
                                 <span className="dm-saved-check">✓</span>
                               )}
                             </div>
-                            <select
-                              className="dm-tech-select"
-                              value={techId}
-                              onChange={(ev) => handleAssignTech(o.id, ev.target.value)}
+                            <div
                               style={{
-                                WebkitAppearance: 'auto',
-                                MozAppearance: 'auto',
-                                appearance: 'auto',
-                                backgroundColor: '#2c2c2e',
-                                color: '#f5f5f7',
-                                border: '1px solid rgba(255, 255, 255, 0.15)',
-                                borderRadius: '8px',
-                                padding: '6px 12px',
-                                fontSize: '13px',
-                                cursor: 'pointer',
-                                outline: 'none',
-                                minWidth: '120px',
-                                backgroundImage: 'none',
+                                display: "grid",
+                                gridTemplateColumns: "1fr 1fr",
+                                gap: 4,
+                                minWidth: 200,
                               }}
                             >
-                              <option value="">Unassigned</option>
-                              {techs.map((t) => (
-                                <option key={t.id} value={String(t.id)}>
-                                  {t.username}
-                                </option>
-                              ))}
-                            </select>
+                              {techs.map((t) => {
+                                const tid = Number(t.id);
+                                const current = Array.isArray(o.techIds) ? o.techIds : [];
+                                const isSelected = current.some((x) => Number(x) === tid);
+                                return (
+                                  <button
+                                    key={t.id}
+                                    type="button"
+                                    onClick={(ev) => {
+                                      ev.stopPropagation();
+                                      const next = isSelected
+                                        ? current.filter((x) => Number(x) !== tid)
+                                        : [...current, tid];
+                                      handleSetTechs(o.id, next);
+                                    }}
+                                    style={{
+                                      padding: "5px 8px",
+                                      borderRadius: 16,
+                                      fontSize: 11,
+                                      fontWeight: 500,
+                                      border: isSelected ? "2px solid #3b82f6" : "2px solid #4b5563",
+                                      background: isSelected ? "#1d4ed8" : "#374151",
+                                      color: isSelected ? "#fff" : "#9ca3af",
+                                      cursor: "pointer",
+                                      textAlign: "center",
+                                    }}
+                                  >
+                                    {isSelected ? "✓ " : ""}
+                                    {t.username}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
 
                           {/* Middle: WO info */}

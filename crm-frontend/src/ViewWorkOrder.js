@@ -1685,7 +1685,7 @@ export default function ViewWorkOrder() {
                   <div className="meta-row" style={{ alignItems: "flex-start" }}>
                     <span className="meta-label">Assigned Techs</span>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 4 }}>
                         {techUsers.map((t) => {
                           const tid = Number(t.id);
                           const active = assignedTechIds.includes(tid);
@@ -1717,7 +1717,7 @@ export default function ViewWorkOrder() {
                                 }
                               }}
                               style={{
-                                padding: "6px 14px",
+                                padding: "8px 12px",
                                 borderRadius: 20,
                                 border: active ? "2px solid #3b82f6" : "2px solid #4b5563",
                                 background: active ? "#1d4ed8" : "#374151",
@@ -1726,6 +1726,7 @@ export default function ViewWorkOrder() {
                                 fontWeight: 500,
                                 cursor: techSaving ? "wait" : "pointer",
                                 opacity: techSaving ? 0.7 : 1,
+                                textAlign: "center",
                               }}
                             >
                               {active ? "✓ " : ""}
