@@ -283,15 +283,43 @@ export default function WorkOrders() {
     e.stopPropagation();
     try {
       const userIds = techId ? [Number(techId)] : [];
+      await setRowTechs(orderId, userIds);
+    } catch (err) {
+      console.error("Error assigning tech:", err);
+      alert(err?.response?.data?.error || "Failed to assign technician.");
+    }
+  };
+
+  // Replace the full tech list for one row. Optimistic local update + refetch.
+  const setRowTechs = async (orderId, userIds) => {
+    const ids = Array.from(new Set((userIds || []).map(Number).filter(Boolean)));
+    const names = ids
+      .map((id) => techUsers.find((t) => Number(t.id) === id)?.username || "")
+      .filter(Boolean);
+    setWorkOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              assignedTo: ids[0] ?? null,
+              assignedToName: names[0] ?? "",
+              techIds: ids,
+              techNames: names,
+            }
+          : o
+      )
+    );
+    try {
       await api.put(
         `/work-orders/${orderId}/techs`,
-        { userIds },
+        { userIds: ids },
         { headers: { "Content-Type": "application/json", ...authHeaders() } }
       );
       await fetchWorkOrders();
     } catch (err) {
-      console.error("Error assigning tech:", err);
-      alert(err?.response?.data?.error || "Failed to assign technician.");
+      console.error("Error setting techs:", err);
+      alert(err?.response?.data?.error || "Failed to update techs.");
+      await fetchWorkOrders();
     }
   };
 
@@ -475,35 +503,51 @@ export default function WorkOrders() {
 
                     {userRole !== "tech" && (
                       <td onClick={(e) => e.stopPropagation()}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <select
-                            className="control select"
-                            value={order.assignedTo ?? ""}
-                            onChange={(e) => assignToTech(order.id, e.target.value, e)}
-                          >
-                            <option value="">Unassigned</option>
-                            {techUsers.map((t) => (
-                              <option key={t.id} value={t.id}>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr",
+                            gap: 4,
+                            minWidth: 180,
+                          }}
+                        >
+                          {techUsers.map((t) => {
+                            const tid = Number(t.id);
+                            const current = Array.isArray(order.techIds)
+                              ? order.techIds
+                              : order.assignedTo
+                              ? [Number(order.assignedTo)]
+                              : [];
+                            const isSelected = current.some((x) => Number(x) === tid);
+                            return (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const next = isSelected
+                                    ? current.filter((x) => Number(x) !== tid)
+                                    : [...current, tid];
+                                  setRowTechs(order.id, next);
+                                }}
+                                style={{
+                                  padding: "4px 8px",
+                                  borderRadius: 16,
+                                  fontSize: 11,
+                                  fontWeight: 500,
+                                  border: isSelected ? "2px solid #3b82f6" : "2px solid #4b5563",
+                                  background: isSelected ? "#1d4ed8" : "#374151",
+                                  color: isSelected ? "#fff" : "#9ca3af",
+                                  cursor: "pointer",
+                                  textAlign: "center",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {isSelected ? "✓ " : ""}
                                 {t.username}
-                              </option>
-                            ))}
-                          </select>
-                          {Array.isArray(order.techIds) && order.techIds.length > 1 && (
-                            <span
-                              title={(order.techNames || []).join(", ")}
-                              style={{
-                                fontSize: 11,
-                                fontWeight: 600,
-                                padding: "2px 8px",
-                                borderRadius: 999,
-                                background: "#1d4ed8",
-                                color: "#fff",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              +{order.techIds.length - 1} more
-                            </span>
-                          )}
+                              </button>
+                            );
+                          })}
                         </div>
                       </td>
                     )}
