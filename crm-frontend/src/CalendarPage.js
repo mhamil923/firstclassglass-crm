@@ -1589,6 +1589,8 @@ export default function WorkOrderCalendar() {
                 }
               }
 
+              const problem = order.problemDescription || order.problem || order.description || "";
+
               return (
                 <div
                   key={order.id}
@@ -1597,6 +1599,7 @@ export default function WorkOrderCalendar() {
                   onDragStart={(e) => beginGlobalDrag(order, e)}
                   onDragEnd={endGlobalDrag}
                   title={`${customerLabel} — ${idLabel}`}
+                  style={{ minHeight: 160, display: "flex", flexDirection: "column" }}
                 >
                   <div className="d-flex align-items-center justify-content-between" style={{ gap: 8 }}>
                     <div className="fw-bold" style={clamp1}>
@@ -1616,6 +1619,24 @@ export default function WorkOrderCalendar() {
                       <small className="text-muted" style={clamp2}>
                         Site Address: {siteAddr}
                       </small>
+                    </div>
+                  ) : null}
+
+                  {problem ? (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "var(--text-secondary)",
+                        marginTop: 4,
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                        lineHeight: 1.4,
+                      }}
+                      title={problem}
+                    >
+                      {problem}
                     </div>
                   ) : null}
 
