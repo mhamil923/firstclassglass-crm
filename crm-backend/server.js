@@ -584,6 +584,27 @@ async function ensureWorkOrderTechsTable() {
 }
 ensureWorkOrderTechsTable().catch(() => {});
 
+// Clean up orphaned work_orders.assignedTo values that point at non-existent users.
+// The FK has ON DELETE SET NULL, but rows can become orphaned if a user was
+// deleted via a path that bypassed FK actions (e.g., manual SQL with FK checks off).
+// An orphan blocks every subsequent UPDATE on that row, including photo uploads.
+async function cleanupOrphanedAssignedTo() {
+  try {
+    const [r] = await db.query(`
+      UPDATE work_orders wo
+      LEFT JOIN users u ON u.id = wo.assignedTo
+         SET wo.assignedTo = NULL
+       WHERE wo.assignedTo IS NOT NULL AND u.id IS NULL
+    `);
+    if (r && r.affectedRows > 0) {
+      console.log(`[OrphanCleanup] Cleared ${r.affectedRows} orphaned work_orders.assignedTo`);
+    }
+  } catch (e) {
+    console.warn('[OrphanCleanup] Failed:', e.message);
+  }
+}
+cleanupOrphanedAssignedTo().catch(() => {});
+
 /**
  * Hydrate `techIds` (number[]) and `techNames` (string[]) on a list of work-order rows.
  * Mutates rows in place. One query for the whole batch.
@@ -6545,9 +6566,14 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       scheduledEnd
     ];
 
-    if (SCHEMA.hasAssignedTo) {
+    // Only touch assignedTo when the request explicitly included it.
+    // Without this guard, a photo-only edit would re-write the existing value,
+    // and an orphaned FK (assignedTo pointing at a deleted user) would make
+    // MySQL reject the entire UPDATE with ER_NO_REFERENCED_ROW_2.
+    if (SCHEMA.hasAssignedTo && Object.prototype.hasOwnProperty.call(req.body, 'assignedTo')) {
+      const v = req.body.assignedTo;
       sql += `, assignedTo=?`;
-      params.push((assignedTo === '' || assignedTo === undefined) ? null : Number(assignedTo));
+      params.push((v === '' || v == null) ? null : Number(v));
     }
 
     // customerId linking
@@ -6581,8 +6607,9 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
     res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
   } catch (err) {
-    console.error('Work-order edit error:', err);
-    res.status(500).json({ error: 'Failed to update work order.' });
+    console.error('Work-order edit error:', err.message, err.code, err.stack);
+    const detail = err && err.code ? `${err.code}: ${err.message}` : (err?.message || 'Failed to update work order.');
+    res.status(500).json({ error: detail });
   }
 });
 
