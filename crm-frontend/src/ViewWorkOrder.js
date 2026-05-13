@@ -1618,7 +1618,12 @@ export default function ViewWorkOrder() {
           <div className="wo-stack-head">
             <div className="wo-stack-meta">
               <div className="section-card">
-                <h3 className="section-header">Details</h3>
+                <h3 className="section-header" style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+                  <span>Details</span>
+                  <button className="btn btn-light" onClick={() => setShowNoteInput((v) => !v)}>
+                    {showNoteInput ? "Cancel" : "Add Note"}
+                  </button>
+                </h3>
 
                 {recentNotes.length ? (
                   <ul className="notes-list notes-list--compact">
@@ -2436,10 +2441,6 @@ export default function ViewWorkOrder() {
         {/* ======================= Notes ======================= */}
         <div className="section-card">
           <h3 className="section-header">Notes</h3>
-
-          <button className="btn btn-light" onClick={() => setShowNoteInput((v) => !v)}>
-            {showNoteInput ? "Cancel" : "Add Note"}
-          </button>
 
           {showNoteInput && (
             <div className="add-note">
