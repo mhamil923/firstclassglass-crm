@@ -1625,6 +1625,21 @@ export default function ViewWorkOrder() {
                   </button>
                 </h3>
 
+                {showNoteInput && (
+                  <div className="add-note">
+                    <textarea
+                      className="control textarea"
+                      value={newNote}
+                      onChange={(e) => setNewNote(e.target.value)}
+                      placeholder="Write your note here..."
+                      rows={4}
+                    />
+                    <button className="btn btn-primary" onClick={handleAddNote}>
+                      Submit Note
+                    </button>
+                  </div>
+                )}
+
                 {recentNotes.length ? (
                   <ul className="notes-list notes-list--compact">
                     {recentNotes.map((n, idx) => (
@@ -2438,51 +2453,6 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* ======================= Notes ======================= */}
-        <div className="section-card">
-          <h3 className="section-header">Notes</h3>
-
-          {showNoteInput && (
-            <div className="add-note">
-              <textarea
-                className="control textarea"
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                placeholder="Write your note here..."
-                rows={4}
-              />
-              <button className="btn btn-primary" onClick={handleAddNote}>
-                Submit Note
-              </button>
-            </div>
-          )}
-
-          {displayNotes.length > 0 ? (
-            <ul className="notes-list">
-              {displayNotes.map((n, idx) => (
-                <li key={`${n.createdAt || "na"}-${idx}`} className="note-item">
-                  <div className="note-header">
-                    <small className="note-timestamp">
-                      {n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "—"}
-                      {n.by ? ` — ${n.by}` : ""}
-                    </small>
-                    <button
-                      type="button"
-                      className="note-delete-btn"
-                      title="Delete note"
-                      onClick={() => handleDeleteNote(idx)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <p className="note-text">{n.text}</p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="empty-text">No notes added.</p>
-          )}
-        </div>
       </div>
     </div>
   );
