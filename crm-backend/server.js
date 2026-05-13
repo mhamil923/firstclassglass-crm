@@ -5545,8 +5545,18 @@ app.get('/debug/work-order/:id', authenticate, async (req, res) => {
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
     const [raw] = await db.execute(workOrdersSelectSQL({ orderSql: 'ORDER BY w.id DESC' }));
-    const rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status), allPoNumbersFormatted: formatPoNumberList(r.allPoNumbers) }));
+    let rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status), allPoNumbersFormatted: formatPoNumberList(r.allPoNumbers) }));
     await attachTechsToWorkOrders(rows);
+
+    const now = new Date();
+    rows = rows.map(r => ({
+      ...r,
+      pastDue: r.status === 'Scheduled' && r.scheduledDate && new Date(r.scheduledDate) < now,
+    }));
+
+    if (req.query.pastDue === 'true') {
+      rows = rows.filter(r => r.pastDue);
+    }
 
     // DEBUG: Log count of "Waiting on Parts" work orders
     const waitingCount = rows.filter(r => r.status === 'Waiting on Parts').length;

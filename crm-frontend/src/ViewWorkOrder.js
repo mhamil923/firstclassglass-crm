@@ -1612,6 +1612,24 @@ export default function ViewWorkOrder() {
           </div>
         </div>
 
+        {workOrder?.status === 'Scheduled' && workOrder?.scheduledDate && new Date(workOrder.scheduledDate) < new Date() && (
+          <div style={{
+            background: 'rgba(220,38,38,0.15)',
+            border: '1px solid #dc2626',
+            borderRadius: 8,
+            padding: '10px 16px',
+            marginBottom: 16,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}>
+            <span style={{ fontSize: 16 }}>⚠️</span>
+            <span style={{ color: '#fca5a5', fontWeight: 600 }}>
+              This work order was scheduled for {new Date(workOrder.scheduledDate).toLocaleDateString()} and has not been completed or updated.
+            </span>
+          </div>
+        )}
+
         {/* ======================= BASIC INFO ======================= */}
         <div className="wo-stack">
           {/* LEFT: Details + status/tech */}

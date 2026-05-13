@@ -771,6 +771,10 @@ export default function WorkOrderCalendar() {
   const [unscheduledOrders, setUnscheduledOrders] = useState([]);
   const [unscheduledSearch, setUnscheduledSearch] = useState("");
 
+  // Past Due strip data
+  const [pastDueOrders, setPastDueOrders] = useState([]);
+  const [showPastDue, setShowPastDue] = useState(true);
+
   // Supplier pickups (a separate calendar event type rendered in orange)
   const [supplierPickups, setSupplierPickups] = useState([]);
   const [showPickupModal, setShowPickupModal] = useState(false);
@@ -903,20 +907,24 @@ export default function WorkOrderCalendar() {
 
   const refreshLists = useCallback(async () => {
     try {
-      const [allRes, unRes, pickupsRes, supRes] = await Promise.all([
+      const [allRes, unRes, pickupsRes, supRes, pastDueRes] = await Promise.all([
         api.get("/work-orders"),
         api.get("/work-orders/unscheduled"),
         api.get("/supplier-pickups").catch(() => ({ data: [] })),
         api.get("/supplier-pickups/suppliers").catch(() => ({ data: [] })),
+        api.get("/work-orders", { params: { pastDue: "true" } }).catch(() => ({ data: [] })),
       ]);
       setAllOrders(Array.isArray(allRes.data) ? allRes.data : []);
       setUnscheduledOrders(Array.isArray(unRes.data) ? unRes.data : []);
       setSupplierPickups(Array.isArray(pickupsRes.data) ? pickupsRes.data : []);
       setSupplierList(Array.isArray(supRes.data) ? supRes.data : []);
+      setPastDueOrders(Array.isArray(pastDueRes.data) ? pastDueRes.data : []);
     } catch (e) {
       console.error("⚠️ Error loading lists:", e);
     }
   }, []);
+
+  const handleReschedule = (wo) => openEditModal(wo, currentDate);
 
   /* ========= /calendar/events ========= */
   function visibleRangeFor(viewName, anchorDate) {
@@ -1565,6 +1573,147 @@ export default function WorkOrderCalendar() {
               Showing {listForStrip.length} match{listForStrip.length === 1 ? "" : "es"} across{" "}
               {allOrders.length} total work order{allOrders.length === 1 ? "" : "s"} (drag any item
               to schedule/reschedule).
+            </div>
+          )}
+
+          {pastDueOrders.length > 0 && (
+            <div style={{ marginBottom: 12, marginTop: 12 }}>
+              <div
+                onClick={() => setShowPastDue(!showPastDue)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                  padding: "8px 12px",
+                  background: "rgba(220,38,38,0.15)",
+                  borderRadius: 8,
+                  border: "1px solid #dc2626",
+                  marginBottom: showPastDue ? 8 : 0,
+                }}
+              >
+                <span style={{ color: "#dc2626", fontWeight: 700, fontSize: 13 }}>⚠ PAST DUE</span>
+                <span
+                  style={{
+                    background: "#dc2626",
+                    color: "#fff",
+                    borderRadius: 10,
+                    padding: "1px 8px",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  {pastDueOrders.length}
+                </span>
+                <span style={{ color: "#9ca3af", fontSize: 12, marginLeft: "auto" }}>
+                  {showPastDue ? "▲ Hide" : "▼ Show"} — scheduled dates that passed without completion
+                </span>
+              </div>
+
+              {showPastDue && (
+                <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
+                  {pastDueOrders.map((wo) => (
+                    <div
+                      key={wo.id}
+                      style={{
+                        background: "rgba(220,38,38,0.1)",
+                        border: "1px solid #dc2626",
+                        borderRadius: 10,
+                        padding: "12px 14px",
+                        minWidth: 220,
+                        maxWidth: 220,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <div style={{ color: "#fca5a5", fontWeight: 600, fontSize: 12, marginBottom: 4 }}>
+                        {wo.scheduledDate ? `Was: ${new Date(wo.scheduledDate).toLocaleDateString()}` : ""}
+                      </div>
+                      <div
+                        style={{
+                          fontWeight: 600,
+                          fontSize: 13,
+                          color: "#fff",
+                          overflow: "hidden",
+                          whiteSpace: "nowrap",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {wo.customer || "—"} — {wo.workOrderNumber || wo.woNumber || "N/A"}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#fca5a5",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {getSiteLocation(wo) || ""}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#6b7280",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {getSiteAddress(wo) || ""}
+                      </div>
+                      {wo.problemDescription && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "#9ca3af",
+                            marginTop: 4,
+                            display: "-webkit-box",
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: "vertical",
+                            overflow: "hidden",
+                          }}
+                        >
+                          {wo.problemDescription}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                        <button
+                          onClick={() => navigateToView(wo.id)}
+                          style={{
+                            flex: 1,
+                            padding: "5px",
+                            borderRadius: 6,
+                            background: "#374151",
+                            color: "#fff",
+                            border: "none",
+                            cursor: "pointer",
+                            fontSize: 11,
+                          }}
+                        >
+                          Open
+                        </button>
+                        <button
+                          onClick={() => handleReschedule(wo)}
+                          style={{
+                            flex: 1,
+                            padding: "5px",
+                            borderRadius: 6,
+                            background: "#dc2626",
+                            color: "#fff",
+                            border: "none",
+                            cursor: "pointer",
+                            fontSize: 11,
+                            fontWeight: 600,
+                          }}
+                        >
+                          Reschedule
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

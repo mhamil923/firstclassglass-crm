@@ -205,6 +205,11 @@ export default function WorkOrders() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const isPastDue = (o) =>
+    toCanonicalStatus(o.status) === "Scheduled" &&
+    o.scheduledDate &&
+    moment(o.scheduledDate).isBefore(moment().startOf("day"));
+
   // filtering
   useEffect(() => {
     const todayStr = moment().format("YYYY-MM-DD");
@@ -216,6 +221,8 @@ export default function WorkOrders() {
           o.scheduledDate &&
           moment(o.scheduledDate).format("YYYY-MM-DD") === todayStr
       );
+    } else if (selectedFilter === "Past Due") {
+      rows = workOrders.filter(isPastDue);
     } else {
       const f = normStatus(selectedFilter);
       rows = workOrders.filter((o) => normStatus(o.status) === f);
@@ -228,6 +235,7 @@ export default function WorkOrders() {
   const chipCounts = useMemo(() => {
     const buckets = Object.fromEntries(STATUS_LIST.map((s) => [s, 0]));
     let today = 0;
+    let pastDue = 0;
     const todayStr = moment().format("YYYY-MM-DD");
     for (const o of workOrders) {
       const label = toCanonicalStatus(o.status);
@@ -238,9 +246,11 @@ export default function WorkOrders() {
       ) {
         today++;
       }
+      if (isPastDue(o)) pastDue++;
     }
     return {
       Today: today,
+      "Past Due": pastDue,
       ...buckets,
     };
   }, [workOrders]);
@@ -383,6 +393,37 @@ export default function WorkOrders() {
                 </button>
               );
             })}
+
+            <button
+              type="button"
+              onClick={() => setFilter("Past Due")}
+              style={{
+                background: selectedFilter === "Past Due" ? "#dc2626" : "transparent",
+                border: "2px solid #dc2626",
+                color: selectedFilter === "Past Due" ? "#fff" : "#dc2626",
+                borderRadius: 20,
+                padding: "4px 14px",
+                cursor: "pointer",
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              Past Due
+              <span
+                style={{
+                  background: selectedFilter === "Past Due" ? "#fff" : "#dc2626",
+                  color: selectedFilter === "Past Due" ? "#dc2626" : "#fff",
+                  borderRadius: 10,
+                  padding: "1px 8px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                {chipCounts["Past Due"] ?? 0}
+              </span>
+            </button>
           </div>
 
           {/* ✅ Removed: “Mark Parts In” button + modal feature */}
@@ -488,17 +529,35 @@ export default function WorkOrders() {
                     </td>
 
                     <td onClick={(e) => e.stopPropagation()}>
-                      <select
-                        className="control select"
-                        value={toCanonicalStatus(order.status)}
-                        onChange={(e) => handleStatusChange(e, order.id)}
-                      >
-                        {STATUS_LIST.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
+                      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap" }}>
+                        <select
+                          className="control select"
+                          value={toCanonicalStatus(order.status)}
+                          onChange={(e) => handleStatusChange(e, order.id)}
+                        >
+                          {STATUS_LIST.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                        {isPastDue(order) && (
+                          <span
+                            style={{
+                              background: "#dc2626",
+                              color: "#fff",
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: "2px 6px",
+                              borderRadius: 10,
+                              marginLeft: 6,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            PAST DUE
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {userRole !== "tech" && (
