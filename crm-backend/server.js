@@ -5548,11 +5548,17 @@ app.get('/work-orders', authenticate, async (req, res) => {
     let rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status), allPoNumbersFormatted: formatPoNumberList(r.allPoNumbers) }));
     await attachTechsToWorkOrders(rows);
 
-    const now = new Date();
-    rows = rows.map(r => ({
-      ...r,
-      pastDue: r.status === 'Scheduled' && r.scheduledDate && new Date(r.scheduledDate) < now,
-    }));
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    rows = rows.map(r => {
+      let isPastDue = false;
+      if (r.status === 'Scheduled' && r.scheduledDate) {
+        const scheduled = new Date(r.scheduledDate);
+        scheduled.setHours(0, 0, 0, 0);
+        isPastDue = scheduled < startOfToday;
+      }
+      return { ...r, pastDue: isPastDue };
+    });
 
     if (req.query.pastDue === 'true') {
       rows = rows.filter(r => r.pastDue);

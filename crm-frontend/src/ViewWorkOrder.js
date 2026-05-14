@@ -1612,7 +1612,13 @@ export default function ViewWorkOrder() {
           </div>
         </div>
 
-        {workOrder?.status === 'Scheduled' && workOrder?.scheduledDate && new Date(workOrder.scheduledDate) < new Date() && (
+        {workOrder?.status === 'Scheduled' && workOrder?.scheduledDate && (() => {
+          const scheduled = new Date(workOrder.scheduledDate);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          scheduled.setHours(0, 0, 0, 0);
+          return scheduled < today;
+        })() && (
           <div style={{
             background: 'rgba(220,38,38,0.15)',
             border: '1px solid #dc2626',
