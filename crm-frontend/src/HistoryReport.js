@@ -256,6 +256,7 @@ export default function HistoryReport() {
                   <th>PO #</th>
                   <th>Customer</th>
                   <th>Site</th>
+                  <th>PROBLEM DESCRIPTION</th>
                   <th>Status</th>
                   <th>Assigned To</th>
                   <th>Scheduled</th>
@@ -291,6 +292,20 @@ export default function HistoryReport() {
                         </div>
                       </td>
 
+                      <td style={{ maxWidth: 250, fontSize: 12, color: "#9ca3af" }}>
+                        <div
+                          style={{
+                            display: "-webkit-box",
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: "vertical",
+                            overflow: "hidden",
+                            lineHeight: "1.4",
+                          }}
+                          title={o.problemDescription || o.problem_description || ""}
+                        >
+                          {o.problemDescription || o.problem_description || "—"}
+                        </div>
+                      </td>
                       <td>{o.status || "—"}</td>
                       <td>{o.assignedToName || "—"}</td>
                       <td>
