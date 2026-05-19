@@ -39,6 +39,20 @@ function statusClass(s) {
   return "vi-status-draft";
 }
 
+const PAYMENT_METHOD_LABEL = {
+  check: "Check",
+  credit_card: "Credit Card",
+  cash: "Cash",
+  other: "Other",
+};
+
+function paymentStatusStyle(status) {
+  const s = String(status || "Unpaid");
+  if (s === "Paid") return { bg: "#34c759", color: "#fff", label: "Paid" };
+  if (s === "Partial") return { bg: "#f59e0b", color: "#fff", label: "Partial" };
+  return { bg: "#ef4444", color: "#fff", label: "Unpaid" };
+}
+
 export default function ViewInvoice() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -57,9 +71,9 @@ export default function ViewInvoice() {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentForm, setPaymentForm] = useState({
     amount: "",
-    paymentMethod: "Check",
-    referenceNumber: "",
-    notes: "",
+    paymentMethod: "check",
+    checkNumber: "",
+    referenceNote: "",
     paymentDate: todayISO(),
   });
   const [paymentSaving, setPaymentSaving] = useState(false);
@@ -156,9 +170,9 @@ export default function ViewInvoice() {
   const openPaymentModal = () => {
     setPaymentForm({
       amount: invoice ? String(Number(invoice.balanceDue) || "") : "",
-      paymentMethod: "Check",
-      referenceNumber: "",
-      notes: "",
+      paymentMethod: "check",
+      checkNumber: "",
+      referenceNote: "",
       paymentDate: todayISO(),
     });
     setShowPaymentModal(true);
@@ -211,6 +225,17 @@ export default function ViewInvoice() {
   const isDraft = inv.status === "Draft";
   const isVoid = inv.status === "Void";
   const balanceDue = Number(inv.balanceDue) || 0;
+  const invoiceTotal = Number(inv.total) || 0;
+  const amountPaid = Number(inv.amountPaid) || 0;
+
+  // Derive paymentStatus from amounts if backend didn't supply it
+  let paymentStatus = inv.paymentStatus;
+  if (!paymentStatus) {
+    if (amountPaid >= invoiceTotal && invoiceTotal > 0) paymentStatus = "Paid";
+    else if (amountPaid > 0) paymentStatus = "Partial";
+    else paymentStatus = "Unpaid";
+  }
+  const payStyle = paymentStatusStyle(paymentStatus);
 
   return (
     <div className="vi-page">
@@ -222,6 +247,24 @@ export default function ViewInvoice() {
             <h2 className="vi-title">Invoice #{inv.invoiceNumber}</h2>
             <span className={`vi-status-pill ${statusClass(inv.status)}`}>
               {inv.status || "Draft"}
+            </span>
+            <span
+              style={{
+                background: payStyle.bg,
+                color: payStyle.color,
+                fontSize: 12,
+                fontWeight: 700,
+                padding: "4px 12px",
+                borderRadius: 999,
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                marginLeft: 8,
+              }}
+              title="Payment status"
+            >
+              {paymentStatus === "Partial"
+                ? `Partial — ${fmtMoney(amountPaid)} of ${fmtMoney(invoiceTotal)}`
+                : payStyle.label}
             </span>
           </div>
           <div className="vi-actions">
@@ -497,11 +540,11 @@ export default function ViewInvoice() {
           )}
         </div>
 
-        {/* Payment History */}
+        {/* Payments */}
         <div className="vi-card">
           <div className="vi-card-header">
-            <span>Payment History</span>
-            {!isVoid && inv.status !== "Paid" && balanceDue > 0 && (
+            <span>Payments</span>
+            {!isVoid && balanceDue > 0 && (
               <button
                 className="vi-btn vi-btn-success"
                 style={{ padding: "6px 14px", fontSize: 13 }}
@@ -510,6 +553,30 @@ export default function ViewInvoice() {
                 + Record Payment
               </button>
             )}
+          </div>
+          <div className="vi-card-body" style={{ paddingBottom: 0 }}>
+            <div className="vi-grid vi-grid-3">
+              <div className="vi-field">
+                <div className="vi-label">Invoice Total</div>
+                <div className="vi-value" style={{ fontWeight: 700 }}>{fmtMoney(invoiceTotal)}</div>
+              </div>
+              <div className="vi-field">
+                <div className="vi-label">Amount Paid</div>
+                <div className="vi-value vi-paid-amount" style={{ fontWeight: 700 }}>{fmtMoney(amountPaid)}</div>
+              </div>
+              <div className="vi-field">
+                <div className="vi-label">Balance Remaining</div>
+                <div
+                  className="vi-value"
+                  style={{
+                    fontWeight: 700,
+                    color: balanceDue > 0 ? "#ef4444" : "#34c759",
+                  }}
+                >
+                  {fmtMoney(balanceDue)}
+                </div>
+              </div>
+            </div>
           </div>
           {payments.length === 0 ? (
             <div className="vi-card-body" style={{ textAlign: "center", color: "var(--text-tertiary)" }}>
@@ -520,32 +587,39 @@ export default function ViewInvoice() {
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Amount</th>
                   <th>Method</th>
-                  <th>Reference #</th>
-                  <th>Notes</th>
+                  <th>Check #</th>
+                  <th>Amount</th>
+                  <th>Note</th>
+                  <th>Recorded By</th>
                   <th style={{ width: 60 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {payments.map((p) => (
-                  <tr key={p.id}>
-                    <td>{fmtDate(p.paymentDate)}</td>
-                    <td style={{ fontWeight: 700, color: "#34c759" }}>{fmtMoney(p.amount)}</td>
-                    <td>{p.paymentMethod || "—"}</td>
-                    <td>{p.referenceNumber || "—"}</td>
-                    <td>{p.notes || "—"}</td>
-                    <td>
-                      <button
-                        className="vi-btn-icon danger"
-                        onClick={() => handleDeletePayment(p.id)}
-                        title="Delete payment"
-                      >
-                        &times;
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {payments.map((p) => {
+                  const methodKey = String(p.paymentMethod || "").toLowerCase();
+                  const methodLabel = PAYMENT_METHOD_LABEL[methodKey] || p.paymentMethod || "—";
+                  const isCheck = methodKey === "check";
+                  return (
+                    <tr key={p.id}>
+                      <td>{fmtDate(p.paymentDate)}</td>
+                      <td>{methodLabel}</td>
+                      <td>{isCheck ? (p.checkNumber || "—") : "—"}</td>
+                      <td style={{ fontWeight: 700, color: "#34c759" }}>{fmtMoney(p.amount)}</td>
+                      <td>{p.referenceNote || p.notes || "—"}</td>
+                      <td>{p.recordedBy || "—"}</td>
+                      <td>
+                        <button
+                          className="vi-btn-icon danger"
+                          onClick={() => handleDeletePayment(p.id)}
+                          title="Delete payment"
+                        >
+                          &times;
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -681,33 +755,33 @@ export default function ViewInvoice() {
                 onChange={handlePaymentChange}
                 className="vi-modal-input"
               >
-                <option value="Cash">Cash</option>
-                <option value="Check">Check</option>
-                <option value="Credit Card">Credit Card</option>
-                <option value="ACH">ACH</option>
-                <option value="Zelle">Zelle</option>
-                <option value="Other">Other</option>
+                <option value="check">Check</option>
+                <option value="credit_card">Credit Card</option>
+                <option value="cash">Cash</option>
+                <option value="other">Other</option>
               </select>
             </div>
+            {paymentForm.paymentMethod === "check" && (
+              <div className="vi-modal-field">
+                <label className="vi-modal-label">Check Number</label>
+                <input
+                  type="text"
+                  name="checkNumber"
+                  value={paymentForm.checkNumber}
+                  onChange={handlePaymentChange}
+                  className="vi-modal-input"
+                  placeholder="e.g. 1023"
+                />
+              </div>
+            )}
             <div className="vi-modal-field">
-              <label className="vi-modal-label">Reference # (optional)</label>
-              <input
-                type="text"
-                name="referenceNumber"
-                value={paymentForm.referenceNumber}
-                onChange={handlePaymentChange}
-                className="vi-modal-input"
-                placeholder="Check #, transaction ID..."
-              />
-            </div>
-            <div className="vi-modal-field">
-              <label className="vi-modal-label">Notes (optional)</label>
+              <label className="vi-modal-label">Reference Note (optional)</label>
               <textarea
-                name="notes"
-                value={paymentForm.notes}
+                name="referenceNote"
+                value={paymentForm.referenceNote}
                 onChange={handlePaymentChange}
                 className="vi-modal-input vi-modal-textarea"
-                placeholder="Payment notes..."
+                placeholder="Transaction ID, memo, anything to remember..."
                 rows={2}
               />
             </div>

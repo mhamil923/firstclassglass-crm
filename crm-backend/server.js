@@ -279,6 +279,7 @@ const STATUS_CANON = [
   'Approved',
   'Waiting on Parts',
   'Needs to be Invoiced',
+  'Invoiced Waiting for Payment',
   'Completed',
 ];
 
@@ -330,6 +331,14 @@ const STATUS_SYNONYMS = new Map([
   ['needsinvoice','Needs to be Invoiced'],
   ['needsinvoiced','Needs to be Invoiced'],
   ['needs to invoice','Needs to be Invoiced'],
+  ['invoiced waiting for payment','Invoiced Waiting for Payment'],
+  ['invoiced-waiting-for-payment','Invoiced Waiting for Payment'],
+  ['invoiced_waiting_for_payment','Invoiced Waiting for Payment'],
+  ['invoiced waiting payment','Invoiced Waiting for Payment'],
+  ['waiting for payment','Invoiced Waiting for Payment'],
+  ['waiting on payment','Invoiced Waiting for Payment'],
+  ['awaiting payment','Invoiced Waiting for Payment'],
+  ['invoiced','Invoiced Waiting for Payment'],
   ['approved','Approved'],
   ['declined','Declined'],
 ]);
@@ -344,6 +353,7 @@ const STATUS_SHORT = new Map([
   ['nq', 'Needs to be Quoted'],
   ['ns', 'Needs to be Scheduled'],
   ['ni', 'Needs to be Invoiced'],
+  ['iw', 'Invoiced Waiting for Payment'],
   ['co', 'Completed'],
 ]);
 
@@ -3506,14 +3516,18 @@ async function recalcInvoiceTotals(invoiceId) {
   const taxAmount = Math.round(subtotal * taxRate) / 100;
   const total = subtotal + taxAmount;
   const [[{ paid }]] = await db.query(
-    'SELECT COALESCE(SUM(amount), 0) AS paid FROM payments WHERE invoiceId = ?',
+    'SELECT COALESCE(SUM(amount), 0) AS paid FROM invoice_payments WHERE invoiceId = ?',
     [invoiceId]
   );
   const amountPaid = Number(paid) || 0;
   const balanceDue = Math.round((total - amountPaid) * 100) / 100;
 
-  const sets = ['subtotal=?', 'taxAmount=?', 'total=?', 'amountPaid=?', 'balanceDue=?', 'updatedAt=NOW()'];
-  const params = [subtotal, taxAmount, total, amountPaid, balanceDue];
+  let paymentStatus = 'Unpaid';
+  if (amountPaid >= total && total > 0) paymentStatus = 'Paid';
+  else if (amountPaid > 0) paymentStatus = 'Partial';
+
+  const sets = ['subtotal=?', 'taxAmount=?', 'total=?', 'amountPaid=?', 'balanceDue=?', 'paymentStatus=?', 'updatedAt=NOW()'];
+  const params = [subtotal, taxAmount, total, amountPaid, balanceDue, paymentStatus];
 
   if (balanceDue <= 0 && amountPaid > 0 && inv?.status !== 'Draft' && inv?.status !== 'Void') {
     sets.push("status='Paid'", 'paidAt=NOW()');
@@ -3644,7 +3658,7 @@ app.get('/invoices/:id', authenticate, requireNumericParam('id'), async (req, re
       [req.params.id]
     );
     const [payments] = await db.query(
-      'SELECT * FROM payments WHERE invoiceId = ? ORDER BY paymentDate DESC, id DESC',
+      'SELECT * FROM invoice_payments WHERE invoiceId = ? ORDER BY paymentDate DESC, id DESC',
       [req.params.id]
     );
     invoice.lineItems = lineItems;
@@ -3703,6 +3717,11 @@ app.post('/invoices', authenticate, async (req, res) => {
         b.notes || null, terms, b.templateId || null
       ]
     );
+
+    if (b.workOrderId) {
+      await db.query("UPDATE work_orders SET status = 'Invoiced Waiting for Payment' WHERE id = ?", [b.workOrderId]);
+    }
+
     const [[created]] = await db.query('SELECT * FROM invoices WHERE id = ?', [result.insertId]);
     res.status(201).json(created);
   } catch (err) {
@@ -3893,45 +3912,120 @@ app.post('/invoices/:id/send-email', authenticate, requireNumericParam('id'), as
   }
 });
 
+// GET /invoices/:id/payments - list payments for an invoice
+app.get('/invoices/:id/payments', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT * FROM invoice_payments WHERE invoiceId = ? ORDER BY paymentDate ASC, id ASC',
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching payments:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /invoices/:id/payments - record a payment
 app.post('/invoices/:id/payments', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const b = coerceBody(req);
-    if (!b.amount || Number(b.amount) <= 0) return res.status(400).json({ error: 'Payment amount is required and must be > 0' });
+    const amount = Number(b.amount);
+    if (!amount || amount <= 0) return res.status(400).json({ error: 'Payment amount is required and must be > 0' });
+
+    const invoiceId = req.params.id;
+    const [[invoice]] = await db.query('SELECT * FROM invoices WHERE id = ?', [invoiceId]);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    const paymentMethod = b.paymentMethod || 'check';
+    const checkNumber = b.checkNumber || null;
+    const referenceNote = b.referenceNote ?? b.notes ?? null;
+    const paymentDate = b.paymentDate || new Date().toISOString().split('T')[0];
+    const recordedBy = req.user?.name || req.user?.username || 'Admin';
+
+    const [result] = await db.query(
+      `INSERT INTO invoice_payments
+        (invoiceId, workOrderId, amount, paymentMethod, checkNumber, referenceNote, paymentDate, recordedBy)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [invoiceId, invoice.workOrderId || null, amount, paymentMethod, checkNumber, referenceNote, paymentDate, recordedBy]
+    );
+
+    await recalcInvoiceTotals(invoiceId);
+
+    const [[totals]] = await db.query(
+      'SELECT COALESCE(SUM(amount),0) AS totalPaid FROM invoice_payments WHERE invoiceId = ?',
+      [invoiceId]
+    );
+    const totalPaid = parseFloat(totals.totalPaid);
+    const invoiceTotal = parseFloat(invoice.total || 0);
+
+    let paymentStatus = 'Unpaid';
+    if (totalPaid >= invoiceTotal && invoiceTotal > 0) paymentStatus = 'Paid';
+    else if (totalPaid > 0) paymentStatus = 'Partial';
 
     await db.query(
-      'INSERT INTO payments (invoiceId, paymentDate, amount, paymentMethod, referenceNumber, notes) VALUES (?, ?, ?, ?, ?, ?)',
-      [
-        req.params.id,
-        b.paymentDate || new Date().toISOString().split('T')[0],
-        Number(b.amount),
-        b.paymentMethod || null,
-        b.referenceNumber || null,
-        b.notes || null
-      ]
+      'UPDATE invoices SET paymentStatus = ?, amountPaid = ? WHERE id = ?',
+      [paymentStatus, totalPaid, invoiceId]
     );
-    await recalcInvoiceTotals(req.params.id);
 
-    const [[invoice]] = await db.query('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
-    const [payments] = await db.query('SELECT * FROM payments WHERE invoiceId = ? ORDER BY paymentDate DESC, id DESC', [req.params.id]);
-    invoice.payments = payments;
-    res.json(invoice);
+    if (paymentStatus === 'Paid' && invoice.workOrderId) {
+      await db.query("UPDATE work_orders SET status = 'Completed' WHERE id = ?", [invoice.workOrderId]);
+    }
+
+    const balanceRemaining = Math.round((invoiceTotal - totalPaid) * 100) / 100;
+    res.json({
+      success: true,
+      paymentId: result.insertId,
+      totalPaid,
+      paymentStatus,
+      balanceRemaining,
+    });
   } catch (err) {
-    console.error('Error recording payment:', err);
-    res.status(500).json({ error: 'Failed to record payment.' });
+    console.error('[Payment] Error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
 // DELETE /invoices/:id/payments/:paymentId
 app.delete('/invoices/:id/payments/:paymentId', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
-    await db.query('DELETE FROM payments WHERE id = ? AND invoiceId = ?', [req.params.paymentId, req.params.id]);
-    await recalcInvoiceTotals(req.params.id);
-    const [[invoice]] = await db.query('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
-    res.json(invoice);
+    const invoiceId = req.params.id;
+    await db.query(
+      'DELETE FROM invoice_payments WHERE id = ? AND invoiceId = ?',
+      [req.params.paymentId, invoiceId]
+    );
+
+    await recalcInvoiceTotals(invoiceId);
+
+    const [[totals]] = await db.query(
+      'SELECT COALESCE(SUM(amount),0) AS totalPaid FROM invoice_payments WHERE invoiceId = ?',
+      [invoiceId]
+    );
+    const [[inv]] = await db.query('SELECT total, workOrderId FROM invoices WHERE id = ?', [invoiceId]);
+    const totalPaid = parseFloat(totals.totalPaid);
+    const invoiceTotal = parseFloat(inv?.total || 0);
+
+    let paymentStatus = 'Unpaid';
+    if (totalPaid >= invoiceTotal && invoiceTotal > 0) paymentStatus = 'Paid';
+    else if (totalPaid > 0) paymentStatus = 'Partial';
+
+    await db.query(
+      'UPDATE invoices SET paymentStatus = ?, amountPaid = ? WHERE id = ?',
+      [paymentStatus, totalPaid, invoiceId]
+    );
+
+    // If unpaid/partial after deletion, revert linked WO from Completed back to Invoiced Waiting for Payment
+    if (paymentStatus !== 'Paid' && inv?.workOrderId) {
+      await db.query(
+        "UPDATE work_orders SET status = 'Invoiced Waiting for Payment' WHERE id = ? AND status = 'Completed'",
+        [inv.workOrderId]
+      );
+    }
+
+    res.json({ success: true, totalPaid, paymentStatus });
   } catch (err) {
     console.error('Error deleting payment:', err);
-    res.status(500).json({ error: 'Failed to delete payment.' });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -4019,7 +4113,12 @@ app.post('/estimates/:id/convert-to-invoice', authenticate, requireNumericParam(
       await db.query("UPDATE estimates SET status='Accepted', acceptedAt=NOW(), updatedAt=NOW() WHERE id=?", [req.params.id]);
     }
 
-    // Work order status is NOT changed here — user controls WO status progression manually
+    if (estimate.workOrderId) {
+      await db.query(
+        "UPDATE work_orders SET status = 'Invoiced Waiting for Payment' WHERE id = ?",
+        [estimate.workOrderId]
+      );
+    }
 
     const [[created]] = await db.query('SELECT * FROM invoices WHERE id = ?', [newId]);
     console.log('[Estimate] Converted estimate #' + req.params.id + ' to invoice #' + newId);

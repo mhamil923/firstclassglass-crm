@@ -6,6 +6,22 @@ import SendEmailModal from "./SendEmailModal";
 import "./Invoices.css";
 
 const STATUS_OPTIONS = ["All", "Draft", "Sent", "Partial", "Paid", "Overdue", "Void"];
+const PAYMENT_STATUS_OPTIONS = ["All", "Unpaid", "Partial", "Paid"];
+
+function derivePaymentStatus(inv) {
+  if (inv?.paymentStatus) return inv.paymentStatus;
+  const total = Number(inv?.total) || 0;
+  const paid = Number(inv?.amountPaid) || 0;
+  if (paid >= total && total > 0) return "Paid";
+  if (paid > 0) return "Partial";
+  return "Unpaid";
+}
+
+function paymentStatusStyle(status) {
+  if (status === "Paid") return { background: "#34c759", color: "#fff" };
+  if (status === "Partial") return { background: "#f59e0b", color: "#fff" };
+  return { background: "#ef4444", color: "#fff" };
+}
 
 /* ─── Chevron SVG for collapsible ─── */
 function ChevronDown({ className }) {
@@ -52,6 +68,9 @@ export default function Invoices() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState(searchParams.get("status") || "All");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState(
+    searchParams.get("paymentStatus") || "All"
+  );
   const debounceRef = useRef(null);
 
   // Ready to Invoice state
@@ -219,6 +238,18 @@ export default function Invoices() {
                   <option key={s} value={s}>{s === "All" ? "All Statuses" : s}</option>
                 ))}
               </select>
+              <select
+                className="inv-filter-select"
+                value={paymentStatusFilter}
+                onChange={(e) => setPaymentStatusFilter(e.target.value)}
+                aria-label="Payment status filter"
+              >
+                {PAYMENT_STATUS_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s === "All" ? "All Payments" : s}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -232,62 +263,93 @@ export default function Invoices() {
                   <th>Ship To</th>
                   <th>P.O. No.</th>
                   <th>Status</th>
+                  <th>Payment</th>
                   <th style={{ textAlign: "right" }}>Total</th>
                   <th style={{ textAlign: "right" }}>Balance Due</th>
                   <th style={{ width: 50 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {invoices.length === 0 && !loading && (
-                  <tr>
-                    <td colSpan={9}>
-                      <div className="inv-empty">
-                        {search || statusFilter !== "All"
-                          ? "No invoices match your filters."
-                          : "No invoices yet. Create your first invoice to get started."}
-                      </div>
-                    </td>
-                  </tr>
-                )}
-                {invoices.map((inv) => (
-                  <tr key={inv.id} onClick={() => navigate(`/invoices/${inv.id}`)}>
-                    <td data-label="Invoice #">
-                      <span className="inv-number">#{inv.invoiceNumber}</span>
-                    </td>
-                    <td data-label="Date">{fmtDate(inv.issueDate || inv.createdAt)}</td>
-                    <td data-label="Customer">
-                      <span className="inv-customer-name">
-                        {inv.companyName || inv.custName || "—"}
-                      </span>
-                    </td>
-                    <td data-label="Ship To">{inv.projectName || "—"}</td>
-                    <td data-label="P.O. No.">{inv.poNumber || "—"}</td>
-                    <td data-label="Status">
-                      <span className={`inv-status-pill ${statusClass(inv.status)}`}>
-                        {inv.status || "Draft"}
-                      </span>
-                    </td>
-                    <td data-label="Total" style={{ textAlign: "right" }}>
-                      <span className="inv-total">{fmtMoney(inv.total)}</span>
-                    </td>
-                    <td data-label="Balance Due" style={{ textAlign: "right" }}>
-                      <span className={`inv-balance${Number(inv.balanceDue) > 0 ? " inv-balance-due" : ""}`}>
-                        {fmtMoney(inv.balanceDue)}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: "center", width: 50 }}>
-                      {(inv.status === "Sent" || inv.status === "Overdue") && Number(inv.balanceDue) > 0 && (
-                        <button
-                          className="inv-remind-btn"
-                          title="Send payment reminder"
-                          onClick={(e) => { e.stopPropagation(); setReminderInvoice(inv); }}
-                        >
-                          &#9993;
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {(() => {
+                  const visibleInvoices =
+                    paymentStatusFilter === "All"
+                      ? invoices
+                      : invoices.filter((i) => derivePaymentStatus(i) === paymentStatusFilter);
+
+                  if (visibleInvoices.length === 0 && !loading) {
+                    return (
+                      <tr>
+                        <td colSpan={10}>
+                          <div className="inv-empty">
+                            {search || statusFilter !== "All" || paymentStatusFilter !== "All"
+                              ? "No invoices match your filters."
+                              : "No invoices yet. Create your first invoice to get started."}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return visibleInvoices.map((inv) => {
+                    const payStatus = derivePaymentStatus(inv);
+                    const payStyle = paymentStatusStyle(payStatus);
+                    return (
+                      <tr key={inv.id} onClick={() => navigate(`/invoices/${inv.id}`)}>
+                        <td data-label="Invoice #">
+                          <span className="inv-number">#{inv.invoiceNumber}</span>
+                        </td>
+                        <td data-label="Date">{fmtDate(inv.issueDate || inv.createdAt)}</td>
+                        <td data-label="Customer">
+                          <span className="inv-customer-name">
+                            {inv.companyName || inv.custName || "—"}
+                          </span>
+                        </td>
+                        <td data-label="Ship To">{inv.projectName || "—"}</td>
+                        <td data-label="P.O. No.">{inv.poNumber || "—"}</td>
+                        <td data-label="Status">
+                          <span className={`inv-status-pill ${statusClass(inv.status)}`}>
+                            {inv.status || "Draft"}
+                          </span>
+                        </td>
+                        <td data-label="Payment">
+                          <span
+                            style={{
+                              ...payStyle,
+                              padding: "3px 10px",
+                              borderRadius: 999,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              textTransform: "uppercase",
+                              letterSpacing: 0.3,
+                              display: "inline-block",
+                            }}
+                          >
+                            {payStatus}
+                          </span>
+                        </td>
+                        <td data-label="Total" style={{ textAlign: "right" }}>
+                          <span className="inv-total">{fmtMoney(inv.total)}</span>
+                        </td>
+                        <td data-label="Balance Due" style={{ textAlign: "right" }}>
+                          <span className={`inv-balance${Number(inv.balanceDue) > 0 ? " inv-balance-due" : ""}`}>
+                            {fmtMoney(inv.balanceDue)}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: "center", width: 50 }}>
+                          {(inv.status === "Sent" || inv.status === "Overdue") && Number(inv.balanceDue) > 0 && (
+                            <button
+                              className="inv-remind-btn"
+                              title="Send payment reminder"
+                              onClick={(e) => { e.stopPropagation(); setReminderInvoice(inv); }}
+                            >
+                              &#9993;
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           </div>

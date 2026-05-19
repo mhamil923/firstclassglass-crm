@@ -20,6 +20,7 @@ const STATUS_LIST = [
   "Waiting on Parts",
   "Needs to be Scheduled",
   "Needs to be Invoiced",
+  "Invoiced Waiting for Payment",
   "Completed",
 ];
 
@@ -59,6 +60,14 @@ const STATUS_SYNONYMS = new Map([
   ["needs to be invoiced", "Needs to be Invoiced"],
   ["needs invoiced", "Needs to be Invoiced"],
 
+  ["invoiced waiting for payment", "Invoiced Waiting for Payment"],
+  ["invoiced-waiting-for-payment", "Invoiced Waiting for Payment"],
+  ["invoiced_waiting_for_payment", "Invoiced Waiting for Payment"],
+  ["invoiced waiting payment", "Invoiced Waiting for Payment"],
+  ["waiting for payment", "Invoiced Waiting for Payment"],
+  ["waiting on payment", "Invoiced Waiting for Payment"],
+  ["awaiting payment", "Invoiced Waiting for Payment"],
+
   // Legacy: map any "Parts In" variants to "Needs to be Scheduled"
   ["part in", "Needs to be Scheduled"],
   ["parts in", "Needs to be Scheduled"],
@@ -71,6 +80,12 @@ const STATUS_SYNONYMS = new Map([
 
 const toCanonicalStatus = (s) =>
   CANON.get(statusKey(s)) || STATUS_SYNONYMS.get(statusKey(s)) || norm(s);
+
+// Per-status accent colors (used for chips/badges that need to stand out).
+// Statuses not in this map fall back to default chip styling.
+const STATUS_COLOR = {
+  "Invoiced Waiting for Payment": "#f59e0b",
+};
 
 // Hide legacy PO values that equal WO
 const isLegacyWoInPo = (wo, po) => !!norm(wo) && norm(wo) === norm(po);
@@ -164,7 +179,7 @@ export default function WorkOrders() {
 
   // For jeffsr, only show these status tabs; everyone else gets the full list.
   const visibleStatusList = isJeffSr
-    ? ["Scheduled", "Needs to be Scheduled", "Needs to be Quoted", "Needs to be Invoiced"]
+    ? ["Scheduled", "Needs to be Scheduled", "Needs to be Quoted", "Needs to be Invoiced", "Invoiced Waiting for Payment"]
     : STATUS_LIST;
 
   // state
@@ -381,15 +396,47 @@ export default function WorkOrders() {
               })),
             ].map(({ key, label, count }) => {
               const active = selectedFilter === key;
+              const accent = STATUS_COLOR[key];
+              const accentStyle = accent
+                ? {
+                    background: active ? accent : "transparent",
+                    border: `2px solid ${accent}`,
+                    color: active ? "#fff" : accent,
+                    borderRadius: 20,
+                    padding: "4px 14px",
+                    cursor: "pointer",
+                    fontWeight: 600,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }
+                : undefined;
               return (
                 <button
                   key={key}
                   type="button"
-                  className={`chip ${active ? "active" : ""}`}
+                  className={accent ? "" : `chip ${active ? "active" : ""}`}
+                  style={accentStyle}
                   onClick={() => setFilter(key)}
                 >
                   <span className="chip-label">{label}</span>
-                  <span className="chip-count">{count ?? 0}</span>
+                  <span
+                    className={accent ? "" : "chip-count"}
+                    style={
+                      accent
+                        ? {
+                            background: active ? "#fff" : accent,
+                            color: active ? accent : "#fff",
+                            borderRadius: 10,
+                            padding: "1px 8px",
+                            fontSize: 12,
+                            fontWeight: 700,
+                          }
+                        : undefined
+                    }
+                  >
+                    {count ?? 0}
+                  </span>
                 </button>
               );
             })}

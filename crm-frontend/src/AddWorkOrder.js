@@ -17,6 +17,7 @@ const STATUS_LIST = [
   "Waiting on Parts",
   "Needs to be Scheduled",
   "Needs to be Invoiced",
+  "Invoiced Waiting for Payment",
   "Completed",
 ];
 
