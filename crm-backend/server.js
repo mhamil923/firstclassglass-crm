@@ -192,17 +192,23 @@ function parseDateTimeFlexible(input) {
   const s = String(input).trim();
   if (!s) return null;
 
+  // Date-only (no time) → default to local noon (12:00).
   let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (m) {
     const [ , Y, Mo, D ] = m.map(Number);
-    return toSqlDateTimeFromParts(Y, Mo, D, 8, 0, 0);
+    return toSqlDateTimeFromParts(Y, Mo, D, 12, 0, 0);
   }
 
   m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2})(?::(\d{2})(?::(\d{2}))?)?$/.exec(s);
   if (m) {
     const Y  = Number(m[1]), Mo = Number(m[2]), D  = Number(m[3]);
-    const hh = Number(m[4]);
-    const mi = Number(m[5] || 0), se = Number(m[6] || 0);
+    let hh = Number(m[4]);
+    let mi = Number(m[5] || 0), se = Number(m[6] || 0);
+    // Treat 00:00 / 00:00:00 (HTML `datetime-local` default when user
+    // picked a date but didn't touch the time) as "no time specified" and
+    // promote to noon. Users who truly want midnight are vanishingly rare
+    // for field-service scheduling.
+    if (hh === 0 && mi === 0 && se === 0) hh = 12;
     return toSqlDateTimeFromParts(Y, Mo, D, hh, mi, se);
   }
 

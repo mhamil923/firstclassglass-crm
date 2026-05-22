@@ -108,12 +108,15 @@ function toDatetimeLocalValue(dateLike) {
   return mm.format("YYYY-MM-DDTHH:mm");
 }
 
-// Convert datetime-local value -> MySQL datetime string (server-friendly)
+// Convert datetime-local value -> MySQL datetime string (server-friendly).
+// Promotes the HTML date-picker default of T00:00 (date picked, time blank)
+// to T12:00 — actual midnight scheduling is essentially never wanted here.
 function datetimeLocalToMySQL(val) {
   const v = (val || "").trim();
   if (!v) return "";
   const m = moment(v, "YYYY-MM-DDTHH:mm", true);
   if (!m.isValid()) return "";
+  if (m.hour() === 0 && m.minute() === 0) m.hour(12);
   return m.format("YYYY-MM-DD HH:mm:ss");
 }
 

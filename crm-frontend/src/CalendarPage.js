@@ -311,8 +311,8 @@ function StackedWeekView(props) {
     const item = typeof dragFromOutsideItem === "function" ? dragFromOutsideItem() : null;
     if (!item || typeof onDropFromOutside !== "function") return;
 
-    // Default drop time for Week stacked view: 8:00 AM
-    const startTime = moment(dayDate).startOf("day").add(8, "hours").toDate();
+    // Default drop time for Week stacked view: 12:00 PM (noon)
+    const startTime = moment(dayDate).startOf("day").add(12, "hours").toDate();
     onDropFromOutside({ start: startTime });
   };
 
@@ -479,7 +479,8 @@ function StackedDayView(props) {
     e.preventDefault();
     const item = typeof dragFromOutsideItem === "function" ? dragFromOutsideItem() : null;
     if (!item || typeof onDropFromOutside !== "function") return;
-    const startTime = day.clone().add(8, "hours").toDate();
+    // Default drop time for Day stacked view: 12:00 PM (noon)
+    const startTime = day.clone().add(12, "hours").toDate();
     onDropFromOutside({ start: startTime });
   };
 
@@ -1009,7 +1010,13 @@ export default function WorkOrderCalendar() {
 
   /* ===== edit modal wiring ===== */
   function openEditModal(order, fallbackDate) {
-    const start = fromDbString(order?.scheduledDate || order?.start) || fallbackDate || new Date();
+    const existing = fromDbString(order?.scheduledDate || order?.start);
+    // When no existing scheduledDate, default to noon on fallback day
+    let start = existing;
+    if (!start) {
+      const base = fallbackDate || new Date();
+      start = moment(base).hour(12).minute(0).second(0).millisecond(0).toDate();
+    }
     const end =
       fromDbString(order?.scheduledEnd || order?.end) ||
       moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
@@ -1203,8 +1210,8 @@ export default function WorkOrderCalendar() {
     const e = fromDbString(order.scheduledEnd) ||
       (s ? moment(s).add(DEFAULT_WINDOW_MIN, "minutes").toDate() : new Date());
     setInlineEditId(order.id);
-    setInlineStartTime(s ? fmtTime(s) : "08:00");
-    setInlineEndTime(e ? fmtTime(e) : "10:00");
+    setInlineStartTime(s ? fmtTime(s) : "12:00");
+    setInlineEndTime(e ? fmtTime(e) : "14:00");
   }
 
   function cancelInlineEdit() {
