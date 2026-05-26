@@ -1107,37 +1107,50 @@ export default function WorkOrderCalendar() {
       const allOrdersById = {};
       allOrders.forEach((wo) => { allOrdersById[wo.id] = wo; });
 
-      const normalized = list
-        .map((ev) => {
-          const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
-          const e =
-            fromDbString(ev.end) ||
-            fromDbString(ev.scheduledEnd) ||
-            (s ? moment(s).add(DEFAULT_WINDOW_MIN, "minutes").toDate() : null);
+      // Filter to the clicked day using date-only string comparison (defensive
+      // against timezone shifts and mixed datetime formats from the backend).
+      const filteredForDay = list.filter((ev) => {
+        const raw = ev.start || ev.scheduledDate;
+        if (!raw) return false;
+        const eventDateStr = (raw instanceof Date)
+          ? moment(raw).format('YYYY-MM-DD')
+          : String(raw).split('T')[0].split(' ')[0];
+        return eventDateStr === dateStr;
+      });
 
-          // Cross-reference with allOrders for assignedTo data
-          const full = allOrdersById[ev.id];
+      console.log('[DayModal] selectedDay:', dateStr,
+        'total events:', list.length,
+        'filtered:', filteredForDay.length);
 
-          return {
-            id: ev.id,
-            customer: ev.meta?.customer ?? ev.customer,
-            siteLocation: ev.meta?.siteLocation ?? ev.siteLocation ?? getSiteLocation(ev),
-            siteAddress: ev.meta?.siteAddress ?? ev.siteAddress ?? getSiteAddress(ev),
-            workOrderNumber: getWorkOrderNumber(ev),
-            poNumber: getPoNumber(ev),
-            problemDescription: ev.meta?.problemDescription ?? ev.problemDescription,
-            scheduledDate: s,
-            scheduledEnd: e,
-            serviceAddress: ev.serviceAddress,
-            address: ev.address,
-            status: ev.status ?? ev.meta?.status,
-            assignedTo: full?.assignedTo ?? ev.meta?.assignedTo ?? ev.assignedTo ?? null,
-            assignedToName: full?.assignedToName ?? ev.meta?.assignedToName ?? ev.assignedToName ?? "",
-            techIds: Array.isArray(full?.techIds) ? full.techIds.map(Number) : [],
-            techNames: Array.isArray(full?.techNames) ? full.techNames : [],
-          };
-        })
-        .filter((o) => o.scheduledDate && isSameDay(o.scheduledDate, day));
+      const normalized = filteredForDay.map((ev) => {
+        const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
+        const e =
+          fromDbString(ev.end) ||
+          fromDbString(ev.scheduledEnd) ||
+          (s ? moment(s).add(DEFAULT_WINDOW_MIN, "minutes").toDate() : null);
+
+        // Cross-reference with allOrders for assignedTo data
+        const full = allOrdersById[ev.id];
+
+        return {
+          id: ev.id,
+          customer: ev.meta?.customer ?? ev.customer,
+          siteLocation: ev.meta?.siteLocation ?? ev.siteLocation ?? getSiteLocation(ev),
+          siteAddress: ev.meta?.siteAddress ?? ev.siteAddress ?? getSiteAddress(ev),
+          workOrderNumber: getWorkOrderNumber(ev),
+          poNumber: getPoNumber(ev),
+          problemDescription: ev.meta?.problemDescription ?? ev.problemDescription,
+          scheduledDate: s,
+          scheduledEnd: e,
+          serviceAddress: ev.serviceAddress,
+          address: ev.address,
+          status: ev.status ?? ev.meta?.status,
+          assignedTo: full?.assignedTo ?? ev.meta?.assignedTo ?? ev.assignedTo ?? null,
+          assignedToName: full?.assignedToName ?? ev.meta?.assignedToName ?? ev.assignedToName ?? "",
+          techIds: Array.isArray(full?.techIds) ? full.techIds.map(Number) : [],
+          techNames: Array.isArray(full?.techNames) ? full.techNames : [],
+        };
+      });
 
       normalized.sort((a, b) => {
         const sa = a.scheduledDate ? +a.scheduledDate : 0;
@@ -1145,17 +1158,8 @@ export default function WorkOrderCalendar() {
         return sa - sb;
       });
 
-      // Diagnostic: verify assignedTo data is reaching the modal
-      console.log('[Calendar Modal] Work orders for day:', JSON.stringify(normalized.map(wo => ({
-        id: wo.id,
-        customer: wo.customer,
-        assignedTo: wo.assignedTo,
-        assignedToName: wo.assignedToName,
-        fromAllOrders: allOrdersById[wo.id] ? {
-          assignedTo: allOrdersById[wo.id].assignedTo,
-          assignedToName: allOrdersById[wo.id].assignedToName,
-        } : 'NOT_FOUND_IN_ALL_ORDERS',
-      }))));
+      console.log('[DayModal] normalized work orders:', normalized.length,
+        normalized.map(wo => ({ id: wo.id, customer: wo.customer, scheduledDate: wo.scheduledDate })));
 
       setDayOrders(normalized);
       setDayForModal(day.toDate());
