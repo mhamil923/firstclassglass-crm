@@ -1083,24 +1083,12 @@ export default function WorkOrderCalendar() {
   async function openDayModal(dateLike) {
     const day = moment(dateLike).startOf("day");
     const dateStr = day.format("YYYY-MM-DD");
-    const startExact = `${dateStr} 00:00:00`;
-    const endExact = `${dateStr} 23:59:59`;
 
     try {
-      let list = [];
-      try {
-        const dayRes = await api.get("/calendar/day", { params: { date: dateStr } });
-        if (Array.isArray(dayRes.data)) list = dayRes.data;
-      } catch {
-        // ignore -> fallback
-      }
-
-      if (!list.length) {
-        const { data } = await api.get("/calendar/events", {
-          params: { start: startExact, end: endExact },
-        });
-        list = Array.isArray(data) ? data : [];
-      }
+      // Single source of truth: filter the `events` array the calendar
+      // cells already render from. No separate API fetch — guarantees the
+      // modal list matches what's visible on the day cell.
+      const list = events;
 
       // Build lookup from allOrders (from /work-orders endpoint, which always
       // includes assignedTo + assignedToName). This is the authoritative source.
@@ -1108,8 +1096,9 @@ export default function WorkOrderCalendar() {
       allOrders.forEach((wo) => { allOrdersById[wo.id] = wo; });
 
       // Filter to the clicked day using date-only string comparison (defensive
-      // against timezone shifts and mixed datetime formats from the backend).
+      // against timezone shifts and mixed datetime formats).
       const filteredForDay = list.filter((ev) => {
+        if (ev?.kind === "pickup") return false;
         const raw = ev.start || ev.scheduledDate;
         if (!raw) return false;
         const eventDateStr = (raw instanceof Date)
@@ -1119,8 +1108,14 @@ export default function WorkOrderCalendar() {
       });
 
       console.log('[DayModal] selectedDay:', dateStr,
-        'total events:', list.length,
-        'filtered:', filteredForDay.length);
+        'events count:', list.length,
+        'matched:', filteredForDay.length);
+      console.log('[DayModal] All event dates:', list.map(e => {
+        const r = e.start || e.scheduledDate;
+        return (r instanceof Date)
+          ? moment(r).format('YYYY-MM-DD')
+          : String(r || '').substring(0, 10);
+      }));
 
       const normalized = filteredForDay.map((ev) => {
         const s = fromDbString(ev.start) || fromDbString(ev.scheduledDate);
@@ -1332,6 +1327,15 @@ export default function WorkOrderCalendar() {
 
   function onSelectEvent(event) {
     if (event?.kind === "pickup") return;
+    // In month view, a single click on an event pill should open the DAY
+    // modal showing all jobs for that day (not the edit modal for just one).
+    if (view === "month") {
+      const d = fromDbString(event.start) || fromDbString(event.scheduledDate);
+      if (d) {
+        openDayModal(d);
+        return;
+      }
+    }
     const full = allOrders.find((o) => Number(o.id) === Number(event.id)) || event;
     openEditModal(full);
   }
