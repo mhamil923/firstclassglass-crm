@@ -2155,8 +2155,65 @@ export default function ViewWorkOrder() {
               {estimatePdfs.map((pdf) => {
                 const href = pdfThumbUrl(pdf.filename);
                 const name = pdf.originalName || (pdf.filename || "").split("/").pop() || "estimate.pdf";
+                const status = pdf.status || "Pending";
+                const isApproved = status === "Approved";
+                const isDeclined = status === "Declined";
+                const statusBg = isApproved ? "#22c55e" : isDeclined ? "#6b7280" : "#f59e0b";
                 return (
-                  <div className="po-pdf-card" key={`pdf-${pdf.id}`}>
+                  <div
+                    className="po-pdf-card"
+                    key={`pdf-${pdf.id}`}
+                    style={{
+                      position: "relative",
+                      border: isApproved
+                        ? "2px solid #22c55e"
+                        : isDeclined
+                        ? "2px solid #6b7280"
+                        : undefined,
+                      opacity: isDeclined ? 0.5 : 1,
+                    }}
+                  >
+                    <select
+                      value={status}
+                      onChange={async (e) => {
+                        const newStatus = e.target.value;
+                        const prevStatus = pdf.status || "Pending";
+                        setEstimatePdfs((prev) =>
+                          prev.map((p) => (p.id === pdf.id ? { ...p, status: newStatus } : p))
+                        );
+                        try {
+                          await api.put(
+                            `/work-orders/${id}/estimate-pdfs/${pdf.id}/status`,
+                            { status: newStatus },
+                            { headers: authHeaders() }
+                          );
+                        } catch (err) {
+                          console.error("Failed to update estimate PDF status:", err);
+                          alert(err?.response?.data?.error || "Failed to update status.");
+                          setEstimatePdfs((prev) =>
+                            prev.map((p) => (p.id === pdf.id ? { ...p, status: prevStatus } : p))
+                          );
+                        }
+                      }}
+                      style={{
+                        position: "absolute",
+                        top: 8,
+                        right: 8,
+                        zIndex: 2,
+                        padding: "2px 8px",
+                        borderRadius: 12,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        background: statusBg,
+                        color: "#fff",
+                        border: "none",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <option value="Pending">Pending</option>
+                      <option value="Approved">Approved</option>
+                      <option value="Declined">Declined</option>
+                    </select>
                     <div className="po-pdf-thumbnail">
                       <iframe title={`Estimate PDF ${pdf.id}`} src={href} />
                     </div>

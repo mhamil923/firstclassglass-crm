@@ -565,6 +565,9 @@ export default function AddWorkOrder() {
     form.append("customerEmail", workOrder.customerEmail || "");
     const primaryTechId = assignedTechIds[0] || workOrder.assignedTo || "";
     if (primaryTechId) form.append("assignedTo", primaryTechId);
+    if (assignedTechIds.length > 0) {
+      form.append("techIds", JSON.stringify(assignedTechIds));
+    }
     if (workOrder.customerId) form.append("customerId", workOrder.customerId);
 
     if (workOrder.scheduledDate) {
@@ -579,19 +582,9 @@ export default function AddWorkOrder() {
 
     try {
       setSubmitting(true);
-      const createRes = await api.post("/work-orders", form, {
+      await api.post("/work-orders", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-
-      // Sync the multi-tech junction table with the chip selection.
-      const newId = createRes?.data?.id || createRes?.data?.workOrder?.id;
-      if (newId && assignedTechIds.length > 0) {
-        try {
-          await api.put(`/work-orders/${newId}/techs`, { userIds: assignedTechIds });
-        } catch (e) {
-          console.warn("Failed to sync multi-tech assignment:", e?.message || e);
-        }
-      }
 
       if (willBeScheduled) navigate("/calendar");
       else navigate("/work-orders");

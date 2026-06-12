@@ -537,10 +537,26 @@ async function ensureEstimatePdfsTable() {
         workOrderId  INT NOT NULL,
         filename     VARCHAR(500) NULL,
         originalName VARCHAR(500) NULL,
+        status       VARCHAR(50) NOT NULL DEFAULT 'Pending',
         uploadedAt   DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (workOrderId) REFERENCES work_orders(id) ON DELETE CASCADE
       )
     `);
+    // Idempotent column add for pre-existing tables
+    try {
+      const [cols] = await db.query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'work_order_estimate_pdfs' AND COLUMN_NAME = 'status'`
+      );
+      if (!cols || cols.length === 0) {
+        await db.query(
+          `ALTER TABLE work_order_estimate_pdfs ADD COLUMN status VARCHAR(50) NOT NULL DEFAULT 'Pending'`
+        );
+        console.log('[Estimate PDF Table] added status column');
+      }
+    } catch (e) {
+      console.warn('[Estimate PDF Table] Could not ensure status column:', e.message);
+    }
     console.log('[Estimate PDF Table] work_order_estimate_pdfs table ready');
   } catch (e) {
     console.warn('[Estimate PDF Table] Could not create work_order_estimate_pdfs:', e.message);
@@ -5649,7 +5665,21 @@ app.get('/debug/work-order/:id', authenticate, async (req, res) => {
 // LIST ALL
 app.get('/work-orders', authenticate, async (req, res) => {
   try {
-    const [raw] = await db.execute(workOrdersSelectSQL({ orderSql: 'ORDER BY w.id DESC' }));
+    // ?mine=true scopes the list to the authenticated user, using either the
+    // primary assignedTo or the multi-tech junction table. Used by the field
+    // app so techs only see their own WOs; web CRM omits the param to see all.
+    const onlyMine = req.query.mine === 'true' || req.query.mine === '1';
+    let whereSql = '';
+    let params = [];
+    if (onlyMine && req.user && Number.isFinite(Number(req.user.id))) {
+      const uid = Number(req.user.id);
+      whereSql = `WHERE (w.assignedTo = ? OR w.id IN (SELECT workOrderId FROM work_order_techs WHERE userId = ?))`;
+      params = [uid, uid];
+    }
+    const [raw] = await db.query(
+      workOrdersSelectSQL({ whereSql, orderSql: 'ORDER BY w.id DESC' }),
+      params
+    );
     let rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status), allPoNumbersFormatted: formatPoNumberList(r.allPoNumbers) }));
     await attachTechsToWorkOrders(rows);
 
@@ -6395,7 +6425,42 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       }
     }
 
-    res.status(201).json({ workOrderId: r.insertId });
+    // Sync multi-tech junction. Prefer explicit techIds (JSON string or array)
+    // from the create form; fall back to the primary assignedTo so single-tech
+    // creators (e.g. field-app submit-for-self) still land a junction row.
+    try {
+      let techIds = [];
+      const rawTechIds = req.body.techIds;
+      if (Array.isArray(rawTechIds)) {
+        techIds = rawTechIds;
+      } else if (typeof rawTechIds === 'string' && rawTechIds.trim()) {
+        try {
+          const parsed = JSON.parse(rawTechIds);
+          if (Array.isArray(parsed)) techIds = parsed;
+        } catch {
+          // Not JSON — accept comma-separated form: "1,2,3"
+          techIds = rawTechIds.split(',').map(s => s.trim()).filter(Boolean);
+        }
+      }
+      const uniqueIds = Array.from(new Set(
+        techIds.map(v => Number(v)).filter(v => Number.isFinite(v) && v > 0)
+      ));
+      const fallbackId = Number(assignedTo);
+      if (uniqueIds.length === 0 && Number.isFinite(fallbackId) && fallbackId > 0) {
+        uniqueIds.push(fallbackId);
+      }
+      if (uniqueIds.length > 0) {
+        const values = uniqueIds.map(uid => [r.insertId, uid]);
+        await db.query('INSERT IGNORE INTO work_order_techs (workOrderId, userId) VALUES ?', [values]);
+        if (SCHEMA.hasAssignedTo) {
+          await db.execute('UPDATE work_orders SET assignedTo = ? WHERE id = ?', [uniqueIds[0], r.insertId]);
+        }
+      }
+    } catch (techErr) {
+      console.warn('[POST /work-orders] Tech junction sync failed:', techErr.message);
+    }
+
+    res.status(201).json({ id: r.insertId, workOrderId: r.insertId });
   } catch (err) {
     console.error('Work-order create error:', err);
     res.status(500).json({ error: 'Failed to save work order.' });
@@ -7010,7 +7075,7 @@ app.get('/work-orders/:id/estimate-pdfs', authenticate, requireNumericParam('id'
   try {
     const wid = Number(req.params.id);
     const [rows] = await db.query(
-      'SELECT id, workOrderId, filename, originalName, uploadedAt FROM work_order_estimate_pdfs WHERE workOrderId = ? ORDER BY uploadedAt ASC, id ASC',
+      'SELECT id, workOrderId, filename, originalName, status, uploadedAt FROM work_order_estimate_pdfs WHERE workOrderId = ? ORDER BY uploadedAt ASC, id ASC',
       [wid]
     );
     res.json(rows);
@@ -7046,7 +7111,7 @@ app.post(
       );
 
       const [[row]] = await db.query(
-        'SELECT id, workOrderId, filename, originalName, uploadedAt FROM work_order_estimate_pdfs WHERE id = ?',
+        'SELECT id, workOrderId, filename, originalName, status, uploadedAt FROM work_order_estimate_pdfs WHERE id = ?',
         [result.insertId]
       );
       res.status(201).json(row);
@@ -7084,6 +7149,37 @@ app.delete(
     } catch (err) {
       console.error('Estimate PDF delete error:', err);
       res.status(500).json({ error: 'Failed to delete estimate PDF.' });
+    }
+  }
+);
+
+// PUT /work-orders/:id/estimate-pdfs/:pdfId/status — update approval status
+app.put(
+  '/work-orders/:id/estimate-pdfs/:pdfId/status',
+  authenticate,
+  requireNumericParam('id'),
+  requireNumericParam('pdfId'),
+  async (req, res) => {
+    try {
+      const wid = Number(req.params.id);
+      const pdfId = Number(req.params.pdfId);
+      const allowed = ['Pending', 'Approved', 'Declined'];
+      const status = String(req.body?.status || '').trim();
+      if (!allowed.includes(status)) {
+        return res.status(400).json({ error: `Status must be one of: ${allowed.join(', ')}` });
+      }
+
+      const [result] = await db.query(
+        'UPDATE work_order_estimate_pdfs SET status = ? WHERE id = ? AND workOrderId = ?',
+        [status, pdfId, wid]
+      );
+      if (!result || result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Estimate PDF not found on this work order.' });
+      }
+      res.json({ success: true, status });
+    } catch (err) {
+      console.error('Estimate PDF status update error:', err);
+      res.status(500).json({ error: 'Failed to update estimate PDF status.' });
     }
   }
 );
