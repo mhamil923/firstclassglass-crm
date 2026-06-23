@@ -565,6 +565,39 @@ async function ensureEstimatePdfsTable() {
 
 ensureEstimatePdfsTable().catch(() => {});
 
+// ─── RESIDENTIAL_CONTRACTS TABLE (one contract per work order) ─────────────
+async function ensureResidentialContractsTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS residential_contracts (
+        id                  INT AUTO_INCREMENT PRIMARY KEY,
+        workOrderId         INT NOT NULL,
+        status              VARCHAR(50) NOT NULL DEFAULT 'Draft',
+        scopeOfWork         TEXT NULL,
+        contractTotal       DECIMAL(10,2) NULL,
+        downPaymentPercent  DECIMAL(5,2) NULL,
+        startDate           DATE NULL,
+        completionDate      DATE NULL,
+        generatedPdfPath    VARCHAR(500) NULL,
+        signedPdfPath       VARCHAR(500) NULL,
+        signerName          VARCHAR(255) NULL,
+        signedAt            DATETIME NULL,
+        signatureData       LONGTEXT NULL,
+        sentToEmail         VARCHAR(255) NULL,
+        sentAt              DATETIME NULL,
+        createdAt           DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt           DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_workorder (workOrderId),
+        FOREIGN KEY (workOrderId) REFERENCES work_orders(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('[Residential Contracts] residential_contracts table ready');
+  } catch (e) {
+    console.warn('[Residential Contracts] Could not create residential_contracts:', e.message);
+  }
+}
+ensureResidentialContractsTable().catch(() => {});
+
 // ─── SUPPLIER_PICKUPS TABLE ─────────────────────────────────────────────────
 async function ensureSupplierPickupsTable() {
   try {
@@ -7183,6 +7216,93 @@ app.put(
     }
   }
 );
+
+// ─── RESIDENTIAL CONTRACTS (one per work order) ────────────────────────────
+
+// GET /work-orders/:id/residential-contract — returns the contract row or null
+app.get('/work-orders/:id/residential-contract', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const [[row]] = await db.query(
+      'SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1',
+      [wid]
+    );
+    res.json(row || null);
+  } catch (err) {
+    console.error('Residential contract get error:', err);
+    res.status(500).json({ error: 'Failed to fetch residential contract.' });
+  }
+});
+
+// PUT /work-orders/:id/residential-contract — upsert draft fields. Signed contracts
+// are read-only; sending/signing is handled by dedicated routes (Phase 3).
+app.put('/work-orders/:id/residential-contract', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+
+    const [[wo]] = await db.query('SELECT id FROM work_orders WHERE id = ?', [wid]);
+    if (!wo) return res.status(404).json({ error: 'Work order not found.' });
+
+    const [[existing]] = await db.query(
+      'SELECT id, status FROM residential_contracts WHERE workOrderId = ? LIMIT 1',
+      [wid]
+    );
+    if (existing && existing.status === 'Signed') {
+      return res.status(409).json({ error: 'Signed contracts cannot be edited.' });
+    }
+
+    const body = req.body || {};
+    const toNullableStr = (v) => (v === undefined || v === null || v === '' ? null : String(v));
+    const toNullableNum = (v) => {
+      if (v === undefined || v === null || v === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const toNullableDate = (v) => {
+      if (!v) return null;
+      // Accept "YYYY-MM-DD" or full ISO; store as DATE
+      const s = String(v);
+      const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+      return m ? m[1] : null;
+    };
+
+    const fields = {
+      scopeOfWork:        toNullableStr(body.scopeOfWork),
+      contractTotal:      toNullableNum(body.contractTotal),
+      downPaymentPercent: toNullableNum(body.downPaymentPercent),
+      startDate:          toNullableDate(body.startDate),
+      completionDate:     toNullableDate(body.completionDate),
+    };
+
+    if (existing) {
+      await db.query(
+        `UPDATE residential_contracts
+            SET scopeOfWork = ?, contractTotal = ?, downPaymentPercent = ?,
+                startDate = ?, completionDate = ?
+          WHERE id = ?`,
+        [fields.scopeOfWork, fields.contractTotal, fields.downPaymentPercent,
+         fields.startDate, fields.completionDate, existing.id]
+      );
+    } else {
+      await db.query(
+        `INSERT INTO residential_contracts
+           (workOrderId, status, scopeOfWork, contractTotal, downPaymentPercent, startDate, completionDate)
+         VALUES (?, 'Draft', ?, ?, ?, ?, ?)`,
+        [wid, fields.scopeOfWork, fields.contractTotal, fields.downPaymentPercent,
+         fields.startDate, fields.completionDate]
+      );
+    }
+
+    const [[row]] = await db.query(
+      'SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1',
+      [wid]
+    );
+    res.json(row);
+  } catch (err) {
+    console.error('Residential contract upsert error:', err);
+    res.status(500).json({ error: 'Failed to save residential contract.' });
+  }
+});
 
 // ─── PURCHASE ORDERS (derived from work_order_pos) ──────────────────────────
 

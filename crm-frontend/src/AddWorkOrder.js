@@ -143,6 +143,10 @@ export default function AddWorkOrder() {
 
   // Multi-tech assignment (drives the primary `assignedTo` and `/techs` endpoint).
   const [assignedTechIds, setAssignedTechIds] = useState([]);
+
+  // Residential job toggle — when checked, seeds a Draft residential_contracts row
+  // after the WO is created so the Residential Contract card shows up on ViewWorkOrder.
+  const [isResidential, setIsResidential] = useState(false);
   const toggleAssignedTech = (id) => {
     const n = Number(id);
     setAssignedTechIds((prev) =>
@@ -582,9 +586,24 @@ export default function AddWorkOrder() {
 
     try {
       setSubmitting(true);
-      await api.post("/work-orders", form, {
+      const createRes = await api.post("/work-orders", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
+
+      // Seed a Draft residential contract row if marked residential.
+      // Backend ignores unknown fields, so passing county is harmless even though
+      // Phase 1 doesn't store it. downPaymentPercent: 50 is the standard default.
+      const newId = createRes?.data?.id || createRes?.data?.workOrderId;
+      if (isResidential && newId) {
+        try {
+          await api.put(`/work-orders/${newId}/residential-contract`, {
+            county: "DuPage",
+            downPaymentPercent: 50,
+          });
+        } catch (e) {
+          console.warn("Failed to seed residential contract draft:", e?.message || e);
+        }
+      }
 
       if (willBeScheduled) navigate("/calendar");
       else navigate("/work-orders");
@@ -1016,6 +1035,30 @@ export default function AddWorkOrder() {
                     Calendar).
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* ===== Residential job toggle ===== */}
+            <div className="awo-section">
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isResidential}
+                  onChange={(e) => setIsResidential(e.target.checked)}
+                />
+                Residential job — generate contract after creating
+              </label>
+              <div className="awo-help" style={{ marginTop: 4 }}>
+                Creates a Draft Residential Contract on this work order. You fill in scope, total,
+                and dates on the work order page, then send for signature.
               </div>
             </div>
 

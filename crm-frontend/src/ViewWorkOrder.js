@@ -410,6 +410,17 @@ export default function ViewWorkOrder() {
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
   const [busyImageUpload, setBusyImageUpload] = useState(false);
 
+  // Residential contract (Phase 1: draft data only; PDF + signing in later phases)
+  const [residentialContract, setResidentialContract] = useState(null);
+  const [contractDraft, setContractDraft] = useState({
+    scopeOfWork: "",
+    contractTotal: "",
+    downPaymentPercent: "",
+    startDate: "",
+    completionDate: "",
+  });
+  const [contractSaving, setContractSaving] = useState(false);
+
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
 
@@ -605,6 +616,55 @@ export default function ViewWorkOrder() {
     }
   };
 
+  const fetchResidentialContract = async () => {
+    try {
+      const res = await api.get(`/work-orders/${id}/residential-contract`, {
+        headers: authHeaders(),
+      });
+      const row = res.data || null;
+      setResidentialContract(row);
+      setContractDraft({
+        scopeOfWork: row?.scopeOfWork ?? "",
+        contractTotal:
+          row?.contractTotal != null && row.contractTotal !== ""
+            ? String(row.contractTotal)
+            : "",
+        downPaymentPercent:
+          row?.downPaymentPercent != null && row.downPaymentPercent !== ""
+            ? String(row.downPaymentPercent)
+            : "",
+        startDate: row?.startDate ? String(row.startDate).slice(0, 10) : "",
+        completionDate: row?.completionDate ? String(row.completionDate).slice(0, 10) : "",
+      });
+    } catch (err) {
+      console.error("Error fetching residential contract:", err);
+      setResidentialContract(null);
+    }
+  };
+
+  const saveResidentialContract = async () => {
+    setContractSaving(true);
+    try {
+      const payload = {
+        scopeOfWork: contractDraft.scopeOfWork || null,
+        contractTotal: contractDraft.contractTotal === "" ? null : Number(contractDraft.contractTotal),
+        downPaymentPercent:
+          contractDraft.downPaymentPercent === "" ? null : Number(contractDraft.downPaymentPercent),
+        startDate: contractDraft.startDate || null,
+        completionDate: contractDraft.completionDate || null,
+      };
+      const res = await api.put(`/work-orders/${id}/residential-contract`, payload, {
+        headers: authHeaders(),
+      });
+      setResidentialContract(res.data || null);
+    } catch (err) {
+      console.error("Error saving residential contract:", err);
+      alert(err?.response?.data?.error || "Failed to save residential contract.");
+    } finally {
+      setContractSaving(false);
+    }
+  };
+
   useEffect(() => {
     // Reset init state when id changes
     quickScheduleInitializedRef.current = false;
@@ -615,6 +675,7 @@ export default function ViewWorkOrder() {
     fetchLinkedEstimates();
     fetchLinkedInvoices();
     fetchEstimatePdfs();
+    fetchResidentialContract();
     fetchTechUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -2292,6 +2353,119 @@ export default function ViewWorkOrder() {
               No estimates linked to this work order.
             </p>
           )}
+        </div>
+
+        {/* ======================= Residential Contract ======================= */}
+        <div className="section-card">
+          <h3 className="section-header">
+            Residential Contract
+            {(() => {
+              const s = residentialContract?.status || "Draft";
+              const style = (() => {
+                const sl = s.toLowerCase();
+                if (sl === "sent") return { background: "rgba(0,113,227,0.1)", color: "var(--accent-blue)" };
+                if (sl === "signed") return { background: "rgba(52,199,89,0.12)", color: "#34c759" };
+                if (sl === "cancelled") return { background: "rgba(255,59,48,0.12)", color: "#ff3b30" };
+                return { background: "rgba(142,142,147,0.12)", color: "#8e8e93" };
+              })();
+              return (
+                <span style={{ ...style, marginLeft: 12, display: "inline-block", padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
+                  {s}
+                </span>
+              );
+            })()}
+          </h3>
+
+          {(() => {
+            const isSigned = residentialContract?.status === "Signed";
+            return (
+              <div style={{ padding: "16px", display: "grid", gap: 12 }}>
+                <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
+                  Scope of work
+                  <textarea
+                    value={contractDraft.scopeOfWork}
+                    onChange={(e) => setContractDraft((d) => ({ ...d, scopeOfWork: e.target.value }))}
+                    disabled={isSigned || contractSaving}
+                    rows={4}
+                    style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14, fontFamily: "inherit", resize: "vertical" }}
+                  />
+                </label>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
+                    Contract total ($)
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={contractDraft.contractTotal}
+                      onChange={(e) => setContractDraft((d) => ({ ...d, contractTotal: e.target.value }))}
+                      disabled={isSigned || contractSaving}
+                      style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
+                    Down payment (%)
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={contractDraft.downPaymentPercent}
+                      onChange={(e) => setContractDraft((d) => ({ ...d, downPaymentPercent: e.target.value }))}
+                      disabled={isSigned || contractSaving}
+                      style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
+                    />
+                  </label>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
+                    Estimated start
+                    <input
+                      type="date"
+                      value={contractDraft.startDate}
+                      onChange={(e) => setContractDraft((d) => ({ ...d, startDate: e.target.value }))}
+                      disabled={isSigned || contractSaving}
+                      style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
+                    Estimated completion
+                    <input
+                      type="date"
+                      value={contractDraft.completionDate}
+                      onChange={(e) => setContractDraft((d) => ({ ...d, completionDate: e.target.value }))}
+                      disabled={isSigned || contractSaving}
+                      style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
+                    />
+                  </label>
+                </div>
+
+                {isSigned ? (
+                  <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0 }}>
+                    Signed by <strong>{residentialContract?.signerName || "—"}</strong>
+                    {residentialContract?.signedAt
+                      ? ` on ${new Date(residentialContract.signedAt).toLocaleString()}`
+                      : ""}
+                    . Signed contracts cannot be edited.
+                  </p>
+                ) : (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={saveResidentialContract}
+                      disabled={contractSaving}
+                      style={{ fontSize: 14, padding: "8px 16px" }}
+                    >
+                      {contractSaving ? "Saving…" : residentialContract ? "Save changes" : "Save draft"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* ======================= Linked Invoices ======================= */}
