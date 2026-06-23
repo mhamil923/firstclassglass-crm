@@ -34,6 +34,15 @@ const CalendarTechContext = createContext({
 // Keep this in sync with server DEFAULT_WINDOW_MINUTES
 const DEFAULT_WINDOW_MIN = 120;
 
+// Statuses that mean the WO is done/dead and should not show up as scheduling work.
+// Used to filter the Unscheduled bar + Past Due strip, and to hide schedule actions
+// on these orders when they appear in search results.
+const EXCLUDED_FROM_SCHEDULING = new Set([
+  "Completed",
+  "Declined",
+  "Invoiced Waiting for Payment",
+]);
+
 // Keep this in sync with ViewWorkOrder.js and WorkOrders.js
 const STATUS_OPTIONS = [
   "New",
@@ -917,10 +926,18 @@ export default function WorkOrderCalendar() {
         api.get("/work-orders", { params: { pastDue: "true" } }).catch(() => ({ data: [] })),
       ]);
       setAllOrders(Array.isArray(allRes.data) ? allRes.data : []);
-      setUnscheduledOrders(Array.isArray(unRes.data) ? unRes.data : []);
+      setUnscheduledOrders(
+        (Array.isArray(unRes.data) ? unRes.data : []).filter(
+          (o) => !EXCLUDED_FROM_SCHEDULING.has(o?.status)
+        )
+      );
       setSupplierPickups(Array.isArray(pickupsRes.data) ? pickupsRes.data : []);
       setSupplierList(Array.isArray(supRes.data) ? supRes.data : []);
-      setPastDueOrders(Array.isArray(pastDueRes.data) ? pastDueRes.data : []);
+      setPastDueOrders(
+        (Array.isArray(pastDueRes.data) ? pastDueRes.data : []).filter(
+          (o) => !EXCLUDED_FROM_SCHEDULING.has(o?.status)
+        )
+      );
     } catch (e) {
       console.error("⚠️ Error loading lists:", e);
     }
@@ -1740,6 +1757,7 @@ export default function WorkOrderCalendar() {
               const siteLoc = getSiteLocation(order) || "";
               const siteAddr = getSiteAddress(order) || "";
               const isScheduled = !!order.scheduledDate;
+              const isFinished = EXCLUDED_FROM_SCHEDULING.has(order?.status);
 
               let currentWhen = "";
               if (isScheduled) {
@@ -1760,17 +1778,45 @@ export default function WorkOrderCalendar() {
                 <div
                   key={order.id}
                   className="unscheduled-item"
-                  draggable
-                  onDragStart={(e) => beginGlobalDrag(order, e)}
+                  draggable={!isFinished}
+                  onDragStart={(e) => {
+                    if (isFinished) {
+                      e.preventDefault();
+                      return;
+                    }
+                    beginGlobalDrag(order, e);
+                  }}
                   onDragEnd={endGlobalDrag}
                   title={`${customerLabel} — ${idLabel}`}
-                  style={{ minHeight: 160, display: "flex", flexDirection: "column" }}
+                  style={{
+                    minHeight: 160,
+                    display: "flex",
+                    flexDirection: "column",
+                    opacity: isFinished ? 0.65 : 1,
+                  }}
                 >
                   <div className="d-flex align-items-center justify-content-between" style={{ gap: 8 }}>
                     <div className="fw-bold" style={clamp1}>
                       {customerLabel} — {idLabel}
                     </div>
-                    {isScheduled && <span className="badge text-bg-secondary">Scheduled</span>}
+                    {isFinished ? (
+                      <span
+                        className="badge"
+                        style={{
+                          background:
+                            order.status === "Completed"
+                              ? "#22c55e"
+                              : order.status === "Declined"
+                              ? "#6b7280"
+                              : "#3b82f6",
+                          color: "#fff",
+                        }}
+                      >
+                        {order.status}
+                      </span>
+                    ) : isScheduled ? (
+                      <span className="badge text-bg-secondary">Scheduled</span>
+                    ) : null}
                   </div>
 
                   {siteLoc ? (
@@ -1817,21 +1863,25 @@ export default function WorkOrderCalendar() {
                     onPointerDown={(e) => e.stopPropagation()}
                     onTouchStart={(e) => e.stopPropagation()}
                   >
-                    <button
-                      className="btn btn-xs btn-outline-light me-1"
-                      onClick={() => openEditModal(order, currentDate)}
-                      type="button"
-                    >
-                      {isScheduled ? "Edit/Reschedule…" : "Schedule…"}
-                    </button>
+                    {!isFinished && (
+                      <>
+                        <button
+                          className="btn btn-xs btn-outline-light me-1"
+                          onClick={() => openEditModal(order, currentDate)}
+                          type="button"
+                        >
+                          {isScheduled ? "Edit/Reschedule…" : "Schedule…"}
+                        </button>
 
-                    <button
-                      className="btn btn-xs btn-light me-1"
-                      onClick={() => openStatusPicker(order)}
-                      type="button"
-                    >
-                      Status…
-                    </button>
+                        <button
+                          className="btn btn-xs btn-light me-1"
+                          onClick={() => openStatusPicker(order)}
+                          type="button"
+                        >
+                          Status…
+                        </button>
+                      </>
+                    )}
 
                     <button
                       className="btn btn-xs btn-light"
