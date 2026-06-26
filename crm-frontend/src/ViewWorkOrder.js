@@ -49,6 +49,45 @@ const isPdfKey = (key) => /\.pdf(\?|$)/i.test(key);
 const urlFor = (relPath) => `${API_BASE_URL}/files?key=${encodeURIComponent(relPath)}`;
 const pdfThumbUrl = (relPath) => `${urlFor(relPath)}#page=1&view=FitH`;
 
+/* ---------- Print helpers ---------- */
+const printImage = (url, title = 'Print') => {
+  const w = window.open('', '_blank');
+  if (!w) { alert('Pop-up blocked. Allow pop-ups to print.'); return; }
+  w.document.write(`
+    <html><head><title>${title}</title>
+    <style>
+      @media print { @page { margin: 0.5in; } }
+      body { margin:0; display:flex; align-items:center; justify-content:center; }
+      img { max-width:100%; max-height:100vh; object-fit:contain; }
+    </style></head>
+    <body><img src="${url}" onload="window.focus();window.print();" /></body></html>
+  `);
+  w.document.close();
+};
+
+const printAllPhotos = (urls) => {
+  if (!urls || urls.length === 0) { alert('No photos to print.'); return; }
+  const w = window.open('', '_blank');
+  if (!w) { alert('Pop-up blocked. Allow pop-ups to print.'); return; }
+  const imgs = urls.map(u => `<img src="${u}" style="max-width:100%;max-height:100vh;object-fit:contain;page-break-after:always;display:block;margin:0 auto;" />`).join('');
+  w.document.write(`
+    <html><head><title>Work Order Photos</title>
+    <style>@media print{@page{margin:0.5in;}} body{margin:0;} img{page-break-after:always;}</style>
+    </head><body>${imgs}
+    <script>
+      var imgs=document.images, total=imgs.length, done=0;
+      if(total===0){window.print();}
+      for(var i=0;i<total;i++){
+        if(imgs[i].complete){done++;}
+        else{imgs[i].onload=imgs[i].onerror=function(){done++;if(done===total){window.focus();window.print();}};}
+      }
+      if(done===total){window.focus();window.print();}
+    <\/script>
+    </body></html>
+  `);
+  w.document.close();
+};
+
 const fileNameFromKey = (key) => (key || "").split("/").pop() || key || "";
 const isImageKey = (key) => !!key && !isPdfKey(key) && /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(key);
 
@@ -235,6 +274,17 @@ function Lightbox({ open, onClose, kind, src, title }) {
             {kind === "image" && (
               <button className="btn btn-light" onClick={handleDownload} disabled={downloading}>
                 {downloading ? "Preparing…" : "Download"}
+              </button>
+            )}
+            {kind === "image" && (
+              <button
+                className="btn btn-light"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  printImage(src, title || inferredName);
+                }}
+              >
+                Print
               </button>
             )}
             <button
@@ -2527,6 +2577,10 @@ export default function ViewWorkOrder() {
             <div className="section-actions">
               <button className="btn btn-outline" onClick={() => downloadMany(photoImages)} disabled={!photoImages.length}>
                 Download All Photos
+              </button>
+
+              <button className="btn btn-outline" onClick={() => printAllPhotos(photoImages.map(urlFor))} disabled={!photoImages.length}>
+                Print All Photos
               </button>
 
               <label className="btn btn-light">
