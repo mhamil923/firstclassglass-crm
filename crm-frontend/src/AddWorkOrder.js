@@ -592,13 +592,13 @@ export default function AddWorkOrder() {
 
       // Seed a Draft residential contract row if marked residential.
       // Backend ignores unknown fields, so passing county is harmless even though
-      // Phase 1 doesn't store it. downPaymentPercent: 50 is the standard default.
+      // Phase 1 doesn't store it. downPaymentPercent: 100 is the standard default.
       const newId = createRes?.data?.id || createRes?.data?.workOrderId;
       if (isResidential && newId) {
         try {
           await api.put(`/work-orders/${newId}/residential-contract`, {
             county: "DuPage",
-            downPaymentPercent: 50,
+            downPaymentPercent: 100,
           });
         } catch (e) {
           console.warn("Failed to seed residential contract draft:", e?.message || e);

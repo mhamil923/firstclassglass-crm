@@ -575,7 +575,7 @@ async function ensureResidentialContractsTable() {
         status              VARCHAR(50) NOT NULL DEFAULT 'Draft',
         scopeOfWork         TEXT NULL,
         contractTotal       DECIMAL(10,2) NULL,
-        downPaymentPercent  DECIMAL(5,2) NULL,
+        downPaymentPercent  DECIMAL(5,2) NULL DEFAULT 100,
         startDate           DATE NULL,
         completionDate      DATE NULL,
         generatedPdfPath    VARCHAR(500) NULL,
