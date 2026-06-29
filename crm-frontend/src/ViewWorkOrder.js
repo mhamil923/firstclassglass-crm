@@ -484,6 +484,11 @@ export default function ViewWorkOrder() {
   const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
   const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
 
+  // ✅ Estimate-approval prompt (when WO status -> Approved with multiple estimates)
+  const [showApproveEstimateModal, setShowApproveEstimateModal] = useState(false);
+  const [approveSelectedId, setApproveSelectedId] = useState(null);
+  const [declineOthers, setDeclineOthers] = useState(true);
+
   // ✅ Inline edit mode (stacked fields)
   const [editMode, setEditMode] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
@@ -1533,11 +1538,84 @@ export default function ViewWorkOrder() {
         });
       }
       await fetchWorkOrder();
+
+      // ✅ Tie WO "Approved" status to estimate approval (uploaded estimate PDFs on THIS work order)
+      if (newStatus === "Approved") {
+        const estimates = estimatePdfs;
+        const alreadyApproved = estimates.some((est) => (est.status || "") === "Approved");
+        if (!alreadyApproved) {
+          if (estimates.length === 1) {
+            // Auto-approve the only estimate
+            const est = estimates[0];
+            try {
+              await api.put(
+                `/work-orders/${id}/estimate-pdfs/${est.id}/status`,
+                { status: "Approved" },
+                { headers: authHeaders() }
+              );
+              setEstimatePdfs((prev) =>
+                prev.map((p) => (p.id === est.id ? { ...p, status: "Approved" } : p))
+              );
+            } catch (err) {
+              console.error("Failed to auto-approve estimate:", err);
+            }
+          } else if (estimates.length > 1) {
+            // Multiple estimates — prompt the user to pick which one was approved
+            setApproveSelectedId(null);
+            setDeclineOthers(true);
+            setShowApproveEstimateModal(true);
+          }
+          // 0 estimates -> do nothing special
+        }
+      }
     } catch (error) {
       console.error("⚠️ Error updating status:", error);
       alert(error?.response?.data?.error || "Failed to update status.");
     } finally {
       setStatusSaving(false);
+    }
+  };
+
+  // ✅ Confirm which estimate was approved (multiple-estimate case)
+  const confirmApproveEstimate = async () => {
+    if (!approveSelectedId) return;
+    const chosen = estimatePdfs.find((p) => p.id === approveSelectedId);
+    if (!chosen) {
+      setShowApproveEstimateModal(false);
+      return;
+    }
+    try {
+      await api.put(
+        `/work-orders/${id}/estimate-pdfs/${chosen.id}/status`,
+        { status: "Approved" },
+        { headers: authHeaders() }
+      );
+      if (declineOthers) {
+        const others = estimatePdfs.filter((p) => p.id !== chosen.id);
+        await Promise.all(
+          others.map((p) =>
+            api.put(
+              `/work-orders/${id}/estimate-pdfs/${p.id}/status`,
+              { status: "Declined" },
+              { headers: authHeaders() }
+            )
+          )
+        );
+      }
+      setEstimatePdfs((prev) =>
+        prev.map((p) =>
+          p.id === chosen.id
+            ? { ...p, status: "Approved" }
+            : declineOthers
+            ? { ...p, status: "Declined" }
+            : p
+        )
+      );
+    } catch (err) {
+      console.error("Failed to approve estimate:", err);
+      alert(err?.response?.data?.error || "Failed to approve estimate.");
+    } finally {
+      setShowApproveEstimateModal(false);
     }
   };
 
@@ -1680,6 +1758,157 @@ export default function ViewWorkOrder() {
         src={lightbox.src}
         title={lightbox.title}
       />
+
+      {/* ✅ Which-estimate-was-approved selection modal */}
+      {showApproveEstimateModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShowApproveEstimateModal(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--bg-card, #fff)",
+              borderRadius: 12,
+              maxWidth: 560,
+              width: "100%",
+              maxHeight: "85vh",
+              overflowY: "auto",
+              padding: 24,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: "var(--text-primary)" }}>
+              Which estimate was approved?
+            </h3>
+            <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--text-secondary)" }}>
+              This work order has multiple estimates. Select the one the customer approved.
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {estimatePdfs.map((pdf) => {
+                const name =
+                  pdf.originalName || (pdf.filename || "").split("/").pop() || "estimate.pdf";
+                const selected = approveSelectedId === pdf.id;
+                return (
+                  <div
+                    key={`approve-${pdf.id}`}
+                    onClick={() => setApproveSelectedId(pdf.id)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: 10,
+                      borderRadius: 10,
+                      cursor: "pointer",
+                      border: selected
+                        ? "2px solid var(--accent-blue, #0071e3)"
+                        : "2px solid var(--border-color, #e5e7eb)",
+                      background: selected ? "rgba(0,113,227,0.06)" : "transparent",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="approve-estimate"
+                      checked={selected}
+                      readOnly
+                      style={{ flexShrink: 0 }}
+                    />
+                    <div
+                      style={{
+                        width: 64,
+                        height: 80,
+                        flexShrink: 0,
+                        border: "1px solid var(--border-color, #e5e7eb)",
+                        borderRadius: 6,
+                        overflow: "hidden",
+                        background: "#f3f4f6",
+                      }}
+                    >
+                      <iframe
+                        title={`Estimate ${pdf.id} thumb`}
+                        src={pdfThumbUrl(pdf.filename)}
+                        style={{ width: "100%", height: "100%", border: "none", pointerEvents: "none" }}
+                      />
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: "var(--text-primary)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={name}
+                      >
+                        {name}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                        Current: {pdf.status || "Pending"}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                marginTop: 16,
+                fontSize: 13,
+                color: "var(--text-primary)",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={declineOthers}
+                onChange={(e) => setDeclineOthers(e.target.checked)}
+              />
+              Mark the other estimate(s) as Declined
+            </label>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+              <button
+                type="button"
+                className="btn btn-light"
+                onClick={() => setShowApproveEstimateModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={confirmApproveEstimate}
+                disabled={!approveSelectedId}
+                style={{
+                  background: approveSelectedId ? "#22c55e" : "#9ca3af",
+                  color: "#fff",
+                  cursor: approveSelectedId ? "pointer" : "not-allowed",
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="view-card">
         <div className="view-header-row">
