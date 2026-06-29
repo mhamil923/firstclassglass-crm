@@ -3745,6 +3745,54 @@ app.get('/invoices', authenticate, async (req, res) => {
   }
 });
 
+// GET /invoices/collections — all chaseable invoices with computed overdue/late-fee
+// info. MUST be declared before /invoices/:id so "collections" isn't treated as an id.
+// (Helpers computeCollections/etc. are hoisted function declarations defined below.)
+app.get('/invoices/collections', authenticate, async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT i.*, c.companyName, c.name AS custName, c.email AS custEmail, c.phone AS custPhone,
+             w.workOrderNumber
+      FROM invoices i
+      LEFT JOIN customers c ON i.customerId = c.id
+      LEFT JOIN work_orders w ON i.workOrderId = w.id
+      WHERE i.status IN ('Sent','Partial','Overdue','Unpaid')
+        AND (COALESCE(i.total,0) - COALESCE(i.amountPaid,0)) > 0
+    `);
+
+    const list = rows.map((inv) => {
+      const comp = computeCollections(inv);
+      return {
+        id: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        qbDocNumber: inv.qbDocNumber || null,
+        workOrderId: inv.workOrderId || null,
+        workOrderNumber: inv.workOrderNumber || null,
+        customer: inv.companyName || inv.custName || '—',
+        customerEmail: inv.custEmail || '',
+        status: inv.status,
+        total: Number(inv.total) || 0,
+        amountPaid: Number(inv.amountPaid) || 0,
+        outstanding: comp.outstanding,
+        daysOverdue: comp.daysOverdue,
+        dueDate: comp.dueDate,
+        reminderStage: comp.reminderStage,
+        lateFee: comp.lateFee,
+        qbPayLink: inv.qbPayLink || '',
+        lastReminderAt: inv.lastReminderAt || null,
+        storedReminderStage: inv.reminderStage || 'None',
+      };
+    });
+
+    // Most overdue first
+    list.sort((a, b) => b.daysOverdue - a.daysOverdue);
+    res.json(list);
+  } catch (err) {
+    console.error('Collections list error:', err);
+    res.status(500).json({ error: 'Failed to load collections.' });
+  }
+});
+
 // GET /invoices/:id - single invoice with line items and payments
 app.get('/invoices/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
@@ -5158,6 +5206,290 @@ app.post('/email/send-reminder/:invoiceId', authenticate, requireNumericParam('i
       );
     } catch (logErr) { /* ignore */ }
     res.status(500).json({ error: err.message || 'Failed to send reminder.' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// INVOICE COLLECTIONS / PAYMENT REMINDERS (review-before-send)
+// QuickBooks Desktop stays the source of truth. The CRM only tracks overdue
+// status, computes late fees, and drafts reminder emails for the user to approve.
+// ════════════════════════════════════════════════════════════════════════════
+
+const COLLECTIONS_CHASEABLE = ['Sent', 'Partial', 'Overdue', 'Unpaid'];
+const LATE_FEE_RATE = 0.15;       // 15%
+const NET_TERM_DAYS = 45;         // invoice becomes due 45 days after the invoice date
+const ESCALATION_EVERY_DAYS = 30; // additional 15% every 30 days thereafter
+
+function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+// Calendar-day number (UTC) for a date — used for exact whole-day differences
+// that do NOT drift across daylight-saving boundaries.
+function dayNumber(d) {
+  const x = new Date(d);
+  return Math.floor(Date.UTC(x.getFullYear(), x.getMonth(), x.getDate()) / (24 * 60 * 60 * 1000));
+}
+
+// Compute collections fields for an invoice row.
+// Returns { daysOverdue, daysSinceInvoice, dueDate, outstanding, lateFee, reminderStage }.
+function computeCollections(inv, now = new Date()) {
+  const total = Number(inv.total) || 0;
+  const amountPaid = Number(inv.amountPaid) || 0;
+  const outstanding = round2(Math.max(0, total - amountPaid));
+
+  const todayNum = dayNumber(now);
+  const issueDateObj = inv.issueDate ? new Date(inv.issueDate) : (inv.createdAt ? new Date(inv.createdAt) : new Date(now));
+  const issueNum = dayNumber(issueDateObj);
+
+  // dueDate = explicit invoices.dueDate if set, else invoice date + 45 days (net-45 term)
+  let dueNum, dueLabel;
+  if (inv.dueDate) {
+    dueNum = dayNumber(inv.dueDate);
+    dueLabel = new Date(inv.dueDate);
+  } else {
+    dueNum = issueNum + NET_TERM_DAYS;
+    dueLabel = new Date(issueDateObj);
+    dueLabel.setDate(dueLabel.getDate() + NET_TERM_DAYS);
+  }
+
+  const daysOverdue = todayNum - dueNum;          // negative => not yet due
+  const daysSinceInvoice = todayNum - issueNum;
+
+  // ── Late fee policy (auditable) ──────────────────────────────────────────
+  //   Let B = outstanding balance (total - amountPaid).
+  //   When the invoice reaches its due date (daysOverdue >= 0, i.e. 45 days
+  //   after the invoice date), a 15% late fee is applied to B.
+  //   Then for every additional full 30 days it remains unpaid, another 15%
+  //   is applied to the *running* (fee-inclusive) balance — i.e. it COMPOUNDS:
+  //       balance *= 1.15  at the due date, then *= 1.15 again every +30 days.
+  //   Number of 15% applications:  n = 1 + floor(daysOverdue / 30).
+  //   Total owed with fees = B * (1.15 ^ n).
+  //   lateFee = totalOwed - B = B * (1.15^n - 1).
+  let lateFee = 0;
+  if (daysOverdue >= 0 && outstanding > 0) {
+    const n = 1 + Math.floor(daysOverdue / ESCALATION_EVERY_DAYS);
+    lateFee = round2(outstanding * (Math.pow(1 + LATE_FEE_RATE, n) - 1));
+  }
+
+  // ── Reminder stage ───────────────────────────────────────────────────────
+  let reminderStage;
+  if (daysOverdue >= 0) {
+    const level = Math.floor(daysOverdue / ESCALATION_EVERY_DAYS); // 0 at due, 1 at +30, ...
+    reminderStage = level === 0 ? 'Past Due' : `Escalation +${level * ESCALATION_EVERY_DAYS}`;
+  } else if (daysSinceInvoice >= 0) {
+    reminderStage = 'Due Soon';   // issued, in the 0..44 day pre-due window (gentle nudge)
+  } else {
+    reminderStage = 'None';       // future-dated / not yet issued
+  }
+
+  const pad = (n) => String(n).padStart(2, '0');
+  const dueDateStr = `${dueLabel.getFullYear()}-${pad(dueLabel.getMonth() + 1)}-${pad(dueLabel.getDate())}`;
+
+  return {
+    daysOverdue,
+    daysSinceInvoice,
+    dueDate: dueDateStr,
+    outstanding,
+    lateFee,
+    reminderStage,
+  };
+}
+
+function fmtMoneyServer(n) {
+  return '$' + (Number(n) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+// Build the reminder email draft (subject/body/to) for an invoice's current stage.
+function buildReminderDraft(inv, comp) {
+  const custName = inv.companyName || inv.custName || 'Customer';
+  const invNo = inv.invoiceNumber || inv.qbDocNumber || inv.id;
+  const total = Number(inv.total) || 0;
+  const amountPaid = Number(inv.amountPaid) || 0;
+  const isPartial = amountPaid > 0 && amountPaid < total;
+  const totalDueNow = round2(comp.outstanding + comp.lateFee);
+
+  let subject;
+  if (comp.reminderStage === 'Due Soon') {
+    subject = `Upcoming payment — Invoice #${invNo}`;
+  } else if (comp.reminderStage === 'Past Due') {
+    subject = `Past due: Invoice #${invNo} — ${fmtMoneyServer(comp.outstanding)} outstanding`;
+  } else {
+    subject = `FINAL NOTICE — Invoice #${invNo} is ${comp.daysOverdue} days past due`;
+  }
+
+  const lines = [];
+  lines.push(`Hello ${custName},`);
+  lines.push('');
+  if (comp.reminderStage === 'Due Soon') {
+    lines.push(`This is a friendly reminder that Invoice #${invNo} is coming due.`);
+  } else {
+    lines.push(`Our records show that Invoice #${invNo} is currently ${comp.daysOverdue} day(s) past due.`);
+  }
+  lines.push('');
+  lines.push(`Invoice #: ${invNo}`);
+  lines.push(`Original amount: ${fmtMoneyServer(total)}`);
+  if (isPartial) {
+    lines.push(`Amount paid: ${fmtMoneyServer(amountPaid)}`);
+  }
+  lines.push(`Outstanding balance: ${fmtMoneyServer(comp.outstanding)}`);
+  if (comp.daysOverdue >= 0) {
+    lines.push(`Days past due: ${comp.daysOverdue}`);
+  }
+  if (comp.lateFee > 0) {
+    lines.push('');
+    lines.push(`Late fee: ${fmtMoneyServer(comp.lateFee)}`);
+    lines.push(`(Per our terms, a 15% late fee applies once an invoice is ${NET_TERM_DAYS} days past the invoice date, with an additional 15% added every 30 days it remains unpaid.)`);
+    lines.push(`Total due now (balance + late fee): ${fmtMoneyServer(totalDueNow)}`);
+  }
+  lines.push('');
+  if (inv.qbPayLink) {
+    lines.push(`Pay this invoice now: ${inv.qbPayLink}`);
+  } else {
+    lines.push('Reply to this email or call us at 630-250-9777 to arrange payment.');
+  }
+  lines.push('');
+  lines.push('Thank you,');
+  lines.push('First Class Glass & Mirror, Inc.');
+
+  return {
+    subject,
+    body: lines.join('\n'),
+    to: inv.custEmail || '',
+    payLinkOnFile: !!inv.qbPayLink,
+    lateFee: comp.lateFee,
+    outstanding: comp.outstanding,
+    reminderStage: comp.reminderStage,
+    daysOverdue: comp.daysOverdue,
+  };
+}
+
+async function getInvoiceWithCustomer(id) {
+  const [[inv]] = await db.query(`
+    SELECT i.*, c.companyName, c.name AS custName, c.email AS custEmail, c.phone AS custPhone
+    FROM invoices i LEFT JOIN customers c ON i.customerId = c.id
+    WHERE i.id = ?
+  `, [id]);
+  return inv || null;
+}
+
+// PUT /invoices/:id/paylink — save the QuickBooks hosted-payment URL
+app.put('/invoices/:id/paylink', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const link = b.qbPayLink == null ? null : String(b.qbPayLink).trim();
+    const [r] = await db.query('UPDATE invoices SET qbPayLink = ?, updatedAt = NOW() WHERE id = ?', [link || null, Number(req.params.id)]);
+    if (!r.affectedRows) return res.status(404).json({ error: 'Invoice not found.' });
+    res.json({ ok: true, qbPayLink: link || '' });
+  } catch (err) {
+    console.error('Save pay link error:', err);
+    res.status(500).json({ error: 'Failed to save pay link.' });
+  }
+});
+
+// POST /invoices/:id/reminder/draft — build (do NOT send) the reminder for review
+app.post('/invoices/:id/reminder/draft', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const inv = await getInvoiceWithCustomer(Number(req.params.id));
+    if (!inv) return res.status(404).json({ error: 'Invoice not found.' });
+    const comp = computeCollections(inv);
+    const draft = buildReminderDraft(inv, comp);
+    res.json({
+      ...draft,
+      invoiceNumber: inv.invoiceNumber,
+      noPayLinkWarning: inv.qbPayLink ? null : 'No QuickBooks pay link is on file for this invoice. The reminder will ask the customer to reply or call. Add a pay link to include a one-click payment URL.',
+    });
+  } catch (err) {
+    console.error('Reminder draft error:', err);
+    res.status(500).json({ error: 'Failed to draft reminder.' });
+  }
+});
+
+// POST /invoices/:id/reminder/send — send the (possibly edited) reminder
+app.post('/invoices/:id/reminder/send', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const invoiceId = Number(req.params.id);
+    const b = coerceBody(req);
+    const inv = await getInvoiceWithCustomer(invoiceId);
+    if (!inv) return res.status(404).json({ error: 'Invoice not found.' });
+
+    const comp = computeCollections(inv);
+    const stage = comp.reminderStage;
+    const to = (b.to || inv.custEmail || '').trim();
+    const subject = (b.subject || '').trim();
+    const body = b.body || '';
+    if (!to) return res.status(400).json({ error: 'Recipient email is required.' });
+    if (!subject || !body) return res.status(400).json({ error: 'Subject and body are required.' });
+
+    // Atomic double-send guard: refuse if a 'Sent' reminder already exists for
+    // this invoice + stage within the last 12 hours (blocks double-click).
+    const [[recent]] = await db.query(
+      `SELECT id FROM invoice_reminders
+        WHERE invoiceId = ? AND stage = ? AND status = 'Sent'
+          AND createdAt >= DATE_SUB(NOW(), INTERVAL 12 HOUR)
+        LIMIT 1`,
+      [invoiceId, stage]
+    );
+    if (recent) {
+      return res.status(409).json({ error: `A "${stage}" reminder for this invoice was already sent in the last 12 hours.` });
+    }
+
+    // Branded HTML wrapper (matches the existing reminder email styling)
+    const html = `
+      <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+        <div style="background:white;padding:30px 20px;text-align:center;border-bottom:3px solid #1b5e20;border-radius:12px 12px 0 0">
+          <div style="color:#1b5e20;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">PAYMENT REMINDER</div>
+        </div>
+        <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
+          ${String(body).replace(/\n/g, '<br>')}
+        </div>
+        <div style="text-align:center;padding:16px;color:#999;font-size:11px">
+          First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777
+        </div>
+      </div>`;
+
+    const { transport, settings } = await createEmailTransport();
+    await transport.sendMail({
+      from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+      replyTo: settings.replyTo || settings.senderEmail,
+      to,
+      subject,
+      text: body,
+      html,
+    });
+
+    await db.query(
+      `INSERT INTO invoice_reminders (invoiceId, stage, daysOverdue, lateFeeAtSend, sentBy, sentTo, emailSubject, emailBody, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Sent')`,
+      [invoiceId, stage, comp.daysOverdue, comp.lateFee, req.user?.username || null, to, subject, body]
+    );
+    await db.query(
+      'UPDATE invoices SET reminderStage = ?, lastReminderAt = NOW(), lateFeeAmount = ?, updatedAt = NOW() WHERE id = ?',
+      [stage, comp.lateFee, invoiceId]
+    );
+
+    res.json({ ok: true, stage, lateFee: comp.lateFee, sentTo: to });
+  } catch (err) {
+    console.error('Reminder send error:', err);
+    res.status(500).json({ error: err.message || 'Failed to send reminder.' });
+  }
+});
+
+// POST /invoices/:id/reminder/skip — log that the user chose not to chase this cycle
+app.post('/invoices/:id/reminder/skip', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const invoiceId = Number(req.params.id);
+    const inv = await getInvoiceWithCustomer(invoiceId);
+    if (!inv) return res.status(404).json({ error: 'Invoice not found.' });
+    const comp = computeCollections(inv);
+    await db.query(
+      `INSERT INTO invoice_reminders (invoiceId, stage, daysOverdue, lateFeeAtSend, sentBy, status)
+       VALUES (?, ?, ?, ?, ?, 'Skipped')`,
+      [invoiceId, comp.reminderStage, comp.daysOverdue, comp.lateFee, req.user?.username || null]
+    );
+    await db.query('UPDATE invoices SET lastReminderAt = NOW(), updatedAt = NOW() WHERE id = ?', [invoiceId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Reminder skip error:', err);
+    res.status(500).json({ error: 'Failed to skip reminder.' });
   }
 });
 
@@ -9795,6 +10127,37 @@ const autoDeclineStaleWorkOrders = async () => {
 };
 autoDeclineStaleWorkOrders();
 setInterval(autoDeclineStaleWorkOrders, 24 * 60 * 60 * 1000);
+
+// ─── DAILY COLLECTIONS RECOMPUTE (NO AUTO-SEND) ──────────────────────────────
+// Keeps reminderStage + lateFeeAmount current for unpaid/partial invoices so the
+// Collections list and late fees are fresh each morning. This NEVER sends email —
+// all reminders are review-before-send via the /reminder/draft + /reminder/send flow.
+const recomputeInvoiceCollections = async () => {
+  try {
+    const [rows] = await db.query(
+      `SELECT id, total, amountPaid, issueDate, dueDate, createdAt
+         FROM invoices
+        WHERE status IN ('Sent','Partial','Overdue','Unpaid')
+          AND (COALESCE(total,0) - COALESCE(amountPaid,0)) > 0`
+    );
+    let updated = 0;
+    for (const inv of rows) {
+      const comp = computeCollections(inv);
+      await db.query(
+        'UPDATE invoices SET reminderStage = ?, lateFeeAmount = ?, updatedAt = NOW() WHERE id = ?',
+        [comp.reminderStage, comp.lateFee, inv.id]
+      );
+      updated++;
+    }
+    if (updated > 0) {
+      console.log(`[Collections] Recomputed ${updated} invoice(s): overdue stage + late fees updated (no emails sent)`);
+    }
+  } catch (err) {
+    console.error('[Collections] Recompute failed:', err.message);
+  }
+};
+recomputeInvoiceCollections();
+setInterval(recomputeInvoiceCollections, 24 * 60 * 60 * 1000);
 
 // ─── START ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 80;
