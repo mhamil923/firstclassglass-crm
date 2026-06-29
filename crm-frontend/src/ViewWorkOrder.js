@@ -459,16 +459,15 @@ export default function ViewWorkOrder() {
   const [estimatePdfs, setEstimatePdfs] = useState([]);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
 
-  // QuickBooks documents (read-only capture)
-  const [qbDocs, setQbDocs] = useState([]);
-  // qbModal: null when closed, otherwise { docType, editingId|null }
+  // QuickBooks metadata capture — folded into the Estimate + Invoice upload flows.
+  // qbModal: null when closed, otherwise { docType: 'Estimate'|'Invoice', editingId|null }
   const [qbModal, setQbModal] = useState(null);
   const [qbFile, setQbFile] = useState(null);
   const [qbForm, setQbForm] = useState({
     qbDocNumber: "",
     amount: "",
     docDate: "",
-    status: "Sent",
+    status: "Pending",
     amountPaid: "",
     notes: "",
   });
@@ -686,34 +685,26 @@ export default function ViewWorkOrder() {
     }
   };
 
-  const fetchQbDocs = async () => {
-    try {
-      const res = await api.get(`/work-orders/${id}/qb-documents`, { headers: authHeaders() });
-      setQbDocs(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      console.error("Error fetching QuickBooks documents:", err);
-      setQbDocs([]);
-    }
-  };
-
+  // Status options differ by document type (matches the backend validation).
   const QB_STATUS_OPTS = (docType) =>
     docType === "Estimate"
-      ? ["Sent", "Approved", "Declined"]
+      ? ["Pending", "Approved", "Declined"]
       : ["Sent", "Partial", "Paid"];
 
-  // Open the attach/edit modal. Prefill amount from the WO where possible
-  // (QB numbers are the truth, so the user can override everything).
+  // Open the upload (or invoice-edit) modal. Prefill amount from the WO total
+  // where possible; the QuickBooks numbers are the truth, so the user can override.
   const openQbModal = (docType, doc = null) => {
     if (doc) {
+      // Editing an existing uploaded invoice row
       setQbForm({
-        qbDocNumber: doc.qbDocNumber || "",
-        amount: doc.amount != null ? String(doc.amount) : "",
-        docDate: doc.docDate ? String(doc.docDate).slice(0, 10) : "",
-        status: doc.status || QB_STATUS_OPTS(doc.docType)[0],
+        qbDocNumber: doc.qbDocNumber || doc.invoiceNumber || "",
+        amount: doc.total != null ? String(doc.total) : (doc.amount != null ? String(doc.amount) : ""),
+        docDate: (doc.docDate || doc.issueDate) ? String(doc.docDate || doc.issueDate).slice(0, 10) : "",
+        status: doc.status || QB_STATUS_OPTS(docType)[0],
         amountPaid: doc.amountPaid != null ? String(doc.amountPaid) : "",
         notes: doc.notes || "",
       });
-      setQbModal({ docType: doc.docType, editingId: doc.id });
+      setQbModal({ docType, editingId: doc.id });
     } else {
       const prefillAmount = workOrder?.total != null ? String(workOrder.total) : "";
       setQbForm({
@@ -738,53 +729,68 @@ export default function ViewWorkOrder() {
     if (!qbModal) return;
     setQbSaving(true);
     try {
-      if (qbModal.editingId) {
-        // Edit existing — field updates only (PDF stays as-is)
-        await api.put(
-          `/work-orders/${id}/qb-documents/${qbModal.editingId}`,
-          {
-            docType: qbModal.docType,
-            qbDocNumber: qbForm.qbDocNumber,
-            amount: qbForm.amount === "" ? null : Number(qbForm.amount),
-            docDate: qbForm.docDate || null,
-            status: qbForm.status,
-            amountPaid: qbForm.amountPaid === "" ? 0 : Number(qbForm.amountPaid),
-            notes: qbForm.notes,
-          },
-          { headers: authHeaders() }
-        );
-      } else {
+      if (qbModal.docType === "Estimate") {
+        // Upload estimate PDF + QB metadata into work_order_estimate_pdfs
+        if (!qbFile) { alert("Please choose a PDF file."); setQbSaving(false); return; }
         const form = new FormData();
-        if (qbFile) form.append("qbPdf", qbFile);
-        form.append("docType", qbModal.docType);
-        form.append("qbDocNumber", qbForm.qbDocNumber);
+        form.append("estimatePdf", qbFile);
+        if (qbForm.qbDocNumber) form.append("qbDocNumber", qbForm.qbDocNumber);
         if (qbForm.amount !== "") form.append("amount", qbForm.amount);
         if (qbForm.docDate) form.append("docDate", qbForm.docDate);
         form.append("status", qbForm.status);
-        if (qbForm.amountPaid !== "") form.append("amountPaid", qbForm.amountPaid);
-        if (qbForm.notes) form.append("notes", qbForm.notes);
-        await api.post(`/work-orders/${id}/qb-documents`, form, {
+        await api.post(`/work-orders/${id}/estimate-pdfs`, form, {
           headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
         });
+        await fetchEstimatePdfs();
+      } else {
+        // Invoice
+        if (qbModal.editingId) {
+          await api.put(
+            `/work-orders/${id}/invoices/${qbModal.editingId}/qb`,
+            {
+              qbDocNumber: qbForm.qbDocNumber,
+              amount: qbForm.amount === "" ? null : Number(qbForm.amount),
+              docDate: qbForm.docDate || null,
+              status: qbForm.status,
+              amountPaid: qbForm.amountPaid === "" ? 0 : Number(qbForm.amountPaid),
+              notes: qbForm.notes,
+            },
+            { headers: authHeaders() }
+          );
+        } else {
+          if (!qbFile) { alert("Please choose a PDF file."); setQbSaving(false); return; }
+          const form = new FormData();
+          form.append("invoicePdf", qbFile);
+          if (qbForm.qbDocNumber) form.append("qbDocNumber", qbForm.qbDocNumber);
+          if (qbForm.amount !== "") form.append("amount", qbForm.amount);
+          if (qbForm.docDate) form.append("docDate", qbForm.docDate);
+          form.append("status", qbForm.status);
+          if (qbForm.amountPaid !== "") form.append("amountPaid", qbForm.amountPaid);
+          if (qbForm.notes) form.append("notes", qbForm.notes);
+          await api.post(`/work-orders/${id}/invoices/upload`, form, {
+            headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+          });
+        }
+        await fetchLinkedInvoices();
       }
-      await fetchQbDocs();
       closeQbModal();
     } catch (err) {
       console.error("Error saving QuickBooks document:", err);
-      alert(err?.response?.data?.error || "Failed to save QuickBooks document.");
+      alert(err?.response?.data?.error || "Failed to save document.");
     } finally {
       setQbSaving(false);
     }
   };
 
-  const deleteQbDoc = async (docId) => {
-    if (!window.confirm("Remove this QuickBooks document?")) return;
+  // Remove an uploaded QB invoice (row + stored PDF)
+  const deleteUploadedInvoice = async (invId) => {
+    if (!window.confirm("Remove this invoice? This cannot be undone.")) return;
     try {
-      await api.delete(`/work-orders/${id}/qb-documents/${docId}`, { headers: authHeaders() });
-      setQbDocs((prev) => prev.filter((d) => d.id !== docId));
+      await api.delete(`/work-orders/${id}/invoices/${invId}`, { headers: authHeaders() });
+      setLinkedInvoices((prev) => prev.filter((inv) => inv.id !== invId));
     } catch (err) {
-      console.error("Error deleting QuickBooks document:", err);
-      alert(err?.response?.data?.error || "Failed to delete QuickBooks document.");
+      console.error("Error deleting invoice:", err);
+      alert(err?.response?.data?.error || "Failed to delete invoice.");
     }
   };
 
@@ -847,7 +853,6 @@ export default function ViewWorkOrder() {
     fetchLinkedEstimates();
     fetchLinkedInvoices();
     fetchEstimatePdfs();
-    fetchQbDocs();
     fetchResidentialContract();
     fetchTechUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1456,35 +1461,6 @@ export default function ViewWorkOrder() {
     }
   };
 
-  const handleAddEstimatePdf = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!isPdfFile(file)) {
-      alert("Please choose a PDF file.");
-      e.target.value = "";
-      return;
-    }
-    setBusyEstimateUpload(true);
-    try {
-      const form = new FormData();
-      form.append("estimatePdf", file);
-      const resp = await api.post(`/work-orders/${id}/estimate-pdfs`, form, {
-        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-      });
-      const newPdf = resp.data;
-      if (newPdf && newPdf.id) {
-        setEstimatePdfs((prev) => [...prev, newPdf]);
-      } else {
-        await fetchEstimatePdfs();
-      }
-    } catch (error) {
-      console.error("⚠️ Error uploading Estimate PDF:", error);
-      alert(error?.response?.data?.error || "Failed to upload Estimate PDF.");
-    } finally {
-      setBusyEstimateUpload(false);
-      e.target.value = "";
-    }
-  };
 
   const handleRemoveEstimatePdf = async (pdfId) => {
     if (!pdfId) return;
@@ -1898,10 +1874,10 @@ export default function ViewWorkOrder() {
             }}
           >
             <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "var(--text-primary)" }}>
-              {qbModal.editingId ? "Edit" : "Attach"} QB {qbModal.docType}
+              {qbModal.editingId ? "Edit" : "Upload"} {qbModal.docType} {qbModal.editingId ? "" : "PDF"}
             </h3>
             <p style={{ margin: "0 0 16px", fontSize: 12, color: "var(--text-secondary)" }}>
-              Capture the QuickBooks {qbModal.docType.toLowerCase()} details. QuickBooks Desktop stays the source of truth.
+              Capture the QuickBooks {qbModal.docType.toLowerCase()} number, amount, date{qbModal.docType === "Invoice" ? ", and payment status" : " and status"}.
             </p>
 
             {!qbModal.editingId && (
@@ -2004,7 +1980,7 @@ export default function ViewWorkOrder() {
                 disabled={qbSaving}
                 style={{ background: "#2563eb", color: "#fff" }}
               >
-                {qbSaving ? "Saving…" : qbModal.editingId ? "Save Changes" : "Attach Document"}
+                {qbSaving ? "Saving…" : qbModal.editingId ? "Save Changes" : "Upload"}
               </button>
             </div>
           </div>
@@ -2668,19 +2644,14 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">
             Estimates
             <span style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
-              <label
+              <button
+                type="button"
                 className="btn btn-light"
-                style={{ fontSize: 12, padding: "4px 12px", cursor: busyEstimateUpload ? "not-allowed" : "pointer", marginBottom: 0 }}
+                style={{ fontSize: 12, padding: "4px 12px" }}
+                onClick={() => openQbModal("Estimate")}
               >
-                + {busyEstimateUpload ? "Uploading…" : "Upload Estimate PDF"}
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleAddEstimatePdf}
-                  style={{ display: "none" }}
-                  disabled={busyEstimateUpload}
-                />
-              </label>
+                + Upload Estimate PDF
+              </button>
               <Link
                 to={`/estimates/new?workOrderId=${woId}`}
                 className="btn btn-light"
@@ -2747,6 +2718,10 @@ export default function ViewWorkOrder() {
               {estimatePdfs.map((pdf) => {
                 const href = pdfThumbUrl(pdf.filename);
                 const name = pdf.originalName || (pdf.filename || "").split("/").pop() || "estimate.pdf";
+                const qbMoney = (n) => "$" + (Number(n) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                const qbLabel = (pdf.qbDocNumber || pdf.amount != null)
+                  ? `QB Est${pdf.qbDocNumber ? ` #${pdf.qbDocNumber}` : ""}${pdf.amount != null ? ` — ${qbMoney(pdf.amount)}` : ""}`
+                  : null;
                 const status = pdf.status || "Pending";
                 const isApproved = status === "Approved";
                 const isDeclined = status === "Declined";
@@ -2818,6 +2793,16 @@ export default function ViewWorkOrder() {
                     >
                       {name}
                     </a>
+                    {qbLabel ? (
+                      <div className="tiny" style={{ fontWeight: 600, color: "var(--text-primary)", padding: "0 8px" }}>
+                        {qbLabel}
+                      </div>
+                    ) : null}
+                    {pdf.docDate ? (
+                      <div className="tiny" style={{ color: "var(--text-secondary)", padding: "0 8px" }}>
+                        {new Date(pdf.docDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                      </div>
+                    ) : null}
                     <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button
                         type="button"
@@ -2886,10 +2871,10 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* ======================= QuickBooks Documents (read-only capture) ======================= */}
+        {/* ======================= Linked Invoices ======================= */}
         <div className="section-card">
           <h3 className="section-header">
-            QuickBooks Documents
+            Invoices
             <span style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
               <button
                 type="button"
@@ -2897,160 +2882,125 @@ export default function ViewWorkOrder() {
                 style={{ fontSize: 12, padding: "4px 12px" }}
                 onClick={() => openQbModal("Invoice")}
               >
-                + Attach QB Invoice
+                + Upload Invoice PDF
               </button>
-              <button
-                type="button"
+              <Link
+                to={`/invoices/new?workOrderId=${woId}`}
                 className="btn btn-light"
-                style={{ fontSize: 12, padding: "4px 12px" }}
-                onClick={() => openQbModal("Estimate")}
+                style={{ fontSize: 12, padding: "4px 12px", textDecoration: "none" }}
               >
-                + Attach QB Estimate
-              </button>
+                + Create Invoice
+              </Link>
             </span>
           </h3>
-
-          <p className="tiny" style={{ color: "var(--text-secondary)", margin: "0 16px 8px" }}>
-            QuickBooks Desktop is the source of truth — these are read-only captures for CRM records.
-          </p>
-
-          {qbDocs.length === 0 ? (
-            <p className="empty-text" style={{ padding: "20px" }}>
-              No QuickBooks documents attached.
-            </p>
-          ) : (
-            <div className="po-pdf-grid">
-              {qbDocs.map((d) => {
-                const href = d.pdfPath ? pdfThumbUrl(d.pdfPath) : null;
-                const amount = Number(d.amount) || 0;
-                const paid = Number(d.amountPaid) || 0;
-                const sl = (d.status || "").toLowerCase();
-                const badgeBg =
-                  sl === "paid" || sl === "approved" ? "#22c55e" :
-                  sl === "declined" ? "#6b7280" : "#f59e0b";
-                const money = (n) => "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-                const label = `QB ${d.docType}${d.qbDocNumber ? ` #${d.qbDocNumber}` : ""} — ${money(amount)} — ${d.status || "Sent"}`;
-                return (
-                  <div className="po-pdf-card" key={`qb-${d.id}`} style={{ position: "relative" }}>
-                    <span
-                      style={{
-                        position: "absolute", top: 8, right: 8, zIndex: 2,
-                        padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700,
-                        background: badgeBg, color: "#fff",
-                      }}
-                    >
-                      {d.status || "Sent"}
-                    </span>
-                    {href ? (
-                      <div className="po-pdf-thumbnail">
-                        <iframe title={`QB ${d.docType} ${d.id}`} src={href} />
-                      </div>
-                    ) : (
-                      <div className="po-pdf-thumbnail" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", fontSize: 12 }}>
-                        No PDF
-                      </div>
-                    )}
-                    <div className="po-pdf-label" title={label} style={{ fontWeight: 600 }}>
-                      {label}
-                    </div>
-                    <div className="tiny" style={{ color: "var(--text-secondary)", padding: "0 8px" }}>
-                      {d.docDate ? new Date(d.docDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "No date"}
-                      {sl === "partial" ? ` • Paid ${money(paid)} of ${money(amount)}` : ""}
-                    </div>
-                    <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {href && (
-                        <button type="button" className="po-btn-expand" onClick={() => openLightbox("pdf", href, label)}>
-                          Expand
-                        </button>
-                      )}
-                      <button type="button" className="po-btn-expand" onClick={() => openQbModal(d.docType, d)}>
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="po-btn-expand"
-                        onClick={() => deleteQbDoc(d.id)}
-                        style={{ background: "#dc2626", color: "#ffffff", borderColor: "#dc2626" }}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* ======================= Linked Invoices ======================= */}
-        <div className="section-card">
-          <h3 className="section-header">
-            Invoices
-            <Link
-              to={`/invoices/new?workOrderId=${woId}`}
-              className="btn btn-light"
-              style={{ fontSize: 12, padding: "4px 12px", textDecoration: "none" }}
-            >
-              + Create Invoice
-            </Link>
-          </h3>
-          {linkedInvoices.length > 0 ? (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Invoice #</th>
-                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Status</th>
-                    <th style={{ padding: "10px 16px", textAlign: "right", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Total</th>
-                    <th style={{ padding: "10px 16px", textAlign: "right", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Balance Due</th>
-                    <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {linkedInvoices.map((inv) => {
-                    const invTotal = Number(inv.total) || 0;
-                    const balance = Number(inv.balanceDue) || 0;
-                    const invStatusStyle = (() => {
+          {(() => {
+            // Uploaded QB invoices (have qbDocNumber) render as cards; CRM-generated render in the table.
+            const uploadedInvoices = linkedInvoices.filter((inv) => inv.qbDocNumber);
+            const crmInvoices = linkedInvoices.filter((inv) => !inv.qbDocNumber);
+            const money = (n) => "$" + (Number(n) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+            return (
+              <>
+                {uploadedInvoices.length > 0 && (
+                  <div className="po-pdf-grid">
+                    {uploadedInvoices.map((inv) => {
+                      const href = inv.pdfPath ? pdfThumbUrl(inv.pdfPath) : null;
+                      const total = Number(inv.total) || 0;
+                      const paid = Number(inv.amountPaid) || 0;
                       const sl = (inv.status || "").toLowerCase();
-                      if (sl === "sent") return { background: "rgba(0,113,227,0.1)", color: "var(--accent-blue)" };
-                      if (sl === "partial") return { background: "rgba(255,159,10,0.12)", color: "#ff9f0a" };
-                      if (sl === "paid") return { background: "rgba(52,199,89,0.12)", color: "#34c759" };
-                      if (sl === "overdue") return { background: "rgba(255,59,48,0.12)", color: "#ff3b30" };
-                      if (sl === "void") return { background: "rgba(142,142,147,0.12)", color: "#636366" };
-                      return { background: "rgba(142,142,147,0.12)", color: "#8e8e93" };
-                    })();
-                    return (
-                      <tr
-                        key={inv.id}
-                        style={{ cursor: "pointer", borderBottom: "1px solid var(--border-color)", transition: "var(--transition-fast)" }}
-                        onClick={() => navigate(`/invoices/${inv.id}`)}
-                        onMouseEnter={(ev) => { ev.currentTarget.style.background = "var(--bg-hover)"; }}
-                        onMouseLeave={(ev) => { ev.currentTarget.style.background = ""; }}
-                      >
-                        <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>{inv.invoiceNumber || "—"}</td>
-                        <td style={{ padding: "12px 16px" }}>
-                          <span style={{ ...invStatusStyle, display: "inline-block", padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
-                            {inv.status || "Draft"}
+                      const badgeBg = sl === "paid" ? "#22c55e" : (sl === "partial" || sl === "sent") ? "#f59e0b" : "#6b7280";
+                      const label = `QB Inv${inv.qbDocNumber ? ` #${inv.qbDocNumber}` : ""} — ${money(total)} — ${inv.status || "Sent"}`;
+                      return (
+                        <div className="po-pdf-card" key={`inv-${inv.id}`} style={{ position: "relative" }}>
+                          <span style={{ position: "absolute", top: 8, right: 8, zIndex: 2, padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700, background: badgeBg, color: "#fff" }}>
+                            {inv.status || "Sent"}
                           </span>
-                        </td>
-                        <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums", color: "var(--text-primary)" }}>
-                          {"$" + invTotal.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
-                        </td>
-                        <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums", color: balance > 0 ? "#ff3b30" : "var(--text-primary)" }}>
-                          {"$" + balance.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
-                        </td>
-                        <td style={{ padding: "12px 16px", fontSize: 14, color: "var(--text-secondary)" }}>
-                          {inv.issueDate ? new Date(inv.issueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="empty-text" style={{ padding: "20px" }}>No invoices linked to this work order.</p>
-          )}
+                          {href ? (
+                            <div className="po-pdf-thumbnail">
+                              <iframe title={`Invoice ${inv.id}`} src={href} />
+                            </div>
+                          ) : (
+                            <div className="po-pdf-thumbnail" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", fontSize: 12 }}>No PDF</div>
+                          )}
+                          <div className="po-pdf-label" title={label} style={{ fontWeight: 600 }}>{label}</div>
+                          <div className="tiny" style={{ color: "var(--text-secondary)", padding: "0 8px" }}>
+                            {inv.docDate || inv.issueDate ? new Date(inv.docDate || inv.issueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "No date"}
+                            {sl === "partial" ? ` • Paid ${money(paid)} of ${money(total)}` : ""}
+                          </div>
+                          <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            {href && (
+                              <button type="button" className="po-btn-expand" onClick={() => openLightbox("pdf", href, label)}>Expand</button>
+                            )}
+                            <button type="button" className="po-btn-expand" onClick={() => openQbModal("Invoice", inv)}>Edit</button>
+                            <button type="button" className="po-btn-expand" onClick={() => deleteUploadedInvoice(inv.id)} style={{ background: "#dc2626", color: "#ffffff", borderColor: "#dc2626" }}>Remove</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {crmInvoices.length > 0 && (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr>
+                          <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Invoice #</th>
+                          <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Status</th>
+                          <th style={{ padding: "10px 16px", textAlign: "right", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Total</th>
+                          <th style={{ padding: "10px 16px", textAlign: "right", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Balance Due</th>
+                          <th style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid var(--border-color)" }}>Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {crmInvoices.map((inv) => {
+                          const invTotal = Number(inv.total) || 0;
+                          const balance = Number(inv.balanceDue) || 0;
+                          const invStatusStyle = (() => {
+                            const sl = (inv.status || "").toLowerCase();
+                            if (sl === "sent") return { background: "rgba(0,113,227,0.1)", color: "var(--accent-blue)" };
+                            if (sl === "partial") return { background: "rgba(255,159,10,0.12)", color: "#ff9f0a" };
+                            if (sl === "paid") return { background: "rgba(52,199,89,0.12)", color: "#34c759" };
+                            if (sl === "overdue") return { background: "rgba(255,59,48,0.12)", color: "#ff3b30" };
+                            if (sl === "void") return { background: "rgba(142,142,147,0.12)", color: "#636366" };
+                            return { background: "rgba(142,142,147,0.12)", color: "#8e8e93" };
+                          })();
+                          return (
+                            <tr
+                              key={inv.id}
+                              style={{ cursor: "pointer", borderBottom: "1px solid var(--border-color)", transition: "var(--transition-fast)" }}
+                              onClick={() => navigate(`/invoices/${inv.id}`)}
+                              onMouseEnter={(ev) => { ev.currentTarget.style.background = "var(--bg-hover)"; }}
+                              onMouseLeave={(ev) => { ev.currentTarget.style.background = ""; }}
+                            >
+                              <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>{inv.invoiceNumber || "—"}</td>
+                              <td style={{ padding: "12px 16px" }}>
+                                <span style={{ ...invStatusStyle, display: "inline-block", padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
+                                  {inv.status || "Draft"}
+                                </span>
+                              </td>
+                              <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums", color: "var(--text-primary)" }}>
+                                {money(invTotal)}
+                              </td>
+                              <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums", color: balance > 0 ? "#ff3b30" : "var(--text-primary)" }}>
+                                {money(balance)}
+                              </td>
+                              <td style={{ padding: "12px 16px", fontSize: 14, color: "var(--text-secondary)" }}>
+                                {inv.issueDate ? new Date(inv.issueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {linkedInvoices.length === 0 && (
+                  <p className="empty-text" style={{ padding: "20px" }}>No invoices linked to this work order.</p>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* ======================= PO PDFs (Multi-PO) ======================= */}

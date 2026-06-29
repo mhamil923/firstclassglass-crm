@@ -571,6 +571,23 @@ async function ensureEstimatePdfsTable() {
     } catch (e) {
       console.warn('[Estimate PDF Table] Could not ensure status column:', e.message);
     }
+    // QuickBooks metadata columns (folded in from the old qb_documents section)
+    try {
+      const qbCols = [
+        { name: 'qbDocNumber', ddl: 'qbDocNumber VARCHAR(100)' },
+        { name: 'amount',      ddl: 'amount DECIMAL(12,2)' },
+        { name: 'docDate',     ddl: 'docDate DATE' },
+      ];
+      for (const { name, ddl } of qbCols) {
+        const [found] = await db.query(`SHOW COLUMNS FROM \`work_order_estimate_pdfs\` LIKE ?`, [name]);
+        if (!found.length) {
+          await db.query(`ALTER TABLE work_order_estimate_pdfs ADD COLUMN ${ddl}`);
+          console.log(`[Estimate PDF Table] added ${name} column`);
+        }
+      }
+    } catch (e) {
+      console.warn('[Estimate PDF Table] Could not ensure QB columns:', e.message);
+    }
     console.log('[Estimate PDF Table] work_order_estimate_pdfs table ready');
   } catch (e) {
     console.warn('[Estimate PDF Table] Could not create work_order_estimate_pdfs:', e.message);
@@ -872,12 +889,13 @@ function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', l
       ) poAgg ON poAgg.workOrderId = w.id
       LEFT JOIN (
         SELECT workOrderId,
-          GROUP_CONCAT(CASE WHEN docType='Invoice' THEN qbDocNumber END ORDER BY id SEPARATOR ', ') AS qbInvoiceNumbers,
-          GROUP_CONCAT(qbDocNumber ORDER BY id SEPARATOR ', ') AS qbAllDocNumbers,
-          SUM(CASE WHEN docType='Invoice' THEN amount ELSE 0 END) AS qbInvoiceAmount,
-          SUM(CASE WHEN docType='Invoice' THEN amountPaid ELSE 0 END) AS qbInvoicePaid,
-          MAX(CASE WHEN docType='Invoice' THEN status END) AS qbInvoiceStatus
-        FROM qb_documents
+          GROUP_CONCAT(invoiceNumber ORDER BY id SEPARATOR ', ') AS qbInvoiceNumbers,
+          GROUP_CONCAT(invoiceNumber ORDER BY id SEPARATOR ', ') AS qbAllDocNumbers,
+          SUM(total) AS qbInvoiceAmount,
+          SUM(amountPaid) AS qbInvoicePaid,
+          MAX(status) AS qbInvoiceStatus
+        FROM invoices
+        WHERE workOrderId IS NOT NULL
         GROUP BY workOrderId
       ) qbAgg ON qbAgg.workOrderId = w.id
       ${whereSql}
@@ -1058,6 +1076,23 @@ async function ensureInvoiceTables() {
     }
   } catch (e) {
     console.warn('[Invoices] Could not ensure billing columns:', e.message);
+  }
+
+  // QuickBooks metadata columns (folded in from the old qb_documents section)
+  try {
+    const qbCols = [
+      { name: 'qbDocNumber', type: 'VARCHAR(100) NULL' },
+      { name: 'docDate',     type: 'DATE NULL' },
+    ];
+    for (const { name, type } of qbCols) {
+      const [found] = await db.query(`SHOW COLUMNS FROM \`invoices\` LIKE ?`, [name]);
+      if (!found.length) {
+        await db.query(`ALTER TABLE \`invoices\` ADD COLUMN \`${name}\` ${type}`);
+        console.log(`[Invoices] Added column ${name}`);
+      }
+    }
+  } catch (e) {
+    console.warn('[Invoices] Could not ensure QB columns:', e.message);
   }
 
   try {
@@ -5854,10 +5889,15 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
     }
 
     // Find a work order by its QuickBooks invoice/estimate number.
+    // Invoice numbers live in `invoices`; estimate QB numbers in work_order_estimate_pdfs.
+    const qbExists = (alias) =>
+      `(EXISTS (SELECT 1 FROM invoices iv WHERE iv.workOrderId = w.id AND (COALESCE(iv.invoiceNumber,'') LIKE ${alias} OR COALESCE(iv.qbDocNumber,'') LIKE ${alias}))
+        OR EXISTS (SELECT 1 FROM work_order_estimate_pdfs ep WHERE ep.workOrderId = w.id AND COALESCE(ep.qbDocNumber,'') LIKE ${alias}))`;
+
     const qbNeedle = String(qbDocNumber || '').trim();
     if (qbNeedle) {
-      terms.push(`EXISTS (SELECT 1 FROM qb_documents q WHERE q.workOrderId = w.id AND COALESCE(q.qbDocNumber,'') LIKE ?)`);
-      params.push(`%${qbNeedle}%`);
+      terms.push(qbExists('?'));
+      params.push(`%${qbNeedle}%`, `%${qbNeedle}%`, `%${qbNeedle}%`);
     }
 
     const combined = String(poNumber || '').trim();
@@ -5865,10 +5905,10 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
 
     if (combined || woOnly) {
       const needle = combined || woOnly;
-      // Match PO, WO number, OR a captured QuickBooks doc number so the
-      // generic PO/WO search box also finds work orders by QB invoice #.
-      terms.push(`(COALESCE(w.poNumber,'') LIKE ? OR COALESCE(w.workOrderNumber,'') LIKE ? OR EXISTS (SELECT 1 FROM qb_documents q2 WHERE q2.workOrderId = w.id AND COALESCE(q2.qbDocNumber,'') LIKE ?))`);
-      params.push(`%${needle}%`, `%${needle}%`, `%${needle}%`);
+      // Match PO, WO number, OR a captured QuickBooks invoice/estimate number so the
+      // generic PO/WO search box also finds work orders by QB number.
+      terms.push(`(COALESCE(w.poNumber,'') LIKE ? OR COALESCE(w.workOrderNumber,'') LIKE ? OR ${qbExists('?')})`);
+      params.push(`%${needle}%`, `%${needle}%`, `%${needle}%`, `%${needle}%`, `%${needle}%`);
     }
 
     if (combined && woOnly && combined !== woOnly) {
@@ -7255,7 +7295,7 @@ app.get('/work-orders/:id/estimate-pdfs', authenticate, requireNumericParam('id'
   try {
     const wid = Number(req.params.id);
     const [rows] = await db.query(
-      'SELECT id, workOrderId, filename, originalName, status, uploadedAt FROM work_order_estimate_pdfs WHERE workOrderId = ? ORDER BY uploadedAt ASC, id ASC',
+      'SELECT id, workOrderId, filename, originalName, status, qbDocNumber, amount, docDate, uploadedAt FROM work_order_estimate_pdfs WHERE workOrderId = ? ORDER BY uploadedAt ASC, id ASC',
       [wid]
     );
     res.json(rows);
@@ -7285,13 +7325,21 @@ app.post(
       const key = fileKey(pdfFile);
       const originalName = pdfFile.originalname || '';
 
+      // Optional QuickBooks metadata captured alongside the estimate PDF
+      const body = coerceBody(req);
+      const qbDocNumber = body.qbDocNumber ? String(body.qbDocNumber).trim() : null;
+      const amount = body.amount !== undefined && body.amount !== '' && Number.isFinite(Number(body.amount)) ? Number(body.amount) : null;
+      const docDate = body.docDate && /^\d{4}-\d{2}-\d{2}/.test(String(body.docDate)) ? String(body.docDate).slice(0, 10) : null;
+      const allowedStatus = ['Pending', 'Approved', 'Declined'];
+      const status = allowedStatus.includes(String(body.status || '').trim()) ? String(body.status).trim() : 'Pending';
+
       const [result] = await db.query(
-        'INSERT INTO work_order_estimate_pdfs (workOrderId, filename, originalName) VALUES (?, ?, ?)',
-        [wid, key, originalName]
+        'INSERT INTO work_order_estimate_pdfs (workOrderId, filename, originalName, status, qbDocNumber, amount, docDate) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [wid, key, originalName, status, qbDocNumber, amount, docDate]
       );
 
       const [[row]] = await db.query(
-        'SELECT id, workOrderId, filename, originalName, status, uploadedAt FROM work_order_estimate_pdfs WHERE id = ?',
+        'SELECT id, workOrderId, filename, originalName, status, qbDocNumber, amount, docDate, uploadedAt FROM work_order_estimate_pdfs WHERE id = ?',
         [result.insertId]
       );
       res.status(201).json(row);
@@ -7360,6 +7408,135 @@ app.put(
     } catch (err) {
       console.error('Estimate PDF status update error:', err);
       res.status(500).json({ error: 'Failed to update estimate PDF status.' });
+    }
+  }
+);
+
+// ─── INVOICE PDF UPLOAD (QuickBooks invoice captured as a real invoice row) ──
+// Mirrors the estimate-PDF upload: attach a QBO-exported invoice PDF + metadata.
+// Creates a row in the existing `invoices` table (distinguished by qbDocNumber).
+
+// POST /work-orders/:id/invoices/upload — create an invoice from a QB PDF + fields
+app.post(
+  '/work-orders/:id/invoices/upload',
+  authenticate,
+  requireNumericParam('id'),
+  withMulter(upload.any()),
+  async (req, res) => {
+    try {
+      const wid = Number(req.params.id);
+      const [[wo]] = await db.query('SELECT id, customerId, customer, billingAddress FROM work_orders WHERE id = ?', [wid]);
+      if (!wo) return res.status(404).json({ error: 'Work order not found.' });
+
+      const body = coerceBody(req);
+      const files = Array.isArray(req.files) ? req.files : [];
+      const pdfFile = files.find((f) => isPdf(f));
+      const pdfPath = pdfFile ? fileKey(pdfFile) : null;
+
+      // Resolve a customerId (NOT NULL on invoices): WO link, else find/create by name.
+      let customerId = wo.customerId || null;
+      if (!customerId && wo.customer) {
+        try {
+          const cust = await findOrCreateCustomer(wo.customer, { billingAddress: wo.billingAddress });
+          customerId = cust.id;
+        } catch (e) {
+          console.warn('[invoice upload] customer resolve failed:', e.message);
+        }
+      }
+      if (!customerId) return res.status(400).json({ error: 'Could not resolve a customer for this work order.' });
+
+      const qbDocNumber = body.qbDocNumber ? String(body.qbDocNumber).trim() : '';
+      const invoiceNumber = qbDocNumber || (await getNextInvoiceNumber());
+      const total = body.amount !== undefined && body.amount !== '' && Number.isFinite(Number(body.amount)) ? Number(body.amount) : 0;
+      const amountPaid = body.amountPaid !== undefined && body.amountPaid !== '' && Number.isFinite(Number(body.amountPaid)) ? Number(body.amountPaid) : 0;
+      const allowedStatus = ['Sent', 'Partial', 'Paid'];
+      const status = allowedStatus.includes(String(body.status || '').trim()) ? String(body.status).trim() : 'Sent';
+      const docDate = body.docDate && /^\d{4}-\d{2}-\d{2}/.test(String(body.docDate)) ? String(body.docDate).slice(0, 10) : null;
+      const issueDate = docDate || new Date().toISOString().split('T')[0];
+      const balanceDue = Math.max(0, total - amountPaid);
+
+      const [result] = await db.query(
+        `INSERT INTO invoices
+           (invoiceNumber, customerId, workOrderId, status, issueDate, docDate, qbDocNumber,
+            subtotal, total, amountPaid, balanceDue, pdfPath, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [invoiceNumber, customerId, wid, status, issueDate, docDate, qbDocNumber || null,
+         total, total, amountPaid, balanceDue, pdfPath, body.notes || null]
+      );
+
+      const [[row]] = await db.query('SELECT * FROM invoices WHERE id = ?', [result.insertId]);
+      res.status(201).json(row);
+    } catch (err) {
+      console.error('Invoice upload error:', err);
+      res.status(500).json({ error: 'Failed to upload invoice.' });
+    }
+  }
+);
+
+// PUT /work-orders/:id/invoices/:invId/qb — edit captured QB invoice fields
+app.put(
+  '/work-orders/:id/invoices/:invId/qb',
+  authenticate,
+  requireNumericParam('id'),
+  requireNumericParam('invId'),
+  async (req, res) => {
+    try {
+      const wid = Number(req.params.id);
+      const invId = Number(req.params.invId);
+      const [[inv]] = await db.query('SELECT * FROM invoices WHERE id = ? AND workOrderId = ?', [invId, wid]);
+      if (!inv) return res.status(404).json({ error: 'Invoice not found on this work order.' });
+
+      const b = coerceBody(req);
+      const sets = [];
+      const params = [];
+      if (b.qbDocNumber !== undefined) { sets.push('qbDocNumber=?', 'invoiceNumber=?'); const v = String(b.qbDocNumber).trim() || null; params.push(v, v || inv.invoiceNumber); }
+      if (b.docDate !== undefined) { const d = /^\d{4}-\d{2}-\d{2}/.test(String(b.docDate || '')) ? String(b.docDate).slice(0,10) : null; sets.push('docDate=?', 'issueDate=?'); params.push(d, d || inv.issueDate); }
+      if (b.status !== undefined) {
+        const allowed = ['Sent', 'Partial', 'Paid', 'Draft', 'Overdue', 'Void'];
+        const s = allowed.includes(String(b.status).trim()) ? String(b.status).trim() : inv.status;
+        sets.push('status=?'); params.push(s);
+      }
+      // total / amountPaid -> recompute balanceDue
+      const newTotal = b.amount !== undefined && b.amount !== '' ? Number(b.amount) : Number(inv.total) || 0;
+      const newPaid = b.amountPaid !== undefined && b.amountPaid !== '' ? Number(b.amountPaid) : Number(inv.amountPaid) || 0;
+      if (b.amount !== undefined) { sets.push('total=?', 'subtotal=?'); params.push(newTotal, newTotal); }
+      if (b.amountPaid !== undefined) { sets.push('amountPaid=?'); params.push(newPaid); }
+      if (b.amount !== undefined || b.amountPaid !== undefined) { sets.push('balanceDue=?'); params.push(Math.max(0, newTotal - newPaid)); }
+      if (b.notes !== undefined) { sets.push('notes=?'); params.push(b.notes == null ? null : String(b.notes)); }
+
+      if (!sets.length) return res.json(inv);
+      sets.push('updatedAt=NOW()');
+      params.push(invId, wid);
+      await db.query(`UPDATE invoices SET ${sets.join(', ')} WHERE id = ? AND workOrderId = ?`, params);
+
+      const [[row]] = await db.query('SELECT * FROM invoices WHERE id = ?', [invId]);
+      res.json(row);
+    } catch (err) {
+      console.error('Invoice QB update error:', err);
+      res.status(500).json({ error: 'Failed to update invoice.' });
+    }
+  }
+);
+
+// DELETE /work-orders/:id/invoices/:invId — remove invoice + stored PDF
+app.delete(
+  '/work-orders/:id/invoices/:invId',
+  authenticate,
+  requireNumericParam('id'),
+  requireNumericParam('invId'),
+  async (req, res) => {
+    try {
+      const wid = Number(req.params.id);
+      const invId = Number(req.params.invId);
+      const [[inv]] = await db.query('SELECT * FROM invoices WHERE id = ? AND workOrderId = ?', [invId, wid]);
+      if (!inv) return res.status(404).json({ error: 'Invoice not found on this work order.' });
+
+      await db.query('DELETE FROM invoices WHERE id = ?', [invId]);
+      if (inv.pdfPath) await deleteStoredFileByKey(inv.pdfPath);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('Invoice delete error:', err);
+      res.status(500).json({ error: 'Failed to delete invoice.' });
     }
   }
 );
