@@ -2652,13 +2652,6 @@ export default function ViewWorkOrder() {
               >
                 + Upload Estimate PDF
               </button>
-              <Link
-                to={`/estimates/new?workOrderId=${woId}`}
-                className="btn btn-light"
-                style={{ fontSize: 12, padding: "4px 12px", textDecoration: "none" }}
-              >
-                + Create Estimate
-              </Link>
             </span>
           </h3>
 
@@ -2884,13 +2877,6 @@ export default function ViewWorkOrder() {
               >
                 + Upload Invoice PDF
               </button>
-              <Link
-                to={`/invoices/new?workOrderId=${woId}`}
-                className="btn btn-light"
-                style={{ fontSize: 12, padding: "4px 12px", textDecoration: "none" }}
-              >
-                + Create Invoice
-              </Link>
             </span>
           </h3>
           {(() => {

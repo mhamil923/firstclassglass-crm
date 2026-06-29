@@ -12,8 +12,7 @@ import "./Navbar.css";
 const NAV_ITEMS = [
   { id: "home", label: "Home", to: "/" },
   { id: "work-orders", label: "Work Orders", to: "/work-orders" },
-  { id: "estimates", label: "Estimates", to: "/estimates" },
-  { id: "invoices", label: "Invoices", to: "/invoices" },
+  { id: "collections", label: "Collections", to: "/collections" },
   { id: "purchase-orders", label: "Purchase Orders", to: "/purchase-orders" },
   {
     id: "planning",

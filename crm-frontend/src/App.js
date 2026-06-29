@@ -19,12 +19,9 @@ import Navbar from "./Navbar";
 import PurchaseOrders from "./PurchaseOrders"; // ← NEW import
 import Customers from "./Customers";
 import ViewCustomer from "./ViewCustomer";
-import Estimates from "./Estimates";
-import CreateEstimate from "./CreateEstimate";
 import ViewEstimate from "./ViewEstimate";
-import Invoices from "./Invoices";
-import CreateInvoice from "./CreateInvoice";
 import ViewInvoice from "./ViewInvoice";
+import Collections from "./Collections";
 import Reports from "./Reports";
 import RouteBuilder from "./RouteBuilder";
 import LineItemTemplates from "./LineItemTemplates";
@@ -129,23 +126,18 @@ export default function App() {
               }
             />
 
-            {/* Estimates */}
+            {/* Collections / payment reminders (creation is done in QuickBooks) */}
             <Route
-              path="/estimates"
+              path="/collections"
               element={
                 <PrivateRoute>
-                  <Estimates />
+                  <Collections />
                 </PrivateRoute>
               }
             />
-            <Route
-              path="/estimates/new"
-              element={
-                <PrivateRoute>
-                  <CreateEstimate />
-                </PrivateRoute>
-              }
-            />
+
+            {/* Estimates — VIEW only (standalone list/create pages retired; creation in QuickBooks).
+                Kept because ViewWorkOrder links to /estimates/:id for CRM-created estimates. */}
             <Route
               path="/estimates/:id"
               element={
@@ -154,45 +146,14 @@ export default function App() {
                 </PrivateRoute>
               }
             />
-            <Route
-              path="/estimates/:id/edit"
-              element={
-                <PrivateRoute>
-                  <CreateEstimate />
-                </PrivateRoute>
-              }
-            />
 
-            {/* Invoices */}
-            <Route
-              path="/invoices"
-              element={
-                <PrivateRoute>
-                  <Invoices />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/invoices/new"
-              element={
-                <PrivateRoute>
-                  <CreateInvoice />
-                </PrivateRoute>
-              }
-            />
+            {/* Invoices — VIEW only (standalone list/create pages retired; creation in QuickBooks).
+                Kept because ViewWorkOrder + Collections "Open" link to /invoices/:id. */}
             <Route
               path="/invoices/:id"
               element={
                 <PrivateRoute>
                   <ViewInvoice />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/invoices/:id/edit"
-              element={
-                <PrivateRoute>
-                  <CreateInvoice />
                 </PrivateRoute>
               }
             />
