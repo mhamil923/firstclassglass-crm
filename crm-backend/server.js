@@ -372,6 +372,20 @@ function displayStatusOrDefault(s) {
   return canonStatus(s) || (String(s || '').trim() ? String(s) : 'New');
 }
 
+// When a WO moves to "Waiting for Approval", stamp estimateSentAt once.
+// Uses COALESCE so a re-save never resets the clock (only fills when NULL).
+async function stampEstimateSentIfWaiting(woId, statusCanon) {
+  try {
+    if (statusCanon !== 'Waiting for Approval') return;
+    await db.query(
+      "UPDATE work_orders SET estimateSentAt = NOW() WHERE id = ? AND status = 'Waiting for Approval' AND estimateSentAt IS NULL",
+      [Number(woId)]
+    );
+  } catch (e) {
+    console.warn('[stampEstimateSentIfWaiting] failed:', e.message);
+  }
+}
+
 // ===============================
 // END Part 1/6
 // Next: Part 2/6
@@ -3319,6 +3333,7 @@ app.post('/estimates', authenticate, async (req, res) => {
     if (body.workOrderId) {
       try {
         await db.query("UPDATE work_orders SET status='Waiting for Approval' WHERE id=?", [Number(body.workOrderId)]);
+        await stampEstimateSentIfWaiting(Number(body.workOrderId), 'Waiting for Approval');
       } catch (woErr) {
         console.error('Failed to update WO status on estimate create:', woErr.message);
       }
@@ -5922,6 +5937,63 @@ app.get('/work-orders/by-po/:poNumber/pdf', authenticate, async (req, res) => {
   }
 });
 
+// ─── FOLLOW-UP LIST ─────────────────────────────────────────────────────────
+// Work orders in "Waiting for Approval", excluding national accounts,
+// sorted by days-since-estimate-sent (oldest first). MUST be declared before
+// the /:id route so "followup" isn't captured as a numeric id.
+app.get('/work-orders/followup', authenticate, async (req, res) => {
+  try {
+    // National accounts to exclude (case-insensitive substring match).
+    // Patterns confirmed against live DISTINCT customer values so no legitimate
+    // direct customer is hidden and no national account leaks through.
+    const NATIONAL_PATTERNS = [
+      '%true source%',
+      '%clm%',
+      '%clear vision%',
+      '%1st time%',
+      '%countrywide%',
+    ];
+    const excludeSql = NATIONAL_PATTERNS.map(() => 'LOWER(w.customer) NOT LIKE ?').join(' AND ');
+
+    const [rows] = await db.query(
+      `SELECT
+          w.id, w.customer, w.siteLocation, w.siteAddress, w.billingAddress,
+          w.problemDescription, w.customerPhone, w.sitePhone, w.billingPhone,
+          w.customerEmail, w.estimateSentAt, w.created_at, w.updatedAt,
+          COALESCE(w.estimateSentAt, w.updatedAt, w.created_at) AS effectiveSentAt,
+          DATEDIFF(NOW(), COALESCE(w.estimateSentAt, w.updatedAt, w.created_at)) AS daysSinceSent,
+          (SELECT COUNT(*) FROM followup_calls fc WHERE fc.workOrderId = w.id) AS callCount,
+          (SELECT fc2.outcome FROM followup_calls fc2 WHERE fc2.workOrderId = w.id ORDER BY fc2.calledAt DESC, fc2.id DESC LIMIT 1) AS lastOutcome,
+          (SELECT fc3.calledAt FROM followup_calls fc3 WHERE fc3.workOrderId = w.id ORDER BY fc3.calledAt DESC, fc3.id DESC LIMIT 1) AS lastCalledAt
+       FROM work_orders w
+       WHERE w.status = 'Waiting for Approval'
+         AND ${excludeSql}
+       ORDER BY (w.estimateSentAt IS NULL) ASC,
+                COALESCE(w.estimateSentAt, w.updatedAt, w.created_at) ASC`,
+      NATIONAL_PATTERNS
+    );
+
+    res.json(rows.map(r => ({
+      id: r.id,
+      customer: r.customer,
+      siteLocation: r.siteLocation,
+      siteAddress: r.siteAddress || r.billingAddress || null,
+      problemDescription: r.problemDescription,
+      phone: r.customerPhone || r.sitePhone || r.billingPhone || null,
+      email: r.customerEmail || null,
+      estimateSentAt: r.estimateSentAt || null,
+      effectiveSentAt: r.effectiveSentAt || null,
+      daysSinceSent: r.daysSinceSent == null ? null : Number(r.daysSinceSent),
+      callCount: Number(r.callCount) || 0,
+      lastOutcome: r.lastOutcome || null,
+      lastCalledAt: r.lastCalledAt || null,
+    })));
+  } catch (err) {
+    console.error('Follow-up list error:', err);
+    res.status(500).json({ error: 'Failed to load follow-up list.' });
+  }
+});
+
 // GET single by ID
 app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
@@ -6817,6 +6889,7 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     params.push(wid);
 
     await db.execute(sql, params);
+    await stampEstimateSentIfWaiting(wid, cStatus);
 
     // Sync legacy PO columns from work_order_pos if a PO was added
     if (newPoPdfFile && wantReplacePo) {
@@ -6878,6 +6951,7 @@ app.put('/work-orders/:id/status', authenticate, requireNumericParam('id'), asyn
     if (!c) return res.status(400).json({ error: 'Invalid status value' });
 
     await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [c, Number(req.params.id)]);
+    await stampEstimateSentIfWaiting(Number(req.params.id), c);
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [Number(req.params.id)]);
     if (!updated) return res.status(404).json({ error: 'Not found.' });
 
@@ -7098,6 +7172,44 @@ app.put('/work-orders/:id/pos/:poId/mark-picked-up', authenticate, requireNumeri
   } catch (err) {
     console.error('Work-order PO mark-picked-up error:', err);
     res.status(500).json({ error: 'Failed to mark PO as picked up.' });
+  }
+});
+
+// ─── FOLLOW-UP CALL LOG ───────────────────────────────────────────────────
+// GET /work-orders/:id/followup-calls — all call log rows, newest first
+app.get('/work-orders/:id/followup-calls', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const [rows] = await db.query(
+      'SELECT id, workOrderId, calledBy, outcome, notes, calledAt FROM followup_calls WHERE workOrderId = ? ORDER BY calledAt DESC, id DESC',
+      [wid]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Follow-up calls list error:', err);
+    res.status(500).json({ error: 'Failed to fetch follow-up calls.' });
+  }
+});
+
+// POST /work-orders/:id/followup-calls — log a new follow-up call attempt
+app.post('/work-orders/:id/followup-calls', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const b = coerceBody(req);
+    const outcome = String(b.outcome || '').trim();
+    const notes = b.notes == null ? null : String(b.notes);
+    if (!outcome) return res.status(400).json({ error: 'outcome is required.' });
+
+    const calledBy = (req.user && req.user.username) ? req.user.username : null;
+    const [result] = await db.query(
+      'INSERT INTO followup_calls (workOrderId, calledBy, outcome, notes) VALUES (?, ?, ?, ?)',
+      [wid, calledBy, outcome, notes]
+    );
+    const [[row]] = await db.query('SELECT id, workOrderId, calledBy, outcome, notes, calledAt FROM followup_calls WHERE id = ?', [result.insertId]);
+    res.status(201).json(row);
+  } catch (err) {
+    console.error('Follow-up call create error:', err);
+    res.status(500).json({ error: 'Failed to log follow-up call.' });
   }
 });
 

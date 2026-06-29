@@ -191,6 +191,39 @@ export default function WorkOrders() {
   // UX
   const [flashMsg, setFlashMsg] = useState("");
 
+  // Follow-Up tab state
+  const [followup, setFollowup] = useState([]);
+  const [followupLoading, setFollowupLoading] = useState(false);
+  // Log Call modal: { wo } when open, null when closed
+  const [callModalWO, setCallModalWO] = useState(null);
+  const [callHistory, setCallHistory] = useState([]);
+  const [callOutcome, setCallOutcome] = useState("Left Voicemail");
+  const [callNotes, setCallNotes] = useState("");
+  const [callSaving, setCallSaving] = useState(false);
+
+  const CALL_OUTCOMES = [
+    "Left Voicemail",
+    "Spoke - Considering",
+    "Spoke - Approved",
+    "Spoke - Declined",
+    "No Answer",
+    "Wrong Number",
+    "Other",
+  ];
+
+  const fetchFollowup = async () => {
+    setFollowupLoading(true);
+    try {
+      const res = await api.get("/work-orders/followup", { headers: authHeaders() });
+      setFollowup(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Error fetching follow-up list:", err);
+      setFollowup([]);
+    } finally {
+      setFollowupLoading(false);
+    }
+  };
+
   // NOTE: return the promise so `await fetchWorkOrders()` actually waits.
   const fetchWorkOrders = async () => {
     try {
@@ -219,6 +252,12 @@ export default function WorkOrders() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Refresh the follow-up list whenever its tab becomes active
+  useEffect(() => {
+    if (selectedFilter === "Follow-Up") fetchFollowup();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFilter]);
 
   const isPastDue = (o) =>
     toCanonicalStatus(o.status) === "Scheduled" &&
@@ -271,6 +310,72 @@ export default function WorkOrders() {
   }, [workOrders]);
 
   const setFilter = (value) => setSelectedFilter(value);
+
+  /* ------------------------------------------------------------------------ */
+  /* FOLLOW-UP: Log Call modal                                                */
+  /* ------------------------------------------------------------------------ */
+  const openCallModal = async (wo) => {
+    setCallModalWO(wo);
+    setCallOutcome("Left Voicemail");
+    setCallNotes("");
+    setCallHistory([]);
+    try {
+      const res = await api.get(`/work-orders/${wo.id}/followup-calls`, { headers: authHeaders() });
+      setCallHistory(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Error fetching call history:", err);
+    }
+  };
+
+  const closeCallModal = () => {
+    setCallModalWO(null);
+    setCallHistory([]);
+    setCallNotes("");
+  };
+
+  const saveCall = async () => {
+    if (!callModalWO || !callOutcome) return;
+    setCallSaving(true);
+    try {
+      await api.post(
+        `/work-orders/${callModalWO.id}/followup-calls`,
+        { outcome: callOutcome, notes: callNotes },
+        { headers: authHeaders() }
+      );
+      await fetchFollowup(); // refresh row last-call info
+      closeCallModal();
+    } catch (err) {
+      console.error("Error logging call:", err);
+      alert(err?.response?.data?.error || "Failed to log call.");
+    } finally {
+      setCallSaving(false);
+    }
+  };
+
+  // Quick shortcut from the modal: set WO status, then refresh the list
+  const setWoStatusFromModal = async (id, newStatus) => {
+    try {
+      await api.put(`/work-orders/${id}/status`, { status: newStatus }, { headers: authHeaders() });
+      await fetchFollowup();
+      await fetchWorkOrders();
+      closeCallModal();
+      if (newStatus === "Approved") {
+        // Estimate-approval flow lives on the WO detail page — jump there
+        navigate(`/view-work-order/${id}`, { state: { from: "/work-orders" } });
+      }
+    } catch (err) {
+      console.error("Error updating status from modal:", err);
+      alert(err?.response?.data?.error || "Failed to update status.");
+    }
+  };
+
+  // Days-waiting badge color: green <7, amber 7-14, red >14
+  const daysBadgeColor = (d) => {
+    if (d == null) return "#6b7280";
+    if (d > 14) return "#dc2626";
+    if (d >= 7) return "#f59e0b";
+    return "#22c55e";
+  };
 
   /* ------------------------------------------------------------------------ */
   /* SINGLE-ROW STATUS CHANGE  (PUT /work-orders/:id/status)                  */
@@ -471,11 +576,142 @@ export default function WorkOrders() {
                 {chipCounts["Past Due"] ?? 0}
               </span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setFilter("Follow-Up")}
+              style={{
+                background: selectedFilter === "Follow-Up" ? "#7c3aed" : "transparent",
+                border: "2px solid #7c3aed",
+                color: selectedFilter === "Follow-Up" ? "#fff" : "#7c3aed",
+                borderRadius: 20,
+                padding: "4px 14px",
+                cursor: "pointer",
+                fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              Follow-Up
+              <span
+                style={{
+                  background: selectedFilter === "Follow-Up" ? "#fff" : "#7c3aed",
+                  color: selectedFilter === "Follow-Up" ? "#7c3aed" : "#fff",
+                  borderRadius: 10,
+                  padding: "1px 8px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                {followup.length}
+              </span>
+            </button>
           </div>
 
           {/* ✅ Removed: “Mark Parts In” button + modal feature */}
         </div>
 
+        {selectedFilter === "Follow-Up" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+            {followupLoading && (
+              <div className="empty-state">Loading follow-up list…</div>
+            )}
+            {!followupLoading && followup.length === 0 && (
+              <div className="empty-state">
+                No direct-customer work orders are waiting for approval. 🎉
+              </div>
+            )}
+            {!followupLoading && followup.map((wo) => {
+              const phone = wo.phone;
+              const days = wo.daysSinceSent;
+              const badgeBg = daysBadgeColor(days);
+              const lastTxt = wo.callCount > 0
+                ? `${wo.lastOutcome || "Logged"}${wo.lastCalledAt ? ` • ${moment(wo.lastCalledAt).fromNow()}` : ""}`
+                : "Never contacted";
+              return (
+                <div
+                  key={wo.id}
+                  style={{
+                    border: "1px solid var(--border-color, #e5e7eb)",
+                    borderRadius: 12,
+                    padding: 16,
+                    display: "flex",
+                    gap: 16,
+                    alignItems: "flex-start",
+                    flexWrap: "wrap",
+                    background: "var(--bg-card, #fff)",
+                  }}
+                >
+                  <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)" }}>
+                        {wo.customer || "N/A"}
+                      </span>
+                      <span
+                        style={{
+                          background: badgeBg,
+                          color: "#fff",
+                          borderRadius: 999,
+                          padding: "2px 10px",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          whiteSpace: "nowrap",
+                        }}
+                        title={wo.estimateSentAt ? `Estimate sent ${moment(wo.estimateSentAt).format("MMM D, YYYY")}` : "No estimate-sent date"}
+                      >
+                        {days == null ? "—" : `${days} day${days === 1 ? "" : "s"} waiting`}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 2 }}>
+                      {wo.siteLocation || "—"}
+                      {wo.siteAddress ? ` • ${wo.siteAddress}` : ""}
+                    </div>
+                    {wo.problemDescription ? (
+                      <div style={{ ...clampStyle(2), fontSize: 13, color: "var(--text-primary)", marginTop: 6 }}>
+                        {wo.problemDescription}
+                      </div>
+                    ) : null}
+                    <div style={{ marginTop: 8, fontSize: 13 }}>
+                      {phone ? (
+                        <a
+                          href={`tel:${phone}`}
+                          style={{ fontSize: 16, fontWeight: 700, color: "#2563eb", textDecoration: "none" }}
+                        >
+                          📞 {phone}
+                        </a>
+                      ) : (
+                        <span style={{ color: "var(--text-secondary)" }}>No phone on file</span>
+                      )}
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)" }}>
+                      Last follow-up: {lastTxt}
+                      {wo.callCount > 0 ? ` (${wo.callCount} attempt${wo.callCount === 1 ? "" : "s"})` : ""}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      className="btn-primary-apple"
+                      onClick={() => openCallModal(wo)}
+                    >
+                      Log Call
+                    </button>
+                    <button
+                      type="button"
+                      className="chip"
+                      onClick={() => navigate(`/view-work-order/${wo.id}`, { state: { from: "/work-orders" } })}
+                    >
+                      Open
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {selectedFilter !== "Follow-Up" && (
         <div className="table-wrap">
           <table className="wo-table">
             <thead>
@@ -671,8 +907,147 @@ export default function WorkOrders() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
       </div>
+
+      {/* ───── Log Call modal ───── */}
+      {callModalWO && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={closeCallModal}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--bg-card, #fff)",
+              borderRadius: 12,
+              maxWidth: 560,
+              width: "100%",
+              maxHeight: "88vh",
+              overflowY: "auto",
+              padding: 24,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "var(--text-primary)" }}>
+              Log Call — {callModalWO.customer}
+            </h3>
+            <div style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16 }}>
+              {callModalWO.siteLocation || ""}
+              {callModalWO.phone ? (
+                <>
+                  {" • "}
+                  <a href={`tel:${callModalWO.phone}`} style={{ color: "#2563eb", textDecoration: "none", fontWeight: 600 }}>
+                    {callModalWO.phone}
+                  </a>
+                </>
+              ) : null}
+            </div>
+
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
+              Outcome
+            </label>
+            <select
+              className="control select"
+              value={callOutcome}
+              onChange={(e) => setCallOutcome(e.target.value)}
+              style={{ width: "100%", marginBottom: 12 }}
+            >
+              {CALL_OUTCOMES.map((o) => (
+                <option key={o} value={o}>{o}</option>
+              ))}
+            </select>
+
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
+              Notes
+            </label>
+            <textarea
+              value={callNotes}
+              onChange={(e) => setCallNotes(e.target.value)}
+              rows={3}
+              placeholder="What was said, next steps, callback time…"
+              style={{
+                width: "100%",
+                borderRadius: 8,
+                border: "1px solid var(--border-color, #d1d5db)",
+                padding: 8,
+                fontSize: 14,
+                resize: "vertical",
+                marginBottom: 8,
+              }}
+            />
+
+            {/* Quick status shortcuts (offered, not automatic) */}
+            {callOutcome === "Spoke - Approved" && (
+              <button
+                type="button"
+                onClick={() => setWoStatusFromModal(callModalWO.id, "Approved")}
+                style={{ background: "#22c55e", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontWeight: 600, cursor: "pointer", marginBottom: 12 }}
+              >
+                Set WO status → Approved (opens estimate approval)
+              </button>
+            )}
+            {callOutcome === "Spoke - Declined" && (
+              <button
+                type="button"
+                onClick={() => setWoStatusFromModal(callModalWO.id, "Declined")}
+                style={{ background: "#6b7280", color: "#fff", border: "none", borderRadius: 8, padding: "6px 12px", fontWeight: 600, cursor: "pointer", marginBottom: 12 }}
+              >
+                Set WO status → Declined
+              </button>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginBottom: 18 }}>
+              <button type="button" className="chip" onClick={closeCallModal} disabled={callSaving}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary-apple"
+                onClick={saveCall}
+                disabled={callSaving || !callOutcome}
+              >
+                {callSaving ? "Saving…" : "Save Call"}
+              </button>
+            </div>
+
+            <div style={{ borderTop: "1px solid var(--border-color, #e5e7eb)", paddingTop: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: "var(--text-primary)" }}>
+                Call history ({callHistory.length})
+              </div>
+              {callHistory.length === 0 ? (
+                <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>No prior attempts logged.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {callHistory.map((c) => (
+                    <div key={c.id} style={{ fontSize: 13, borderLeft: "3px solid #7c3aed", paddingLeft: 10 }}>
+                      <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                        {c.outcome}
+                        <span style={{ fontWeight: 400, color: "var(--text-secondary)" }}>
+                          {" — "}{c.calledBy || "Unknown"}{" • "}{c.calledAt ? moment(c.calledAt).format("MMM D, YYYY h:mm A") : ""}
+                        </span>
+                      </div>
+                      {c.notes ? <div style={{ color: "var(--text-secondary)", marginTop: 2 }}>{c.notes}</div> : null}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
