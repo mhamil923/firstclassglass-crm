@@ -859,7 +859,9 @@ function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', l
 
   return `
     SELECT w.*, ${assignedSel}, ${createdSel},
-           poAgg.allPoNumbers
+           poAgg.allPoNumbers,
+           qbAgg.qbInvoiceNumbers, qbAgg.qbAllDocNumbers,
+           qbAgg.qbInvoiceAmount, qbAgg.qbInvoicePaid, qbAgg.qbInvoiceStatus
       FROM work_orders w
       ${join}
       LEFT JOIN (
@@ -868,6 +870,16 @@ function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', l
         WHERE poNumber IS NOT NULL AND poNumber <> ''
         GROUP BY workOrderId
       ) poAgg ON poAgg.workOrderId = w.id
+      LEFT JOIN (
+        SELECT workOrderId,
+          GROUP_CONCAT(CASE WHEN docType='Invoice' THEN qbDocNumber END ORDER BY id SEPARATOR ', ') AS qbInvoiceNumbers,
+          GROUP_CONCAT(qbDocNumber ORDER BY id SEPARATOR ', ') AS qbAllDocNumbers,
+          SUM(CASE WHEN docType='Invoice' THEN amount ELSE 0 END) AS qbInvoiceAmount,
+          SUM(CASE WHEN docType='Invoice' THEN amountPaid ELSE 0 END) AS qbInvoicePaid,
+          MAX(CASE WHEN docType='Invoice' THEN status END) AS qbInvoiceStatus
+        FROM qb_documents
+        GROUP BY workOrderId
+      ) qbAgg ON qbAgg.workOrderId = w.id
       ${whereSql}
       ${orderSql}
       ${limitSql}
@@ -5825,6 +5837,7 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
     siteAddress = '',
     workOrderNumber = '',
     status = '',
+    qbDocNumber = '',
   } = req.query || {};
 
   try {
@@ -5840,13 +5853,22 @@ app.get('/work-orders/search', authenticate, async (req, res) => {
       params.push(`%${status}%`);
     }
 
+    // Find a work order by its QuickBooks invoice/estimate number.
+    const qbNeedle = String(qbDocNumber || '').trim();
+    if (qbNeedle) {
+      terms.push(`EXISTS (SELECT 1 FROM qb_documents q WHERE q.workOrderId = w.id AND COALESCE(q.qbDocNumber,'') LIKE ?)`);
+      params.push(`%${qbNeedle}%`);
+    }
+
     const combined = String(poNumber || '').trim();
     const woOnly   = String(workOrderNumber || '').trim();
 
     if (combined || woOnly) {
       const needle = combined || woOnly;
-      terms.push(`(COALESCE(w.poNumber,'') LIKE ? OR COALESCE(w.workOrderNumber,'') LIKE ?)`);
-      params.push(`%${needle}%`, `%${needle}%`);
+      // Match PO, WO number, OR a captured QuickBooks doc number so the
+      // generic PO/WO search box also finds work orders by QB invoice #.
+      terms.push(`(COALESCE(w.poNumber,'') LIKE ? OR COALESCE(w.workOrderNumber,'') LIKE ? OR EXISTS (SELECT 1 FROM qb_documents q2 WHERE q2.workOrderId = w.id AND COALESCE(q2.qbDocNumber,'') LIKE ?))`);
+      params.push(`%${needle}%`, `%${needle}%`, `%${needle}%`);
     }
 
     if (combined && woOnly && combined !== woOnly) {
@@ -6013,6 +6035,19 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
       : displayStatusOrDefault(row.status);
     row.allPoNumbersFormatted = formatPoNumberList(row.allPoNumbers);
     await attachTechsToWorkOrders([row]);
+
+    // Attach captured QuickBooks documents (read-only) so the field app
+    // Documents section can list the QB invoice/estimate PDFs too.
+    try {
+      const [qbDocs] = await db.query(
+        'SELECT id, workOrderId, docType, qbDocNumber, amount, docDate, status, amountPaid, pdfPath, notes, createdAt FROM qb_documents WHERE workOrderId = ? ORDER BY docDate DESC, id DESC',
+        [id]
+      );
+      row.qbDocuments = qbDocs;
+    } catch (qbErr) {
+      console.warn('[work-order get] qb_documents attach failed:', qbErr.message);
+      row.qbDocuments = [];
+    }
 
     res.json(row);
   } catch (err) {
@@ -7325,6 +7360,186 @@ app.put(
     } catch (err) {
       console.error('Estimate PDF status update error:', err);
       res.status(500).json({ error: 'Failed to update estimate PDF status.' });
+    }
+  }
+);
+
+// ─── QUICKBOOKS DOCUMENTS (read-only capture of QBO-exported invoices/estimates) ──
+// QuickBooks Desktop stays the source of truth. We only capture the PDF + key
+// fields (doc number / amount / date / status / amount paid) as searchable CRM data.
+
+const QB_DOC_TYPES = ['Invoice', 'Estimate'];
+const QB_ESTIMATE_STATUSES = ['Sent', 'Approved', 'Declined'];
+const QB_INVOICE_STATUSES = ['Sent', 'Partial', 'Paid'];
+
+function normalizeQbFields(body, existing = {}) {
+  const out = {};
+  const b = body || {};
+
+  if (b.docType !== undefined) {
+    const t = String(b.docType).trim();
+    out.docType = QB_DOC_TYPES.find((x) => x.toLowerCase() === t.toLowerCase()) || null;
+  }
+  if (b.qbDocNumber !== undefined) {
+    out.qbDocNumber = String(b.qbDocNumber).trim() || null;
+  }
+  if (b.amount !== undefined) {
+    const n = Number(b.amount);
+    out.amount = Number.isFinite(n) ? n : null;
+  }
+  if (b.amountPaid !== undefined) {
+    const n = Number(b.amountPaid);
+    out.amountPaid = Number.isFinite(n) ? n : 0;
+  }
+  if (b.docDate !== undefined) {
+    const d = String(b.docDate).trim();
+    out.docDate = /^\d{4}-\d{2}-\d{2}/.test(d) ? d.slice(0, 10) : null;
+  }
+  if (b.notes !== undefined) {
+    out.notes = b.notes == null ? null : String(b.notes);
+  }
+  if (b.status !== undefined) {
+    const s = String(b.status).trim();
+    const docType = out.docType || existing.docType;
+    const allowed = docType === 'Estimate' ? QB_ESTIMATE_STATUSES : QB_INVOICE_STATUSES;
+    out.status = allowed.find((x) => x.toLowerCase() === s.toLowerCase()) || s || null;
+  }
+  return out;
+}
+
+// GET /work-orders/:id/qb-documents — list all QB docs for a WO
+app.get('/work-orders/:id/qb-documents', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const [rows] = await db.query(
+      'SELECT id, workOrderId, docType, qbDocNumber, amount, docDate, status, amountPaid, pdfPath, notes, createdAt FROM qb_documents WHERE workOrderId = ? ORDER BY docDate DESC, id DESC',
+      [wid]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('QB documents list error:', err);
+    res.status(500).json({ error: 'Failed to fetch QuickBooks documents.' });
+  }
+});
+
+// POST /work-orders/:id/qb-documents — attach a QB invoice/estimate PDF + capture fields
+app.post(
+  '/work-orders/:id/qb-documents',
+  authenticate,
+  requireNumericParam('id'),
+  withMulter(upload.any()),
+  async (req, res) => {
+    try {
+      const wid = Number(req.params.id);
+      const [[wo]] = await db.query('SELECT id FROM work_orders WHERE id = ?', [wid]);
+      if (!wo) return res.status(404).json({ error: 'Work order not found.' });
+
+      const body = coerceBody(req);
+      const f = normalizeQbFields(body);
+      if (!f.docType) {
+        return res.status(400).json({ error: `docType is required and must be one of: ${QB_DOC_TYPES.join(', ')}` });
+      }
+
+      const files = Array.isArray(req.files) ? req.files : [];
+      const pdfFile = files.find((x) => isPdf(x));
+      const pdfPath = pdfFile ? fileKey(pdfFile) : null;
+
+      const status = f.status || (f.docType === 'Estimate' ? 'Sent' : 'Sent');
+
+      const [result] = await db.query(
+        `INSERT INTO qb_documents
+           (workOrderId, docType, qbDocNumber, amount, docDate, status, amountPaid, pdfPath, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          wid,
+          f.docType,
+          f.qbDocNumber ?? null,
+          f.amount ?? null,
+          f.docDate ?? null,
+          status,
+          f.amountPaid ?? 0,
+          pdfPath,
+          f.notes ?? null,
+        ]
+      );
+
+      const [[row]] = await db.query(
+        'SELECT id, workOrderId, docType, qbDocNumber, amount, docDate, status, amountPaid, pdfPath, notes, createdAt FROM qb_documents WHERE id = ?',
+        [result.insertId]
+      );
+      res.status(201).json(row);
+    } catch (err) {
+      console.error('QB document upload error:', err);
+      res.status(500).json({ error: 'Failed to attach QuickBooks document.' });
+    }
+  }
+);
+
+// PUT /work-orders/:id/qb-documents/:docId — update fields (mark Paid, amountPaid, etc.)
+app.put(
+  '/work-orders/:id/qb-documents/:docId',
+  authenticate,
+  requireNumericParam('id'),
+  requireNumericParam('docId'),
+  async (req, res) => {
+    try {
+      const wid = Number(req.params.id);
+      const docId = Number(req.params.docId);
+
+      const [[existing]] = await db.query(
+        'SELECT * FROM qb_documents WHERE id = ? AND workOrderId = ?',
+        [docId, wid]
+      );
+      if (!existing) return res.status(404).json({ error: 'QuickBooks document not found on this work order.' });
+
+      const f = normalizeQbFields(coerceBody(req), existing);
+      const cols = [];
+      const params = [];
+      for (const key of ['docType', 'qbDocNumber', 'amount', 'docDate', 'status', 'amountPaid', 'notes']) {
+        if (f[key] !== undefined) { cols.push(`${key} = ?`); params.push(f[key]); }
+      }
+      if (!cols.length) return res.json(existing);
+
+      params.push(docId, wid);
+      await db.query(`UPDATE qb_documents SET ${cols.join(', ')} WHERE id = ? AND workOrderId = ?`, params);
+
+      const [[row]] = await db.query(
+        'SELECT id, workOrderId, docType, qbDocNumber, amount, docDate, status, amountPaid, pdfPath, notes, createdAt FROM qb_documents WHERE id = ?',
+        [docId]
+      );
+      res.json(row);
+    } catch (err) {
+      console.error('QB document update error:', err);
+      res.status(500).json({ error: 'Failed to update QuickBooks document.' });
+    }
+  }
+);
+
+// DELETE /work-orders/:id/qb-documents/:docId — remove row + stored PDF
+app.delete(
+  '/work-orders/:id/qb-documents/:docId',
+  authenticate,
+  requireNumericParam('id'),
+  requireNumericParam('docId'),
+  async (req, res) => {
+    try {
+      const wid = Number(req.params.id);
+      const docId = Number(req.params.docId);
+
+      const [[row]] = await db.query(
+        'SELECT * FROM qb_documents WHERE id = ? AND workOrderId = ?',
+        [docId, wid]
+      );
+      if (!row) return res.status(404).json({ error: 'QuickBooks document not found on this work order.' });
+
+      await db.query('DELETE FROM qb_documents WHERE id = ?', [docId]);
+      if (row.pdfPath) {
+        await deleteStoredFileByKey(row.pdfPath);
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('QB document delete error:', err);
+      res.status(500).json({ error: 'Failed to delete QuickBooks document.' });
     }
   }
 );

@@ -458,6 +458,21 @@ export default function ViewWorkOrder() {
   const [linkedInvoices, setLinkedInvoices] = useState([]);
   const [estimatePdfs, setEstimatePdfs] = useState([]);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
+
+  // QuickBooks documents (read-only capture)
+  const [qbDocs, setQbDocs] = useState([]);
+  // qbModal: null when closed, otherwise { docType, editingId|null }
+  const [qbModal, setQbModal] = useState(null);
+  const [qbFile, setQbFile] = useState(null);
+  const [qbForm, setQbForm] = useState({
+    qbDocNumber: "",
+    amount: "",
+    docDate: "",
+    status: "Sent",
+    amountPaid: "",
+    notes: "",
+  });
+  const [qbSaving, setQbSaving] = useState(false);
   const [busyImageUpload, setBusyImageUpload] = useState(false);
 
   // Residential contract (Phase 1: draft data only; PDF + signing in later phases)
@@ -671,6 +686,108 @@ export default function ViewWorkOrder() {
     }
   };
 
+  const fetchQbDocs = async () => {
+    try {
+      const res = await api.get(`/work-orders/${id}/qb-documents`, { headers: authHeaders() });
+      setQbDocs(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Error fetching QuickBooks documents:", err);
+      setQbDocs([]);
+    }
+  };
+
+  const QB_STATUS_OPTS = (docType) =>
+    docType === "Estimate"
+      ? ["Sent", "Approved", "Declined"]
+      : ["Sent", "Partial", "Paid"];
+
+  // Open the attach/edit modal. Prefill amount from the WO where possible
+  // (QB numbers are the truth, so the user can override everything).
+  const openQbModal = (docType, doc = null) => {
+    if (doc) {
+      setQbForm({
+        qbDocNumber: doc.qbDocNumber || "",
+        amount: doc.amount != null ? String(doc.amount) : "",
+        docDate: doc.docDate ? String(doc.docDate).slice(0, 10) : "",
+        status: doc.status || QB_STATUS_OPTS(doc.docType)[0],
+        amountPaid: doc.amountPaid != null ? String(doc.amountPaid) : "",
+        notes: doc.notes || "",
+      });
+      setQbModal({ docType: doc.docType, editingId: doc.id });
+    } else {
+      const prefillAmount = workOrder?.total != null ? String(workOrder.total) : "";
+      setQbForm({
+        qbDocNumber: "",
+        amount: prefillAmount,
+        docDate: "",
+        status: QB_STATUS_OPTS(docType)[0],
+        amountPaid: "",
+        notes: "",
+      });
+      setQbModal({ docType, editingId: null });
+    }
+    setQbFile(null);
+  };
+
+  const closeQbModal = () => {
+    setQbModal(null);
+    setQbFile(null);
+  };
+
+  const saveQbDoc = async () => {
+    if (!qbModal) return;
+    setQbSaving(true);
+    try {
+      if (qbModal.editingId) {
+        // Edit existing — field updates only (PDF stays as-is)
+        await api.put(
+          `/work-orders/${id}/qb-documents/${qbModal.editingId}`,
+          {
+            docType: qbModal.docType,
+            qbDocNumber: qbForm.qbDocNumber,
+            amount: qbForm.amount === "" ? null : Number(qbForm.amount),
+            docDate: qbForm.docDate || null,
+            status: qbForm.status,
+            amountPaid: qbForm.amountPaid === "" ? 0 : Number(qbForm.amountPaid),
+            notes: qbForm.notes,
+          },
+          { headers: authHeaders() }
+        );
+      } else {
+        const form = new FormData();
+        if (qbFile) form.append("qbPdf", qbFile);
+        form.append("docType", qbModal.docType);
+        form.append("qbDocNumber", qbForm.qbDocNumber);
+        if (qbForm.amount !== "") form.append("amount", qbForm.amount);
+        if (qbForm.docDate) form.append("docDate", qbForm.docDate);
+        form.append("status", qbForm.status);
+        if (qbForm.amountPaid !== "") form.append("amountPaid", qbForm.amountPaid);
+        if (qbForm.notes) form.append("notes", qbForm.notes);
+        await api.post(`/work-orders/${id}/qb-documents`, form, {
+          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+        });
+      }
+      await fetchQbDocs();
+      closeQbModal();
+    } catch (err) {
+      console.error("Error saving QuickBooks document:", err);
+      alert(err?.response?.data?.error || "Failed to save QuickBooks document.");
+    } finally {
+      setQbSaving(false);
+    }
+  };
+
+  const deleteQbDoc = async (docId) => {
+    if (!window.confirm("Remove this QuickBooks document?")) return;
+    try {
+      await api.delete(`/work-orders/${id}/qb-documents/${docId}`, { headers: authHeaders() });
+      setQbDocs((prev) => prev.filter((d) => d.id !== docId));
+    } catch (err) {
+      console.error("Error deleting QuickBooks document:", err);
+      alert(err?.response?.data?.error || "Failed to delete QuickBooks document.");
+    }
+  };
+
   const fetchResidentialContract = async () => {
     try {
       const res = await api.get(`/work-orders/${id}/residential-contract`, {
@@ -730,6 +847,7 @@ export default function ViewWorkOrder() {
     fetchLinkedEstimates();
     fetchLinkedInvoices();
     fetchEstimatePdfs();
+    fetchQbDocs();
     fetchResidentialContract();
     fetchTechUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1759,6 +1877,140 @@ export default function ViewWorkOrder() {
         title={lightbox.title}
       />
 
+      {/* ───── QuickBooks document attach/edit modal ───── */}
+      {qbModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={closeQbModal}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 1000, padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--bg-card, #fff)", borderRadius: 12, maxWidth: 520,
+              width: "100%", maxHeight: "88vh", overflowY: "auto", padding: 24,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "var(--text-primary)" }}>
+              {qbModal.editingId ? "Edit" : "Attach"} QB {qbModal.docType}
+            </h3>
+            <p style={{ margin: "0 0 16px", fontSize: 12, color: "var(--text-secondary)" }}>
+              Capture the QuickBooks {qbModal.docType.toLowerCase()} details. QuickBooks Desktop stays the source of truth.
+            </p>
+
+            {!qbModal.editingId && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
+                  PDF file (from QuickBooks export)
+                </label>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => setQbFile(e.target.files?.[0] || null)}
+                />
+              </div>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
+                  QB {qbModal.docType} #
+                </label>
+                <input
+                  type="text"
+                  value={qbForm.qbDocNumber}
+                  onChange={(e) => setQbForm((f) => ({ ...f, qbDocNumber: e.target.value }))}
+                  placeholder="e.g. 1234"
+                  style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--border-color, #d1d5db)" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
+                  Amount ($)
+                </label>
+                <input
+                  type="number" step="0.01"
+                  value={qbForm.amount}
+                  onChange={(e) => setQbForm((f) => ({ ...f, amount: e.target.value }))}
+                  style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--border-color, #d1d5db)" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
+                  Date
+                </label>
+                <input
+                  type="date"
+                  value={qbForm.docDate}
+                  onChange={(e) => setQbForm((f) => ({ ...f, docDate: e.target.value }))}
+                  style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--border-color, #d1d5db)" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
+                  Status
+                </label>
+                <select
+                  value={qbForm.status}
+                  onChange={(e) => setQbForm((f) => ({ ...f, status: e.target.value }))}
+                  style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--border-color, #d1d5db)" }}
+                >
+                  {QB_STATUS_OPTS(qbModal.docType).map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              {qbModal.docType === "Invoice" && (
+                <div>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
+                    Amount Paid ($)
+                  </label>
+                  <input
+                    type="number" step="0.01"
+                    value={qbForm.amountPaid}
+                    onChange={(e) => setQbForm((f) => ({ ...f, amountPaid: e.target.value }))}
+                    style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--border-color, #d1d5db)" }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
+                Notes
+              </label>
+              <textarea
+                value={qbForm.notes}
+                onChange={(e) => setQbForm((f) => ({ ...f, notes: e.target.value }))}
+                rows={2}
+                style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--border-color, #d1d5db)", resize: "vertical" }}
+              />
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button type="button" className="btn btn-light" onClick={closeQbModal} disabled={qbSaving}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={saveQbDoc}
+                disabled={qbSaving}
+                style={{ background: "#2563eb", color: "#fff" }}
+              >
+                {qbSaving ? "Saving…" : qbModal.editingId ? "Save Changes" : "Attach Document"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ✅ Which-estimate-was-approved selection modal */}
       {showApproveEstimateModal && (
         <div
@@ -2631,6 +2883,102 @@ export default function ViewWorkOrder() {
             <p className="empty-text" style={{ padding: "20px" }}>
               No estimates linked to this work order.
             </p>
+          )}
+        </div>
+
+        {/* ======================= QuickBooks Documents (read-only capture) ======================= */}
+        <div className="section-card">
+          <h3 className="section-header">
+            QuickBooks Documents
+            <span style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+              <button
+                type="button"
+                className="btn btn-light"
+                style={{ fontSize: 12, padding: "4px 12px" }}
+                onClick={() => openQbModal("Invoice")}
+              >
+                + Attach QB Invoice
+              </button>
+              <button
+                type="button"
+                className="btn btn-light"
+                style={{ fontSize: 12, padding: "4px 12px" }}
+                onClick={() => openQbModal("Estimate")}
+              >
+                + Attach QB Estimate
+              </button>
+            </span>
+          </h3>
+
+          <p className="tiny" style={{ color: "var(--text-secondary)", margin: "0 16px 8px" }}>
+            QuickBooks Desktop is the source of truth — these are read-only captures for CRM records.
+          </p>
+
+          {qbDocs.length === 0 ? (
+            <p className="empty-text" style={{ padding: "20px" }}>
+              No QuickBooks documents attached.
+            </p>
+          ) : (
+            <div className="po-pdf-grid">
+              {qbDocs.map((d) => {
+                const href = d.pdfPath ? pdfThumbUrl(d.pdfPath) : null;
+                const amount = Number(d.amount) || 0;
+                const paid = Number(d.amountPaid) || 0;
+                const sl = (d.status || "").toLowerCase();
+                const badgeBg =
+                  sl === "paid" || sl === "approved" ? "#22c55e" :
+                  sl === "declined" ? "#6b7280" : "#f59e0b";
+                const money = (n) => "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                const label = `QB ${d.docType}${d.qbDocNumber ? ` #${d.qbDocNumber}` : ""} — ${money(amount)} — ${d.status || "Sent"}`;
+                return (
+                  <div className="po-pdf-card" key={`qb-${d.id}`} style={{ position: "relative" }}>
+                    <span
+                      style={{
+                        position: "absolute", top: 8, right: 8, zIndex: 2,
+                        padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700,
+                        background: badgeBg, color: "#fff",
+                      }}
+                    >
+                      {d.status || "Sent"}
+                    </span>
+                    {href ? (
+                      <div className="po-pdf-thumbnail">
+                        <iframe title={`QB ${d.docType} ${d.id}`} src={href} />
+                      </div>
+                    ) : (
+                      <div className="po-pdf-thumbnail" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", fontSize: 12 }}>
+                        No PDF
+                      </div>
+                    )}
+                    <div className="po-pdf-label" title={label} style={{ fontWeight: 600 }}>
+                      {label}
+                    </div>
+                    <div className="tiny" style={{ color: "var(--text-secondary)", padding: "0 8px" }}>
+                      {d.docDate ? new Date(d.docDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "No date"}
+                      {sl === "partial" ? ` • Paid ${money(paid)} of ${money(amount)}` : ""}
+                    </div>
+                    <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {href && (
+                        <button type="button" className="po-btn-expand" onClick={() => openLightbox("pdf", href, label)}>
+                          Expand
+                        </button>
+                      )}
+                      <button type="button" className="po-btn-expand" onClick={() => openQbModal(d.docType, d)}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="po-btn-expand"
+                        onClick={() => deleteQbDoc(d.id)}
+                        style={{ background: "#dc2626", color: "#ffffff", borderColor: "#dc2626" }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
 

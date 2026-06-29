@@ -97,6 +97,8 @@ export default function HistoryReport() {
             const siteAddr = toLower(getSiteAddress(o));
             const status = toLower(o.status);
             const assigned = toLower(o.assignedToName);
+            const qbInv = toLower(o.qbInvoiceNumbers);
+            const qbAll = toLower(o.qbAllDocNumbers);
 
             return (
               customer.includes(q) ||
@@ -105,7 +107,9 @@ export default function HistoryReport() {
               site.includes(q) ||
               siteAddr.includes(q) ||
               status.includes(q) ||
-              assigned.includes(q)
+              assigned.includes(q) ||
+              qbInv.includes(q) ||
+              qbAll.includes(q)
             );
           })
         : all;
@@ -180,7 +184,7 @@ export default function HistoryReport() {
         >
           <input
             className="form-control"
-            placeholder="Search by Customer, WO #, PO #, Site Location, or Site Address"
+            placeholder="Search by Customer, WO #, PO #, QB Invoice #, Site Location, or Site Address"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -258,6 +262,7 @@ export default function HistoryReport() {
                   <th>Site</th>
                   <th>PROBLEM DESCRIPTION</th>
                   <th>Status</th>
+                  <th>QB Invoice</th>
                   <th>Assigned To</th>
                   <th>Scheduled</th>
                 </tr>
@@ -307,6 +312,30 @@ export default function HistoryReport() {
                         </div>
                       </td>
                       <td>{o.status || "—"}</td>
+                      <td>
+                        {(() => {
+                          if (!o.qbInvoiceNumbers) return "—";
+                          const amt = Number(o.qbInvoiceAmount) || 0;
+                          const paid = Number(o.qbInvoicePaid) || 0;
+                          const money = (n) => "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                          const paidStatus =
+                            amt > 0 && paid >= amt ? "Paid" :
+                            paid > 0 ? "Partial" :
+                            (o.qbInvoiceStatus || "Sent");
+                          const color =
+                            paidStatus === "Paid" ? "#22c55e" :
+                            paidStatus === "Partial" ? "#f59e0b" : "#9ca3af";
+                          return (
+                            <div style={{ fontSize: 12 }}>
+                              <div style={{ fontWeight: 600 }}>#{o.qbInvoiceNumbers}</div>
+                              <div>{money(amt)}</div>
+                              <span style={{ color, fontWeight: 600 }}>
+                                {paidStatus === "Partial" ? `Partial (${money(paid)})` : paidStatus}
+                              </span>
+                            </div>
+                          );
+                        })()}
+                      </td>
                       <td>{o.assignedToName || "—"}</td>
                       <td>
                         {o.scheduledDate ? o.scheduledDate.substring(0, 16) : "—"}
