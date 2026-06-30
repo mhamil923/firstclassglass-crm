@@ -1564,17 +1564,18 @@ export default function ViewWorkOrder() {
       const selectedEst = preselectPdfId && estIds.includes(preselectPdfId)
         ? [preselectPdfId]
         : (estIds.length === 1 ? [estIds[0]] : (preselectPdfId ? [preselectPdfId] : []));
+      const photos = d.photos || [];
       setEstSendModal({
         to: d.to || "",
         subject: d.subject || "",
         body: d.body || "",
         estimatePdfs: d.estimatePdfs || [],
-        photos: d.photos || [],
+        photos,
         hasSignoff: !!d.hasSignoff,
         signoffName: d.signoffName || null,
-        selectedEst,            // estimate PDF ids (checked)
-        selectedPhotos: [],     // photo ids (unchecked by default)
-        includeSignoff: false,
+        selectedEst,                                  // estimate PDF ids (checked)
+        selectedPhotos: photos.map((p) => p.id),      // all photos checked by default
+        includeSignoff: !!d.hasSignoff,               // sign-off sheet checked by default (if one exists)
         sending: false,
       });
     } catch (err) {
@@ -2027,43 +2028,49 @@ export default function ViewWorkOrder() {
             onClick={() => !m.sending && closeEstimateSend()}
             style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
           >
-            <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, maxWidth: 640, width: "100%", maxHeight: "92vh", overflowY: "auto", padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-              <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 700, color: "#1b5e20" }}>Send Estimate to Customer</h3>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--bg-card-solid, #fff)", color: "var(--text-primary)", borderRadius: 12, maxWidth: 640, width: "100%", maxHeight: "92vh", overflowY: "auto", padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.5)", border: "1px solid var(--border-color)" }}>
+              {(() => {
+                // Shared dark-theme-aware input styling (matches the app's other dark modals)
+                const fieldStyle = { width: "100%", boxSizing: "border-box", padding: 10, borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border-color)" };
+                const labelStyle = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" };
+                return (
+                  <>
+              <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 700, color: "#34c759" }}>Send Estimate to Customer</h3>
 
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>To</label>
+              <label style={labelStyle}>To</label>
               <input
                 type="email" value={m.to} placeholder="Enter customer email"
                 onChange={(e) => upd({ to: e.target.value })}
-                style={{ width: "100%", boxSizing: "border-box", padding: 10, fontSize: 15, borderRadius: 8, border: `1px solid ${m.to && !emailOk ? "#dc2626" : "#d1d5db"}`, marginBottom: m.to ? 8 : 4 }}
+                style={{ ...fieldStyle, fontSize: 15, border: `1px solid ${m.to && !emailOk ? "#dc2626" : "var(--border-color)"}`, marginBottom: m.to ? 8 : 4 }}
               />
               {!m.to && (
                 <div className="tiny" style={{ color: "var(--text-secondary)", marginBottom: 8 }}>No email on file — enter one to send.</div>
               )}
 
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Subject</label>
+              <label style={labelStyle}>Subject</label>
               <input
                 type="text" value={m.subject} onChange={(e) => upd({ subject: e.target.value })}
-                style={{ width: "100%", boxSizing: "border-box", padding: 10, fontSize: 14, borderRadius: 8, border: "1px solid #d1d5db", marginBottom: 12 }}
+                style={{ ...fieldStyle, fontSize: 14, marginBottom: 12 }}
               />
 
-              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Message</label>
+              <label style={labelStyle}>Message</label>
               <textarea
                 value={m.body} onChange={(e) => upd({ body: e.target.value })} rows={10}
-                style={{ width: "100%", boxSizing: "border-box", padding: 10, fontSize: 13, borderRadius: 8, border: "1px solid #d1d5db", resize: "vertical", fontFamily: "inherit" }}
+                style={{ ...fieldStyle, fontSize: 13, resize: "vertical", fontFamily: "inherit" }}
               />
 
-              <div style={{ marginTop: 14, background: "#f8faf8", border: "1px solid #e2e8e2", borderRadius: 8, padding: 12 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Attachments</div>
+              <div style={{ marginTop: 14, background: "var(--bg-secondary)", border: "1px solid var(--border-color)", borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: "var(--text-primary)" }}>Attachments</div>
 
                 {m.estimatePdfs.map((e) => (
-                  <label key={`est-${e.id}`} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 6, cursor: "pointer" }}>
+                  <label key={`est-${e.id}`} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 6, cursor: "pointer", color: "var(--text-primary)" }}>
                     <input type="checkbox" checked={m.selectedEst.includes(e.id)} onChange={() => upd({ selectedEst: toggleInArray(m.selectedEst, e.id) })} />
                     <span>📄 {e.filename}</span>
                   </label>
                 ))}
 
                 {m.hasSignoff && (
-                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 6, cursor: "pointer" }}>
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 6, cursor: "pointer", color: "var(--text-primary)" }}>
                     <input type="checkbox" checked={m.includeSignoff} onChange={(e) => upd({ includeSignoff: e.target.checked })} />
                     <span>📝 Include sign-off sheet ({m.signoffName})</span>
                   </label>
@@ -2075,14 +2082,17 @@ export default function ViewWorkOrder() {
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {m.photos.map((p) => {
                         const sel = m.selectedPhotos.includes(p.id);
+                        // Resolve via urlFor(key) — the SAME builder the Image Attachments
+                        // section uses (uses API_BASE_URL, correct scheme — fixes blank boxes)
+                        const thumbSrc = p.key ? urlFor(p.key) : p.thumbnailUrl;
                         return (
                           <div
                             key={`ph-${p.id}`} onClick={() => upd({ selectedPhotos: toggleInArray(m.selectedPhotos, p.id) })}
-                            style={{ position: "relative", width: 72, height: 72, borderRadius: 8, overflow: "hidden", cursor: "pointer", border: sel ? "3px solid #1b5e20" : "1px solid #ccc" }}
+                            style={{ position: "relative", width: 72, height: 72, borderRadius: 8, overflow: "hidden", cursor: "pointer", border: sel ? "3px solid #34c759" : "1px solid var(--border-color)", background: "var(--bg-card-solid)" }}
                             title={p.filename}
                           >
-                            <img src={p.thumbnailUrl} alt={p.filename} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                            {sel && <div style={{ position: "absolute", top: 2, right: 4, color: "#1b5e20", fontWeight: 900, background: "rgba(255,255,255,0.85)", borderRadius: 8, padding: "0 4px" }}>✓</div>}
+                            <img src={thumbSrc} alt={p.filename} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            {sel && <div style={{ position: "absolute", top: 2, right: 4, color: "#0b3d2e", fontWeight: 900, background: "rgba(52,199,89,0.9)", borderRadius: 8, padding: "0 4px" }}>✓</div>}
                           </div>
                         );
                       })}
@@ -2096,7 +2106,7 @@ export default function ViewWorkOrder() {
               </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
-                <button type="button" onClick={closeEstimateSend} disabled={m.sending} style={{ padding: "10px 18px", cursor: "pointer", border: "1px solid #ccc", borderRadius: 8, background: "#f1f1f1" }}>Cancel</button>
+                <button type="button" onClick={closeEstimateSend} disabled={m.sending} style={{ padding: "10px 18px", cursor: "pointer", border: "1px solid var(--border-color)", borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)" }}>Cancel</button>
                 <button
                   type="button" onClick={sendEstimateEmail} disabled={!emailOk || m.sending}
                   style={{ padding: "10px 22px", borderRadius: 8, border: "none", fontWeight: 700, color: "#fff", background: (!emailOk || m.sending) ? "#9ca3af" : "#1b5e20", cursor: (!emailOk || m.sending) ? "not-allowed" : "pointer" }}
@@ -2104,6 +2114,9 @@ export default function ViewWorkOrder() {
                   {m.sending ? "Sending…" : "Send"}
                 </button>
               </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
         );
@@ -3068,31 +3081,40 @@ export default function ViewWorkOrder() {
                         </div>
                       ) : null;
                     })()}
-                    <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button
-                        type="button"
-                        className="po-btn-expand"
-                        onClick={() => openLightbox("pdf", href, name)}
-                      >
-                        Expand
-                      </button>
-                      <button
-                        type="button"
-                        className="po-btn-expand"
-                        onClick={() => openEstimateSend(pdf.id)}
-                        style={{ background: "#1b5e20", color: "#ffffff", borderColor: "#1b5e20" }}
-                      >
-                        Send to Customer
-                      </button>
-                      <button
-                        type="button"
-                        className="po-btn-expand"
-                        onClick={() => handleRemoveEstimatePdf(pdf.id)}
-                        disabled={busyEstimateUpload}
-                        style={{ background: "#dc2626", color: "#ffffff", borderColor: "#dc2626" }}
-                      >
-                        Remove
-                      </button>
+                    <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
+                      {(() => {
+                        // Identical sizing for all three so they read as a matching set
+                        const estBtn = { flex: "1 1 0", minWidth: 0, whiteSpace: "nowrap", padding: "6px 8px", fontSize: 12, lineHeight: 1.2, textAlign: "center" };
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              className="po-btn-expand"
+                              style={estBtn}
+                              onClick={() => openLightbox("pdf", href, name)}
+                            >
+                              Expand
+                            </button>
+                            <button
+                              type="button"
+                              className="po-btn-expand"
+                              style={{ ...estBtn, background: "#1b5e20", color: "#ffffff", borderColor: "#1b5e20" }}
+                              onClick={() => openEstimateSend(pdf.id)}
+                            >
+                              Send
+                            </button>
+                            <button
+                              type="button"
+                              className="po-btn-expand"
+                              style={{ ...estBtn, background: "#dc2626", color: "#ffffff", borderColor: "#dc2626" }}
+                              onClick={() => handleRemoveEstimatePdf(pdf.id)}
+                              disabled={busyEstimateUpload}
+                            >
+                              Remove
+                            </button>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 );
