@@ -1581,7 +1581,9 @@ export default function ViewWorkOrder() {
       const selectedEst = preselectPdfId && estIds.includes(preselectPdfId)
         ? [preselectPdfId]
         : (estIds.length === 1 ? [estIds[0]] : (preselectPdfId ? [preselectPdfId] : []));
-      const photos = d.photos || [];
+      // Exclude draw notes (sketch images) from the photo picker — only real photos.
+      // Reuses the same isDrawNote logic (overrides + filename heuristic) as the rest of the page.
+      const photos = (d.photos || []).filter((p) => !(p.key && isDrawNote(p.key)));
       setEstSendModal({
         to: d.to || "",
         subject: d.subject || "",
@@ -1651,7 +1653,8 @@ export default function ViewWorkOrder() {
       const selectedInv = preselectInvId && invIds.includes(preselectInvId)
         ? [preselectInvId]
         : (invIds.length === 1 ? [invIds[0]] : (preselectInvId ? [preselectInvId] : []));
-      const photos = d.photos || [];
+      // Exclude draw notes from the photo picker — only real photos (same logic as the page).
+      const photos = (d.photos || []).filter((p) => !(p.key && isDrawNote(p.key)));
       setInvSendModal({
         to: d.to || "",
         subject: d.subject || "",
@@ -3272,7 +3275,7 @@ export default function ViewWorkOrder() {
                     <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
                       {(() => {
                         // Identical sizing for all three so they read as a matching set
-                        const estBtn = { flex: "1 1 0", minWidth: 0, whiteSpace: "nowrap", padding: "6px 8px", fontSize: 12, lineHeight: 1.2, textAlign: "center" };
+                        const estBtn = { flex: "1 1 0", minWidth: 0, maxWidth: "none", whiteSpace: "nowrap", padding: "0 6px", fontSize: 12, lineHeight: 1.2, height: 32, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center" };
                         return (
                           <>
                             <button
@@ -3412,7 +3415,7 @@ export default function ViewWorkOrder() {
                           })()}
                           <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
                             {(() => {
-                              const invBtn = { flex: "1 1 0", minWidth: 0, whiteSpace: "nowrap", padding: "6px 8px", fontSize: 12, lineHeight: 1.2, textAlign: "center" };
+                              const invBtn = { flex: "1 1 0", minWidth: 0, maxWidth: "none", whiteSpace: "nowrap", padding: "0 6px", fontSize: 12, lineHeight: 1.2, height: 32, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center" };
                               return (
                                 <>
                                   {href && (
