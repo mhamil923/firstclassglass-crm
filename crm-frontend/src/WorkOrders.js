@@ -244,6 +244,10 @@ export default function WorkOrders() {
   // load data
   useEffect(() => {
     fetchWorkOrders();
+    // Fetch the Follow-Up list on mount so its tab badge shows the correct count
+    // immediately (it comes from a separate filtered endpoint, not the generic
+    // work-orders list, so the count can't be derived client-side like the others).
+    fetchFollowup();
     if (userRole !== "tech") {
       api
         .get("/users", { params: { assignees: 1 }, headers: authHeaders() })
