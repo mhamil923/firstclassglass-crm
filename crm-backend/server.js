@@ -5237,17 +5237,28 @@ function computeCollections(inv, now = new Date()) {
   const outstanding = round2(Math.max(0, total - amountPaid));
 
   const todayNum = dayNumber(now);
-  const issueDateObj = inv.issueDate ? new Date(inv.issueDate) : (inv.createdAt ? new Date(inv.createdAt) : new Date(now));
-  const issueNum = dayNumber(issueDateObj);
+  // Collections clock start: when the invoice was emailed to the customer
+  // (invoiceSentAt) takes precedence — the 45-day term runs from the send.
+  // Fall back to invoice date / docDate / createdAt for invoices never sent here.
+  const clockStartObj = inv.invoiceSentAt
+    ? new Date(inv.invoiceSentAt)
+    : (inv.issueDate ? new Date(inv.issueDate)
+      : (inv.docDate ? new Date(inv.docDate)
+        : (inv.createdAt ? new Date(inv.createdAt) : new Date(now))));
+  const issueNum = dayNumber(clockStartObj);
 
-  // dueDate = explicit invoices.dueDate if set, else invoice date + 45 days (net-45 term)
+  // dueDate = clockStart + 45 when sent; else explicit invoices.dueDate; else invoice date + 45 (net-45 term)
   let dueNum, dueLabel;
-  if (inv.dueDate) {
+  if (inv.invoiceSentAt) {
+    dueNum = issueNum + NET_TERM_DAYS;
+    dueLabel = new Date(clockStartObj);
+    dueLabel.setDate(dueLabel.getDate() + NET_TERM_DAYS);
+  } else if (inv.dueDate) {
     dueNum = dayNumber(inv.dueDate);
     dueLabel = new Date(inv.dueDate);
   } else {
     dueNum = issueNum + NET_TERM_DAYS;
-    dueLabel = new Date(issueDateObj);
+    dueLabel = new Date(clockStartObj);
     dueLabel.setDate(dueLabel.getDate() + NET_TERM_DAYS);
   }
 
@@ -7891,6 +7902,216 @@ app.get('/work-orders/:id/estimate-sends', authenticate, requireNumericParam('id
   } catch (err) {
     console.error('Estimate-sends list error:', err);
     res.status(500).json({ error: 'Failed to fetch estimate send history.' });
+  }
+});
+
+// ─── SEND INVOICE TO CUSTOMER (mirrors estimate-send; CRM-sent, no pay link) ──
+
+// GET /work-orders/:id/invoice-send/draft — prefilled compose data (no send)
+app.get('/work-orders/:id/invoice-send/draft', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const [[wo]] = await db.query(
+      `SELECT w.*, c.email AS custEmail2, c.name AS custName2, c.companyName AS custCompany2
+         FROM work_orders w LEFT JOIN customers c ON w.customerId = c.id WHERE w.id = ?`,
+      [wid]
+    );
+    if (!wo) return res.status(404).json({ error: 'Work order not found.' });
+
+    const to = wo.customerEmail || wo.custEmail2 || '';
+    const siteLabel = wo.siteLocation || wo.customer || '';
+    const siteAddr = wo.siteAddress || wo.siteLocation || wo.billingAddress || '';
+    const firstName = firstNameFrom(wo.customer || wo.custName2 || '') || 'there';
+
+    const subject = `Invoice from First Class Glass & Mirror — ${siteLabel || 'your project'}`;
+    const body =
+`Hi ${firstName},
+
+Thank you for your business. Please find your invoice attached for the work completed${siteAddr ? ` at ${siteAddr}` : ''}.
+
+Payment is due within 45 days of the invoice date. Please let us know if you would like to use a credit card for this payment, and we'll send you a secure payment link.
+
+If you have any questions, feel free to reach out anytime.
+
+Best regards,
+First Class Glass & Mirror, Inc.
+1513 Industrial Dr, Itasca, IL 60143
+630-250-9777`;
+
+    // Invoice PDFs on this WO (CRM-generated or uploaded QB invoices — those with a stored PDF)
+    const [invRows] = await db.query(
+      "SELECT id, invoiceNumber, qbDocNumber, pdfPath FROM invoices WHERE workOrderId = ? AND pdfPath IS NOT NULL AND pdfPath <> '' ORDER BY id DESC",
+      [wid]
+    );
+    const backendBase = `${req.headers['x-forwarded-proto'] || req.protocol || 'https'}://${req.get('host')}`;
+    const fileUrl = (k) => `${backendBase}/files?key=${encodeURIComponent(k)}`;
+    const invoicePdfs = invRows.map((p) => ({
+      id: p.id,
+      filename: `Invoice #${p.invoiceNumber || p.qbDocNumber || p.id}`,
+      url: fileUrl(p.pdfPath),
+    }));
+
+    // Photos = comma-separated keys in work_orders.photoPath (exclude PDFs)
+    const photoKeys = String(wo.photoPath || '').split(',').map((s) => s.trim()).filter(Boolean)
+      .filter((k) => !/\.pdf$/i.test(k));
+    const photos = photoKeys.map((k, idx) => ({
+      id: idx, key: k, filename: k.split('/').pop() || `photo_${idx}`, thumbnailUrl: fileUrl(k),
+    }));
+
+    const hasSignoff = !!(wo.pdfPath && /\.pdf$/i.test(wo.pdfPath));
+
+    res.json({
+      to, subject, body, invoicePdfs, photos, hasSignoff,
+      signoffName: hasSignoff ? ((wo.pdfPath || '').split('/').pop() || 'work-order.pdf') : null,
+    });
+  } catch (err) {
+    console.error('Invoice-send draft error:', err);
+    res.status(500).json({ error: 'Failed to build invoice email draft.' });
+  }
+});
+
+// POST /work-orders/:id/invoice-send — send the (edited) invoice email
+app.post('/work-orders/:id/invoice-send', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const b = coerceBody(req);
+
+    const to = String(b.to || '').trim();
+    const subject = String(b.subject || '').trim();
+    const body = String(b.body || '');
+    if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      return res.status(400).json({ error: 'A valid recipient email is required.' });
+    }
+    if (!subject) return res.status(400).json({ error: 'Subject is required.' });
+
+    const [[wo]] = await db.query('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    if (!wo) return res.status(404).json({ error: 'Work order not found.' });
+
+    const invoicePdfIds = Array.isArray(b.invoicePdfIds) ? b.invoicePdfIds.map(Number).filter(Number.isFinite) : [];
+    const photoIds = Array.isArray(b.photoIds) ? b.photoIds.map(Number).filter(Number.isFinite) : [];
+    const includeSignoff = !!b.includeSignoff;
+    const primaryInvId = invoicePdfIds.length ? invoicePdfIds[0] : null;
+
+    // ── ATOMIC CLAIM (INSERT-as-lock) — same single-send guard as estimate-send ──
+    const [claim] = await db.query(
+      `INSERT INTO invoice_sends (workOrderId, invoiceId, sentTo, sentBy, subject, body, attachmentCount)
+       SELECT ?, ?, ?, ?, ?, ?, 0
+       WHERE NOT EXISTS (
+         SELECT 1 FROM invoice_sends WHERE workOrderId = ? AND sentTo = ? AND sentAt >= DATE_SUB(NOW(), INTERVAL 30 SECOND)
+       )`,
+      [wid, primaryInvId, to, req.user?.username || null, subject, body, wid, to]
+    );
+    if (!claim.affectedRows) {
+      const [[existing]] = await db.query(
+        'SELECT id, attachmentCount FROM invoice_sends WHERE workOrderId = ? AND sentTo = ? ORDER BY id DESC LIMIT 1',
+        [wid, to]
+      );
+      console.log('[invoice-send] duplicate suppressed (atomic guard) for WO', wid, 'to', to);
+      return res.json({ ok: true, sentTo: to, attachmentCount: existing?.attachmentCount ?? 0, deduped: true });
+    }
+    const sendRowId = claim.insertId;
+
+    try {
+      const attachments = [];
+
+      // Invoice PDFs (validate they belong to this WO)
+      if (invoicePdfIds.length) {
+        const [invRows] = await db.query(
+          `SELECT id, invoiceNumber, qbDocNumber, pdfPath FROM invoices WHERE workOrderId = ? AND id IN (${invoicePdfIds.map(() => '?').join(',')})`,
+          [wid, ...invoicePdfIds]
+        );
+        for (const r of invRows) {
+          if (!r.pdfPath) continue;
+          try {
+            const a = await resolvePdfAttachment(r.pdfPath);
+            attachments.push({ filename: `Invoice_${r.invoiceNumber || r.qbDocNumber || r.id}.pdf`, content: a.buffer });
+          } catch (e) { console.warn('[invoice-send] invoice attach failed:', r.pdfPath, e.message); }
+        }
+      }
+
+      // Sign-off / WO PDF
+      if (includeSignoff && wo.pdfPath && /\.pdf$/i.test(wo.pdfPath)) {
+        try {
+          const a = await resolvePdfAttachment(wo.pdfPath);
+          attachments.push({ filename: a.filename, content: a.buffer });
+        } catch (e) { console.warn('[invoice-send] signoff attach failed:', e.message); }
+      }
+
+      // Photos (resolve selected indices against the WO's photoPath CSV, PDFs excluded)
+      if (photoIds.length) {
+        const photoKeys = String(wo.photoPath || '').split(',').map((s) => s.trim()).filter(Boolean)
+          .filter((k) => !/\.pdf$/i.test(k));
+        for (const idx of photoIds) {
+          const key = photoKeys[idx];
+          if (!key) continue;
+          try {
+            const a = await resolvePdfAttachment(key);
+            attachments.push({ filename: a.filename, content: a.buffer });
+          } catch (e) { console.warn('[invoice-send] photo attach failed:', key, e.message); }
+        }
+      }
+
+      // Send via existing transport (branded HTML; no pay link — credit-card handled manually)
+      const { transport, settings } = await createEmailTransport();
+      const html = `
+        <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+          <div style="background:white;padding:30px 20px;text-align:center;border-bottom:3px solid #1b5e20;border-radius:12px 12px 0 0">
+            <div style="color:#1b5e20;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">INVOICE</div>
+          </div>
+          <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
+            ${String(body).replace(/\n/g, '<br>')}
+          </div>
+          <div style="text-align:center;padding:16px;color:#999;font-size:11px">First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777</div>
+        </div>`;
+
+      console.log('[invoice-send] sending ONE email -> to:', to, '| WO:', wid, '| attachments:', attachments.length);
+      await transport.sendMail({
+        from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+        replyTo: settings.replyTo || settings.senderEmail,
+        to, subject, text: body, html, attachments,
+      });
+
+      // Finalize the claimed row with the real attachment count
+      await db.query('UPDATE invoice_sends SET attachmentCount = ? WHERE id = ?', [attachments.length, sendRowId]);
+
+      // Start the collections clock once (preserve original on re-send) + mark Sent if unset
+      if (invoicePdfIds.length) {
+        await db.query(
+          `UPDATE invoices
+              SET invoiceSentAt = COALESCE(invoiceSentAt, NOW()),
+                  status = CASE WHEN status IS NULL OR status = '' OR status = 'Draft' THEN 'Sent' ELSE status END,
+                  updatedAt = NOW()
+            WHERE workOrderId = ? AND id IN (${invoicePdfIds.map(() => '?').join(',')})`,
+          [wid, ...invoicePdfIds]
+        );
+      }
+      // Persist the typed email if the WO had none
+      if (!wo.customerEmail) {
+        await db.query('UPDATE work_orders SET customerEmail = ? WHERE id = ? AND (customerEmail IS NULL OR customerEmail = "")', [to, wid]);
+      }
+
+      res.json({ ok: true, sentTo: to, attachmentCount: attachments.length });
+    } catch (sendErr) {
+      await db.query('DELETE FROM invoice_sends WHERE id = ?', [sendRowId]).catch(() => {});
+      throw sendErr;
+    }
+  } catch (err) {
+    console.error('Invoice-send error:', err);
+    res.status(500).json({ error: err.message || 'Failed to send invoice.' });
+  }
+});
+
+// GET /work-orders/:id/invoice-sends — send history (for "Sent to X on DATE" on cards)
+app.get('/work-orders/:id/invoice-sends', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT id, workOrderId, invoiceId, sentTo, sentBy, attachmentCount, sentAt FROM invoice_sends WHERE workOrderId = ? ORDER BY sentAt DESC, id DESC',
+      [Number(req.params.id)]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Invoice-sends list error:', err);
+    res.status(500).json({ error: 'Failed to fetch invoice send history.' });
   }
 });
 

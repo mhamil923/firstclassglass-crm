@@ -463,6 +463,10 @@ export default function ViewWorkOrder() {
   const [estSendModal, setEstSendModal] = useState(null); // null | draft-state object
   const [estimateSends, setEstimateSends] = useState([]);
 
+  // Send Invoice to Customer — compose modal + send history (mirrors estimate-send)
+  const [invSendModal, setInvSendModal] = useState(null);
+  const [invoiceSends, setInvoiceSends] = useState([]);
+
   // QuickBooks metadata capture — folded into the Estimate + Invoice upload flows.
   // qbModal: null when closed, otherwise { docType: 'Estimate'|'Invoice', editingId|null }
   const [qbModal, setQbModal] = useState(null);
@@ -516,6 +520,7 @@ export default function ViewWorkOrder() {
   const scheduleInputRef = useRef(null);
   const estimateFileRef = useRef(null);
   const estSendingRef = useRef(false); // synchronous lock — hard-blocks rapid double-clicks
+  const invSendingRef = useRef(false);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [quickScheduledDate, setQuickScheduledDate] = useState(""); // datetime-local value string
 
@@ -701,6 +706,17 @@ export default function ViewWorkOrder() {
     } catch (err) {
       console.error("Error fetching estimate sends:", err);
       setEstimateSends([]);
+    }
+  };
+
+  // Also above the early return — called from the mount effect (TDZ-safe).
+  const fetchInvoiceSends = async () => {
+    try {
+      const res = await api.get(`/work-orders/${id}/invoice-sends`, { headers: authHeaders() });
+      setInvoiceSends(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Error fetching invoice sends:", err);
+      setInvoiceSends([]);
     }
   };
 
@@ -918,6 +934,7 @@ export default function ViewWorkOrder() {
     fetchLinkedInvoices();
     fetchEstimatePdfs();
     fetchEstimateSends();
+    fetchInvoiceSends();
     fetchResidentialContract();
     fetchTechUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1625,6 +1642,71 @@ export default function ViewWorkOrder() {
     }
   };
 
+  // ─── Invoice send (mirrors estimate send; pre-checks invoice PDF + sign-off + photos) ───
+  const openInvoiceSend = async (preselectInvId) => {
+    try {
+      const res = await api.get(`/work-orders/${id}/invoice-send/draft`, { headers: authHeaders() });
+      const d = res.data || {};
+      const invIds = Array.isArray(d.invoicePdfs) ? d.invoicePdfs.map((e) => e.id) : [];
+      const selectedInv = preselectInvId && invIds.includes(preselectInvId)
+        ? [preselectInvId]
+        : (invIds.length === 1 ? [invIds[0]] : (preselectInvId ? [preselectInvId] : []));
+      const photos = d.photos || [];
+      setInvSendModal({
+        to: d.to || "",
+        subject: d.subject || "",
+        body: d.body || "",
+        invoicePdfs: d.invoicePdfs || [],
+        photos,
+        hasSignoff: !!d.hasSignoff,
+        signoffName: d.signoffName || null,
+        selectedInv,                              // invoice PDF ids (checked)
+        selectedPhotos: photos.map((p) => p.id),  // all photos checked by default
+        includeSignoff: !!d.hasSignoff,           // sign-off checked by default (if exists)
+        sending: false,
+      });
+    } catch (err) {
+      console.error("Error building invoice draft:", err);
+      alert(err?.response?.data?.error || "Failed to open invoice composer.");
+    }
+  };
+
+  const closeInvoiceSend = () => setInvSendModal(null);
+
+  const sendInvoiceEmail = async () => {
+    if (invSendingRef.current) return;
+    if (!invSendModal || invSendModal.sending) return;
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((invSendModal.to || "").trim());
+    if (!emailOk) { alert("Please enter a valid customer email."); return; }
+    invSendingRef.current = true;
+    setInvSendModal((m) => ({ ...m, sending: true }));
+    try {
+      const res = await api.post(
+        `/work-orders/${id}/invoice-send`,
+        {
+          to: invSendModal.to.trim(),
+          subject: invSendModal.subject,
+          body: invSendModal.body,
+          invoicePdfIds: invSendModal.selectedInv,
+          photoIds: invSendModal.selectedPhotos,
+          includeSignoff: invSendModal.includeSignoff,
+        },
+        { headers: authHeaders() }
+      );
+      const sentTo = res.data?.sentTo || invSendModal.to.trim();
+      setInvSendModal(null);
+      await fetchInvoiceSends();
+      await fetchLinkedInvoices(); // refresh status/invoiceSentAt
+      alert(`Invoice sent to ${sentTo}.`);
+    } catch (err) {
+      console.error("Error sending invoice:", err);
+      alert(err?.response?.data?.error || "Failed to send invoice.");
+      setInvSendModal((m) => (m ? { ...m, sending: false } : m));
+    } finally {
+      invSendingRef.current = false;
+    }
+  };
+
   const handleRemoveEstimatePdf = async (pdfId) => {
     if (!pdfId) return;
     if (!window.confirm("Remove this estimate PDF? This cannot be undone.")) return;
@@ -2109,6 +2191,112 @@ export default function ViewWorkOrder() {
                 <button type="button" onClick={closeEstimateSend} disabled={m.sending} style={{ padding: "10px 18px", cursor: "pointer", border: "1px solid var(--border-color)", borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)" }}>Cancel</button>
                 <button
                   type="button" onClick={sendEstimateEmail} disabled={!emailOk || m.sending}
+                  style={{ padding: "10px 22px", borderRadius: 8, border: "none", fontWeight: 700, color: "#fff", background: (!emailOk || m.sending) ? "#9ca3af" : "#1b5e20", cursor: (!emailOk || m.sending) ? "not-allowed" : "pointer" }}
+                >
+                  {m.sending ? "Sending…" : "Send"}
+                </button>
+              </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ───── Send Invoice to Customer — compose modal (mirrors estimate modal) ───── */}
+      {invSendModal && (() => {
+        const m = invSendModal;
+        const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((m.to || "").trim());
+        const attachCount = m.selectedInv.length + m.selectedPhotos.length + (m.includeSignoff ? 1 : 0);
+        const upd = (patch) => setInvSendModal((s) => ({ ...s, ...patch }));
+        return (
+          <div
+            role="dialog" aria-modal="true"
+            onClick={() => !m.sending && closeInvoiceSend()}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+          >
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--bg-card-solid, #fff)", color: "var(--text-primary)", borderRadius: 12, maxWidth: 640, width: "100%", maxHeight: "92vh", overflowY: "auto", padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.5)", border: "1px solid var(--border-color)" }}>
+              {(() => {
+                const fieldStyle = { width: "100%", boxSizing: "border-box", padding: 10, borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border-color)" };
+                const labelStyle = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" };
+                return (
+                  <>
+              <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 700, color: "#34c759" }}>Send Invoice to Customer</h3>
+
+              <label style={labelStyle}>To</label>
+              <input
+                type="email" value={m.to} placeholder="Enter customer email"
+                onChange={(e) => upd({ to: e.target.value })}
+                style={{ ...fieldStyle, fontSize: 15, border: `1px solid ${m.to && !emailOk ? "#dc2626" : "var(--border-color)"}`, marginBottom: m.to ? 8 : 4 }}
+              />
+              {!m.to && (
+                <div className="tiny" style={{ color: "var(--text-secondary)", marginBottom: 8 }}>No email on file — enter one to send.</div>
+              )}
+
+              <label style={labelStyle}>Subject</label>
+              <input
+                type="text" value={m.subject} onChange={(e) => upd({ subject: e.target.value })}
+                style={{ ...fieldStyle, fontSize: 14, marginBottom: 12 }}
+              />
+
+              <label style={labelStyle}>Message</label>
+              <textarea
+                value={m.body} onChange={(e) => upd({ body: e.target.value })} rows={10}
+                style={{ ...fieldStyle, fontSize: 13, resize: "vertical", fontFamily: "inherit" }}
+              />
+
+              <div style={{ marginTop: 14, background: "var(--bg-secondary)", border: "1px solid var(--border-color)", borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: "var(--text-primary)" }}>Attachments</div>
+
+                {m.invoicePdfs.map((e) => (
+                  <label key={`inv-${e.id}`} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 6, cursor: "pointer", color: "var(--text-primary)" }}>
+                    <input type="checkbox" checked={m.selectedInv.includes(e.id)} onChange={() => upd({ selectedInv: toggleInArray(m.selectedInv, e.id) })} />
+                    <span>🧾 {e.filename}</span>
+                  </label>
+                ))}
+                {m.invoicePdfs.length === 0 && (
+                  <div className="tiny" style={{ color: "var(--text-secondary)", marginBottom: 6 }}>No invoice PDF on this work order — attach one to the invoice first.</div>
+                )}
+
+                {m.hasSignoff && (
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 6, cursor: "pointer", color: "var(--text-primary)" }}>
+                    <input type="checkbox" checked={m.includeSignoff} onChange={(e) => upd({ includeSignoff: e.target.checked })} />
+                    <span>📝 Include sign-off sheet ({m.signoffName})</span>
+                  </label>
+                )}
+
+                {m.photos.length > 0 && (
+                  <>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)", margin: "8px 0 6px" }}>Photos (tap to include)</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {m.photos.map((p) => {
+                        const sel = m.selectedPhotos.includes(p.id);
+                        const thumbSrc = p.key ? urlFor(p.key) : p.thumbnailUrl;
+                        return (
+                          <div
+                            key={`ph-${p.id}`} onClick={() => upd({ selectedPhotos: toggleInArray(m.selectedPhotos, p.id) })}
+                            style={{ position: "relative", width: 72, height: 72, borderRadius: 8, overflow: "hidden", cursor: "pointer", border: sel ? "3px solid #34c759" : "1px solid var(--border-color)", background: "var(--bg-card-solid)" }}
+                            title={p.filename}
+                          >
+                            <img src={thumbSrc} alt={p.filename} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            {sel && <div style={{ position: "absolute", top: 2, right: 4, color: "#0b3d2e", fontWeight: 900, background: "rgba(52,199,89,0.9)", borderRadius: 8, padding: "0 4px" }}>✓</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                <div className="tiny" style={{ marginTop: 10, color: "var(--text-secondary)" }}>
+                  {attachCount} attachment{attachCount === 1 ? "" : "s"}{attachCount > 6 ? " — large emails (>10 MB) may be slow to deliver." : ""}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+                <button type="button" onClick={closeInvoiceSend} disabled={m.sending} style={{ padding: "10px 18px", cursor: "pointer", border: "1px solid var(--border-color)", borderRadius: 8, background: "var(--bg-secondary)", color: "var(--text-primary)" }}>Cancel</button>
+                <button
+                  type="button" onClick={sendInvoiceEmail} disabled={!emailOk || m.sending}
                   style={{ padding: "10px 22px", borderRadius: 8, border: "none", fontWeight: 700, color: "#fff", background: (!emailOk || m.sending) ? "#9ca3af" : "#1b5e20", cursor: (!emailOk || m.sending) ? "not-allowed" : "pointer" }}
                 >
                   {m.sending ? "Sending…" : "Send"}
@@ -3214,12 +3402,28 @@ export default function ViewWorkOrder() {
                             {inv.docDate || inv.issueDate ? new Date(inv.docDate || inv.issueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "No date"}
                             {sl === "partial" ? ` • Paid ${money(paid)} of ${money(total)}` : ""}
                           </div>
-                          <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            {href && (
-                              <button type="button" className="po-btn-expand" onClick={() => openLightbox("pdf", href, label)}>Expand</button>
-                            )}
-                            <button type="button" className="po-btn-expand" onClick={() => openQbModal("Invoice", inv)}>Edit</button>
-                            <button type="button" className="po-btn-expand" onClick={() => deleteUploadedInvoice(inv.id)} style={{ background: "#dc2626", color: "#ffffff", borderColor: "#dc2626" }}>Remove</button>
+                          {(() => {
+                            const lastSend = invoiceSends.find((s) => s.invoiceId === inv.id) || null;
+                            return lastSend ? (
+                              <div className="tiny" style={{ color: "#1b5e20", padding: "0 8px", fontWeight: 600 }}>
+                                ✉ Sent to {lastSend.sentTo} on {new Date(lastSend.sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                              </div>
+                            ) : null;
+                          })()}
+                          <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
+                            {(() => {
+                              const invBtn = { flex: "1 1 0", minWidth: 0, whiteSpace: "nowrap", padding: "6px 8px", fontSize: 12, lineHeight: 1.2, textAlign: "center" };
+                              return (
+                                <>
+                                  {href && (
+                                    <button type="button" className="po-btn-expand" style={invBtn} onClick={() => openLightbox("pdf", href, label)}>Expand</button>
+                                  )}
+                                  <button type="button" className="po-btn-expand" style={{ ...invBtn, background: "#1b5e20", color: "#ffffff", borderColor: "#1b5e20" }} onClick={() => openInvoiceSend(inv.id)}>Send</button>
+                                  <button type="button" className="po-btn-expand" style={invBtn} onClick={() => openQbModal("Invoice", inv)}>Edit</button>
+                                  <button type="button" className="po-btn-expand" style={{ ...invBtn, background: "#dc2626", color: "#ffffff", borderColor: "#dc2626" }} onClick={() => deleteUploadedInvoice(inv.id)}>Remove</button>
+                                </>
+                              );
+                            })()}
                           </div>
                         </div>
                       );
