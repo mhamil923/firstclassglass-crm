@@ -23,6 +23,7 @@ import ViewEstimate from "./ViewEstimate";
 import ViewInvoice from "./ViewInvoice";
 import Collections from "./Collections";
 import SignContract from "./SignContract";
+import EstimateResponse from "./EstimateResponse";
 import Reports from "./Reports";
 import RouteBuilder from "./RouteBuilder";
 import LineItemTemplates from "./LineItemTemplates";
@@ -51,6 +52,7 @@ export default function App() {
             {/* Public */}
             <Route path="/login" element={<Login />} />
             <Route path="/sign-contract/:token" element={<SignContract />} />
+            <Route path="/estimate-response/:token" element={<EstimateResponse />} />
 
             {/* Protected */}
             <Route

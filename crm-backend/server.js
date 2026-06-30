@@ -7734,98 +7734,143 @@ app.post('/work-orders/:id/estimate-send', authenticate, requireNumericParam('id
     const [[wo]] = await db.query('SELECT * FROM work_orders WHERE id = ?', [wid]);
     if (!wo) return res.status(404).json({ error: 'Work order not found.' });
 
-    // Atomic no-double-send guard: refuse if an estimate_sends row to the same
-    // address exists in the last 30 seconds (blocks double-click).
-    const [[recent]] = await db.query(
-      "SELECT id FROM estimate_sends WHERE workOrderId = ? AND sentTo = ? AND sentAt >= DATE_SUB(NOW(), INTERVAL 30 SECOND) LIMIT 1",
-      [wid, to]
-    );
-    if (recent) {
-      return res.status(409).json({ error: 'This estimate was just sent moments ago.' });
-    }
-
     const estimatePdfIds = Array.isArray(b.estimatePdfIds) ? b.estimatePdfIds.map(Number).filter(Number.isFinite) : [];
     const photoIds = Array.isArray(b.photoIds) ? b.photoIds.map(Number).filter(Number.isFinite) : [];
     const includeSignoff = !!b.includeSignoff;
+    const primaryEstId = estimatePdfIds.length ? estimatePdfIds[0] : null;
 
-    const attachments = [];
-
-    // Estimate PDFs
-    let firstEstId = null;
-    if (estimatePdfIds.length) {
-      const [estRows] = await db.query(
-        `SELECT id, filename, originalName FROM work_order_estimate_pdfs WHERE workOrderId = ? AND id IN (${estimatePdfIds.map(() => '?').join(',')})`,
-        [wid, ...estimatePdfIds]
+    // ── ATOMIC CLAIM (INSERT-as-lock) ────────────────────────────────────────
+    // Insert the estimate_sends row FIRST, only if no row for this WO+recipient
+    // exists in the last 30s. The NOT EXISTS check + INSERT are a single atomic
+    // statement, so two concurrent requests (double-fire) can't both claim — the
+    // loser gets affectedRows=0 and we skip its send. Mirrors the public_tokens
+    // UPDATE-as-lock that fixed the earlier duplicate-notification bug.
+    const [claim] = await db.query(
+      `INSERT INTO estimate_sends (workOrderId, estimatePdfId, sentTo, sentBy, subject, body, attachmentCount)
+       SELECT ?, ?, ?, ?, ?, ?, 0
+       WHERE NOT EXISTS (
+         SELECT 1 FROM estimate_sends WHERE workOrderId = ? AND sentTo = ? AND sentAt >= DATE_SUB(NOW(), INTERVAL 30 SECOND)
+       )`,
+      [wid, primaryEstId, to, req.user?.username || null, subject, body, wid, to]
+    );
+    if (!claim.affectedRows) {
+      // A concurrent/duplicate send already claimed this WO+recipient — make the
+      // double-fire harmless: don't send again, return the existing result.
+      const [[existing]] = await db.query(
+        'SELECT id, attachmentCount FROM estimate_sends WHERE workOrderId = ? AND sentTo = ? ORDER BY id DESC LIMIT 1',
+        [wid, to]
       );
-      for (const r of estRows) {
-        if (firstEstId === null) firstEstId = r.id;
-        try {
-          const a = await resolvePdfAttachment(r.filename);
-          attachments.push({ filename: r.originalName || a.filename, content: a.buffer });
-        } catch (e) { console.warn('[estimate-send] estimate attach failed:', r.filename, e.message); }
+      console.log('[estimate-send] duplicate suppressed (atomic guard) for WO', wid, 'to', to);
+      return res.json({ ok: true, sentTo: to, attachmentCount: existing?.attachmentCount ?? 0, deduped: true });
+    }
+    const sendRowId = claim.insertId;
+
+    try {
+      const attachments = [];
+
+      // Estimate PDFs
+      if (estimatePdfIds.length) {
+        const [estRows] = await db.query(
+          `SELECT id, filename, originalName FROM work_order_estimate_pdfs WHERE workOrderId = ? AND id IN (${estimatePdfIds.map(() => '?').join(',')})`,
+          [wid, ...estimatePdfIds]
+        );
+        for (const r of estRows) {
+          try {
+            const a = await resolvePdfAttachment(r.filename);
+            attachments.push({ filename: r.originalName || a.filename, content: a.buffer });
+          } catch (e) { console.warn('[estimate-send] estimate attach failed:', r.filename, e.message); }
+        }
       }
-    }
 
-    // Sign-off / WO PDF
-    if (includeSignoff && wo.pdfPath && /\.pdf$/i.test(wo.pdfPath)) {
-      try {
-        const a = await resolvePdfAttachment(wo.pdfPath);
-        attachments.push({ filename: a.filename, content: a.buffer });
-      } catch (e) { console.warn('[estimate-send] signoff attach failed:', e.message); }
-    }
-
-    // Photos (resolve selected indices against the WO's photoPath CSV, PDFs excluded)
-    if (photoIds.length) {
-      const photoKeys = String(wo.photoPath || '').split(',').map((s) => s.trim()).filter(Boolean)
-        .filter((k) => !/\.pdf$/i.test(k));
-      for (const idx of photoIds) {
-        const key = photoKeys[idx];
-        if (!key) continue;
+      // Sign-off / WO PDF
+      if (includeSignoff && wo.pdfPath && /\.pdf$/i.test(wo.pdfPath)) {
         try {
-          const a = await resolvePdfAttachment(key);
+          const a = await resolvePdfAttachment(wo.pdfPath);
           attachments.push({ filename: a.filename, content: a.buffer });
-        } catch (e) { console.warn('[estimate-send] photo attach failed:', key, e.message); }
+        } catch (e) { console.warn('[estimate-send] signoff attach failed:', e.message); }
       }
+
+      // Photos (resolve selected indices against the WO's photoPath CSV, PDFs excluded)
+      if (photoIds.length) {
+        const photoKeys = String(wo.photoPath || '').split(',').map((s) => s.trim()).filter(Boolean)
+          .filter((k) => !/\.pdf$/i.test(k));
+        for (const idx of photoIds) {
+          const key = photoKeys[idx];
+          if (!key) continue;
+          try {
+            const a = await resolvePdfAttachment(key);
+            attachments.push({ filename: a.filename, content: a.buffer });
+          } catch (e) { console.warn('[estimate-send] photo attach failed:', key, e.message); }
+        }
+      }
+
+      // Accept/Decline response token (one per WO+estimate). DELETE-before-INSERT.
+      const respToken = generatePublicToken();
+      const appUrl = ((await getAppPublicUrl(req)) || 'https://main.d2c3mwinxmekdi.amplifyapp.com').replace(/\/$/, '');
+      const respUrl = `${appUrl}/estimate-response/${respToken}`;
+      const acceptUrl = `${respUrl}?action=accept`;
+      const declineUrl = `${respUrl}?action=decline`;
+
+      // Send via existing transport (branded HTML, matches other CRM emails)
+      const { transport, settings } = await createEmailTransport();
+      const html = `
+        <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+          <div style="background:white;padding:30px 20px;text-align:center;border-bottom:3px solid #1b5e20;border-radius:12px 12px 0 0">
+            <div style="color:#1b5e20;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">ESTIMATE</div>
+          </div>
+          <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
+            ${String(body).replace(/\n/g, '<br>')}
+            <div style="text-align:center;margin:28px 0 8px">
+              <a href="${acceptUrl}" style="display:inline-block;padding:14px 30px;margin:6px;background:#16a34a;color:#fff;text-decoration:none;border-radius:8px;font-size:16px;font-weight:700">✓ Accept Estimate</a>
+              <a href="${declineUrl}" style="display:inline-block;padding:14px 30px;margin:6px;background:#dc2626;color:#fff;text-decoration:none;border-radius:8px;font-size:16px;font-weight:700">✕ Decline Estimate</a>
+            </div>
+            <p style="text-align:center;font-size:12px;color:#999;margin-top:8px">Or review and respond here: <a href="${respUrl}">${respUrl}</a></p>
+          </div>
+          <div style="text-align:center;padding:16px;color:#999;font-size:11px">First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777</div>
+        </div>`;
+      const textBody = `${body}\n\nAccept this estimate: ${acceptUrl}\nDecline this estimate: ${declineUrl}\n\nOr review here: ${respUrl}`;
+
+      console.log('[estimate-send] sending ONE email -> to:', to, '| WO:', wid, '| attachments:', attachments.length);
+      await transport.sendMail({
+        from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+        replyTo: settings.replyTo || settings.senderEmail,
+        to,
+        subject,
+        text: textBody,
+        html,
+        attachments,
+      });
+
+      // Persist the response token only after a successful send (DELETE-before-INSERT)
+      const tokenExpiry = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
+      await db.query(
+        "DELETE FROM public_tokens WHERE type='estimate_response' AND workOrderId=? AND (estimatePdfId <=> ?) AND usedAt IS NULL",
+        [wid, primaryEstId]
+      );
+      await db.query(
+        "INSERT INTO public_tokens (token, type, workOrderId, estimatePdfId, recipientEmail, expiresAt) VALUES (?, 'estimate_response', ?, ?, ?, ?)",
+        [respToken, wid, primaryEstId, to, tokenExpiry]
+      );
+
+      // Finalize the claimed estimate_sends row with the real attachment count
+      await db.query('UPDATE estimate_sends SET attachmentCount = ? WHERE id = ?', [attachments.length, sendRowId]);
+
+      // Start the follow-up clock once (preserve original if re-sent)
+      await db.query(
+        'UPDATE work_orders SET estimateSentAt = NOW(), updatedAt = NOW() WHERE id = ? AND estimateSentAt IS NULL',
+        [wid]
+      );
+      // Persist the typed email if the WO had none
+      if (!wo.customerEmail) {
+        await db.query('UPDATE work_orders SET customerEmail = ? WHERE id = ? AND (customerEmail IS NULL OR customerEmail = "")', [to, wid]);
+      }
+
+      res.json({ ok: true, sentTo: to, attachmentCount: attachments.length, respondUrl: respUrl });
+    } catch (sendErr) {
+      // Send failed — release the claim so a retry can proceed.
+      await db.query('DELETE FROM estimate_sends WHERE id = ?', [sendRowId]).catch(() => {});
+      throw sendErr;
     }
-
-    // Send via existing transport (branded HTML, matches other CRM emails)
-    const { transport, settings } = await createEmailTransport();
-    const html = `
-      <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-        <div style="background:white;padding:30px 20px;text-align:center;border-bottom:3px solid #1b5e20;border-radius:12px 12px 0 0">
-          <div style="color:#1b5e20;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">ESTIMATE</div>
-        </div>
-        <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
-          ${String(body).replace(/\n/g, '<br>')}
-        </div>
-        <div style="text-align:center;padding:16px;color:#999;font-size:11px">First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777</div>
-      </div>`;
-    await transport.sendMail({
-      from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
-      replyTo: settings.replyTo || settings.senderEmail,
-      to,
-      subject,
-      text: body,
-      html,
-      attachments,
-    });
-
-    await db.query(
-      'INSERT INTO estimate_sends (workOrderId, estimatePdfId, sentTo, sentBy, subject, body, attachmentCount) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [wid, firstEstId, to, req.user?.username || null, subject, body, attachments.length]
-    );
-
-    // Start the follow-up clock once (preserve original if re-sent)
-    await db.query(
-      'UPDATE work_orders SET estimateSentAt = NOW(), updatedAt = NOW() WHERE id = ? AND estimateSentAt IS NULL',
-      [wid]
-    );
-    // Also persist the typed email if the WO had none
-    if (!wo.customerEmail) {
-      await db.query('UPDATE work_orders SET customerEmail = ? WHERE id = ? AND (customerEmail IS NULL OR customerEmail = "")', [to, wid]);
-    }
-
-    res.json({ ok: true, sentTo: to, attachmentCount: attachments.length });
   } catch (err) {
     console.error('Estimate-send error:', err);
     res.status(500).json({ error: err.message || 'Failed to send estimate.' });
@@ -10596,6 +10641,114 @@ app.post(['/public/contract/:token/sign', '/api/public/contract/:token/sign'], a
   } catch (err) {
     console.error('[Public] contract sign error:', err.message, err.stack);
     res.status(500).json({ error: 'Failed to sign contract.' });
+  }
+});
+
+// ─── PUBLIC ESTIMATE ACCEPT/DECLINE (no auth, tokenized) ────────────────────
+// GET display data for the response page (does NOT mark the token used)
+app.get(['/public/estimate-response/:token', '/api/public/estimate-response/:token'], async (req, res) => {
+  try {
+    const [[tok]] = await db.query(
+      "SELECT * FROM public_tokens WHERE token = ? AND type = 'estimate_response'",
+      [req.params.token]
+    );
+    if (!tok) return res.json({ status: 'invalid' });
+    if (tok.expiresAt && new Date(tok.expiresAt) < new Date()) return res.json({ status: 'invalid' });
+    if (tok.usedAt) {
+      const resp = tok.response === 'accept' ? 'Accepted' : (tok.response === 'decline' ? 'Declined' : 'Responded');
+      return res.json({ status: 'already_responded', response: resp });
+    }
+
+    const [[wo]] = await db.query(
+      'SELECT id, customer, siteLocation, siteAddress, billingAddress, workOrderNumber FROM work_orders WHERE id = ?',
+      [tok.workOrderId]
+    );
+    let pdfUrl = null, amount = null;
+    if (tok.estimatePdfId) {
+      const [[pdf]] = await db.query('SELECT filename, amount FROM work_order_estimate_pdfs WHERE id = ?', [tok.estimatePdfId]);
+      if (pdf) {
+        const backendBase = `${req.headers['x-forwarded-proto'] || req.protocol || 'https'}://${req.get('host')}`;
+        pdfUrl = `${backendBase}/files?key=${encodeURIComponent(pdf.filename)}`;
+        amount = pdf.amount;
+      }
+    }
+
+    res.json({
+      status: 'ok',
+      workOrderId: tok.workOrderId,
+      workOrderNumber: wo?.workOrderNumber || null,
+      customer: wo?.customer || '',
+      siteAddress: wo?.siteAddress || wo?.siteLocation || wo?.billingAddress || '',
+      amount,
+      pdfUrl,
+    });
+  } catch (err) {
+    console.error('[Public] estimate-response get error:', err.message);
+    res.status(500).json({ status: 'error', error: 'Failed to load estimate.' });
+  }
+});
+
+// POST accept/decline — ATOMIC LOCK FIRST, then WO status + estimate status + office email
+app.post(['/public/estimate-response/:token', '/api/public/estimate-response/:token'], async (req, res) => {
+  try {
+    const token = req.params.token;
+    const action = String((req.body && req.body.action) || '').toLowerCase();
+    if (!['accept', 'decline'].includes(action)) {
+      return res.status(400).json({ error: 'Invalid action.' });
+    }
+
+    const [[tok]] = await db.query(
+      "SELECT * FROM public_tokens WHERE token = ? AND type = 'estimate_response'",
+      [token]
+    );
+    if (!tok) return res.status(404).json({ error: 'This estimate link is invalid.' });
+    if (tok.expiresAt && new Date(tok.expiresAt) < new Date()) {
+      return res.status(410).json({ error: 'This estimate link has expired.' });
+    }
+
+    // ── ATOMIC LOCK ──────────────────────────────────────────────────────────
+    const [lock] = await db.query(
+      "UPDATE public_tokens SET usedAt=NOW(), response=? WHERE token=? AND type='estimate_response' AND usedAt IS NULL",
+      [action, token]
+    );
+    if (lock.affectedRows === 0) {
+      return res.status(409).json({ error: 'This estimate has already been responded to.' });
+    }
+    await db.query('UPDATE public_tokens SET respondedAt=NOW() WHERE id=?', [tok.id]);
+
+    const wid = tok.workOrderId;
+    // Use the SAME working status-update form as /work-orders/:id/status
+    // (plain `UPDATE work_orders SET status = ? WHERE id = ?`, no updatedAt — avoids the old bug)
+    const newWoStatus = action === 'accept' ? canonStatus('Approved') : canonStatus('Declined');
+    await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [newWoStatus, wid]);
+
+    // Mark this estimate PDF Approved/Declined (same column the per-card dropdown uses)
+    if (tok.estimatePdfId) {
+      const pdfStatus = action === 'accept' ? 'Approved' : 'Declined';
+      await db.query(
+        'UPDATE work_order_estimate_pdfs SET status = ? WHERE id = ? AND workOrderId = ?',
+        [pdfStatus, tok.estimatePdfId, wid]
+      );
+    }
+
+    // Office notification (one only — atomic lock guarantees this runs once)
+    try {
+      const { transport, settings } = await createEmailTransport();
+      const [[wo]] = await db.query('SELECT customer, workOrderNumber FROM work_orders WHERE id = ?', [wid]);
+      await transport.sendMail({
+        from: `"CRM Notification" <${settings.senderEmail}>`,
+        to: settings.senderEmail,
+        subject: `Estimate ${action === 'accept' ? 'ACCEPTED' : 'DECLINED'} — ${wo?.customer || 'Customer'} (WO ${wo?.workOrderNumber || wid})`,
+        text: `The customer ${action === 'accept' ? 'ACCEPTED' : 'DECLINED'} the estimate for ${wo?.customer || 'this work order'} (WO ${wo?.workOrderNumber || wid}) on ${new Date().toLocaleString()}.\nWork order status set to ${newWoStatus}.`,
+      });
+    } catch (mailErr) {
+      console.warn('[Public] estimate-response office email failed (non-fatal):', mailErr.message);
+    }
+
+    res.json({ success: true, action, status: newWoStatus });
+  } catch (err) {
+    console.error('[Public] estimate-response error:', err.message, err.stack);
+    res.status(500).json({ error: 'Failed to record response.' });
   }
 });
 

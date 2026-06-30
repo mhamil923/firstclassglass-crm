@@ -515,6 +515,7 @@ export default function ViewWorkOrder() {
   // ✅ Quick schedule picker (view mode)
   const scheduleInputRef = useRef(null);
   const estimateFileRef = useRef(null);
+  const estSendingRef = useRef(false); // synchronous lock — hard-blocks rapid double-clicks
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [quickScheduledDate, setQuickScheduledDate] = useState(""); // datetime-local value string
 
@@ -1585,9 +1586,13 @@ export default function ViewWorkOrder() {
     arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val];
 
   const sendEstimateEmail = async () => {
+    // Synchronous ref lock: refs update immediately (unlike async setState), so
+    // two rapid clicks in the same tick can't both pass this guard -> one POST.
+    if (estSendingRef.current) return;
     if (!estSendModal || estSendModal.sending) return;
     const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((estSendModal.to || "").trim());
     if (!emailOk) { alert("Please enter a valid customer email."); return; }
+    estSendingRef.current = true;
     setEstSendModal((m) => ({ ...m, sending: true }));
     try {
       const res = await api.post(
@@ -1611,6 +1616,8 @@ export default function ViewWorkOrder() {
       console.error("Error sending estimate:", err);
       alert(err?.response?.data?.error || "Failed to send estimate.");
       setEstSendModal((m) => (m ? { ...m, sending: false } : m));
+    } finally {
+      estSendingRef.current = false;
     }
   };
 
