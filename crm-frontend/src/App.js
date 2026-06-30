@@ -24,6 +24,7 @@ import ViewInvoice from "./ViewInvoice";
 import Collections from "./Collections";
 import SignContract from "./SignContract";
 import EstimateResponse from "./EstimateResponse";
+import ErrorBoundary from "./ErrorBoundary";
 import Reports from "./Reports";
 import RouteBuilder from "./RouteBuilder";
 import LineItemTemplates from "./LineItemTemplates";
@@ -48,6 +49,7 @@ export default function App() {
         <Navbar />
 
         <div className="app-content">
+          <ErrorBoundary>
           <Routes>
             {/* Public */}
             <Route path="/login" element={<Login />} />
@@ -272,6 +274,7 @@ export default function App() {
               }
             />
           </Routes>
+          </ErrorBoundary>
         </div>
       </Router>
     </ThemeProvider>

@@ -10734,10 +10734,12 @@ app.post(['/public/estimate-response/:token', '/api/public/estimate-response/:to
       );
     }
 
-    // Office notification (one only — atomic lock guarantees this runs once)
+    // Office notification (one only — the atomic lock above guarantees only the
+    // request that won usedAt reaches here; the GET route never sends).
     try {
       const { transport, settings } = await createEmailTransport();
       const [[wo]] = await db.query('SELECT customer, workOrderNumber FROM work_orders WHERE id = ?', [wid]);
+      console.log(`[estimate-response] sending ONE office notification — action=${action} WO=${wid} (won atomic lock)`);
       await transport.sendMail({
         from: `"CRM Notification" <${settings.senderEmail}>`,
         to: settings.senderEmail,

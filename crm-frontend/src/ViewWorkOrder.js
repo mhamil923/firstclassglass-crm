@@ -691,6 +691,19 @@ export default function ViewWorkOrder() {
     }
   };
 
+  // NOTE: must be defined ABOVE the early `return` / load effect — the mount
+  // useEffect calls it, and on the first render workOrder is null (early return),
+  // so a const declared below the return would be in the TDZ when the effect fires.
+  const fetchEstimateSends = async () => {
+    try {
+      const res = await api.get(`/work-orders/${id}/estimate-sends`, { headers: authHeaders() });
+      setEstimateSends(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Error fetching estimate sends:", err);
+      setEstimateSends([]);
+    }
+  };
+
   // Status options differ by document type (matches the backend validation).
   const QB_STATUS_OPTS = (docType) =>
     docType === "Estimate"
@@ -1539,16 +1552,6 @@ export default function ViewWorkOrder() {
     } finally {
       setBusyEstimateUpload(false);
       e.target.value = "";
-    }
-  };
-
-  const fetchEstimateSends = async () => {
-    try {
-      const res = await api.get(`/work-orders/${id}/estimate-sends`, { headers: authHeaders() });
-      setEstimateSends(Array.isArray(res.data) ? res.data : []);
-    } catch (err) {
-      console.error("Error fetching estimate sends:", err);
-      setEstimateSends([]);
     }
   };
 
