@@ -7636,6 +7636,216 @@ app.post('/work-orders/:id/followup-calls', authenticate, requireNumericParam('i
 // ─── WORK ORDER ESTIMATE PDFS (multiple uploaded estimate PDFs per WO) ─────
 
 // GET /work-orders/:id/estimate-pdfs — list all uploaded estimate PDFs
+// ─── SEND ESTIMATE TO CUSTOMER (review-before-send, CRM-sent via nodemailer) ──
+
+function firstNameFrom(name) {
+  const s = String(name || '').trim();
+  if (!s) return '';
+  // "Last, First" -> First ; otherwise first token
+  if (s.includes(',')) return s.split(',')[1]?.trim().split(/\s+/)[0] || '';
+  return s.split(/\s+/)[0] || '';
+}
+
+// GET /work-orders/:id/estimate-send/draft — prefilled compose data (no send)
+app.get('/work-orders/:id/estimate-send/draft', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const [[wo]] = await db.query(
+      `SELECT w.*, c.email AS custEmail2, c.name AS custName2, c.companyName AS custCompany2
+         FROM work_orders w LEFT JOIN customers c ON w.customerId = c.id WHERE w.id = ?`,
+      [wid]
+    );
+    if (!wo) return res.status(404).json({ error: 'Work order not found.' });
+
+    const to = wo.customerEmail || wo.custEmail2 || '';
+    const siteLabel = wo.siteLocation || wo.customer || '';
+    const siteAddr = wo.siteAddress || wo.siteLocation || wo.billingAddress || '';
+    const firstName = firstNameFrom(wo.customer || wo.custName2 || '') || 'there';
+
+    const subject = `Your Estimate from First Class Glass & Mirror — ${siteLabel || 'your project'}`;
+    const body =
+`Hi ${firstName},
+
+Thank you for the opportunity to provide an estimate for your project${siteAddr ? ` at ${siteAddr}` : ''}. Please find your estimate attached.
+
+If you have any questions or would like to move forward, feel free to reach out anytime — we're happy to help.
+
+Best regards,
+First Class Glass & Mirror, Inc.
+1513 Industrial Dr, Itasca, IL 60143
+630-250-9777`;
+
+    // Estimate PDFs on this WO
+    const [estPdfs] = await db.query(
+      'SELECT id, filename, originalName FROM work_order_estimate_pdfs WHERE workOrderId = ? ORDER BY uploadedAt ASC, id ASC',
+      [wid]
+    );
+    const backendBase = `${req.headers['x-forwarded-proto'] || req.protocol || 'https'}://${req.get('host')}`;
+    const fileUrl = (k) => `${backendBase}/files?key=${encodeURIComponent(k)}`;
+
+    const estimatePdfs = estPdfs.map((p) => ({
+      id: p.id,
+      filename: p.originalName || (p.filename || '').split('/').pop() || 'estimate.pdf',
+      url: fileUrl(p.filename),
+    }));
+
+    // Photos = comma-separated keys in work_orders.photoPath (exclude any PDFs)
+    const photoKeys = String(wo.photoPath || '').split(',').map((s) => s.trim()).filter(Boolean)
+      .filter((k) => !/\.pdf$/i.test(k));
+    const photos = photoKeys.map((k, idx) => ({
+      id: idx,
+      key: k,
+      filename: k.split('/').pop() || `photo_${idx}`,
+      thumbnailUrl: fileUrl(k),
+    }));
+
+    // Sign-off / work order PDF (work_orders.pdfPath, if a PDF)
+    const hasSignoff = !!(wo.pdfPath && /\.pdf$/i.test(wo.pdfPath));
+
+    res.json({
+      to,
+      subject,
+      body,
+      estimatePdfs,
+      photos,
+      hasSignoff,
+      signoffName: hasSignoff ? ((wo.pdfPath || '').split('/').pop() || 'work-order.pdf') : null,
+    });
+  } catch (err) {
+    console.error('Estimate-send draft error:', err);
+    res.status(500).json({ error: 'Failed to build estimate email draft.' });
+  }
+});
+
+// POST /work-orders/:id/estimate-send — send the (edited) estimate email
+app.post('/work-orders/:id/estimate-send', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const b = coerceBody(req);
+
+    const to = String(b.to || '').trim();
+    const subject = String(b.subject || '').trim();
+    const body = String(b.body || '');
+    if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      return res.status(400).json({ error: 'A valid recipient email is required.' });
+    }
+    if (!subject) return res.status(400).json({ error: 'Subject is required.' });
+
+    const [[wo]] = await db.query('SELECT * FROM work_orders WHERE id = ?', [wid]);
+    if (!wo) return res.status(404).json({ error: 'Work order not found.' });
+
+    // Atomic no-double-send guard: refuse if an estimate_sends row to the same
+    // address exists in the last 30 seconds (blocks double-click).
+    const [[recent]] = await db.query(
+      "SELECT id FROM estimate_sends WHERE workOrderId = ? AND sentTo = ? AND sentAt >= DATE_SUB(NOW(), INTERVAL 30 SECOND) LIMIT 1",
+      [wid, to]
+    );
+    if (recent) {
+      return res.status(409).json({ error: 'This estimate was just sent moments ago.' });
+    }
+
+    const estimatePdfIds = Array.isArray(b.estimatePdfIds) ? b.estimatePdfIds.map(Number).filter(Number.isFinite) : [];
+    const photoIds = Array.isArray(b.photoIds) ? b.photoIds.map(Number).filter(Number.isFinite) : [];
+    const includeSignoff = !!b.includeSignoff;
+
+    const attachments = [];
+
+    // Estimate PDFs
+    let firstEstId = null;
+    if (estimatePdfIds.length) {
+      const [estRows] = await db.query(
+        `SELECT id, filename, originalName FROM work_order_estimate_pdfs WHERE workOrderId = ? AND id IN (${estimatePdfIds.map(() => '?').join(',')})`,
+        [wid, ...estimatePdfIds]
+      );
+      for (const r of estRows) {
+        if (firstEstId === null) firstEstId = r.id;
+        try {
+          const a = await resolvePdfAttachment(r.filename);
+          attachments.push({ filename: r.originalName || a.filename, content: a.buffer });
+        } catch (e) { console.warn('[estimate-send] estimate attach failed:', r.filename, e.message); }
+      }
+    }
+
+    // Sign-off / WO PDF
+    if (includeSignoff && wo.pdfPath && /\.pdf$/i.test(wo.pdfPath)) {
+      try {
+        const a = await resolvePdfAttachment(wo.pdfPath);
+        attachments.push({ filename: a.filename, content: a.buffer });
+      } catch (e) { console.warn('[estimate-send] signoff attach failed:', e.message); }
+    }
+
+    // Photos (resolve selected indices against the WO's photoPath CSV, PDFs excluded)
+    if (photoIds.length) {
+      const photoKeys = String(wo.photoPath || '').split(',').map((s) => s.trim()).filter(Boolean)
+        .filter((k) => !/\.pdf$/i.test(k));
+      for (const idx of photoIds) {
+        const key = photoKeys[idx];
+        if (!key) continue;
+        try {
+          const a = await resolvePdfAttachment(key);
+          attachments.push({ filename: a.filename, content: a.buffer });
+        } catch (e) { console.warn('[estimate-send] photo attach failed:', key, e.message); }
+      }
+    }
+
+    // Send via existing transport (branded HTML, matches other CRM emails)
+    const { transport, settings } = await createEmailTransport();
+    const html = `
+      <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+        <div style="background:white;padding:30px 20px;text-align:center;border-bottom:3px solid #1b5e20;border-radius:12px 12px 0 0">
+          <div style="color:#1b5e20;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">ESTIMATE</div>
+        </div>
+        <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
+          ${String(body).replace(/\n/g, '<br>')}
+        </div>
+        <div style="text-align:center;padding:16px;color:#999;font-size:11px">First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777</div>
+      </div>`;
+    await transport.sendMail({
+      from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+      replyTo: settings.replyTo || settings.senderEmail,
+      to,
+      subject,
+      text: body,
+      html,
+      attachments,
+    });
+
+    await db.query(
+      'INSERT INTO estimate_sends (workOrderId, estimatePdfId, sentTo, sentBy, subject, body, attachmentCount) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [wid, firstEstId, to, req.user?.username || null, subject, body, attachments.length]
+    );
+
+    // Start the follow-up clock once (preserve original if re-sent)
+    await db.query(
+      'UPDATE work_orders SET estimateSentAt = NOW(), updatedAt = NOW() WHERE id = ? AND estimateSentAt IS NULL',
+      [wid]
+    );
+    // Also persist the typed email if the WO had none
+    if (!wo.customerEmail) {
+      await db.query('UPDATE work_orders SET customerEmail = ? WHERE id = ? AND (customerEmail IS NULL OR customerEmail = "")', [to, wid]);
+    }
+
+    res.json({ ok: true, sentTo: to, attachmentCount: attachments.length });
+  } catch (err) {
+    console.error('Estimate-send error:', err);
+    res.status(500).json({ error: err.message || 'Failed to send estimate.' });
+  }
+});
+
+// GET /work-orders/:id/estimate-sends — send history (for "Sent to X on DATE" on cards)
+app.get('/work-orders/:id/estimate-sends', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT id, workOrderId, estimatePdfId, sentTo, sentBy, attachmentCount, sentAt FROM estimate_sends WHERE workOrderId = ? ORDER BY sentAt DESC, id DESC',
+      [Number(req.params.id)]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Estimate-sends list error:', err);
+    res.status(500).json({ error: 'Failed to fetch estimate send history.' });
+  }
+});
+
 app.get('/work-orders/:id/estimate-pdfs', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const wid = Number(req.params.id);

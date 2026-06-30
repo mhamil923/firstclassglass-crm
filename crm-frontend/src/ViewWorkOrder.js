@@ -459,6 +459,10 @@ export default function ViewWorkOrder() {
   const [estimatePdfs, setEstimatePdfs] = useState([]);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
 
+  // Send Estimate to Customer — compose modal + send history
+  const [estSendModal, setEstSendModal] = useState(null); // null | draft-state object
+  const [estimateSends, setEstimateSends] = useState([]);
+
   // QuickBooks metadata capture — folded into the Estimate + Invoice upload flows.
   // qbModal: null when closed, otherwise { docType: 'Estimate'|'Invoice', editingId|null }
   const [qbModal, setQbModal] = useState(null);
@@ -899,6 +903,7 @@ export default function ViewWorkOrder() {
     fetchLinkedEstimates();
     fetchLinkedInvoices();
     fetchEstimatePdfs();
+    fetchEstimateSends();
     fetchResidentialContract();
     fetchTechUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1536,6 +1541,79 @@ export default function ViewWorkOrder() {
     }
   };
 
+  const fetchEstimateSends = async () => {
+    try {
+      const res = await api.get(`/work-orders/${id}/estimate-sends`, { headers: authHeaders() });
+      setEstimateSends(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("Error fetching estimate sends:", err);
+      setEstimateSends([]);
+    }
+  };
+
+  // Open the "Send to Customer" compose modal, preselecting the clicked estimate PDF.
+  const openEstimateSend = async (preselectPdfId) => {
+    try {
+      const res = await api.get(`/work-orders/${id}/estimate-send/draft`, { headers: authHeaders() });
+      const d = res.data || {};
+      const estIds = Array.isArray(d.estimatePdfs) ? d.estimatePdfs.map((e) => e.id) : [];
+      const selectedEst = preselectPdfId && estIds.includes(preselectPdfId)
+        ? [preselectPdfId]
+        : (estIds.length === 1 ? [estIds[0]] : (preselectPdfId ? [preselectPdfId] : []));
+      setEstSendModal({
+        to: d.to || "",
+        subject: d.subject || "",
+        body: d.body || "",
+        estimatePdfs: d.estimatePdfs || [],
+        photos: d.photos || [],
+        hasSignoff: !!d.hasSignoff,
+        signoffName: d.signoffName || null,
+        selectedEst,            // estimate PDF ids (checked)
+        selectedPhotos: [],     // photo ids (unchecked by default)
+        includeSignoff: false,
+        sending: false,
+      });
+    } catch (err) {
+      console.error("Error building estimate draft:", err);
+      alert(err?.response?.data?.error || "Failed to open estimate composer.");
+    }
+  };
+
+  const closeEstimateSend = () => setEstSendModal(null);
+
+  const toggleInArray = (arr, val) =>
+    arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val];
+
+  const sendEstimateEmail = async () => {
+    if (!estSendModal || estSendModal.sending) return;
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((estSendModal.to || "").trim());
+    if (!emailOk) { alert("Please enter a valid customer email."); return; }
+    setEstSendModal((m) => ({ ...m, sending: true }));
+    try {
+      const res = await api.post(
+        `/work-orders/${id}/estimate-send`,
+        {
+          to: estSendModal.to.trim(),
+          subject: estSendModal.subject,
+          body: estSendModal.body,
+          estimatePdfIds: estSendModal.selectedEst,
+          photoIds: estSendModal.selectedPhotos,
+          includeSignoff: estSendModal.includeSignoff,
+        },
+        { headers: authHeaders() }
+      );
+      const sentTo = res.data?.sentTo || estSendModal.to.trim();
+      setEstSendModal(null);
+      await fetchEstimateSends();
+      await fetchWorkOrder(); // refresh estimateSentAt
+      alert(`Estimate sent to ${sentTo}.`);
+    } catch (err) {
+      console.error("Error sending estimate:", err);
+      alert(err?.response?.data?.error || "Failed to send estimate.");
+      setEstSendModal((m) => (m ? { ...m, sending: false } : m));
+    }
+  };
+
   const handleRemoveEstimatePdf = async (pdfId) => {
     if (!pdfId) return;
     if (!window.confirm("Remove this estimate PDF? This cannot be undone.")) return;
@@ -1926,6 +2004,100 @@ export default function ViewWorkOrder() {
         src={lightbox.src}
         title={lightbox.title}
       />
+
+      {/* ───── Send Estimate to Customer — compose modal ───── */}
+      {estSendModal && (() => {
+        const m = estSendModal;
+        const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((m.to || "").trim());
+        const attachCount = m.selectedEst.length + m.selectedPhotos.length + (m.includeSignoff ? 1 : 0);
+        const upd = (patch) => setEstSendModal((s) => ({ ...s, ...patch }));
+        return (
+          <div
+            role="dialog" aria-modal="true"
+            onClick={() => !m.sending && closeEstimateSend()}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+          >
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, maxWidth: 640, width: "100%", maxHeight: "92vh", overflowY: "auto", padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              <h3 style={{ margin: "0 0 12px", fontSize: 18, fontWeight: 700, color: "#1b5e20" }}>Send Estimate to Customer</h3>
+
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>To</label>
+              <input
+                type="email" value={m.to} placeholder="Enter customer email"
+                onChange={(e) => upd({ to: e.target.value })}
+                style={{ width: "100%", boxSizing: "border-box", padding: 10, fontSize: 15, borderRadius: 8, border: `1px solid ${m.to && !emailOk ? "#dc2626" : "#d1d5db"}`, marginBottom: m.to ? 8 : 4 }}
+              />
+              {!m.to && (
+                <div className="tiny" style={{ color: "var(--text-secondary)", marginBottom: 8 }}>No email on file — enter one to send.</div>
+              )}
+
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Subject</label>
+              <input
+                type="text" value={m.subject} onChange={(e) => upd({ subject: e.target.value })}
+                style={{ width: "100%", boxSizing: "border-box", padding: 10, fontSize: 14, borderRadius: 8, border: "1px solid #d1d5db", marginBottom: 12 }}
+              />
+
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Message</label>
+              <textarea
+                value={m.body} onChange={(e) => upd({ body: e.target.value })} rows={10}
+                style={{ width: "100%", boxSizing: "border-box", padding: 10, fontSize: 13, borderRadius: 8, border: "1px solid #d1d5db", resize: "vertical", fontFamily: "inherit" }}
+              />
+
+              <div style={{ marginTop: 14, background: "#f8faf8", border: "1px solid #e2e8e2", borderRadius: 8, padding: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Attachments</div>
+
+                {m.estimatePdfs.map((e) => (
+                  <label key={`est-${e.id}`} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 6, cursor: "pointer" }}>
+                    <input type="checkbox" checked={m.selectedEst.includes(e.id)} onChange={() => upd({ selectedEst: toggleInArray(m.selectedEst, e.id) })} />
+                    <span>📄 {e.filename}</span>
+                  </label>
+                ))}
+
+                {m.hasSignoff && (
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 6, cursor: "pointer" }}>
+                    <input type="checkbox" checked={m.includeSignoff} onChange={(e) => upd({ includeSignoff: e.target.checked })} />
+                    <span>📝 Include sign-off sheet ({m.signoffName})</span>
+                  </label>
+                )}
+
+                {m.photos.length > 0 && (
+                  <>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)", margin: "8px 0 6px" }}>Photos (tap to include)</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {m.photos.map((p) => {
+                        const sel = m.selectedPhotos.includes(p.id);
+                        return (
+                          <div
+                            key={`ph-${p.id}`} onClick={() => upd({ selectedPhotos: toggleInArray(m.selectedPhotos, p.id) })}
+                            style={{ position: "relative", width: 72, height: 72, borderRadius: 8, overflow: "hidden", cursor: "pointer", border: sel ? "3px solid #1b5e20" : "1px solid #ccc" }}
+                            title={p.filename}
+                          >
+                            <img src={p.thumbnailUrl} alt={p.filename} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            {sel && <div style={{ position: "absolute", top: 2, right: 4, color: "#1b5e20", fontWeight: 900, background: "rgba(255,255,255,0.85)", borderRadius: 8, padding: "0 4px" }}>✓</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                <div className="tiny" style={{ marginTop: 10, color: "var(--text-secondary)" }}>
+                  {attachCount} attachment{attachCount === 1 ? "" : "s"}{attachCount > 6 ? " — large emails (>10 MB) may be slow to deliver." : ""}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+                <button type="button" onClick={closeEstimateSend} disabled={m.sending} style={{ padding: "10px 18px", cursor: "pointer", border: "1px solid #ccc", borderRadius: 8, background: "#f1f1f1" }}>Cancel</button>
+                <button
+                  type="button" onClick={sendEstimateEmail} disabled={!emailOk || m.sending}
+                  style={{ padding: "10px 22px", borderRadius: 8, border: "none", fontWeight: 700, color: "#fff", background: (!emailOk || m.sending) ? "#9ca3af" : "#1b5e20", cursor: (!emailOk || m.sending) ? "not-allowed" : "pointer" }}
+                >
+                  {m.sending ? "Sending…" : "Send"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ───── QuickBooks document attach/edit modal ───── */}
       {qbModal && (
@@ -2878,6 +3050,14 @@ export default function ViewWorkOrder() {
                         {new Date(pdf.docDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                       </div>
                     ) : null}
+                    {(() => {
+                      const lastSend = estimateSends.find((s) => s.estimatePdfId === pdf.id) || null;
+                      return lastSend ? (
+                        <div className="tiny" style={{ color: "#1b5e20", padding: "0 8px", fontWeight: 600 }}>
+                          ✉ Sent to {lastSend.sentTo} on {new Date(lastSend.sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </div>
+                      ) : null;
+                    })()}
                     <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button
                         type="button"
@@ -2885,6 +3065,14 @@ export default function ViewWorkOrder() {
                         onClick={() => openLightbox("pdf", href, name)}
                       >
                         Expand
+                      </button>
+                      <button
+                        type="button"
+                        className="po-btn-expand"
+                        onClick={() => openEstimateSend(pdf.id)}
+                        style={{ background: "#1b5e20", color: "#ffffff", borderColor: "#1b5e20" }}
+                      >
+                        Send to Customer
                       </button>
                       <button
                         type="button"
