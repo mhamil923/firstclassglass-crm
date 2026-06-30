@@ -861,6 +861,33 @@ export default function ViewWorkOrder() {
     }
   };
 
+  const sendContractForSignature = async () => {
+    const defaultEmail = workOrder?.customerEmail || "";
+    const email = window.prompt(
+      "Send the contract to this email for signature:",
+      defaultEmail
+    );
+    if (email === null) return; // cancelled
+    const recipientEmail = email.trim();
+    if (!recipientEmail) { alert("An email address is required."); return; }
+    setContractSaving(true);
+    try {
+      const res = await api.post(
+        `/work-orders/${id}/residential-contract/send`,
+        { recipientEmail },
+        { headers: authHeaders() }
+      );
+      if (res.data?.contract) setResidentialContract(res.data.contract);
+      else await fetchResidentialContract();
+      alert(`Contract sent to ${res.data?.sentTo || recipientEmail} for signature.`);
+    } catch (err) {
+      console.error("Error sending contract for signature:", err);
+      alert(err?.response?.data?.error || "Failed to send contract for signature.");
+    } finally {
+      setContractSaving(false);
+    }
+  };
+
   useEffect(() => {
     // Reset init state when id changes
     quickScheduleInitializedRef.current = false;
@@ -3211,9 +3238,37 @@ export default function ViewWorkOrder() {
             const genPath = residentialContract?.generatedPdfPath;
             const genHref = genPath ? pdfThumbUrl(genPath) : null;
             const genName = genPath ? (genPath.split("/").pop() || "contract.pdf") : null;
+            const signedPath = residentialContract?.signedPdfPath;
+            const signedHref = signedPath ? pdfThumbUrl(signedPath) : null;
             return (
               <div style={{ padding: "16px", display: "grid", gap: 12 }}>
-                {/* Generated contract PDF (Phase 2) */}
+                {/* Signed contract PDF (Phase 3) */}
+                {isSigned && (
+                  <div style={{ background: "rgba(52,199,89,0.08)", border: "1px solid rgba(52,199,89,0.4)", borderRadius: 8, padding: 12 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1b7a3a", marginBottom: 8 }}>
+                      ✓ Signed by {residentialContract?.signerName || "—"}
+                      {residentialContract?.signedAt ? ` on ${new Date(residentialContract.signedAt).toLocaleString()}` : ""}
+                    </div>
+                    {signedHref ? (
+                      <div className="po-pdf-card" style={{ maxWidth: 320 }}>
+                        <div className="po-pdf-thumbnail">
+                          <iframe title="Signed Contract PDF" src={signedHref} />
+                        </div>
+                        <a href={signedHref} target="_blank" rel="noopener noreferrer" className="po-pdf-label" title={(signedPath || "").split("/").pop()}>
+                          {(signedPath || "").split("/").pop()}
+                        </a>
+                        <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <button type="button" className="po-btn-expand" onClick={() => openLightbox("pdf", signedHref, "Signed Residential Contract")}>Expand</button>
+                          <a href={signedHref} target="_blank" rel="noopener noreferrer" className="po-btn-expand" style={{ textDecoration: "none", display: "inline-block" }}>View</a>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="tiny" style={{ color: "var(--text-secondary)", margin: 0 }}>Signed (PDF rendering pending).</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Generated (unsigned) contract PDF (Phase 2) */}
                 {genHref ? (
                   <div className="po-pdf-card" style={{ maxWidth: 320 }}>
                     <div className="po-pdf-thumbnail">
@@ -3326,6 +3381,16 @@ export default function ViewWorkOrder() {
                       style={{ fontSize: 14, padding: "8px 16px" }}
                     >
                       {contractSaving ? "Working…" : genHref ? "Regenerate PDF" : "Generate PDF"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-light"
+                      onClick={sendContractForSignature}
+                      disabled={contractSaving}
+                      style={{ fontSize: 14, padding: "8px 16px" }}
+                      title="Email the customer a link to review and sign"
+                    >
+                      Send for Signature
                     </button>
                   </div>
                 )}

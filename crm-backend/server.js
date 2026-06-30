@@ -6421,6 +6421,19 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
       row.qbDocuments = [];
     }
 
+    // Attach the residential contract (Phase 3) so the field app can show the
+    // contract tile + Sign button. Null when the WO is not a residential job.
+    try {
+      const [[rc]] = await db.query(
+        'SELECT id, workOrderId, status, generatedPdfPath, signedPdfPath, signerName, signedAt FROM residential_contracts WHERE workOrderId = ? LIMIT 1',
+        [id]
+      );
+      row.residentialContract = rc || null;
+    } catch (rcErr) {
+      console.warn('[work-order get] residential_contract attach failed:', rcErr.message);
+      row.residentialContract = null;
+    }
+
     res.json(row);
   } catch (err) {
     console.error('Work-order get-by-id error:', err);
@@ -8180,13 +8193,24 @@ function renderResidentialContractPdf(data) {
       doc.moveDown(0.8);
       doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#111')
          .text('You are entitled to a completely filled-in copy of this Agreement at the time you sign it.');
-      doc.moveDown(0.8);
+      doc.moveDown(1.4);
       const sigY = doc.y;
+      // If signed, draw the captured signature image just above the customer line
+      const sig = data.signature;
+      if (sig && sig.imageBuffer) {
+        try { doc.image(sig.imageBuffer, LEFT, sigY - 32, { fit: [180, 30] }); } catch (e) { /* bad image, fall through */ }
+      }
       doc.font('Helvetica').fontSize(9).fillColor('#000');
       doc.text('______________________________', LEFT, sigY);
       doc.text('______________________________', LEFT + CONTENT_W / 2, sigY);
-      doc.text('Customer Signature / Date', LEFT, sigY + 14);
-      doc.text(`${FCG_COMPANY.name} (Authorized Rep) / Date`, LEFT + CONTENT_W / 2, sigY + 14);
+      if (sig && sig.signerName) {
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#000')
+           .text(`${sig.signerName}  —  ${rcFmtDate(sig.signedAt)}`, LEFT, sigY + 14);
+      } else {
+        doc.text('Customer Signature / Date', LEFT, sigY + 14);
+      }
+      doc.font('Helvetica').fontSize(9).fillColor('#000')
+         .text(`${FCG_COMPANY.name} (Authorized Rep) / Date`, LEFT + CONTENT_W / 2, sigY + 14);
 
       // ── Detachable Notice of Cancellation page ──────────────────────────────────
       doc.addPage();
@@ -8223,7 +8247,9 @@ function renderResidentialContractPdf(data) {
  * the same uploads/ + S3 method as estimates/invoices, writes generatedPdfPath,
  * and returns the stored path.
  */
-async function generateResidentialContractPdf(workOrderId, opts = {}) {
+// Shared loader: returns { wo, contract, data } for the contract render.
+// Ensures a residential_contracts row exists (Phase 1 normally seeds it).
+async function loadResidentialContractData(workOrderId, opts = {}) {
   const wid = Number(workOrderId);
 
   const [[wo]] = await db.query(
@@ -8233,7 +8259,6 @@ async function generateResidentialContractPdf(workOrderId, opts = {}) {
   );
   if (!wo) throw new Error('Work order not found');
 
-  // Ensure a contract row exists (Phase 1 normally seeds it; create if missing)
   let [[contract]] = await db.query('SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
   if (!contract) {
     await db.query(
@@ -8279,16 +8304,26 @@ async function generateResidentialContractPdf(workOrderId, opts = {}) {
     completionDate: contract.completionDate,
     scopeOfWork: scope,
   };
+  return { wo, contract, data };
+}
 
-  const pdfBuffer = await renderResidentialContractPdf(data);
-
-  // Store using the SAME method as estimate/invoice PDFs (uploads/ + optional S3)
-  const filename = `residential_contract_${wid}_${Date.now()}.pdf`;
+// Store a rendered PDF buffer using the SAME method as estimates/invoices.
+async function storeContractPdf(wid, prefix, pdfBuffer) {
+  const filename = `${prefix}_${wid}_${Date.now()}.pdf`;
   const localDir = path.resolve(__dirname, 'uploads');
   if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
   const filePath = path.join(localDir, filename);
   fs.writeFileSync(filePath, pdfBuffer);
-  const generatedPdfPath = `uploads/${filename}`;
+  const storedPath = `uploads/${filename}`;
+  await uploadToS3IfConfigured(filePath, storedPath);
+  return storedPath;
+}
+
+async function generateResidentialContractPdf(workOrderId, opts = {}) {
+  const wid = Number(workOrderId);
+  const { data } = await loadResidentialContractData(wid, opts);
+  const pdfBuffer = await renderResidentialContractPdf(data);
+  const generatedPdfPath = await storeContractPdf(wid, 'residential_contract', pdfBuffer);
 
   // Keep status as-is if further along than Draft; otherwise ensure 'Draft'
   await db.query(
@@ -8299,9 +8334,39 @@ async function generateResidentialContractPdf(workOrderId, opts = {}) {
       WHERE workOrderId = ?`,
     [generatedPdfPath, wid]
   );
-  await uploadToS3IfConfigured(filePath, generatedPdfPath);
-
   return generatedPdfPath;
+}
+
+// Phase 3: render the SIGNED contract (signature image + signer name + date drawn
+// into the customer signature line). Reuses renderResidentialContractPdf via the
+// data.signature hook. Reads signerName/signedAt/signatureData from the row.
+// Saves signedPdfPath using the same storage method. Returns the stored path.
+async function renderSignedResidentialContractPdf(workOrderId) {
+  const wid = Number(workOrderId);
+  const { contract, data } = await loadResidentialContractData(wid);
+
+  let imageBuffer = null;
+  const sd = contract.signatureData;
+  if (sd && typeof sd === 'string') {
+    try {
+      const b64 = sd.includes(',') ? sd.split(',').pop() : sd;
+      imageBuffer = Buffer.from(b64, 'base64');
+      if (!imageBuffer.length) imageBuffer = null;
+    } catch (e) { imageBuffer = null; }
+  }
+  data.signature = {
+    signerName: contract.signerName || '',
+    signedAt: contract.signedAt || new Date(),
+    imageBuffer,
+  };
+
+  const pdfBuffer = await renderResidentialContractPdf(data);
+  const signedPdfPath = await storeContractPdf(wid, 'residential_contract_signed', pdfBuffer);
+  await db.query(
+    'UPDATE residential_contracts SET signedPdfPath = ?, updatedAt = NOW() WHERE workOrderId = ?',
+    [signedPdfPath, wid]
+  );
+  return signedPdfPath;
 }
 
 // GET /work-orders/:id/residential-contract — returns the contract row or null
@@ -8409,6 +8474,124 @@ app.post('/work-orders/:id/residential-contract/generate', authenticate, require
   } catch (err) {
     console.error('Residential contract generate error:', err);
     res.status(500).json({ error: err.message || 'Failed to generate residential contract PDF.' });
+  }
+});
+
+// ─── PHASE 3: SIGNING ───────────────────────────────────────────────────────
+
+// POST /work-orders/:id/residential-contract/sign-infield (authenticate)
+// In-field signing by the technician (no token — the tech is authenticated).
+app.post('/work-orders/:id/residential-contract/sign-infield', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const b = coerceBody(req);
+    const signerName = (b.signerName || '').trim();
+    const signatureData = b.signatureData || '';
+    if (!signerName || !signatureData) {
+      return res.status(400).json({ error: 'signerName and signatureData are required.' });
+    }
+
+    const [[contract]] = await db.query('SELECT id, status FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+    if (!contract) return res.status(404).json({ error: 'No residential contract on this work order.' });
+    if (contract.status === 'Signed') return res.status(409).json({ error: 'This contract is already signed.' });
+
+    await db.query(
+      "UPDATE residential_contracts SET status='Signed', signerName=?, signedAt=NOW(), signatureData=?, updatedAt=NOW() WHERE workOrderId=?",
+      [signerName, signatureData, wid]
+    );
+    const signedPdfPath = await renderSignedResidentialContractPdf(wid);
+    const [[row]] = await db.query('SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+    res.json({ ok: true, signedPdfPath, contract: row });
+  } catch (err) {
+    console.error('Residential contract sign-infield error:', err);
+    res.status(500).json({ error: err.message || 'Failed to sign contract.' });
+  }
+});
+
+// POST /work-orders/:id/residential-contract/send (authenticate)
+// Email-for-signature: ensure a generated PDF exists, mint a public 'contract'
+// token (DELETE-before-INSERT dup prevention), email the customer the sign link.
+app.post('/work-orders/:id/residential-contract/send', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const b = coerceBody(req);
+
+    const [[wo]] = await db.query(
+      `SELECT w.*, c.companyName, c.name AS custName, c.email AS custEmail2
+         FROM work_orders w LEFT JOIN customers c ON w.customerId = c.id WHERE w.id = ?`,
+      [wid]
+    );
+    if (!wo) return res.status(404).json({ error: 'Work order not found.' });
+
+    let [[contract]] = await db.query('SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+    if (!contract) return res.status(404).json({ error: 'No residential contract on this work order.' });
+    if (contract.status === 'Signed') return res.status(409).json({ error: 'This contract is already signed.' });
+
+    const recipientEmail = (b.recipientEmail || b.email || wo.customerEmail || wo.custEmail2 || '').trim();
+    if (!recipientEmail) return res.status(400).json({ error: 'Recipient email is required.' });
+
+    // Ensure a generated contract PDF exists
+    if (!contract.generatedPdfPath) {
+      await generateResidentialContractPdf(wid);
+      [[contract]] = await db.query('SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+    }
+
+    // DELETE-before-INSERT: clear any existing unused contract tokens for this WO
+    const pubToken = generatePublicToken();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await db.query(
+      "DELETE FROM public_tokens WHERE workOrderId = ? AND type = 'contract' AND usedAt IS NULL",
+      [wid]
+    );
+    await db.query(
+      "INSERT INTO public_tokens (token, type, workOrderId, recipientEmail, expiresAt) VALUES (?, 'contract', ?, ?, ?)",
+      [pubToken, wid, recipientEmail, expiresAt]
+    );
+
+    const appUrl = (await getAppPublicUrl(req)) || 'https://main.d2c3mwinxmekdi.amplifyapp.com';
+    const signUrl = `${appUrl.replace(/\/$/, '')}/sign-contract/${pubToken}`;
+
+    // Email the customer
+    try {
+      const { transport, settings } = await createEmailTransport();
+      const custName = wo.customer || wo.companyName || wo.custName || 'Customer';
+      const html = `
+        <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+          <div style="background:white;padding:30px 20px;text-align:center;border-bottom:3px solid #1b5e20;border-radius:12px 12px 0 0">
+            <div style="color:#1b5e20;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">RESIDENTIAL CONTRACT</div>
+          </div>
+          <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
+            <p>Hello ${custName},</p>
+            <p>Please review and sign your Residential Sales Order Agreement with First Class Glass &amp; Mirror, Inc.</p>
+            <div style="text-align:center;margin:24px 0">
+              <a href="${signUrl}" style="display:inline-block;padding:14px 40px;background:#1b5e20;color:white;text-decoration:none;border-radius:8px;font-size:16px;font-weight:600">Review &amp; Sign Contract</a>
+            </div>
+            <p style="text-align:center;font-size:12px;color:#999">Or copy this link: ${signUrl}</p>
+          </div>
+          <div style="text-align:center;padding:16px;color:#999;font-size:11px">First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777</div>
+        </div>`;
+      await transport.sendMail({
+        from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+        replyTo: settings.replyTo || settings.senderEmail,
+        to: recipientEmail,
+        subject: 'Please sign your Residential Contract — First Class Glass & Mirror, Inc.',
+        text: `Review and sign your contract: ${signUrl}`,
+        html,
+      });
+    } catch (mailErr) {
+      console.error('[ResContract send] email failed:', mailErr.message);
+      return res.status(500).json({ error: 'Token created but email failed: ' + mailErr.message });
+    }
+
+    await db.query(
+      "UPDATE residential_contracts SET status = CASE WHEN status='Signed' THEN status ELSE 'Sent' END, sentToEmail=?, sentAt=NOW(), updatedAt=NOW() WHERE workOrderId=?",
+      [recipientEmail, wid]
+    );
+    const [[row]] = await db.query('SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+    res.json({ ok: true, sentTo: recipientEmail, signUrl, contract: row });
+  } catch (err) {
+    console.error('Residential contract send error:', err);
+    res.status(500).json({ error: err.message || 'Failed to send contract.' });
   }
 });
 
@@ -10096,6 +10279,113 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
   } catch (err) {
     console.error('[Public] Error processing estimate response:', err.message, err.stack);
     res.status(500).json({ error: 'Failed to process response.' });
+  }
+});
+
+// ─── PHASE 3: PUBLIC CONTRACT SIGNING (no auth, tokenized) ──────────────────
+// Registered at both /public/... and /api/public/... so the SignContract page
+// works regardless of which prefix the frontend calls.
+
+// GET contract display data (does NOT mark the token used)
+app.get(['/public/contract/:token', '/api/public/contract/:token'], async (req, res) => {
+  try {
+    const [[tok]] = await db.query(
+      "SELECT * FROM public_tokens WHERE token = ? AND type = 'contract'",
+      [req.params.token]
+    );
+    if (!tok) return res.json({ status: 'invalid' });
+    if (tok.usedAt) return res.json({ status: 'already_signed' });
+    if (tok.expiresAt && new Date(tok.expiresAt) < new Date()) return res.json({ status: 'invalid' });
+
+    const { contract, data } = await loadResidentialContractData(tok.workOrderId);
+    const backendBase = `${req.headers['x-forwarded-proto'] || req.protocol || 'https'}://${req.get('host')}`;
+    const pdfUrl = contract.generatedPdfPath
+      ? `${backendBase}/files?key=${encodeURIComponent(contract.generatedPdfPath)}`
+      : null;
+
+    res.json({
+      status: 'ok',
+      workOrderId: tok.workOrderId,
+      pdfUrl,
+      contractNumber: data.contractNumber,
+      customer: data.customer,
+      siteAddress: data.siteAddress,
+      billingAddress: data.billingAddress,
+      projectAddress: data.siteAddress,
+      scopeOfWork: data.scopeOfWork,
+      county: data.county,
+      downPaymentPercent: data.downPaymentPercent,
+      contractTotal: data.contractTotal,
+      startDate: data.startDate,
+      completionDate: data.completionDate,
+    });
+  } catch (err) {
+    console.error('[Public] contract get error:', err.message);
+    res.status(500).json({ status: 'error', error: 'Failed to load contract.' });
+  }
+});
+
+// POST sign — ATOMIC LOCK FIRST, then sign + render + confirmation emails
+app.post(['/public/contract/:token/sign', '/api/public/contract/:token/sign'], async (req, res) => {
+  try {
+    const token = req.params.token;
+    const [[tok]] = await db.query(
+      "SELECT * FROM public_tokens WHERE token = ? AND type = 'contract'",
+      [token]
+    );
+    if (!tok) return res.status(404).json({ error: 'This contract link is invalid.' });
+    if (tok.expiresAt && new Date(tok.expiresAt) < new Date()) {
+      return res.status(410).json({ error: 'This contract link has expired.' });
+    }
+
+    // ── ATOMIC LOCK ──────────────────────────────────────────────────────────
+    const [lock] = await db.query(
+      "UPDATE public_tokens SET usedAt=NOW() WHERE token=? AND type='contract' AND usedAt IS NULL",
+      [token]
+    );
+    if (lock.affectedRows === 0) {
+      return res.status(409).json({ error: 'This contract has already been signed.' });
+    }
+
+    const b = req.body || {};
+    const signerName = (b.signerName || '').trim();
+    const signatureData = b.signatureData || '';
+    if (!signerName || !signatureData) {
+      // release the lock so a valid retry can proceed
+      await db.query("UPDATE public_tokens SET usedAt=NULL WHERE token=? AND type='contract'", [token]);
+      return res.status(400).json({ error: 'Full legal name and signature are required.' });
+    }
+
+    const wid = tok.workOrderId;
+    await db.query(
+      "UPDATE residential_contracts SET status='Signed', signerName=?, signedAt=NOW(), signatureData=?, updatedAt=NOW() WHERE workOrderId=?",
+      [signerName, signatureData, wid]
+    );
+    const signedPdfPath = await renderSignedResidentialContractPdf(wid);
+    await db.query('UPDATE public_tokens SET response=?, respondedAt=NOW() WHERE id=?', ['signed', tok.id]);
+
+    // Confirmation emails (customer + office), once
+    try {
+      const { transport, settings } = await createEmailTransport();
+      const [[wo]] = await db.query('SELECT customer, customerEmail FROM work_orders WHERE id = ?', [wid]);
+      const office = settings.senderEmail;
+      const recipients = [tok.recipientEmail, office].filter(Boolean);
+      if (recipients.length) {
+        await transport.sendMail({
+          from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+          to: recipients.join(','),
+          subject: `Residential Contract signed — ${wo?.customer || 'Customer'}`,
+          text: `The residential contract for ${wo?.customer || 'the work order'} was signed by ${signerName} on ${new Date().toLocaleString()}.`,
+        });
+      }
+    } catch (mailErr) {
+      console.warn('[Public] contract confirmation email failed (non-fatal):', mailErr.message);
+    }
+
+    res.json({ success: true, signedPdfPath });
+  } catch (err) {
+    console.error('[Public] contract sign error:', err.message, err.stack);
+    res.status(500).json({ error: 'Failed to sign contract.' });
   }
 });
 
