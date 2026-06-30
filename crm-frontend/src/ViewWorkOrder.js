@@ -843,6 +843,24 @@ export default function ViewWorkOrder() {
     }
   };
 
+  const regenerateContract = async () => {
+    setContractSaving(true);
+    try {
+      const res = await api.post(
+        `/work-orders/${id}/residential-contract/generate`,
+        {},
+        { headers: authHeaders() }
+      );
+      if (res.data?.contract) setResidentialContract(res.data.contract);
+      else await fetchResidentialContract();
+    } catch (err) {
+      console.error("Error generating residential contract PDF:", err);
+      alert(err?.response?.data?.error || "Failed to generate contract PDF.");
+    } finally {
+      setContractSaving(false);
+    }
+  };
+
   useEffect(() => {
     // Reset init state when id changes
     quickScheduleInitializedRef.current = false;
@@ -3190,8 +3208,35 @@ export default function ViewWorkOrder() {
 
           {(() => {
             const isSigned = residentialContract?.status === "Signed";
+            const genPath = residentialContract?.generatedPdfPath;
+            const genHref = genPath ? pdfThumbUrl(genPath) : null;
+            const genName = genPath ? (genPath.split("/").pop() || "contract.pdf") : null;
             return (
               <div style={{ padding: "16px", display: "grid", gap: 12 }}>
+                {/* Generated contract PDF (Phase 2) */}
+                {genHref ? (
+                  <div className="po-pdf-card" style={{ maxWidth: 320 }}>
+                    <div className="po-pdf-thumbnail">
+                      <iframe title="Residential Contract PDF" src={genHref} />
+                    </div>
+                    <a href={genHref} target="_blank" rel="noopener noreferrer" className="po-pdf-label" title={genName}>
+                      {genName}
+                    </a>
+                    <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button type="button" className="po-btn-expand" onClick={() => openLightbox("pdf", genHref, "Residential Contract")}>
+                        Expand
+                      </button>
+                      <a href={genHref} target="_blank" rel="noopener noreferrer" className="po-btn-expand" style={{ textDecoration: "none", display: "inline-block" }}>
+                        View
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="tiny" style={{ color: "var(--text-secondary)", margin: 0 }}>
+                    No contract PDF generated yet. Fill in the fields below and click Generate.
+                  </p>
+                )}
+
                 <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
                   Scope of work
                   <textarea
@@ -3272,6 +3317,15 @@ export default function ViewWorkOrder() {
                       style={{ fontSize: 14, padding: "8px 16px" }}
                     >
                       {contractSaving ? "Saving…" : residentialContract ? "Save changes" : "Save draft"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-light"
+                      onClick={regenerateContract}
+                      disabled={contractSaving}
+                      style={{ fontSize: 14, padding: "8px 16px" }}
+                    >
+                      {contractSaving ? "Working…" : genHref ? "Regenerate PDF" : "Generate PDF"}
                     </button>
                   </div>
                 )}

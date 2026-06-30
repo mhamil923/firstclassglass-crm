@@ -8055,6 +8055,255 @@ app.delete(
 
 // ─── RESIDENTIAL CONTRACTS (one per work order) ────────────────────────────
 
+// Company constants (matches the rest of the app: 1513 Industrial Dr, Itasca, IL 60143)
+const FCG_COMPANY = {
+  name: 'First Class Glass & Mirror, Inc.',
+  address: '1513 Industrial Drive, Itasca, IL 60143',
+  phone: '630-250-9777',
+  cancelEmail: 'Jefflawson360@yahoo.com',
+};
+
+function rcFmtDate(d) {
+  if (!d) return '';
+  try {
+    return new Date(d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  } catch { return String(d); }
+}
+function rcFmtMoney(v) {
+  if (v === null || v === undefined || v === '' || !Number.isFinite(Number(v))) return '';
+  return '$' + Number(v).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/**
+ * Render the First Class Glass Residential Sales Order Agreement to a PDF Buffer.
+ * Illinois Home Repair and Remodeling Act compliant. Merge fields + scope are the
+ * only dynamic content; the legal body is fixed. Blank merge fields render as
+ * underscored fill-in lines.
+ *
+ * NOTE: the section prose below implements the clause spec provided for this contract
+ * (10 sections + Section 1A + detachable Notice of Cancellation, 815 ILCS 505/2B
+ * 3-business-day cooling-off, 50% cancellation fee, DuPage venue, notices to the
+ * Itasca address). It is isolated here so attorney-verbatim text can be dropped in
+ * by editing this one function.
+ */
+function renderResidentialContractPdf(data) {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: 'LETTER', margins: { top: 54, bottom: 54, left: 54, right: 54 } });
+      const chunks = [];
+      doc.on('data', (c) => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      const CONTENT_W = doc.page.width - 108; // 612 - 54*2
+      const LEFT = 54;
+
+      const heading = (t) => { doc.moveDown(0.6); doc.font('Helvetica-Bold').fontSize(10.5).fillColor('#111').text(t); doc.moveDown(0.2); };
+      const body = (t) => { doc.font('Helvetica').fontSize(9).fillColor('#222').text(t, { align: 'justify', lineGap: 1.5 }); };
+      // Inline label + value (value underlined; blank => underscored fill line)
+      const field = (label, value, lineW = 230) => {
+        const startY = doc.y;
+        doc.font('Helvetica-Bold').fontSize(9).fillColor('#111').text(label + '  ', { continued: true });
+        const v = (value === null || value === undefined) ? '' : String(value);
+        doc.font('Helvetica').fillColor('#222').text(v || '__________________________________', { continued: false });
+        return startY;
+      };
+
+      // ── Title block ─────────────────────────────────────────────────────────
+      doc.font('Helvetica-Bold').fontSize(15).fillColor('#0b3d2e').text('RESIDENTIAL SALES ORDER AGREEMENT', { align: 'center' });
+      doc.font('Helvetica').fontSize(9.5).fillColor('#333')
+         .text(`(Illinois Home Repair and Remodeling Compliant – ${data.county || 'DuPage'} County)`, { align: 'center' });
+      doc.moveDown(0.4);
+      doc.font('Helvetica-Bold').fontSize(10).fillColor('#111').text(FCG_COMPANY.name, { align: 'center' });
+      doc.font('Helvetica').fontSize(8.5).fillColor('#444')
+         .text(`${FCG_COMPANY.address}  •  ${FCG_COMPANY.phone}`, { align: 'center' });
+      doc.moveDown(0.5);
+      doc.moveTo(LEFT, doc.y).lineTo(LEFT + CONTENT_W, doc.y).strokeColor('#0b3d2e').lineWidth(1).stroke();
+      doc.moveDown(0.5);
+
+      // ── Header fields ────────────────────────────────────────────────────────
+      field('Contract No.:', data.contractNumber);
+      field('Effective Date:', rcFmtDate(data.effectiveDate));
+      field('Customer:', data.customer);
+      field('Service / Job Address:', data.siteAddress);
+      field('Billing Address:', data.billingAddress);
+      field('Phone:', data.customerPhone);
+      field('Email:', data.customerEmail);
+      doc.moveDown(0.3);
+      field('Contract Total:', rcFmtMoney(data.contractTotal));
+      field('Down Payment:', (data.downPaymentPercent === null || data.downPaymentPercent === undefined || data.downPaymentPercent === '')
+        ? '' : `${Number(data.downPaymentPercent)}% of Contract Total`);
+      field('Estimated Start Date:', rcFmtDate(data.startDate));
+      field('Estimated Completion Date:', rcFmtDate(data.completionDate));
+
+      // ── Section 1A — Work Order Acknowledgment (scope) ────────────────────────
+      heading('SECTION 1A — WORK ORDER ACKNOWLEDGMENT (SCOPE OF WORK)');
+      body('The Customer acknowledges and authorizes the following scope of work to be performed by the Contractor at the Service/Job Address identified above:');
+      doc.moveDown(0.2);
+      doc.font('Helvetica').fontSize(9).fillColor('#000')
+         .text(data.scopeOfWork && String(data.scopeOfWork).trim() ? String(data.scopeOfWork).trim() : '__________________________________________________________________________________________', { align: 'left', lineGap: 2 });
+
+      // ── Sections 1–10 ─────────────────────────────────────────────────────────
+      heading('1. SCOPE OF WORK AND MATERIALS');
+      body(`The Contractor agrees to furnish the labor, materials, and equipment necessary to complete the work described in Section 1A in a good and workmanlike manner. Any work not expressly described in Section 1A is excluded and shall require a written change order signed by both parties.`);
+
+      heading('2. CONTRACT PRICE AND PAYMENT TERMS');
+      body(`The Customer agrees to pay the Contract Total stated above. A down payment of the percentage stated above is due upon execution of this Agreement, with the balance due upon substantial completion of the work, unless otherwise stated in writing. Payments not received when due may be subject to a service charge as permitted by law.`);
+
+      heading('3. CHANGE ORDERS');
+      body(`Any change to the scope of work, materials, or price must be documented in a written change order signed by both the Customer and the Contractor before the additional work is performed. Verbal change orders are not binding.`);
+
+      heading('4. PERMITS AND CODE COMPLIANCE');
+      body(`The Contractor shall perform the work in compliance with applicable building codes. Unless otherwise agreed in writing, the Contractor will obtain permits required for the work, the cost of which may be included in or added to the Contract Total.`);
+
+      heading('5. WARRANTY');
+      body(`The Contractor warrants that the work will be free from defects in workmanship for a period of one (1) year from the date of substantial completion. Manufacturer warranties on materials, where applicable, are passed through to the Customer. This warranty does not cover damage caused by misuse, neglect, alteration, or ordinary wear and tear.`);
+
+      heading('6. INSURANCE');
+      body(`The Contractor maintains general liability insurance and, where required, workers’ compensation insurance. A certificate of insurance is available to the Customer upon request.`);
+
+      heading('7. DELAYS AND FORCE MAJEURE');
+      body(`The Contractor shall not be liable for delays caused by events beyond its reasonable control, including weather, supplier delays, acts of God, or Customer-caused delays. Estimated start and completion dates are good-faith estimates and not guarantees.`);
+
+      heading('8. CANCELLATION AND RIGHT TO CANCEL');
+      body(`You, the Customer, may cancel this transaction at any time prior to midnight of the third (3rd) business day after the date of this transaction, pursuant to 815 ILCS 505/2B. To cancel, deliver a signed and dated written notice of cancellation, or any other written notice, to ${FCG_COMPANY.name}, ${FCG_COMPANY.address}, or by email to ${FCG_COMPANY.cancelEmail}, prior to midnight of the third business day. See the detachable Notice of Cancellation provided on the final page of this Agreement.`);
+      doc.moveDown(0.2);
+      body(`If the Customer cancels after the three (3) business day cooling-off period, or otherwise breaches this Agreement after work or material procurement has begun, the Customer shall be responsible for a cancellation fee equal to fifty percent (50%) of the Contract Total to cover labor, materials, restocking, and administrative costs incurred.`);
+
+      heading('9. GOVERNING LAW AND VENUE');
+      body(`This Agreement shall be governed by the laws of the State of Illinois. The parties agree that exclusive venue for any dispute arising under this Agreement shall lie in the Circuit Court of DuPage County, Illinois.`);
+
+      heading('10. ENTIRE AGREEMENT AND NOTICES');
+      body(`This Agreement, including Section 1A, constitutes the entire agreement between the parties and supersedes all prior oral or written representations. Any modification must be in writing and signed by both parties. All notices to the Contractor shall be sent to ${FCG_COMPANY.name}, ${FCG_COMPANY.address}.`);
+
+      // ── Signature block ────────────────────────────────────────────────────────
+      doc.moveDown(0.8);
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#111')
+         .text('You are entitled to a completely filled-in copy of this Agreement at the time you sign it.');
+      doc.moveDown(0.8);
+      const sigY = doc.y;
+      doc.font('Helvetica').fontSize(9).fillColor('#000');
+      doc.text('______________________________', LEFT, sigY);
+      doc.text('______________________________', LEFT + CONTENT_W / 2, sigY);
+      doc.text('Customer Signature / Date', LEFT, sigY + 14);
+      doc.text(`${FCG_COMPANY.name} (Authorized Rep) / Date`, LEFT + CONTENT_W / 2, sigY + 14);
+
+      // ── Detachable Notice of Cancellation page ──────────────────────────────────
+      doc.addPage();
+      doc.font('Helvetica-Bold').fontSize(13).fillColor('#0b3d2e').text('NOTICE OF CANCELLATION', { align: 'center' });
+      doc.font('Helvetica').fontSize(9).fillColor('#333')
+         .text(`(Detach and return to cancel — 815 ILCS 505/2B)`, { align: 'center' });
+      doc.moveDown(0.6);
+      field('Date of Transaction:', rcFmtDate(data.effectiveDate));
+      doc.moveDown(0.4);
+      doc.font('Helvetica').fontSize(9.5).fillColor('#000').text(
+        `You may cancel this transaction, without any penalty or obligation, within three (3) business days from the above date.\n\n` +
+        `If you cancel, any property traded in, any payments made by you under the contract, and any negotiable instrument executed by you will be returned within ten (10) business days following receipt by the seller of your cancellation notice, and any security interest arising out of the transaction will be cancelled.\n\n` +
+        `To cancel this transaction, mail or deliver a signed and dated copy of this Cancellation Notice, or any other written notice, or send a telegram/email to ${FCG_COMPANY.name}, at ${FCG_COMPANY.address}, or ${FCG_COMPANY.cancelEmail}, NOT LATER THAN MIDNIGHT OF the third business day following the date of this transaction.`,
+        { align: 'left', lineGap: 2 }
+      );
+      doc.moveDown(1.2);
+      doc.text('I HEREBY CANCEL THIS TRANSACTION.');
+      doc.moveDown(1.4);
+      const cY = doc.y;
+      doc.text('______________________________', LEFT, cY);
+      doc.text('Customer Signature', LEFT, cY + 14);
+      doc.moveDown(1.0);
+      doc.text('______________________________', LEFT, doc.y);
+      doc.text('Date', LEFT, doc.y + 2);
+
+      doc.end();
+    } catch (err) { reject(err); }
+  });
+}
+
+/**
+ * Build (or rebuild) the residential contract PDF for a work order.
+ * Ensures a residential_contracts row exists, renders the PDF, stores it using
+ * the same uploads/ + S3 method as estimates/invoices, writes generatedPdfPath,
+ * and returns the stored path.
+ */
+async function generateResidentialContractPdf(workOrderId, opts = {}) {
+  const wid = Number(workOrderId);
+
+  const [[wo]] = await db.query(
+    `SELECT w.*, c.companyName, c.name AS custName, c.email AS custEmail2, c.phone AS custPhone2
+       FROM work_orders w LEFT JOIN customers c ON w.customerId = c.id WHERE w.id = ?`,
+    [wid]
+  );
+  if (!wo) throw new Error('Work order not found');
+
+  // Ensure a contract row exists (Phase 1 normally seeds it; create if missing)
+  let [[contract]] = await db.query('SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+  if (!contract) {
+    await db.query(
+      `INSERT INTO residential_contracts (workOrderId, status, downPaymentPercent) VALUES (?, 'Draft', 100.00)`,
+      [wid]
+    );
+    [[contract]] = await db.query('SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+  }
+
+  // Scope priority: explicit contract scopeOfWork -> most recent CRM estimate line items -> WO problem description
+  let scope = contract.scopeOfWork && String(contract.scopeOfWork).trim() ? String(contract.scopeOfWork).trim() : '';
+  if (!scope) {
+    try {
+      const [[est]] = await db.query('SELECT id FROM estimates WHERE workOrderId = ? ORDER BY id DESC LIMIT 1', [wid]);
+      if (est) {
+        const [items] = await db.query(
+          'SELECT description, quantity, amount FROM estimate_line_items WHERE estimateId = ? ORDER BY sortOrder ASC, id ASC',
+          [est.id]
+        );
+        if (items.length) {
+          scope = items.map((it) => {
+            const qty = (it.quantity !== null && it.quantity !== undefined && it.quantity !== '') ? `${Number(it.quantity)} x ` : '';
+            return `• ${qty}${it.description}`;
+          }).join('\n');
+        }
+      }
+    } catch (e) { console.warn('[ResContract] scope from estimate failed:', e.message); }
+  }
+  if (!scope) scope = wo.problemDescription || '';
+
+  const data = {
+    county: opts.county || 'DuPage',
+    contractNumber: wo.workOrderNumber || `RC-${wid}`,
+    effectiveDate: contract.createdAt || new Date(),
+    customer: wo.customer || wo.companyName || wo.custName || '',
+    siteAddress: wo.siteAddress || wo.siteLocation || '',
+    billingAddress: wo.billingAddress || '',
+    customerPhone: wo.customerPhone || wo.custPhone2 || wo.sitePhone || '',
+    customerEmail: wo.customerEmail || wo.custEmail2 || '',
+    contractTotal: contract.contractTotal,
+    downPaymentPercent: (contract.downPaymentPercent === null || contract.downPaymentPercent === undefined) ? 100 : contract.downPaymentPercent,
+    startDate: contract.startDate,
+    completionDate: contract.completionDate,
+    scopeOfWork: scope,
+  };
+
+  const pdfBuffer = await renderResidentialContractPdf(data);
+
+  // Store using the SAME method as estimate/invoice PDFs (uploads/ + optional S3)
+  const filename = `residential_contract_${wid}_${Date.now()}.pdf`;
+  const localDir = path.resolve(__dirname, 'uploads');
+  if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+  const filePath = path.join(localDir, filename);
+  fs.writeFileSync(filePath, pdfBuffer);
+  const generatedPdfPath = `uploads/${filename}`;
+
+  // Keep status as-is if further along than Draft; otherwise ensure 'Draft'
+  await db.query(
+    `UPDATE residential_contracts
+        SET generatedPdfPath = ?,
+            status = CASE WHEN status IN ('Signed','Sent') THEN status ELSE 'Draft' END,
+            updatedAt = NOW()
+      WHERE workOrderId = ?`,
+    [generatedPdfPath, wid]
+  );
+  await uploadToS3IfConfigured(filePath, generatedPdfPath);
+
+  return generatedPdfPath;
+}
+
 // GET /work-orders/:id/residential-contract — returns the contract row or null
 app.get('/work-orders/:id/residential-contract', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
@@ -8129,6 +8378,15 @@ app.put('/work-orders/:id/residential-contract', authenticate, requireNumericPar
       );
     }
 
+    // Auto-fire PDF generation: this PUT is the moment a residential WO's contract
+    // is seeded on create (AddWorkOrder) and the moment draft fields are edited.
+    // Wrapped in try/catch so a render failure logs but never blocks the save.
+    try {
+      await generateResidentialContractPdf(wid);
+    } catch (genErr) {
+      console.warn('[ResContract] auto-generate after upsert failed (non-fatal):', genErr.message);
+    }
+
     const [[row]] = await db.query(
       'SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1',
       [wid]
@@ -8137,6 +8395,20 @@ app.put('/work-orders/:id/residential-contract', authenticate, requireNumericPar
   } catch (err) {
     console.error('Residential contract upsert error:', err);
     res.status(500).json({ error: 'Failed to save residential contract.' });
+  }
+});
+
+// POST /work-orders/:id/residential-contract/generate — (re)build the contract PDF
+app.post('/work-orders/:id/residential-contract/generate', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const b = (req.body && typeof req.body === 'object') ? req.body : {};
+    const generatedPdfPath = await generateResidentialContractPdf(wid, { county: b.county });
+    const [[row]] = await db.query('SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+    res.json({ ok: true, generatedPdfPath, contract: row });
+  } catch (err) {
+    console.error('Residential contract generate error:', err);
+    res.status(500).json({ error: err.message || 'Failed to generate residential contract PDF.' });
   }
 });
 
