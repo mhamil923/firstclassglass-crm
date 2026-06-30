@@ -510,6 +510,7 @@ export default function ViewWorkOrder() {
 
   // ✅ Quick schedule picker (view mode)
   const scheduleInputRef = useRef(null);
+  const estimateFileRef = useRef(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [quickScheduledDate, setQuickScheduledDate] = useState(""); // datetime-local value string
 
@@ -1506,6 +1507,34 @@ export default function ViewWorkOrder() {
     }
   };
 
+
+  // Estimate upload = plain file picker, no QB metadata modal. POSTs the PDF
+  // straight to the estimate-pdf route (status defaults to Pending; per-card
+  // dropdown handles Approved/Declined later).
+  const handleAddEstimatePdf = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!isPdfFile(file)) {
+      alert("Please choose a PDF file.");
+      e.target.value = "";
+      return;
+    }
+    setBusyEstimateUpload(true);
+    try {
+      const form = new FormData();
+      form.append("estimatePdf", file);
+      await api.post(`/work-orders/${id}/estimate-pdfs`, form, {
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+      });
+      await fetchEstimatePdfs();
+    } catch (error) {
+      console.error("⚠️ Error uploading Estimate PDF:", error);
+      alert(error?.response?.data?.error || "Failed to upload Estimate PDF.");
+    } finally {
+      setBusyEstimateUpload(false);
+      e.target.value = "";
+    }
+  };
 
   const handleRemoveEstimatePdf = async (pdfId) => {
     if (!pdfId) return;
@@ -2689,13 +2718,21 @@ export default function ViewWorkOrder() {
           <h3 className="section-header">
             Estimates
             <span style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+              <input
+                ref={estimateFileRef}
+                type="file"
+                accept="application/pdf"
+                style={{ display: "none" }}
+                onChange={handleAddEstimatePdf}
+              />
               <button
                 type="button"
                 className="btn btn-light"
                 style={{ fontSize: 12, padding: "4px 12px" }}
-                onClick={() => openQbModal("Estimate")}
+                disabled={busyEstimateUpload}
+                onClick={() => estimateFileRef.current?.click()}
               >
-                + Upload Estimate PDF
+                {busyEstimateUpload ? "Uploading…" : "+ Upload Estimate PDF"}
               </button>
             </span>
           </h3>
