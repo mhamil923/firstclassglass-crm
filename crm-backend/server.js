@@ -7806,7 +7806,10 @@ app.post('/work-orders/:id/estimate-send', authenticate, requireNumericParam('id
 
       // Accept/Decline response token (one per WO+estimate). DELETE-before-INSERT.
       const respToken = generatePublicToken();
-      const appUrl = ((await getAppPublicUrl(req)) || 'https://main.d2c3mwinxmekdi.amplifyapp.com').replace(/\/$/, '');
+      // The response page is a React route on the Amplify FRONTEND (not the backend),
+      // so use the frontend base. getAppPublicUrl falls back to the request host
+      // (the backend), which would break the customer link — so don't use it here.
+      const appUrl = (process.env.FRONTEND_PUBLIC_URL || 'https://main.d2c3mwinxmekdi.amplifyapp.com').replace(/\/$/, '');
       const respUrl = `${appUrl}/estimate-response/${respToken}`;
       const acceptUrl = `${respUrl}?action=accept`;
       const declineUrl = `${respUrl}?action=decline`;
