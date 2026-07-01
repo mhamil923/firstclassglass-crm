@@ -1,6 +1,6 @@
 // File: src/App.js
 
-import React from "react";
+import React, { Suspense } from "react";
 import {
   BrowserRouter as Router,
   Route,
@@ -8,32 +8,53 @@ import {
   Navigate
 } from "react-router-dom";
 import { ThemeProvider } from "./contexts/ThemeContext";
+// Eager: needed for first paint / always rendered
 import Home from "./Home";
-import WorkOrders from "./WorkOrders";
-import AddWorkOrder from "./AddWorkOrder";
-import ViewWorkOrder from "./ViewWorkOrder";
-import CalendarPage from "./CalendarPage";
-import HistoryReport from "./HistoryReport";   // ← existing
 import Login from "./Login";
 import Navbar from "./Navbar";
-import PurchaseOrders from "./PurchaseOrders"; // ← NEW import
-import Customers from "./Customers";
-import ViewCustomer from "./ViewCustomer";
-import ViewEstimate from "./ViewEstimate";
-import ViewInvoice from "./ViewInvoice";
-import Collections from "./Collections";
-import SignContract from "./SignContract";
-import EstimateResponse from "./EstimateResponse";
 import ErrorBoundary from "./ErrorBoundary";
-import Reports from "./Reports";
-import RouteBuilder from "./RouteBuilder";
-import LineItemTemplates from "./LineItemTemplates";
-import PdfTemplates from "./PdfTemplates";
-import PdfTemplateBuilder from "./PdfTemplateBuilder";
-import PdfTemplateBuilderLegacy from "./PdfTemplateBuilderLegacy";
-import CanvasTemplateEditor from "./CanvasTemplateEditor";
-import EmailTemplates from "./EmailTemplates";
+
+// Lazy: heavier / not-first-viewed screens — each becomes its own chunk so the
+// initial bundle only ships the landing page. Loaded on first navigation.
+const WorkOrders = React.lazy(() => import("./WorkOrders"));
+const AddWorkOrder = React.lazy(() => import("./AddWorkOrder"));
+const ViewWorkOrder = React.lazy(() => import("./ViewWorkOrder"));
+const CalendarPage = React.lazy(() => import("./CalendarPage"));
+const HistoryReport = React.lazy(() => import("./HistoryReport"));
+const PurchaseOrders = React.lazy(() => import("./PurchaseOrders"));
+const Customers = React.lazy(() => import("./Customers"));
+const ViewCustomer = React.lazy(() => import("./ViewCustomer"));
+const ViewEstimate = React.lazy(() => import("./ViewEstimate"));
+const ViewInvoice = React.lazy(() => import("./ViewInvoice"));
+const Collections = React.lazy(() => import("./Collections"));
+const SignContract = React.lazy(() => import("./SignContract"));
+const EstimateResponse = React.lazy(() => import("./EstimateResponse"));
+const Reports = React.lazy(() => import("./Reports"));
+const RouteBuilder = React.lazy(() => import("./RouteBuilder"));
+const LineItemTemplates = React.lazy(() => import("./LineItemTemplates"));
+const PdfTemplates = React.lazy(() => import("./PdfTemplates"));
+const PdfTemplateBuilder = React.lazy(() => import("./PdfTemplateBuilder"));
+const PdfTemplateBuilderLegacy = React.lazy(() => import("./PdfTemplateBuilderLegacy"));
+const CanvasTemplateEditor = React.lazy(() => import("./CanvasTemplateEditor"));
+const EmailTemplates = React.lazy(() => import("./EmailTemplates"));
 // Note: Bootstrap is imported in index.js before our custom styles
+
+// Lightweight centered spinner shown while a lazy route chunk loads.
+function PageSpinner() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+      <div
+        style={{
+          width: 36, height: 36, borderRadius: "50%",
+          border: "3px solid var(--border-color)",
+          borderTopColor: "var(--accent-blue)",
+          animation: "fcg-spin 0.8s linear infinite",
+        }}
+      />
+      <style>{`@keyframes fcg-spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
 
 // A wrapper for protecting routes
 function PrivateRoute({ children }) {
@@ -50,6 +71,7 @@ export default function App() {
 
         <div className="app-content">
           <ErrorBoundary>
+          <Suspense fallback={<PageSpinner />}>
           <Routes>
             {/* Public */}
             <Route path="/login" element={<Login />} />
@@ -274,6 +296,7 @@ export default function App() {
               }
             />
           </Routes>
+          </Suspense>
           </ErrorBoundary>
         </div>
       </Router>
