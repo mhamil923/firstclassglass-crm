@@ -99,6 +99,17 @@ app.use(bodyParser.urlencoded({ extended: true, limit: '20mb' }));
 // Also accept text/plain bodies
 app.use(bodyParser.text({ type: 'text/plain', limit: '1mb' }));
 
+// Per-route timing: log any request slower than 300ms so slow routes are visible
+// in eb logs without cluttering them with fast requests.
+app.use((req, res, next) => {
+  const t = Date.now();
+  res.on('finish', () => {
+    const ms = Date.now() - t;
+    if (ms > 300) console.log(`[timing] ${res.statusCode} ${req.method} ${req.originalUrl} ${ms}ms`);
+  });
+  next();
+});
+
 // Block known vulnerability scanners by IP (return 200 to avoid EB 4xx health penalty)
 app.use((req, res, next) => {
   const blockedIPs = ['217.76.55.57'];
@@ -1139,6 +1150,58 @@ async function ensureInvoiceTables() {
   }
 }
 ensureInvoiceTables().catch(() => {});
+
+// ─── PERFORMANCE INDEXES (idempotent, non-destructive: ADD INDEX only) ───────
+// MySQL 8 has no CREATE INDEX IF NOT EXISTS, so we check information_schema first.
+// Each single-column secondary index on InnoDB builds ALGORITHM=INPLACE (online).
+async function ensureIndexes() {
+  const wanted = [
+    { table: 'invoices',       index: 'idx_invoices_workOrderId',   col: 'workOrderId' },
+    { table: 'invoices',       index: 'idx_invoices_status',        col: 'status' },
+    { table: 'invoices',       index: 'idx_invoices_createdAt',     col: 'createdAt' },
+    { table: 'invoices',       index: 'idx_invoices_customerId',    col: 'customerId' },
+    { table: 'invoices',       index: 'idx_invoices_invoiceSentAt', col: 'invoiceSentAt' },
+    { table: 'work_order_pos', index: 'idx_wop_workOrderId',        col: 'workOrderId' },
+    { table: 'work_orders',    index: 'idx_work_orders_customerId', col: 'customerId' },
+  ];
+  console.log('[ensureIndexes] starting index check…');
+  for (const { table, index, col } of wanted) {
+    try {
+      const [[colRow]] = await db.query(
+        `SELECT COUNT(*) AS c FROM information_schema.columns
+          WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+        [table, col]
+      );
+      if (!colRow || colRow.c === 0) {
+        console.log(`[ensureIndexes] SKIPPED(no column) ${table}.${col} (${index})`);
+        continue;
+      }
+      const [[idxRow]] = await db.query(
+        `SELECT COUNT(*) AS c FROM information_schema.statistics
+          WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?`,
+        [table, index]
+      );
+      if (idxRow && idxRow.c > 0) {
+        console.log(`[ensureIndexes] SKIPPED(exists) ${index} on ${table}`);
+        continue;
+      }
+      try {
+        await db.query(`ALTER TABLE \`${table}\` ADD INDEX \`${index}\` (\`${col}\`)`);
+        console.log(`[ensureIndexes] CREATED ${index} on ${table}(${col})`);
+      } catch (alterErr) {
+        if (alterErr && alterErr.errno === 1061) {
+          console.log(`[ensureIndexes] SKIPPED(exists/1061) ${index} on ${table}`);
+        } else {
+          console.error(`[ensureIndexes] ERROR ${index} on ${table}: ${alterErr.message}`);
+        }
+      }
+    } catch (e) {
+      console.error(`[ensureIndexes] ERROR checking ${index} on ${table}: ${e.message}`);
+    }
+  }
+  console.log('[ensureIndexes] done.');
+}
+ensureIndexes().catch((e) => console.error('[ensureIndexes] fatal:', e.message));
 
 // ─── LINE ITEM TEMPLATES TABLE ──────────────────────────────────────────────
 async function ensureLineItemTemplateTable() {
