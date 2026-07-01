@@ -4,6 +4,11 @@
 // (invoice creation now happens in QuickBooks). Reads the unchanged collections
 // backend: GET /invoices/collections, PUT /invoices/:id/paylink,
 // POST /invoices/:id/reminder/{draft,send,skip}.
+//
+// Styling: Apple Design System tokens only (var(--bg-card-solid), --bg-secondary,
+// --text-primary, --text-secondary, --border-color, --accent-blue/green/orange/red).
+// Buttons reuse the shared accent-blue primary class (btn-primary-apple) and the
+// estimate-send modal's inline secondary style — dark-mode correct in both themes.
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "./api";
@@ -22,6 +27,39 @@ function fmtDate(d) {
     return d;
   }
 }
+
+// ── Shared design-system button styles (theme tokens; even sizing) ───────────
+// Secondary/ghost button = the same treatment the estimate-send modal's Cancel uses.
+const SECONDARY_BTN = {
+  background: "var(--bg-secondary)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-color)",
+};
+// Compact, even-height sizing for the table-row action buttons (Draft/Open/Skip).
+const ROW_BTN = {
+  fontSize: 12,
+  height: 30,
+  padding: "0 12px",
+  borderRadius: "var(--radius-sm)",
+  cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  whiteSpace: "nowrap",
+  boxSizing: "border-box",
+  lineHeight: 1,
+};
+// Themed inputs (match the estimate-send modal fields).
+const FIELD = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: 10,
+  borderRadius: 8,
+  background: "var(--bg-secondary)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-color)",
+};
+const MODAL_LABEL = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-secondary)" };
 
 export default function Collections() {
   const navigate = useNavigate();
@@ -106,10 +144,11 @@ export default function Collections() {
     }
   };
 
+  // Overdue badge colors from design tokens: green (not due) / amber (0–44) / red (45+)
   const daysOverdueBadge = (d) => {
-    if (d == null || d < 0) return { background: "#34c759", color: "#fff", label: d == null ? "—" : "Not due" };
-    if (d < 45) return { background: "#f59e0b", color: "#fff", label: `${d}d` };
-    return { background: "#dc2626", color: "#fff", label: `${d}d` };
+    if (d == null || d < 0) return { background: "var(--accent-green)", color: "#fff", label: d == null ? "—" : "Not due" };
+    if (d < 45) return { background: "var(--accent-orange)", color: "#fff", label: `${d}d` };
+    return { background: "var(--accent-red)", color: "#fff", label: `${d}d` };
   };
 
   return (
@@ -136,7 +175,7 @@ export default function Collections() {
                   <th>Reminder Stage</th>
                   <th>Last Reminded</th>
                   <th>Pay Link</th>
-                  <th style={{ width: 230 }}></th>
+                  <th style={{ width: 250 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -171,22 +210,22 @@ export default function Collections() {
                         </span>
                       </td>
                       <td data-label="Late Fee" style={{ textAlign: "right" }}>
-                        <span title={lateFeeTip} style={{ color: row.lateFee > 0 ? "#dc2626" : "var(--text-tertiary)", fontWeight: row.lateFee > 0 ? 700 : 400, cursor: "help" }}>
+                        <span title={lateFeeTip} style={{ color: row.lateFee > 0 ? "var(--accent-red)" : "var(--text-tertiary)", fontWeight: row.lateFee > 0 ? 700 : 400, cursor: "help" }}>
                           {fmtMoney(row.lateFee)}
                         </span>
                       </td>
-                      <td data-label="Stage">{row.reminderStage}</td>
-                      <td data-label="Last Reminded" style={{ fontSize: 12 }}>
+                      <td data-label="Stage" style={{ color: "var(--text-primary)" }}>{row.reminderStage}</td>
+                      <td data-label="Last Reminded" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                         {row.lastReminderAt ? fmtDate(row.lastReminderAt) : <span style={{ color: "var(--text-tertiary)" }}>Never</span>}
                       </td>
                       <td data-label="Pay Link">
                         {!editing && row.qbPayLink ? (
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                            <span style={{ color: "#34c759", fontWeight: 700 }}>✓ On file</span>
-                            <button type="button" className="link-btn" style={{ fontSize: 11, background: "none", border: "none", color: "#1b5e20", cursor: "pointer", textDecoration: "underline" }} onClick={() => setPayLinkEdit((m) => ({ ...m, [row.id]: row.qbPayLink || "" }))}>edit</button>
+                            <span style={{ color: "var(--accent-green)", fontWeight: 700 }}>✓ On file</span>
+                            <button type="button" style={{ fontSize: 11, background: "none", border: "none", color: "var(--accent-blue)", cursor: "pointer", textDecoration: "underline", padding: 0 }} onClick={() => setPayLinkEdit((m) => ({ ...m, [row.id]: row.qbPayLink || "" }))}>edit</button>
                           </span>
                         ) : !editing ? (
-                          <button type="button" style={{ fontSize: 12, background: "none", border: "none", color: "#1b5e20", cursor: "pointer", textDecoration: "underline" }} onClick={() => setPayLinkEdit((m) => ({ ...m, [row.id]: "" }))}>+ Add pay link</button>
+                          <button type="button" style={{ fontSize: 12, background: "none", border: "none", color: "var(--accent-blue)", cursor: "pointer", textDecoration: "underline", padding: 0 }} onClick={() => setPayLinkEdit((m) => ({ ...m, [row.id]: "" }))}>+ Add pay link</button>
                         ) : (
                           <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                             <input
@@ -194,17 +233,19 @@ export default function Collections() {
                               value={payLinkEdit[row.id]}
                               onChange={(e) => setPayLinkEdit((m) => ({ ...m, [row.id]: e.target.value }))}
                               placeholder="Paste QuickBooks pay URL"
-                              style={{ fontSize: 12, padding: "3px 6px", border: "1px solid #ccc", borderRadius: 6, width: 180 }}
+                              style={{ ...FIELD, width: 180, fontSize: 12, padding: "5px 8px" }}
                             />
-                            <button type="button" style={{ fontSize: 12, cursor: "pointer" }} onClick={() => savePayLink(row.id)}>Save</button>
-                            <button type="button" style={{ fontSize: 12, cursor: "pointer" }} onClick={() => setPayLinkEdit((m) => { const n = { ...m }; delete n[row.id]; return n; })}>✕</button>
+                            <button type="button" style={{ ...ROW_BTN, background: "var(--accent-blue)", color: "#fff", border: "none", height: 28, padding: "0 10px" }} onClick={() => savePayLink(row.id)}>Save</button>
+                            <button type="button" style={{ ...ROW_BTN, ...SECONDARY_BTN, height: 28, padding: "0 10px" }} onClick={() => setPayLinkEdit((m) => { const n = { ...m }; delete n[row.id]; return n; })}>✕</button>
                           </span>
                         )}
                       </td>
                       <td style={{ whiteSpace: "nowrap" }}>
-                        <button type="button" className="btn-primary-apple" style={{ fontSize: 12, padding: "4px 10px", marginRight: 4 }} onClick={() => openDraft(row)}>Draft Reminder</button>
-                        <button type="button" style={{ fontSize: 12, padding: "4px 10px", marginRight: 4, cursor: "pointer" }} onClick={() => navigate(`/invoices/${row.id}`)}>Open</button>
-                        <button type="button" style={{ fontSize: 12, padding: "4px 10px", cursor: "pointer" }} onClick={() => skipReminder(row.id)}>Skip</button>
+                        <div style={{ display: "inline-flex", gap: 6 }}>
+                          <button type="button" className="btn-primary-apple" style={ROW_BTN} onClick={() => openDraft(row)}>Draft Reminder</button>
+                          <button type="button" style={{ ...ROW_BTN, ...SECONDARY_BTN }} onClick={() => navigate(`/invoices/${row.id}`)}>Open</button>
+                          <button type="button" style={{ ...ROW_BTN, ...SECONDARY_BTN }} onClick={() => skipReminder(row.id)}>Skip</button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -224,34 +265,34 @@ export default function Collections() {
           role="dialog"
           aria-modal="true"
           onClick={() => !draftModal.sending && setDraftModal(null)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
         >
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, maxWidth: 600, width: "100%", maxHeight: "90vh", overflowY: "auto", padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-            <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--bg-card-solid)", color: "var(--text-primary)", border: "1px solid var(--border-color)", borderRadius: "var(--radius-md)", maxWidth: 600, width: "100%", maxHeight: "90vh", overflowY: "auto", padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
+            <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700, color: "var(--text-primary)" }}>
               Review reminder — {draftModal.row.customer} (#{draftModal.row.invoiceNumber})
             </h3>
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", margin: "8px 0 16px", fontSize: 13 }}>
-              <span>Stage: <strong>{draftModal.reminderStage}</strong></span>
-              <span>Outstanding: <strong>{fmtMoney(draftModal.outstanding)}</strong></span>
-              <span style={{ color: draftModal.lateFee > 0 ? "#dc2626" : "inherit" }}>
-                Late fee: <strong>{fmtMoney(draftModal.lateFee)}</strong>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", margin: "8px 0 16px", fontSize: 13, color: "var(--text-secondary)" }}>
+              <span>Stage: <strong style={{ color: "var(--text-primary)" }}>{draftModal.reminderStage}</strong></span>
+              <span>Outstanding: <strong style={{ color: "var(--text-primary)" }}>{fmtMoney(draftModal.outstanding)}</strong></span>
+              <span>
+                Late fee: <strong style={{ color: draftModal.lateFee > 0 ? "var(--accent-red)" : "var(--text-primary)" }}>{fmtMoney(draftModal.lateFee)}</strong>
               </span>
-              <span>Pay link: <strong style={{ color: draftModal.payLinkOnFile ? "#34c759" : "#dc2626" }}>{draftModal.payLinkOnFile ? "✓ included" : "none on file"}</strong></span>
+              <span>Pay link: <strong style={{ color: draftModal.payLinkOnFile ? "var(--accent-green)" : "var(--accent-red)" }}>{draftModal.payLinkOnFile ? "✓ included" : "none on file"}</strong></span>
             </div>
             {draftModal.noPayLinkWarning && (
-              <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", borderRadius: 8, padding: "8px 12px", fontSize: 12, marginBottom: 12 }}>
+              <div style={{ background: "rgba(255,149,0,0.12)", border: "1px solid var(--accent-orange)", color: "var(--accent-orange)", borderRadius: 8, padding: "8px 12px", fontSize: 12, marginBottom: 12 }}>
                 {draftModal.noPayLinkWarning}
               </div>
             )}
-            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>To</label>
-            <input type="text" value={draftModal.to} onChange={(e) => setDraftModal((m) => ({ ...m, to: e.target.value }))} style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #d1d5db", marginBottom: 12 }} />
-            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Subject</label>
-            <input type="text" value={draftModal.subject} onChange={(e) => setDraftModal((m) => ({ ...m, subject: e.target.value }))} style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #d1d5db", marginBottom: 12 }} />
-            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Body</label>
-            <textarea value={draftModal.body} onChange={(e) => setDraftModal((m) => ({ ...m, body: e.target.value }))} rows={14} style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid #d1d5db", resize: "vertical", fontFamily: "inherit", fontSize: 13 }} />
+            <label style={MODAL_LABEL}>To</label>
+            <input type="text" value={draftModal.to} onChange={(e) => setDraftModal((m) => ({ ...m, to: e.target.value }))} style={{ ...FIELD, marginBottom: 12 }} />
+            <label style={MODAL_LABEL}>Subject</label>
+            <input type="text" value={draftModal.subject} onChange={(e) => setDraftModal((m) => ({ ...m, subject: e.target.value }))} style={{ ...FIELD, marginBottom: 12 }} />
+            <label style={MODAL_LABEL}>Body</label>
+            <textarea value={draftModal.body} onChange={(e) => setDraftModal((m) => ({ ...m, body: e.target.value }))} rows={14} style={{ ...FIELD, resize: "vertical", fontFamily: "inherit", fontSize: 13 }} />
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
-              <button type="button" onClick={() => setDraftModal(null)} disabled={draftModal.sending} style={{ padding: "8px 16px", cursor: "pointer" }}>Cancel</button>
-              <button type="button" className="btn-primary-apple" onClick={sendDraft} disabled={draftModal.sending || !draftModal.to || !draftModal.subject || !draftModal.body}>
+              <button type="button" onClick={() => setDraftModal(null)} disabled={draftModal.sending} style={{ ...SECONDARY_BTN, padding: "10px 18px", borderRadius: 8, cursor: "pointer" }}>Cancel</button>
+              <button type="button" className="btn-primary-apple" onClick={sendDraft} disabled={draftModal.sending || !draftModal.to || !draftModal.subject || !draftModal.body} style={(draftModal.sending || !draftModal.to || !draftModal.subject || !draftModal.body) ? { opacity: 0.5, cursor: "not-allowed" } : undefined}>
                 {draftModal.sending ? "Sending…" : "Send"}
               </button>
             </div>
