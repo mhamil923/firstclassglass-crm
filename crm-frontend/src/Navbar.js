@@ -23,13 +23,11 @@ const NAV_ITEMS = [
     ],
   },
   {
+    // PDF Templates + Line Item Templates removed; only Email Templates remains,
+    // so this collapses from a dropdown to a direct link (id kept for saved nav order).
     id: "templates",
-    label: "Templates",
-    children: [
-      { label: "Line Item Templates", to: "/line-item-templates" },
-      { label: "PDF Templates", to: "/pdf-templates" },
-      { label: "Email Templates", to: "/email-templates" },
-    ],
+    label: "Email Templates",
+    to: "/email-templates",
   },
   {
     id: "records",

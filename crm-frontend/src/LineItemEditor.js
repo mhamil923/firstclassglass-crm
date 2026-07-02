@@ -4,7 +4,6 @@
 // Used by both CreateEstimate.js and CreateInvoice.js.
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import api from "./api";
 import "./LineItemEditor.css";
 
@@ -380,9 +379,8 @@ export default function LineItemEditor({ lineItems, setLineItems, nextTempId, cs
         <button type="button" className={`${p}-add-line`} onClick={addLineItem}>
           + Add Line Item
         </button>
-        <Link to="/line-item-templates" className="li-manage-link">
-          Manage Templates
-        </Link>
+        {/* "Manage Templates" link removed (Line Item Templates page retired).
+            The line-item autocomplete below still reads /line-item-templates. */}
       </div>
     </>
   );

@@ -31,11 +31,6 @@ const SignContract = React.lazy(() => import("./SignContract"));
 const EstimateResponse = React.lazy(() => import("./EstimateResponse"));
 const Reports = React.lazy(() => import("./Reports"));
 const RouteBuilder = React.lazy(() => import("./RouteBuilder"));
-const LineItemTemplates = React.lazy(() => import("./LineItemTemplates"));
-const PdfTemplates = React.lazy(() => import("./PdfTemplates"));
-const PdfTemplateBuilder = React.lazy(() => import("./PdfTemplateBuilder"));
-const PdfTemplateBuilderLegacy = React.lazy(() => import("./PdfTemplateBuilderLegacy"));
-const CanvasTemplateEditor = React.lazy(() => import("./CanvasTemplateEditor"));
 const EmailTemplates = React.lazy(() => import("./EmailTemplates"));
 // Note: Bootstrap is imported in index.js before our custom styles
 
@@ -196,65 +191,7 @@ export default function App() {
               }
             />
 
-            {/* Line Item Templates */}
-            <Route
-              path="/line-item-templates"
-              element={
-                <PrivateRoute>
-                  <LineItemTemplates />
-                </PrivateRoute>
-              }
-            />
-
-            {/* PDF Templates */}
-            <Route
-              path="/pdf-templates"
-              element={
-                <PrivateRoute>
-                  <PdfTemplates />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/pdf-templates/new"
-              element={
-                <PrivateRoute>
-                  <PdfTemplateBuilder />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/pdf-templates/canvas/new"
-              element={
-                <PrivateRoute>
-                  <CanvasTemplateEditor />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/pdf-templates/canvas/:id"
-              element={
-                <PrivateRoute>
-                  <CanvasTemplateEditor />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/pdf-templates/legacy/:id"
-              element={
-                <PrivateRoute>
-                  <PdfTemplateBuilderLegacy />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/pdf-templates/:id"
-              element={
-                <PrivateRoute>
-                  <PdfTemplateBuilder />
-                </PrivateRoute>
-              }
-            />
+            {/* PDF Templates + Line Item Templates pages removed (no longer estimating/invoicing off the system) */}
             <Route
               path="/email-templates"
               element={
