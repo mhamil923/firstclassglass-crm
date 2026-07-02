@@ -397,6 +397,32 @@ async function stampEstimateSentIfWaiting(woId, statusCanon) {
   }
 }
 
+// Append a note to work_orders.notes using the SAME format existing notes use:
+//   [YYYY-MM-DD HH:MM:SS.mmm] <who>: <text>   (blocks separated by \n\n)
+async function appendWorkOrderNote(woId, text, who) {
+  const [[row]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [Number(woId)]);
+  const stamp = new Date().toISOString().replace('T', ' ').replace('Z', '');
+  const sep = row && row.notes ? '\n\n' : '';
+  const newNotes = (row?.notes || '') + `${sep}[${stamp}] ${who || 'System'}: ${text}`;
+  await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [newNotes, Number(woId)]);
+}
+
+// When a work order transitions INTO "Approved" (and wasn't already Approved),
+// append an "Approved <M/D/YYYY>" note (Central time) attributed to the actor.
+// Transition-only guard prevents duplicate notes on re-saves of an already-Approved WO.
+// Never throws — a note failure must not fail the status update.
+async function maybeLogApprovalNote(woId, priorStatus, newStatus, who) {
+  try {
+    if (canonStatus(newStatus) === 'Approved' && canonStatus(priorStatus) !== 'Approved') {
+      const dateStr = new Date().toLocaleDateString('en-US', { timeZone: 'America/Chicago' });
+      await appendWorkOrderNote(woId, `Approved ${dateStr}`, who || 'System');
+      console.log(`[approval-note] WO ${woId}: added "Approved ${dateStr}" (by ${who || 'System'})`);
+    }
+  } catch (e) {
+    console.error('[maybeLogApprovalNote] failed (non-fatal):', e.message);
+  }
+}
+
 // ===============================
 // END Part 1/6
 // Next: Part 2/6
@@ -3606,8 +3632,10 @@ app.put('/estimates/:id/status', authenticate, requireNumericParam('id'), async 
       const [[est]] = await db.query('SELECT workOrderId FROM estimates WHERE id=?', [req.params.id]);
       if (est?.workOrderId) {
         try {
+          const [[prevWo]] = await db.query('SELECT status FROM work_orders WHERE id=?', [est.workOrderId]);
           await db.query("UPDATE work_orders SET status='Approved' WHERE id=?", [est.workOrderId]);
           console.log('[Estimate] Accepted - Updated WO #' + est.workOrderId + ' status to Approved');
+          await maybeLogApprovalNote(est.workOrderId, prevWo?.status, 'Approved', req.user?.username || 'System');
         } catch (woErr) {
           console.warn('[PUT /estimates] Failed to sync WO status:', woErr.message);
         }
@@ -7000,6 +7028,9 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       vals
     );
 
+    // If a WO is created already in Approved status, record the approval note (no prior status).
+    await maybeLogApprovalNote(r.insertId, null, cStatus, req.user?.username || 'System');
+
     // If more than 1 image uploaded, append remaining to photoPath
     if (images.length > 1) {
       const wid = r.insertId;
@@ -7384,6 +7415,7 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
 
     await db.execute(sql, params);
     await stampEstimateSentIfWaiting(wid, cStatus);
+    await maybeLogApprovalNote(wid, existing.status, cStatus, req.user?.username || 'System');
 
     // Sync legacy PO columns from work_order_pos if a PO was added
     if (newPoPdfFile && wantReplacePo) {
@@ -7444,8 +7476,10 @@ app.put('/work-orders/:id/status', authenticate, requireNumericParam('id'), asyn
     const c = canonStatus(incoming);
     if (!c) return res.status(400).json({ error: 'Invalid status value' });
 
+    const [[prevRow]] = await db.execute('SELECT status FROM work_orders WHERE id = ?', [Number(req.params.id)]);
     await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [c, Number(req.params.id)]);
     await stampEstimateSentIfWaiting(Number(req.params.id), c);
+    await maybeLogApprovalNote(Number(req.params.id), prevRow?.status, c, req.user?.username || 'System');
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [Number(req.params.id)]);
     if (!updated) return res.status(404).json({ error: 'Not found.' });
 
@@ -10788,8 +10822,10 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
         console.log('[DEBUG] Estimate row:', JSON.stringify(est));
         console.log('[DEBUG] woId resolved to:', woId);
         if (woId) {
+          const [[prevWo]] = await db.query('SELECT status FROM work_orders WHERE id=?', [woId]);
           const [woResult] = await db.query("UPDATE work_orders SET status='Approved' WHERE id=?", [woId]);
           console.log('[DEBUG] WO update affectedRows:', woResult.affectedRows);
+          await maybeLogApprovalNote(woId, prevWo?.status, 'Approved', 'System');
         } else {
           console.log('[DEBUG] No workOrderId on estimate — work order NOT updated');
         }
@@ -11007,7 +11043,9 @@ app.post(['/public/estimate-response/:token', '/api/public/estimate-response/:to
     // Use the SAME working status-update form as /work-orders/:id/status
     // (plain `UPDATE work_orders SET status = ? WHERE id = ?`, no updatedAt — avoids the old bug)
     const newWoStatus = action === 'accept' ? canonStatus('Approved') : canonStatus('Declined');
+    const [[prevWo]] = await db.execute('SELECT status FROM work_orders WHERE id = ?', [wid]);
     await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [newWoStatus, wid]);
+    await maybeLogApprovalNote(wid, prevWo?.status, newWoStatus, 'System');
 
     // Mark this estimate PDF Approved/Declined (same column the per-card dropdown uses)
     if (tok.estimatePdfId) {
