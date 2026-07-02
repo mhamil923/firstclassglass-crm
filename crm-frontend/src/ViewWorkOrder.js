@@ -543,6 +543,7 @@ export default function ViewWorkOrder() {
     scheduledDate: "",
     poSupplier: "",
     poPickedUp: false,
+    referralSource: "",
   });
 
   const patchEdit = (patch) => setEdit((e) => ({ ...e, ...patch }));
@@ -572,6 +573,7 @@ export default function ViewWorkOrder() {
       scheduledDate: workOrder.scheduledDate || "",
       poSupplier: workOrder.poSupplier || poSupplier || "",
       poPickedUp: !!workOrder.poPickedUp,
+      referralSource: workOrder.referralSource || "",
     });
     setEditMode(true);
   };
@@ -1047,6 +1049,7 @@ export default function ViewWorkOrder() {
     poPdfPath,
     poSupplier: woPoSupplier,
     poPickedUp,
+    referralSource,
     id: woId,
   } = workOrder;
 
@@ -1443,6 +1446,9 @@ export default function ViewWorkOrder() {
       // Purchase order fields
       form.append("poSupplier", edit.poSupplier || "");
       form.append("poPickedUp", edit.poPickedUp ? "1" : "0");
+
+      // Referral source — how the job came to us
+      form.append("referralSource", (edit.referralSource || "").trim());
 
       await api.put(`/work-orders/${id}/edit`, form, {
         headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
@@ -2931,6 +2937,30 @@ export default function ViewWorkOrder() {
                   )}
                 </Field>
               </div>
+
+              <Field label="Referral Source" hint={editMode ? "How did this work order come to us?" : null}>
+                {editMode ? (
+                  <>
+                    <input
+                      type="text"
+                      className="control input"
+                      list="vwo-referral-source-options"
+                      placeholder="e.g. Google, Repeat customer, Referred by…"
+                      value={edit.referralSource}
+                      onChange={(e) => patchEdit({ referralSource: e.target.value })}
+                    />
+                    <datalist id="vwo-referral-source-options">
+                      <option value="Google" />
+                      <option value="Repeat customer" />
+                      <option value="Referral" />
+                      <option value="Yelp" />
+                      <option value="Website" />
+                    </datalist>
+                  </>
+                ) : (
+                  <div className="value">{referralSource || "—"}</div>
+                )}
+              </Field>
 
               <div className="wo-row-2">
                 <Field label="Site Location">

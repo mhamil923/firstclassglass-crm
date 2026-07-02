@@ -484,6 +484,25 @@ async function ensureCols() {
     console.warn(`⚠️ Schema ensure failed: ${e.message}`);
   }
 
+  // Referral Source — how the job came to us (Google, referral, repeat customer, etc.).
+  // Idempotent, non-destructive: NULL default so existing work orders are untouched.
+  try {
+    const [[{ c }]] = await db.query(
+      `SELECT COUNT(*) AS c FROM information_schema.columns
+         WHERE table_schema = DATABASE()
+           AND table_name = 'work_orders'
+           AND column_name = 'referralSource'`
+    );
+    if (!c) {
+      await db.query(`ALTER TABLE \`work_orders\` ADD COLUMN \`referralSource\` VARCHAR(255) NULL`);
+      console.log('[migration] referralSource CREATED on work_orders');
+    } else {
+      console.log('[migration] referralSource SKIPPED(exists) on work_orders');
+    }
+  } catch (e) {
+    console.error(`[migration] referralSource ERROR: ${e.message}`);
+  }
+
   try {
     const t1 = await getColumnType('work_orders', 'scheduledDate');
     if (t1 && /^date(?!time)/.test(t1)) {
@@ -6948,6 +6967,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       endTime = null,
       timeWindow = null,
       customerId = null,
+      referralSource = null,
     } = req.body;
 
     if (!customer || !billingAddress || !problemDescription) {
@@ -6984,7 +7004,8 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       'pdfPath','estimatePdfPath','poPdfPath','photoPath',
       'billingPhone','sitePhone','customerPhone','customerEmail','notes',
       'poSupplier','poPickedUp',
-      'scheduledDate','scheduledEnd'
+      'scheduledDate','scheduledEnd',
+      'referralSource'
     ];
 
     const vals = [
@@ -7008,7 +7029,8 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       poSupplier || null,
       Number(poPickedUp) ? 1 : 0,
       scheduledDate,
-      scheduledEnd
+      scheduledEnd,
+      (typeof referralSource === 'string' && referralSource.trim()) ? referralSource.trim() : null
     ];
 
     if (SCHEMA.hasAssignedTo && assignedTo !== undefined && assignedTo !== '') {
@@ -7390,6 +7412,14 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       const v = req.body.assignedTo;
       sql += `, assignedTo=?`;
       params.push((v === '' || v == null) ? null : Number(v));
+    }
+
+    // Referral Source — only touch when the request explicitly included it, so a
+    // photo-only or partial edit never wipes an existing value. Trim; store NULL if empty.
+    if (Object.prototype.hasOwnProperty.call(req.body, 'referralSource')) {
+      const rs = req.body.referralSource;
+      sql += `, referralSource=?`;
+      params.push((typeof rs === 'string' && rs.trim()) ? rs.trim() : null);
     }
 
     // customerId linking

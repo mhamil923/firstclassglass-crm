@@ -116,6 +116,7 @@ export default function AddWorkOrder() {
     customerEmail: "",
     scheduledDate: "",
     customerId: null,
+    referralSource: "",
   });
 
   const [pdfFile, setPdfFile] = useState(null);
@@ -567,6 +568,7 @@ export default function AddWorkOrder() {
 
     form.append("customerPhone", workOrder.customerPhone || "");
     form.append("customerEmail", workOrder.customerEmail || "");
+    form.append("referralSource", workOrder.referralSource || "");
     const primaryTechId = assignedTechIds[0] || workOrder.assignedTo || "";
     if (primaryTechId) form.append("assignedTo", primaryTechId);
     if (assignedTechIds.length > 0) {
@@ -830,6 +832,29 @@ export default function AddWorkOrder() {
                     className="awo-input"
                     placeholder="name@example.com"
                   />
+                </div>
+              </div>
+
+              <div className="awo-grid">
+                <div className="awo-field">
+                  <label className="awo-label">Referral Source</label>
+                  <input
+                    name="referralSource"
+                    value={workOrder.referralSource}
+                    onChange={handleChange}
+                    className="awo-input"
+                    list="referral-source-options"
+                    placeholder="e.g. Google, Repeat customer, Referred by…"
+                    autoComplete="off"
+                  />
+                  <datalist id="referral-source-options">
+                    <option value="Google" />
+                    <option value="Repeat customer" />
+                    <option value="Referral" />
+                    <option value="Yelp" />
+                    <option value="Website" />
+                  </datalist>
+                  <div className="awo-help">How did this work order come to us?</div>
                 </div>
               </div>
             </div>
