@@ -453,6 +453,7 @@ export default function ViewWorkOrder() {
   const [busyReplace, setBusyReplace] = useState(false);
   const [keepOldInAttachments, setKeepOldInAttachments] = useState(true);
   const [busyPoUpload, setBusyPoUpload] = useState(false);
+  const [busyOtherPdfUpload, setBusyOtherPdfUpload] = useState(false);
   const [poList, setPoList] = useState([]);
   const [linkedEstimates, setLinkedEstimates] = useState([]);
   const [linkedInvoices, setLinkedInvoices] = useState([]);
@@ -1800,6 +1801,38 @@ export default function ViewWorkOrder() {
       alert(error?.response?.data?.error || "Failed to upload PO PDF.");
     } finally {
       setBusyPoUpload(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleUploadOtherPdf = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!isPdfFile(file)) {
+      alert("Please choose a PDF file.");
+      e.target.value = "";
+      return;
+    }
+
+    setBusyOtherPdfUpload(true);
+
+    try {
+      const form = new FormData();
+      // Field name is outside FIELD_SETS (work/est/po), so the /edit route buckets
+      // it as an "other" PDF and appends it to the attachments (photoPath) list.
+      form.append("otherPdf", file);
+
+      await api.put(`/work-orders/${id}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+      });
+
+      await fetchWorkOrder();
+    } catch (error) {
+      console.error("⚠️ Error uploading PDF attachment:", error);
+      alert(error?.response?.data?.error || "Failed to upload PDF.");
+    } finally {
+      setBusyOtherPdfUpload(false);
       e.target.value = "";
     }
   };
@@ -3617,6 +3650,20 @@ export default function ViewWorkOrder() {
           ) : (
             <p className="empty-text">No other PDFs attached.</p>
           )}
+
+          <div className="row-actions" style={{ padding: "0 20px 16px" }}>
+            <label className="btn btn-light po-add-btn">
+              <span className="po-add-icon">+</span>
+              {busyOtherPdfUpload ? "Uploading…" : "Add PDF"}
+              <input
+                type="file"
+                accept=".pdf,application/pdf"
+                onChange={handleUploadOtherPdf}
+                style={{ display: "none" }}
+                disabled={busyOtherPdfUpload}
+              />
+            </label>
+          </div>
         </div>
 
         {/* ======================= Photos ======================= */}
