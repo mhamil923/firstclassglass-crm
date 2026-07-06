@@ -397,14 +397,15 @@ async function stampEstimateSentIfWaiting(woId, statusCanon) {
   }
 }
 
-// Append a note to work_orders.notes using the SAME format existing notes use:
-//   [YYYY-MM-DD HH:MM:SS.mmm] <who>: <text>   (blocks separated by \n\n)
+// Add a note as a ROW in work_order_notes (notes were migrated out of the old
+// work_orders.notes TEXT blob). Timestamp uses the same UTC convention the old
+// blob used (toISOString), so display stays consistent with historical notes.
 async function appendWorkOrderNote(woId, text, who) {
-  const [[row]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [Number(woId)]);
-  const stamp = new Date().toISOString().replace('T', ' ').replace('Z', '');
-  const sep = row && row.notes ? '\n\n' : '';
-  const newNotes = (row?.notes || '') + `${sep}[${stamp}] ${who || 'System'}: ${text}`;
-  await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [newNotes, Number(woId)]);
+  const createdAt = new Date().toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
+  await db.execute(
+    'INSERT INTO work_order_notes (workOrderId, author, noteText, createdAt) VALUES (?, ?, ?, ?)',
+    [Number(woId), who || 'System', String(text), createdAt]
+  );
 }
 
 // When a work order transitions INTO "Approved" (and wasn't already Approved),
@@ -705,6 +706,187 @@ async function ensureSupplierPickupsTable() {
 }
 
 ensureSupplierPickupsTable().catch(() => {});
+
+// ─── WORK ORDER NOTES (migrated from work_orders.notes TEXT blob) ────────────
+// Notes were historically a single TEXT column on work_orders, appended as
+//   [YYYY-MM-DD HH:MM:SS.mmm] <author>: <text>   (blocks separated by \n\n)
+// We migrate those blocks into rows so individual notes can be deleted by id.
+// The original blob column is LEFT IN PLACE as a frozen backup (never nulled).
+async function ensureWorkOrderNotesTable() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS work_order_notes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      workOrderId INT NOT NULL,
+      author VARCHAR(100),
+      noteText TEXT,
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_won_workOrderId (workOrderId)
+    )
+  `);
+}
+
+// Parse a notes blob into entries. THREE historical shapes exist in prod:
+//   (A) JSON array:   [{"text":"…","createdAt":"…Z","by":"…"}, …]   (older UI)
+//   (B) bracket text: [<ts>] <author>: <text>  , entries separated by blank lines
+//   (C) hybrid:       a JSON array (A) FOLLOWED by bracket notes (B), e.g.
+//                     [{…}]\n\n[2025-12-03 20:37:46.822] Jeff: Job completed
+//       (happens when a WO's notes started in the old UI then got appended to).
+// Returns [{ createdAt|null, author|null, text }]; unparseable header => nulls.
+function parseNotesBlob(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return [];
+
+  const mapJson = (arr) => arr
+    .map((n) => ({
+      createdAt: n?.createdAt || n?.time || n?.date || null,
+      author: n?.by || n?.author || n?.user || null,
+      text: String(n?.text ?? '').trim(),
+    }));
+
+  const parseBracket = (str) => {
+    const lines = String(str || '').split(/\r?\n/);
+    const entries = [];
+    let current = null;
+    const startRe = /^\[([^\]]+)\]\s*([^:]+):\s*(.*)$/;
+    for (const line of lines) {
+      const m = line.match(startRe);
+      if (m) {
+        if (current) entries.push(current);
+        current = { createdAt: (m[1] || '').trim(), author: (m[2] || '').trim(), text: m[3] || '' };
+        continue;
+      }
+      if (/^\s*$/.test(line)) {
+        if (current) { entries.push(current); current = null; }
+        continue;
+      }
+      if (current) current.text = (current.text ? current.text + '\n' : '') + line;
+      else current = { createdAt: null, author: null, text: line }; // leading junk
+    }
+    if (current) entries.push(current);
+    return entries;
+  };
+
+  const out = [];
+  let rest = s;
+
+  if (rest[0] === '[' || rest[0] === '{') {
+    // (A) whole thing is a JSON array?
+    try {
+      const arr = JSON.parse(rest);
+      if (Array.isArray(arr)) {
+        return mapJson(arr).filter((e) => e.text || e.createdAt || e.author);
+      }
+    } catch { /* maybe hybrid — try to peel the JSON prefix */ }
+
+    // (C) hybrid: JSON array is the first paragraph, bracket notes follow.
+    const idx = rest.indexOf('\n\n');
+    if (idx !== -1) {
+      const head = rest.slice(0, idx).trim();
+      try {
+        const arr = JSON.parse(head);
+        if (Array.isArray(arr)) {
+          out.push(...mapJson(arr));
+          rest = rest.slice(idx + 2); // continue bracket-parsing the remainder
+        }
+      } catch { /* head wasn't JSON — leave rest as-is for bracket parse */ }
+    }
+  }
+
+  out.push(...parseBracket(rest));
+  return out.filter((e) => (e.text != null && String(e.text).length) || e.createdAt || e.author);
+}
+
+// Normalize a note timestamp (bracket "YYYY-MM-DD HH:MM:SS.mmm" or ISO "…T…Z")
+// into a MySQL-friendly "YYYY-MM-DD HH:MM:SS", preserving the stored wall-clock
+// (both formats stored UTC). Returns null if it can't be normalized.
+function normalizeNoteTimestamp(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  let m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?/);
+  if (m) return `${m[1]} ${m[2]}`;
+  m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})$/); // no seconds
+  if (m) return `${m[1]} ${m[2]}:00`;
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
+  return null;
+}
+
+// One-time, non-destructive migration. Guarded: if work_order_notes already has
+// any rows it does nothing (so redeploys/restarts never double-insert).
+async function migrateNotesToRows() {
+  const [[{ c }]] = await db.query('SELECT COUNT(*) AS c FROM work_order_notes');
+  if (c > 0) {
+    console.log(`[notes-migration] SKIPPED — work_order_notes already has ${c} row(s).`);
+    return;
+  }
+  const [wos] = await db.query(
+    "SELECT id, notes FROM work_orders WHERE notes IS NOT NULL AND notes <> ''"
+  );
+  const nowUtc = () => new Date().toISOString().replace('T', ' ').replace('Z', '').slice(0, 19);
+  let migratedWOs = 0, notesCreated = 0, unparseable = 0;
+  for (const wo of wos) {
+    const entries = parseNotesBlob(wo.notes);
+    if (!entries.length) continue;
+    let anyForThisWo = false;
+    for (const e of entries) {
+      const text = String(e.text || '').trim();
+      const author = (e.author && String(e.author).trim()) ? String(e.author).trim() : null;
+      const ts = normalizeNoteTimestamp(e.createdAt);
+      if (!text && !author && !ts) continue; // truly empty (e.g. "[]" element)
+
+      const finalAuthor = author || 'Unknown';
+      const finalCreatedAt = ts || nowUtc();
+      if (!author || !ts) {
+        unparseable++;
+        console.warn(`[notes-migration] WO ${wo.id}: entry missing ${!author ? 'author' : ''}${(!author && !ts) ? '+' : ''}${!ts ? 'timestamp' : ''}, preserved (author='${finalAuthor}'): ${JSON.stringify(text.slice(0, 80))}`);
+      }
+      await db.execute(
+        'INSERT INTO work_order_notes (workOrderId, author, noteText, createdAt) VALUES (?, ?, ?, ?)',
+        [wo.id, finalAuthor, text, finalCreatedAt]
+      );
+      notesCreated++;
+      anyForThisWo = true;
+    }
+    if (anyForThisWo) migratedWOs++;
+  }
+  console.log(`[notes-migration] DONE — ${migratedWOs} work orders migrated, ${notesCreated} notes created, ${unparseable} unparseable-but-preserved. Original blob column left intact as backup.`);
+}
+
+ensureWorkOrderNotesTable()
+  .then(migrateNotesToRows)
+  .catch((e) => console.error('[notes-migration] fatal:', e.message));
+
+// Attach notes from the work_order_notes table onto WO rows for API responses.
+// Rebuilds the legacy `[ts] author: text` blob string (oldest-first) into row.notes
+// so existing consumers (list latest-note, dashboard, print) keep working, and —
+// when withRows is set — also attaches row.notesRows (with ids) for the detail page.
+async function attachNotesToWorkOrders(rows, { withRows = false } = {}) {
+  if (!rows || !rows.length) return;
+  const ids = rows.map((r) => r.id).filter((n) => Number.isFinite(Number(n)));
+  if (!ids.length) return;
+  const [noteRows] = await db.query(
+    `SELECT id, workOrderId, author, noteText,
+            DATE_FORMAT(createdAt, '%Y-%m-%d %H:%i:%s') AS createdAt
+       FROM work_order_notes
+      WHERE workOrderId IN (${ids.map(() => '?').join(',')})
+      ORDER BY workOrderId ASC, createdAt ASC, id ASC`,
+    ids
+  );
+  const byWo = new Map();
+  for (const n of noteRows) {
+    if (!byWo.has(n.workOrderId)) byWo.set(n.workOrderId, []);
+    byWo.get(n.workOrderId).push(n);
+  }
+  for (const r of rows) {
+    const list = byWo.get(Number(r.id)) || byWo.get(r.id) || [];
+    r.notes = list.length
+      ? list.map((n) => `[${n.createdAt}] ${n.author || 'System'}: ${n.noteText || ''}`).join('\n\n')
+      : '';
+    if (withRows) {
+      r.notesRows = list.map((n) => ({ id: n.id, author: n.author, noteText: n.noteText, createdAt: n.createdAt }));
+    }
+  }
+}
 
 // ─── WORK ORDER TECHS (multi-tech assignment) ───────────────────────────────
 async function ensureWorkOrderTechsTable() {
@@ -6230,6 +6412,7 @@ app.get('/work-orders', authenticate, async (req, res) => {
     );
     let rows = raw.map(r => ({ ...r, status: displayStatusOrDefault(r.status), allPoNumbersFormatted: formatPoNumberList(r.allPoNumbers) }));
     await attachTechsToWorkOrders(rows);
+    await attachNotesToWorkOrders(rows); // notes now come from work_order_notes (blob is a backup)
 
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -6528,6 +6711,7 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
       : displayStatusOrDefault(row.status);
     row.allPoNumbersFormatted = formatPoNumberList(row.allPoNumbers);
     await attachTechsToWorkOrders([row]);
+    await attachNotesToWorkOrders([row], { withRows: true }); // notesRows carries ids for per-note delete
 
     // Attach captured QuickBooks documents (read-only) so the field app
     // Documents section can list the QB invoice/estimate PDFs too.
@@ -7467,30 +7651,52 @@ app.put('/work-orders/:id/notes', authenticate, requireNumericParam('id'), async
     const wid = Number(req.params.id);
     const b = coerceBody(req);
     const notes = b.notes ?? b.note ?? b.text ?? b.message;
-    const append = isTruthy(b.append) || isTruthy(b.appendNotes) || isTruthy(b.a);
 
     if (notes == null || String(notes).trim() === '') {
       return res.status(400).json({ error: 'notes is required.' });
     }
 
-    if (append) {
-      const [[row]] = await db.execute('SELECT notes FROM work_orders WHERE id = ?', [wid]);
-      if (!row) return res.status(404).json({ error: 'Not found.' });
+    const [[wo]] = await db.execute('SELECT id FROM work_orders WHERE id = ?', [wid]);
+    if (!wo) return res.status(404).json({ error: 'Not found.' });
 
-      const who = req.user?.username || 'system';
-      const stamp = new Date().toISOString().replace('T',' ').replace('Z','');
-      const sep = row.notes ? '\n\n' : '';
-      const newNotes = (row.notes || '') + `${sep}[${stamp}] ${who}: ${notes}`;
-      await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [newNotes, wid]);
-    } else {
-      await db.execute('UPDATE work_orders SET notes = ? WHERE id = ?', [String(notes), wid]);
+    // Notes are now rows in work_order_notes (append semantics; the old TEXT blob
+    // is a frozen backup and is not written here anymore).
+    const who = req.user?.username || 'system';
+    await appendWorkOrderNote(wid, String(notes), who);
+
+    // Return the updated WO with notes re-attached from the table.
+    const [rows] = await db.execute(
+      workOrdersSelectSQL({ whereSql: 'WHERE w.id = ?', orderSql: '', limitSql: 'LIMIT 1' }),
+      [wid]
+    );
+    const row = rows[0];
+    if (row) {
+      row.status = displayStatusOrDefault(row.status);
+      await attachNotesToWorkOrders([row], { withRows: true });
     }
-
-    const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-    res.json(updated);
+    res.json(row || { ok: true });
   } catch (err) {
     console.error('Work-order notes update error:', err);
     res.status(500).json({ error: 'Failed to update notes.' });
+  }
+});
+
+// DELETE a single note row (verifies it belongs to this work order).
+app.delete('/work-orders/:id/notes/:noteId', authenticate, requireNumericParam('id'), requireNumericParam('noteId'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const noteId = Number(req.params.noteId);
+    const [result] = await db.execute(
+      'DELETE FROM work_order_notes WHERE id = ? AND workOrderId = ?',
+      [noteId, wid]
+    );
+    if (!result.affectedRows) {
+      return res.status(404).json({ error: 'Note not found on this work order.' });
+    }
+    res.json({ ok: true, deleted: noteId });
+  } catch (err) {
+    console.error('Delete note error:', err);
+    res.status(500).json({ error: 'Failed to delete note.' });
   }
 });
 
@@ -7715,13 +7921,9 @@ app.put('/work-orders/:id/pos/:poId/mark-picked-up', authenticate, requireNumeri
 
     await db.query('UPDATE work_order_pos SET poPickedUp = 1 WHERE id = ?', [poId]);
 
-    // Append note to work order
-    const [[wo]] = await db.query('SELECT notes FROM work_orders WHERE id = ?', [wid]);
+    // Append note to work order (now a row in work_order_notes)
     const who = req.user?.username || 'system';
-    const stamp = new Date().toISOString().replace('T', ' ').replace('Z', '');
-    const line = `[${stamp}] ${who}: PO ${po.poNumber || '(no PO #)'}${po.poSupplier ? ` (${po.poSupplier})` : ''} marked PICKED UP.`;
-    const newNotes = (wo?.notes || '') + (wo?.notes ? '\n\n' : '') + line;
-    await db.query('UPDATE work_orders SET notes = ? WHERE id = ?', [newNotes, wid]);
+    await appendWorkOrderNote(wid, `PO ${po.poNumber || '(no PO #)'}${po.poSupplier ? ` (${po.poSupplier})` : ''} marked PICKED UP.`, who);
 
     await syncLegacyPoColumns(wid);
 
@@ -9284,12 +9486,12 @@ app.put('/purchase-orders/:id/mark-picked-up', authenticate, requireNumericParam
       const [[wo]] = await db.query('SELECT * FROM work_orders WHERE id = ?', [wid]);
 
       const who = req.user?.username || 'system';
-      const stamp = new Date().toISOString().replace('T', ' ').replace('Z', '');
-      const line = `[${stamp}] ${who}: PO ${po.poNumber || '(no PO #)'}${po.poSupplier ? ` (${po.poSupplier})` : ''} marked PICKED UP.`;
-      const newNotes = (wo?.notes || '') + (wo?.notes ? '\n\n' : '') + line;
-      await db.query('UPDATE work_orders SET notes = ? WHERE id = ?', [newNotes, wid]);
+      await appendWorkOrderNote(wid, `PO ${po.poNumber || '(no PO #)'}${po.poSupplier ? ` (${po.poSupplier})` : ''} marked PICKED UP.`, who);
 
       await syncLegacyPoColumns(wid);
+
+      const noteHolder = { id: wid };
+      await attachNotesToWorkOrders([noteHolder]);
 
       const [[updated]] = await db.query('SELECT * FROM work_order_pos WHERE id = ?', [poId]);
       return res.json({
@@ -9301,7 +9503,7 @@ app.put('/purchase-orders/:id/mark-picked-up', authenticate, requireNumericParam
         supplier: updated.poSupplier || '',
         poPickedUp: !!Number(updated.poPickedUp || 0),
         poStatus: Number(updated.poPickedUp || 0) ? 'Picked Up' : 'On Order',
-        notes: newNotes,
+        notes: noteHolder.notes || '',
         workOrderStatus: displayStatusOrDefault(wo?.status),
       });
     }
@@ -9311,19 +9513,15 @@ app.put('/purchase-orders/:id/mark-picked-up', authenticate, requireNumericParam
     if (!row) return res.status(404).json({ error: 'PO / Work order not found.' });
 
     const who = req.user?.username || 'system';
-    const stamp = new Date().toISOString().replace('T',' ').replace('Z','');
     const poNumber = row.poNumber || '';
     const supplier = row.poSupplier || '';
 
-    const line = `[${stamp}] ${who}: Purchase order ${poNumber || '(no PO #)'}${supplier ? ` (${supplier})` : ''} marked PICKED UP.`;
-    const newNotes = (row.notes || '') + (row.notes ? '\n\n' : '') + line;
-
-    await db.execute(
-      'UPDATE work_orders SET poPickedUp = 1, notes = ? WHERE id = ?',
-      [newNotes, poId]
-    );
+    await db.execute('UPDATE work_orders SET poPickedUp = 1 WHERE id = ?', [poId]);
+    await appendWorkOrderNote(poId, `Purchase order ${poNumber || '(no PO #)'}${supplier ? ` (${supplier})` : ''} marked PICKED UP.`, who);
 
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [poId]);
+    const noteHolder = { id: Number(poId) };
+    await attachNotesToWorkOrders([noteHolder]);
 
     res.json({
       id: updated.id,
@@ -9333,7 +9531,7 @@ app.put('/purchase-orders/:id/mark-picked-up', authenticate, requireNumericParam
       supplier: updated.poSupplier || '',
       poPickedUp: !!Number(updated.poPickedUp || 0),
       poStatus: poStatusFromRow(updated),
-      notes: updated.notes || '',
+      notes: noteHolder.notes || '',
       workOrderStatus: displayStatusOrDefault(updated.status),
     });
   } catch (err) {

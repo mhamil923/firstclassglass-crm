@@ -806,20 +806,26 @@
 }
 
 .note-delete-btn {
-  border: 1px solid var(--border-color);
-  background: var(--bg-card-solid);
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
   border-radius: var(--radius-sm);
-  padding: 6px 12px;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   font-weight: 700;
-  color: var(--accent-red);
-  font-size: 12px;
+  font-size: 16px;
+  color: var(--text-tertiary);
   transition: var(--transition-fast);
 }
 
 .note-delete-btn:hover {
-  border-color: var(--accent-red);
-  background: rgba(255, 59, 48, 0.1);
+  color: var(--accent-red);
+  background: var(--bg-hover);
 }
 
 .add-note {

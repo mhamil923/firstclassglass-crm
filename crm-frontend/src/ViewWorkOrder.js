@@ -944,6 +944,18 @@ export default function ViewWorkOrder() {
   }, [id]);
 
   const { entries: parsedNotes } = useMemo(() => {
+    // Prefer the row-based notes (from work_order_notes) which carry a real id
+    // for per-note delete. Fall back to parsing the legacy blob if absent.
+    if (Array.isArray(workOrder?.notesRows)) {
+      const entries = workOrder.notesRows.map((r, i) => ({
+        id: r.id,
+        text: String(r.noteText ?? "").trim(),
+        createdAt: r.createdAt || null,
+        by: r.author || null,
+        __order: i,
+      }));
+      return { entries };
+    }
     const raw = workOrder?.notes ?? null;
     return parseNotesArrayOrText(raw);
   }, [workOrder]);
@@ -2068,28 +2080,17 @@ export default function ViewWorkOrder() {
     await fetchWorkOrder();
   };
 
-  const handleDeleteNote = async (displayIdx) => {
+  const handleDeleteNote = async (note) => {
+    if (!note?.id) {
+      alert("This note can't be deleted (missing id). Try refreshing the page.");
+      return;
+    }
     if (!window.confirm("Delete this note?")) return;
 
     try {
-      const byOldest = [...parsedNotes].sort(
-        (a, b) => (a.createdAt ? Date.parse(a.createdAt) : 0) - (b.createdAt ? Date.parse(b.createdAt) : 0)
-      );
-      const target = displayNotes[displayIdx];
-      if (!target) return;
-
-      const kept = byOldest.filter(
-        (e) => !(e.createdAt === target.createdAt && e.text === target.text && (e.by || "") === (target.by || ""))
-      );
-
-      const newBody = kept.length ? formatNotesText(kept) : "";
-      const form = new FormData();
-      form.append("notes", newBody);
-
-      await api.put(`/work-orders/${id}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+      await api.delete(`/work-orders/${id}/notes/${note.id}`, {
+        headers: { "Content-Type": "application/json", ...authHeaders() },
       });
-
       await fetchWorkOrder();
     } catch (error) {
       console.error("⚠️ Error deleting note:", error);
@@ -2738,12 +2739,21 @@ export default function ViewWorkOrder() {
                 {recentNotes.length ? (
                   <ul className="notes-list notes-list--compact">
                     {recentNotes.map((n, idx) => (
-                      <li key={`${n.createdAt || "na"}-${idx}`} className="note-item">
+                      <li key={n.id ?? `${n.createdAt || "na"}-${idx}`} className="note-item">
                         <div className="note-header">
                           <small className="note-timestamp">
                             {n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "—"}
                             {n.by ? ` — ${n.by}` : ""}
                           </small>
+                          <button
+                            type="button"
+                            className="note-delete-btn"
+                            title="Delete note"
+                            aria-label="Delete note"
+                            onClick={() => handleDeleteNote(n)}
+                          >
+                            ×
+                          </button>
                         </div>
                         <p className="note-text">{n.text}</p>
                       </li>
