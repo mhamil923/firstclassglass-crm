@@ -415,6 +415,38 @@ function formatNotesText(entriesInOrder) {
     .join("\n\n");
 }
 
+/* ---------- Invoice-send email composer ----------
+   One invoice selected -> the single-invoice wording from the draft (unchanged).
+   Multiple selected -> pluralized subject + a bulleted list (number + amount). */
+function buildInvoiceEmail(selectedIds, invoicePdfs, ctx) {
+  const { firstName, siteLabel, siteAddr, draftSubject, draftBody } = ctx || {};
+  const ids = selectedIds || [];
+  const chosen = (invoicePdfs || []).filter((p) => ids.includes(p.id));
+  if (chosen.length <= 1) {
+    return { subject: draftSubject || "", body: draftBody || "" };
+  }
+  const money = (n) => "$" + (Number(n) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const site = siteLabel || "your project";
+  const subject = `Invoices from First Class Glass & Mirror — ${site}`;
+  const list = chosen.map((p) => `  • Invoice #${p.number} — ${money(p.amount)}`).join("\n");
+  const body =
+`Hi ${firstName || "there"},
+
+Thank you for your business. Please find your invoices attached for the work completed${siteAddr ? ` at ${siteAddr}` : ""}:
+
+${list}
+
+Payment is due within 45 days of the invoice date. Please let us know if you would like to use a credit card for this payment, and we'll send you a secure payment link.
+
+If you have any questions, feel free to reach out anytime.
+
+Best regards,
+First Class Glass & Mirror, Inc.
+1513 Industrial Dr, Itasca, IL 60143
+630-250-9777`;
+  return { subject, body };
+}
+
 /* ---------- Simple “stacked field” wrapper ---------- */
 function Field({ label, children, hint }) {
   return (
@@ -1674,10 +1706,16 @@ export default function ViewWorkOrder() {
         : (invIds.length === 1 ? [invIds[0]] : (preselectInvId ? [preselectInvId] : []));
       // Exclude draw notes from the photo picker — only real photos (same logic as the page).
       const photos = (d.photos || []).filter((p) => !(p.key && isDrawNote(p.key)));
+      const composeCtx = {
+        firstName: d.firstName, siteLabel: d.siteLabel, siteAddr: d.siteAddr,
+        draftSubject: d.subject || "", draftBody: d.body || "",
+      };
+      // If we opened with 2+ preselected, compose the multi-invoice wording up front.
+      const initial = buildInvoiceEmail(selectedInv, d.invoicePdfs || [], composeCtx);
       setInvSendModal({
         to: d.to || "",
-        subject: d.subject || "",
-        body: d.body || "",
+        subject: initial.subject,
+        body: initial.body,
         invoicePdfs: d.invoicePdfs || [],
         photos,
         hasSignoff: !!d.hasSignoff,
@@ -1686,6 +1724,10 @@ export default function ViewWorkOrder() {
         selectedPhotos: photos.map((p) => p.id),  // all photos checked by default
         includeSignoff: !!d.hasSignoff,           // sign-off checked by default (if exists)
         sending: false,
+        // Multi-invoice composer context + manual-edit flags (edits are preserved).
+        ...composeCtx,
+        subjectTouched: false,
+        bodyTouched: false,
       });
     } catch (err) {
       console.error("Error building invoice draft:", err);
@@ -1694,6 +1736,21 @@ export default function ViewWorkOrder() {
   };
 
   const closeInvoiceSend = () => setInvSendModal(null);
+
+  // Toggle an invoice in the send selection, re-composing subject/body from the
+  // current selection unless the user has manually edited those fields.
+  const toggleInvoiceSel = (invId) => {
+    setInvSendModal((m) => {
+      if (!m) return m;
+      const nextSel = toggleInArray(m.selectedInv, invId);
+      const ctx = { firstName: m.firstName, siteLabel: m.siteLabel, siteAddr: m.siteAddr, draftSubject: m.draftSubject, draftBody: m.draftBody };
+      const built = buildInvoiceEmail(nextSel, m.invoicePdfs, ctx);
+      const patch = { selectedInv: nextSel };
+      if (!m.subjectTouched) patch.subject = built.subject;
+      if (!m.bodyTouched) patch.body = built.body;
+      return { ...m, ...patch };
+    });
+  };
 
   const sendInvoiceEmail = async () => {
     if (invSendingRef.current) return;
@@ -2279,13 +2336,13 @@ export default function ViewWorkOrder() {
 
               <label style={labelStyle}>Subject</label>
               <input
-                type="text" value={m.subject} onChange={(e) => upd({ subject: e.target.value })}
+                type="text" value={m.subject} onChange={(e) => upd({ subject: e.target.value, subjectTouched: true })}
                 style={{ ...fieldStyle, fontSize: 14, marginBottom: 12 }}
               />
 
               <label style={labelStyle}>Message</label>
               <textarea
-                value={m.body} onChange={(e) => upd({ body: e.target.value })} rows={10}
+                value={m.body} onChange={(e) => upd({ body: e.target.value, bodyTouched: true })} rows={10}
                 style={{ ...fieldStyle, fontSize: 13, resize: "vertical", fontFamily: "inherit" }}
               />
 
@@ -2294,7 +2351,7 @@ export default function ViewWorkOrder() {
 
                 {m.invoicePdfs.map((e) => (
                   <label key={`inv-${e.id}`} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 6, cursor: "pointer", color: "var(--text-primary)" }}>
-                    <input type="checkbox" checked={m.selectedInv.includes(e.id)} onChange={() => upd({ selectedInv: toggleInArray(m.selectedInv, e.id) })} />
+                    <input type="checkbox" checked={m.selectedInv.includes(e.id)} onChange={() => toggleInvoiceSel(e.id)} />
                     <span>🧾 {e.filename}</span>
                   </label>
                 ))}
@@ -3446,9 +3503,12 @@ export default function ViewWorkOrder() {
             </span>
           </h3>
           {(() => {
-            // Uploaded QB invoices (have qbDocNumber) render as cards; CRM-generated render in the table.
-            const uploadedInvoices = linkedInvoices.filter((inv) => inv.qbDocNumber);
-            const crmInvoices = linkedInvoices.filter((inv) => !inv.qbDocNumber);
+            // Every uploaded invoice (has a stored PDF) renders as its OWN card — N invoices → N cards.
+            // Split by presence of a PDF, NOT qbDocNumber: a QB invoice uploaded without a typed
+            // number must still show as a card (previously it fell into the "CRM" table, which is
+            // what made WO 476 look like a corrupted split). Truly CRM-generated rows (no PDF) go in the table.
+            const uploadedInvoices = linkedInvoices.filter((inv) => inv.pdfPath);
+            const crmInvoices = linkedInvoices.filter((inv) => !inv.pdfPath);
             const money = (n) => "$" + (Number(n) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
             return (
               <>
@@ -3460,7 +3520,8 @@ export default function ViewWorkOrder() {
                       const paid = Number(inv.amountPaid) || 0;
                       const sl = (inv.status || "").toLowerCase();
                       const badgeBg = sl === "paid" ? "#22c55e" : (sl === "partial" || sl === "sent") ? "#f59e0b" : "#6b7280";
-                      const label = `QB Inv${inv.qbDocNumber ? ` #${inv.qbDocNumber}` : ""} — ${money(total)} — ${inv.status || "Sent"}`;
+                      const invNo = inv.qbDocNumber || inv.invoiceNumber || inv.id;
+                      const label = `Invoice${invNo ? ` #${invNo}` : ""} — ${money(total)} — ${inv.status || "Sent"}`;
                       return (
                         <div className="po-pdf-card" key={`inv-${inv.id}`} style={{ position: "relative" }}>
                           <span style={{ position: "absolute", top: 8, right: 8, zIndex: 2, padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700, background: badgeBg, color: "#fff" }}>

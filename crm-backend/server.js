@@ -8269,14 +8269,16 @@ First Class Glass & Mirror, Inc.
 
     // Invoice PDFs on this WO (CRM-generated or uploaded QB invoices — those with a stored PDF)
     const [invRows] = await db.query(
-      "SELECT id, invoiceNumber, qbDocNumber, pdfPath FROM invoices WHERE workOrderId = ? AND pdfPath IS NOT NULL AND pdfPath <> '' ORDER BY id DESC",
+      "SELECT id, invoiceNumber, qbDocNumber, total, pdfPath FROM invoices WHERE workOrderId = ? AND pdfPath IS NOT NULL AND pdfPath <> '' ORDER BY id DESC",
       [wid]
     );
     const backendBase = `${req.headers['x-forwarded-proto'] || req.protocol || 'https'}://${req.get('host')}`;
     const fileUrl = (k) => `${backendBase}/files?key=${encodeURIComponent(k)}`;
     const invoicePdfs = invRows.map((p) => ({
       id: p.id,
-      filename: `Invoice #${p.invoiceNumber || p.qbDocNumber || p.id}`,
+      number: p.qbDocNumber || p.invoiceNumber || String(p.id),
+      amount: Number(p.total) || 0,
+      filename: `Invoice #${p.qbDocNumber || p.invoiceNumber || p.id}`,
       url: fileUrl(p.pdfPath),
     }));
 
@@ -8291,6 +8293,8 @@ First Class Glass & Mirror, Inc.
 
     res.json({
       to, subject, body, invoicePdfs, photos, hasSignoff,
+      // Ingredients so the composer can rebuild the subject/body when MULTIPLE invoices are selected.
+      firstName, siteLabel, siteAddr,
       signoffName: hasSignoff ? ((wo.pdfPath || '').split('/').pop() || 'work-order.pdf') : null,
     });
   } catch (err) {
@@ -8402,6 +8406,21 @@ app.post('/work-orders/:id/invoice-send', authenticate, requireNumericParam('id'
 
       // Finalize the claimed row with the real attachment count
       await db.query('UPDATE invoice_sends SET attachmentCount = ? WHERE id = ?', [attachments.length, sendRowId]);
+
+      // Log ONE invoice_sends row PER invoice included in this email. The atomic claim
+      // above already created the row for the primary invoice; add rows for the rest so
+      // every sent invoice's card shows its "✉ Sent to X" badge (the card history read
+      // matches invoice_sends.invoiceId === invoice.id).
+      const extraInvIds = invoicePdfIds.filter((iid) => iid !== primaryInvId);
+      if (extraInvIds.length) {
+        const placeholders = extraInvIds.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
+        const extraParams = [];
+        for (const iid of extraInvIds) extraParams.push(wid, iid, to, req.user?.username || null, subject, body, attachments.length);
+        await db.query(
+          `INSERT INTO invoice_sends (workOrderId, invoiceId, sentTo, sentBy, subject, body, attachmentCount) VALUES ${placeholders}`,
+          extraParams
+        );
+      }
 
       // Start the collections clock once (preserve original on re-send) + mark Sent if unset
       if (invoicePdfIds.length) {
