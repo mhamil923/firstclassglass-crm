@@ -491,6 +491,7 @@ export default function ViewWorkOrder() {
   const [linkedInvoices, setLinkedInvoices] = useState([]);
   const [estimatePdfs, setEstimatePdfs] = useState([]);
   const [busyEstimateUpload, setBusyEstimateUpload] = useState(false);
+  const [estimateUploadLabel, setEstimateUploadLabel] = useState(""); // "Uploading 2 of 4…"
 
   // Send Estimate to Customer — compose modal + send history
   const [estSendModal, setEstSendModal] = useState(null); // null | draft-state object
@@ -503,7 +504,8 @@ export default function ViewWorkOrder() {
   // QuickBooks metadata capture — folded into the Estimate + Invoice upload flows.
   // qbModal: null when closed, otherwise { docType: 'Estimate'|'Invoice', editingId|null }
   const [qbModal, setQbModal] = useState(null);
-  const [qbFile, setQbFile] = useState(null);
+  const [qbFiles, setQbFiles] = useState([]); // one or many PDFs (multi-select upload)
+  const [qbUploadLabel, setQbUploadLabel] = useState(""); // "Uploading 2 of 4…"
   const [qbForm, setQbForm] = useState({
     qbDocNumber: "",
     amount: "",
@@ -787,67 +789,100 @@ export default function ViewWorkOrder() {
       });
       setQbModal({ docType, editingId: null });
     }
-    setQbFile(null);
+    setQbFiles([]);
   };
 
   const closeQbModal = () => {
     setQbModal(null);
-    setQbFile(null);
+    setQbFiles([]);
   };
 
   const saveQbDoc = async () => {
     if (!qbModal) return;
     setQbSaving(true);
     try {
-      if (qbModal.docType === "Estimate") {
-        // Upload estimate PDF + QB metadata into work_order_estimate_pdfs
-        if (!qbFile) { alert("Please choose a PDF file."); setQbSaving(false); return; }
-        const form = new FormData();
-        form.append("estimatePdf", qbFile);
-        if (qbForm.qbDocNumber) form.append("qbDocNumber", qbForm.qbDocNumber);
-        if (qbForm.amount !== "") form.append("amount", qbForm.amount);
-        if (qbForm.docDate) form.append("docDate", qbForm.docDate);
-        form.append("status", qbForm.status);
-        await api.post(`/work-orders/${id}/estimate-pdfs`, form, {
-          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-        });
-        await fetchEstimatePdfs();
-      } else {
-        // Invoice
-        if (qbModal.editingId) {
-          await api.put(
-            `/work-orders/${id}/invoices/${qbModal.editingId}/qb`,
-            {
-              qbDocNumber: qbForm.qbDocNumber,
-              amount: qbForm.amount === "" ? null : Number(qbForm.amount),
-              docDate: qbForm.docDate || null,
-              status: qbForm.status,
-              amountPaid: qbForm.amountPaid === "" ? 0 : Number(qbForm.amountPaid),
-              notes: qbForm.notes,
-            },
-            { headers: authHeaders() }
-          );
-        } else {
-          if (!qbFile) { alert("Please choose a PDF file."); setQbSaving(false); return; }
+      const isEstimate = qbModal.docType === "Estimate";
+
+      // Edit path (invoices only): update metadata on an existing row, no file.
+      if (!isEstimate && qbModal.editingId) {
+        await api.put(
+          `/work-orders/${id}/invoices/${qbModal.editingId}/qb`,
+          {
+            qbDocNumber: qbForm.qbDocNumber,
+            amount: qbForm.amount === "" ? null : Number(qbForm.amount),
+            docDate: qbForm.docDate || null,
+            status: qbForm.status,
+            amountPaid: qbForm.amountPaid === "" ? 0 : Number(qbForm.amountPaid),
+            notes: qbForm.notes,
+          },
+          { headers: authHeaders() }
+        );
+        await fetchLinkedInvoices();
+        closeQbModal();
+        setQbSaving(false);
+        return;
+      }
+
+      // Upload path (estimate or invoice), one row per PDF.
+      if (!qbFiles.length) { alert("Please choose at least one PDF file."); setQbSaving(false); return; }
+
+      const url = isEstimate ? `/work-orders/${id}/estimate-pdfs` : `/work-orders/${id}/invoices/upload`;
+      const field = isEstimate ? "estimatePdf" : "invoicePdf";
+      const single = qbFiles.length === 1;
+      // Metadata fields describe ONE document, so they only apply to a single-file upload.
+      // For a batch, each PDF is inserted as its own row with default metadata (auto number,
+      // $0) — the user fills in each via Edit afterward. Each request is independent, so no
+      // one file's number/amount bleeds into another's row.
+      const failed = [];
+      let ok = 0;
+      for (let i = 0; i < qbFiles.length; i++) {
+        const file = qbFiles[i];
+        if (!single) setQbUploadLabel(`Uploading ${i + 1} of ${qbFiles.length}…`);
+        if (!isPdfFile(file)) {
+          failed.push(`${file.name || "file " + (i + 1)} (not a PDF)`);
+          continue;
+        }
+        try {
           const form = new FormData();
-          form.append("invoicePdf", qbFile);
-          if (qbForm.qbDocNumber) form.append("qbDocNumber", qbForm.qbDocNumber);
-          if (qbForm.amount !== "") form.append("amount", qbForm.amount);
-          if (qbForm.docDate) form.append("docDate", qbForm.docDate);
-          form.append("status", qbForm.status);
-          if (qbForm.amountPaid !== "") form.append("amountPaid", qbForm.amountPaid);
-          if (qbForm.notes) form.append("notes", qbForm.notes);
-          await api.post(`/work-orders/${id}/invoices/upload`, form, {
+          form.append(field, file);
+          if (single) {
+            if (qbForm.qbDocNumber) form.append("qbDocNumber", qbForm.qbDocNumber);
+            if (qbForm.amount !== "") form.append("amount", qbForm.amount);
+            if (qbForm.docDate) form.append("docDate", qbForm.docDate);
+            form.append("status", qbForm.status);
+            if (!isEstimate && qbForm.amountPaid !== "") form.append("amountPaid", qbForm.amountPaid);
+            if (qbForm.notes) form.append("notes", qbForm.notes);
+          }
+          await api.post(url, form, {
             headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
           });
+          ok += 1;
+        } catch (error) {
+          console.error("Error uploading", file?.name, error);
+          failed.push(`${file.name || "file " + (i + 1)} (${error?.response?.data?.error || "upload failed"})`);
         }
-        await fetchLinkedInvoices();
+      }
+      setQbUploadLabel("");
+
+      if (isEstimate) await fetchEstimatePdfs();
+      else await fetchLinkedInvoices();
+
+      // Keep a single-file modal open on failure (preserves the old solo-upload UX);
+      // for a batch, close and summarize which files failed.
+      if (single && ok === 0) {
+        alert(failed[0] || "Failed to save document.");
+        setQbSaving(false);
+        return;
+      }
+      if (failed.length) {
+        alert(`${failed.length} file(s) were not uploaded:\n• ${failed.join("\n• ")}`);
       }
       closeQbModal();
     } catch (err) {
       console.error("Error saving QuickBooks document:", err);
       alert(err?.response?.data?.error || "Failed to save document.");
     } finally {
+      setQbUploadLabel("");
       setQbSaving(false);
     }
   };
@@ -1599,27 +1634,37 @@ export default function ViewWorkOrder() {
   // straight to the estimate-pdf route (status defaults to Pending; per-card
   // dropdown handles Approved/Declined later).
   const handleAddEstimatePdf = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!isPdfFile(file)) {
-      alert("Please choose a PDF file.");
-      e.target.value = "";
-      return;
-    }
+    const files = Array.from(e.target.files || []);
+    e.target.value = ""; // reset early so re-picking the same files re-fires
+    if (!files.length) return;
+
     setBusyEstimateUpload(true);
-    try {
-      const form = new FormData();
-      form.append("estimatePdf", file);
-      await api.post(`/work-orders/${id}/estimate-pdfs`, form, {
-        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-      });
-      await fetchEstimatePdfs();
-    } catch (error) {
-      console.error("⚠️ Error uploading Estimate PDF:", error);
-      alert(error?.response?.data?.error || "Failed to upload Estimate PDF.");
-    } finally {
-      setBusyEstimateUpload(false);
-      e.target.value = "";
+    const failed = [];
+    // Sequential — one request per file (route inserts one estimate row per PDF).
+    // A bad file is skipped; the batch continues.
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setEstimateUploadLabel(`Uploading ${i + 1} of ${files.length}…`);
+      if (!isPdfFile(file)) {
+        failed.push(`${file.name || "file " + (i + 1)} (not a PDF)`);
+        continue;
+      }
+      try {
+        const form = new FormData();
+        form.append("estimatePdf", file);
+        await api.post(`/work-orders/${id}/estimate-pdfs`, form, {
+          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+        });
+      } catch (error) {
+        console.error("⚠️ Error uploading Estimate PDF:", file?.name, error);
+        failed.push(`${file.name || "file " + (i + 1)} (${error?.response?.data?.error || "upload failed"})`);
+      }
+    }
+    setEstimateUploadLabel("");
+    setBusyEstimateUpload(false);
+    await fetchEstimatePdfs(); // refresh once after the whole batch
+    if (failed.length) {
+      alert(`${failed.length} file(s) were not uploaded:\n• ${failed.join("\n• ")}`);
     }
   };
 
@@ -2440,13 +2485,20 @@ export default function ViewWorkOrder() {
             {!qbModal.editingId && (
               <div style={{ marginBottom: 12 }}>
                 <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
-                  PDF file (from QuickBooks export)
+                  PDF file(s) (from QuickBooks export)
                 </label>
                 <input
                   type="file"
-                  accept="application/pdf"
-                  onChange={(e) => setQbFile(e.target.files?.[0] || null)}
+                  accept=".pdf,application/pdf"
+                  multiple
+                  onChange={(e) => setQbFiles(Array.from(e.target.files || []))}
                 />
+                {qbFiles.length > 1 && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-secondary)" }}>
+                    {qbFiles.length} files selected — each will be added as its own {qbModal.docType.toLowerCase()}.
+                    The number/amount fields below apply to single uploads only; set each one via Edit after upload.
+                  </div>
+                )}
               </div>
             )}
 
@@ -2537,7 +2589,13 @@ export default function ViewWorkOrder() {
                 disabled={qbSaving}
                 style={{ background: "#2563eb", color: "#fff" }}
               >
-                {qbSaving ? "Saving…" : qbModal.editingId ? "Save Changes" : "Upload"}
+                {qbSaving
+                  ? (qbUploadLabel || "Saving…")
+                  : qbModal.editingId
+                  ? "Save Changes"
+                  : qbFiles.length > 1
+                  ? `Upload ${qbFiles.length}`
+                  : "Upload"}
               </button>
             </div>
           </div>
@@ -3237,7 +3295,8 @@ export default function ViewWorkOrder() {
               <input
                 ref={estimateFileRef}
                 type="file"
-                accept="application/pdf"
+                accept=".pdf,application/pdf"
+                multiple
                 style={{ display: "none" }}
                 onChange={handleAddEstimatePdf}
               />
@@ -3248,7 +3307,7 @@ export default function ViewWorkOrder() {
                 disabled={busyEstimateUpload}
                 onClick={() => estimateFileRef.current?.click()}
               >
-                {busyEstimateUpload ? "Uploading…" : "+ Upload Estimate PDF"}
+                {busyEstimateUpload ? (estimateUploadLabel || "Uploading…") : "+ Upload Estimate PDF"}
               </button>
             </span>
           </h3>

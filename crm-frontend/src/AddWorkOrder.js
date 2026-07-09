@@ -121,7 +121,7 @@ export default function AddWorkOrder() {
 
   const [pdfFile, setPdfFile] = useState(null);
   const [estimatePdfFile, setEstimatePdfFile] = useState(null);
-  const [photoFile, setPhotoFile] = useState(null);
+  const [photos, setPhotos] = useState([]); // multiple site photos
 
   // PDF extraction state
   const [extractPdfFile, setExtractPdfFile] = useState(null);
@@ -361,7 +361,12 @@ export default function AddWorkOrder() {
 
   const handlePdfChange = (e) => setPdfFile(e.target.files?.[0] || null);
   const handleEstimateChange = (e) => setEstimatePdfFile(e.target.files?.[0] || null);
-  const handlePhotoChange = (e) => setPhotoFile(e.target.files?.[0] || null);
+  // Accumulate across picks so the user can add photos in multiple selections.
+  const handlePhotoChange = (e) => {
+    const picked = Array.from(e.target.files || []);
+    if (picked.length) setPhotos((prev) => [...prev, ...picked]);
+    if (photoInputRef.current) photoInputRef.current.value = ""; // allow re-selecting the same file
+  };
 
   // ✅ chip remove handlers (clear state + input value)
   const removePdf = () => {
@@ -372,8 +377,8 @@ export default function AddWorkOrder() {
     setEstimatePdfFile(null);
     if (estimateInputRef.current) estimateInputRef.current.value = "";
   };
-  const removePhoto = () => {
-    setPhotoFile(null);
+  const removePhoto = (idx) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== idx));
     if (photoInputRef.current) photoInputRef.current.value = "";
   };
 
@@ -584,7 +589,9 @@ export default function AddWorkOrder() {
 
     if (pdfFile) form.append("workOrderPdf", pdfFile);
     if (estimatePdfFile) form.append("estimatePdf", estimatePdfFile);
-    if (photoFile) form.append("photoFile", photoFile);
+    // Attach every selected photo. The create route (upload.any) stores all images:
+    // first → primary attachment, the rest appended to photoPath.
+    photos.forEach((p) => form.append("photoFile", p));
 
     try {
       setSubmitting(true);
@@ -1121,16 +1128,22 @@ export default function AddWorkOrder() {
                 </div>
 
                 <div className="awo-field">
-                  <label className="awo-label">Photo</label>
+                  <label className="awo-label">Photos</label>
                   <input
                     ref={photoInputRef}
                     type="file"
                     accept="image/*"
+                    multiple
                     onChange={handlePhotoChange}
                     className="awo-file"
                   />
-                  <div className="awo-help">Optional site photo / reference.</div>
-                  <FileChip file={photoFile} onRemove={removePhoto} />
+                  <div className="awo-help">
+                    Optional site photos / references.
+                    {photos.length > 0 ? ` • ${photos.length} photo${photos.length === 1 ? "" : "s"} selected` : ""}
+                  </div>
+                  {photos.map((p, i) => (
+                    <FileChip key={`${p.name}-${i}`} file={p} onRemove={() => removePhoto(i)} />
+                  ))}
                 </div>
               </div>
             </div>
