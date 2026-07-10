@@ -6,6 +6,35 @@ import "./AddWorkOrder.css";
 // Keep this in sync with CalendarPage.js and server DEFAULT_WINDOW_MINUTES
 const DEFAULT_WINDOW_MIN = 120;
 
+// Downscale/compress a camera photo before upload (canvas — no extra dependency).
+// Matches the Field-tech-app: max 1600px longest edge, ~80% JPEG. A 5.7MB photo
+// becomes a few hundred KB, which is what actually fixes the upload timeouts.
+// Non-images and any failure fall through to the original file untouched.
+async function compressImage(file, maxDim = 1600, quality = 0.8) {
+  if (!file || !file.type || !file.type.startsWith("image/")) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const longest = Math.max(bitmap.width, bitmap.height);
+    const scale = Math.min(1, maxDim / longest);
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    if (bitmap.close) bitmap.close();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    if (!blob) return file;
+    // If compression somehow produced a bigger file, keep the original.
+    if (blob.size >= file.size) return file;
+    const base = (file.name || "photo").replace(/\.[^.]+$/, "");
+    return new File([blob], `${base}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+  } catch {
+    return file; // e.g. HEIC that the browser can't decode — send as-is
+  }
+}
+
 // Keep this list in sync with WorkOrders.js and server.js
 const STATUS_LIST = [
   "New",
@@ -140,6 +169,7 @@ export default function AddWorkOrder() {
   const customerDropdownRef = useRef(null);
 
   const [submitting, setSubmitting] = useState(false);
+  const [submitLabel, setSubmitLabel] = useState(""); // "Uploading photo 2 of 3…"
   const [loadingRefs, setLoadingRefs] = useState(false);
 
   // Multi-tech assignment (drives the primary `assignedTo` and `/techs` endpoint).
@@ -587,43 +617,75 @@ export default function AddWorkOrder() {
       if (computedEnd) form.append("endTime", computedEnd);
     }
 
+    // PDFs stay in the create request (small); photos are uploaded separately AFTER
+    // the WO exists so a slow/failed photo can't kill work-order creation.
     if (pdfFile) form.append("workOrderPdf", pdfFile);
     if (estimatePdfFile) form.append("estimatePdf", estimatePdfFile);
-    // Attach every selected photo. The create route (upload.any) stores all images:
-    // first → primary attachment, the rest appended to photoPath.
-    photos.forEach((p) => form.append("photoFile", p));
 
+    let newId = null;
     try {
       setSubmitting(true);
+      setSubmitLabel("Creating work order…");
+      // Longer timeout than the 30s default: uploads over weak jobsite links.
       const createRes = await api.post("/work-orders", form, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
       });
-
-      // Seed a Draft residential contract row if marked residential.
-      // Backend ignores unknown fields, so passing county is harmless even though
-      // Phase 1 doesn't store it. downPaymentPercent: 100 is the standard default.
-      const newId = createRes?.data?.id || createRes?.data?.workOrderId;
-      if (isResidential && newId) {
-        try {
-          await api.put(`/work-orders/${newId}/residential-contract`, {
-            county: "DuPage",
-            downPaymentPercent: 100,
-          });
-        } catch (e) {
-          console.warn("Failed to seed residential contract draft:", e?.message || e);
-        }
-      }
-
-      if (willBeScheduled) navigate("/calendar");
-      else navigate("/work-orders");
+      newId = createRes?.data?.id || createRes?.data?.workOrderId;
     } catch (err) {
       const msg =
         err?.response?.data?.error || err?.message || "Failed to save — check server logs";
       console.error("⚠️ Error adding work order:", err);
-      alert(msg);
-    } finally {
+      alert(`Could not create the work order: ${msg}\n\nYour entries are still here — please try again.`);
       setSubmitting(false);
+      setSubmitLabel("");
+      return; // form intact, nothing half-created
     }
+
+    // WO now exists. Seed a Draft residential contract row if marked residential.
+    if (isResidential && newId) {
+      try {
+        await api.put(`/work-orders/${newId}/residential-contract`, {
+          county: "DuPage",
+          downPaymentPercent: 100,
+        });
+      } catch (e) {
+        console.warn("Failed to seed residential contract draft:", e?.message || e);
+      }
+    }
+
+    // Upload photos ONE AT A TIME to the existing photo endpoint, compressed first.
+    // Each request stays small; a single failure doesn't abort the batch or the WO.
+    const failedPhotos = [];
+    for (let i = 0; i < photos.length; i++) {
+      setSubmitLabel(`Uploading photo ${i + 1} of ${photos.length}…`);
+      try {
+        const compressed = await compressImage(photos[i]);
+        const pf = new FormData();
+        pf.append("photoFile", compressed);
+        await api.put(`/work-orders/${newId}/edit`, pf, {
+          headers: { "Content-Type": "multipart/form-data" },
+          timeout: 120000,
+        });
+      } catch (e) {
+        console.error("⚠️ Photo upload failed:", photos[i]?.name, e);
+        failedPhotos.push(photos[i]?.name || `photo ${i + 1}`);
+      }
+    }
+
+    setSubmitting(false);
+    setSubmitLabel("");
+
+    if (failedPhotos.length) {
+      alert(
+        `Work order #${newId} was created, but ${failedPhotos.length} photo(s) didn't upload:\n• ${failedPhotos.join(
+          "\n• "
+        )}\n\nYou can add them from the work order page.`
+      );
+    }
+
+    if (willBeScheduled) navigate("/calendar");
+    else navigate("/work-orders");
   };
 
   return (
@@ -1158,7 +1220,7 @@ export default function AddWorkOrder() {
               </button>
 
               <button type="submit" className="btn btn-primary awo-submit" disabled={submitting}>
-                {submitting ? "Saving…" : "Add Work Order"}
+                {submitting ? (submitLabel || "Saving…") : "Add Work Order"}
               </button>
             </div>
           </form>
