@@ -6,6 +6,33 @@ import moment from "moment";
 import API_BASE_URL from "./config";
 import "./ViewWorkOrder.css";
 
+// Downscale/compress a camera photo before upload (canvas — no extra dependency).
+// Mirrors AddWorkOrder.js and the Field-tech-app: max 1600px longest edge, ~80% JPEG.
+// A 5MB+ camera photo becomes a few hundred KB, which is what actually prevents the
+// upload timeouts. Non-images and any failure fall through to the original untouched.
+async function compressImage(file, maxDim = 1600, quality = 0.8) {
+  if (!file || !file.type || !file.type.startsWith("image/")) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const longest = Math.max(bitmap.width, bitmap.height);
+    const scale = Math.min(1, maxDim / longest);
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    if (bitmap.close) bitmap.close();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    if (!blob || blob.size >= file.size) return file;
+    const base = (file.name || "photo").replace(/\.[^.]+$/, "");
+    return new File([blob], `${base}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
+  } catch {
+    return file; // e.g. HEIC the browser can't decode — send as-is
+  }
+}
+
 // Keep this in sync with AddWorkOrder.js and WorkOrders.js
 const STATUS_OPTIONS = [
   "New",
@@ -516,6 +543,7 @@ export default function ViewWorkOrder() {
   });
   const [qbSaving, setQbSaving] = useState(false);
   const [busyImageUpload, setBusyImageUpload] = useState(false);
+  const [imageUploadLabel, setImageUploadLabel] = useState(""); // "Uploading 2 of 3…"
 
   // Residential contract (Phase 1: draft data only; PDF + signing in later phases)
   const [residentialContract, setResidentialContract] = useState(null);
@@ -1981,21 +2009,32 @@ export default function ViewWorkOrder() {
     }
 
     setBusyImageUpload(true);
-    try {
-      const form = new FormData();
-      files.forEach((file) => form.append("photoFile", file));
-
-      await api.put(`/work-orders/${id}/edit`, form, {
-        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
-      });
-
-      await fetchWorkOrder();
-    } catch (error) {
-      console.error("⚠️ Error uploading images:", error);
-      alert(error?.response?.data?.error || "Failed to upload images.");
-    } finally {
-      setBusyImageUpload(false);
-      e.target.value = "";
+    e.target.value = ""; // reset early so re-picking the same files re-fires
+    // Compress each photo to ~1600px and upload ONE AT A TIME. Each request stays
+    // small (a few hundred KB), so it never hits the axios/nginx timeout that was
+    // killing the old single combined raw-photo upload. One failure doesn't abort
+    // the rest, and the button never gets stuck.
+    const failed = [];
+    for (let i = 0; i < files.length; i++) {
+      setImageUploadLabel(`Uploading ${i + 1} of ${files.length}…`);
+      try {
+        const compressed = await compressImage(files[i]);
+        const form = new FormData();
+        form.append("photoFile", compressed);
+        await api.put(`/work-orders/${id}/edit`, form, {
+          headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+          timeout: 120000,
+        });
+      } catch (error) {
+        console.error("⚠️ Error uploading image:", files[i]?.name, error);
+        failed.push(files[i]?.name || `photo ${i + 1}`);
+      }
+    }
+    setImageUploadLabel("");
+    setBusyImageUpload(false);
+    await fetchWorkOrder(); // refresh once after the batch
+    if (failed.length) {
+      alert(`${failed.length} photo(s) didn't upload:\n• ${failed.join("\n• ")}`);
     }
   };
 
@@ -3813,7 +3852,7 @@ export default function ViewWorkOrder() {
               </button>
 
               <label className="btn btn-light">
-                {busyImageUpload ? "Uploading…" : "Upload Photos"}
+                {busyImageUpload ? (imageUploadLabel || "Uploading…") : "Upload Photos"}
                 <input
                   type="file"
                   accept="image/*"
