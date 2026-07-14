@@ -6739,6 +6739,14 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
       row.residentialContract = null;
     }
 
+    // Resolved sign-off document (contract for residential, else pdfPath sign-off sheet).
+    try {
+      row.signOff = await resolveSignOffDoc(id, row);
+    } catch (soErr) {
+      console.warn('[work-order get] signOff resolve failed:', soErr.message);
+      row.signOff = null;
+    }
+
     res.json(row);
   } catch (err) {
     console.error('Work-order get-by-id error:', err);
@@ -8039,8 +8047,9 @@ First Class Glass & Mirror, Inc.
       thumbnailUrl: fileUrl(k),
     }));
 
-    // Sign-off / work order PDF (work_orders.pdfPath, if a PDF)
-    const hasSignoff = !!(wo.pdfPath && /\.pdf$/i.test(wo.pdfPath));
+    // Sign-off document (resolver: residential contract, else pdfPath sign-off sheet)
+    const signOff = await resolveSignOffDoc(wid, wo);
+    const hasSignoff = signOff.hasDoc;
 
     res.json({
       to,
@@ -8049,7 +8058,8 @@ First Class Glass & Mirror, Inc.
       estimatePdfs,
       photos,
       hasSignoff,
-      signoffName: hasSignoff ? ((wo.pdfPath || '').split('/').pop() || 'work-order.pdf') : null,
+      signoffName: hasSignoff ? signOff.name : null,
+      signoffKind: signOff.kind, // 'contract' | 'sheet' — lets the composer label it
     });
   } catch (err) {
     console.error('Estimate-send draft error:', err);
@@ -8122,11 +8132,14 @@ app.post('/work-orders/:id/estimate-send', authenticate, requireNumericParam('id
         }
       }
 
-      // Sign-off / WO PDF
-      if (includeSignoff && wo.pdfPath && /\.pdf$/i.test(wo.pdfPath)) {
+      // Sign-off document (resolver: residential contract, else pdfPath sign-off sheet)
+      if (includeSignoff) {
         try {
-          const a = await resolvePdfAttachment(wo.pdfPath);
-          attachments.push({ filename: a.filename, content: a.buffer });
+          const signOff = await resolveSignOffDoc(wid, wo);
+          if (signOff.key) {
+            const a = await resolvePdfAttachment(signOff.key);
+            attachments.push({ filename: signOff.name || a.filename, content: a.buffer });
+          }
         } catch (e) { console.warn('[estimate-send] signoff attach failed:', e.message); }
       }
 
@@ -8289,13 +8302,15 @@ First Class Glass & Mirror, Inc.
       id: idx, key: k, filename: k.split('/').pop() || `photo_${idx}`, thumbnailUrl: fileUrl(k),
     }));
 
-    const hasSignoff = !!(wo.pdfPath && /\.pdf$/i.test(wo.pdfPath));
+    const signOff = await resolveSignOffDoc(wid, wo);
+    const hasSignoff = signOff.hasDoc;
 
     res.json({
       to, subject, body, invoicePdfs, photos, hasSignoff,
       // Ingredients so the composer can rebuild the subject/body when MULTIPLE invoices are selected.
       firstName, siteLabel, siteAddr,
-      signoffName: hasSignoff ? ((wo.pdfPath || '').split('/').pop() || 'work-order.pdf') : null,
+      signoffName: hasSignoff ? signOff.name : null,
+      signoffKind: signOff.kind,
     });
   } catch (err) {
     console.error('Invoice-send draft error:', err);
@@ -8362,11 +8377,14 @@ app.post('/work-orders/:id/invoice-send', authenticate, requireNumericParam('id'
         }
       }
 
-      // Sign-off / WO PDF
-      if (includeSignoff && wo.pdfPath && /\.pdf$/i.test(wo.pdfPath)) {
+      // Sign-off document (resolver: residential contract, else pdfPath sign-off sheet)
+      if (includeSignoff) {
         try {
-          const a = await resolvePdfAttachment(wo.pdfPath);
-          attachments.push({ filename: a.filename, content: a.buffer });
+          const signOff = await resolveSignOffDoc(wid, wo);
+          if (signOff.key) {
+            const a = await resolvePdfAttachment(signOff.key);
+            attachments.push({ filename: signOff.name || a.filename, content: a.buffer });
+          }
         } catch (e) { console.warn('[invoice-send] signoff attach failed:', e.message); }
       }
 
@@ -9195,6 +9213,97 @@ async function renderSignedResidentialContractPdf(workOrderId) {
   );
   return signedPdfPath;
 }
+
+// ─── SIGN-OFF DOCUMENT RESOLVER (single source of truth) ─────────────────────
+// The "sign-off document" for a WO is:
+//   • Residential job (has a residential_contracts row): the CONTRACT is the
+//     sign-off doc — the signed contract if signed, else the generated contract PDF.
+//   • Everything else: work_orders.pdfPath (the classic sign-off sheet).
+// Everything that references "the sign-off document" (send-flow attachments,
+// ViewWorkOrder display) goes through this so residential behaviour lives in ONE place.
+// Pass an already-loaded `wo` row to avoid a re-query, or omit it to load fresh.
+async function resolveSignOffDoc(wid, wo) {
+  let contract = null;
+  try {
+    const [[rc]] = await db.query(
+      'SELECT status, generatedPdfPath, signedPdfPath FROM residential_contracts WHERE workOrderId = ? LIMIT 1',
+      [Number(wid)]
+    );
+    contract = rc || null;
+  } catch { contract = null; }
+
+  if (contract) {
+    const key = contract.signedPdfPath || contract.generatedPdfPath || null;
+    return {
+      kind: 'contract',
+      isResidential: true,
+      key,
+      hasDoc: !!key,
+      signed: !!contract.signedPdfPath,
+      status: contract.status || 'Draft',
+      name: key ? (key.split('/').pop() || 'residential-contract.pdf') : null,
+    };
+  }
+
+  let woRow = wo;
+  if (!woRow) {
+    const [[r]] = await db.query('SELECT pdfPath FROM work_orders WHERE id = ? LIMIT 1', [Number(wid)]);
+    woRow = r || {};
+  }
+  const key = (woRow.pdfPath && /\.pdf$/i.test(woRow.pdfPath)) ? woRow.pdfPath : null;
+  return {
+    kind: 'sheet',
+    isResidential: false,
+    key,
+    hasDoc: !!key,
+    signed: !!key,
+    status: null,
+    name: key ? (key.split('/').pop() || 'work-order.pdf') : null,
+  };
+}
+
+// POST /work-orders/:id/residential-contract/upload-signed — attach an externally
+// signed contract PDF as the WO's signed sign-off document (stored in the contract's
+// signedPdfPath, status -> Signed). Mirrors how a signed sign-off sheet is attached.
+app.post(
+  '/work-orders/:id/residential-contract/upload-signed',
+  authenticate,
+  requireNumericParam('id'),
+  withMulter(upload.any()),
+  async (req, res) => {
+    try {
+      const wid = Number(req.params.id);
+      const [[wo]] = await db.query('SELECT id FROM work_orders WHERE id = ?', [wid]);
+      if (!wo) return res.status(404).json({ error: 'Work order not found.' });
+
+      const files = Array.isArray(req.files) ? req.files : [];
+      const pdfFile = files.find((f) => isPdf(f));
+      if (!pdfFile) return res.status(400).json({ error: 'Please upload a PDF file.' });
+      const key = fileKey(pdfFile);
+
+      // Ensure a contract row exists (residential WOs normally already have one).
+      const [[existing]] = await db.query('SELECT id FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+      if (!existing) {
+        await db.query(
+          `INSERT INTO residential_contracts (workOrderId, status, downPaymentPercent) VALUES (?, 'Draft', 100.00)`,
+          [wid]
+        );
+      }
+      await db.query(
+        `UPDATE residential_contracts
+            SET signedPdfPath = ?, status = 'Signed', signedAt = COALESCE(signedAt, NOW()), updatedAt = NOW()
+          WHERE workOrderId = ?`,
+        [key, wid]
+      );
+
+      const [[row]] = await db.query('SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+      res.json({ ok: true, contract: row });
+    } catch (err) {
+      console.error('Upload signed contract error:', err);
+      res.status(500).json({ error: 'Failed to upload signed contract.' });
+    }
+  }
+);
 
 // GET /work-orders/:id/residential-contract — returns the contract row or null
 app.get('/work-orders/:id/residential-contract', authenticate, requireNumericParam('id'), async (req, res) => {

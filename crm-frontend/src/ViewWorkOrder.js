@@ -555,6 +555,7 @@ export default function ViewWorkOrder() {
     completionDate: "",
   });
   const [contractSaving, setContractSaving] = useState(false);
+  const [busySignedContract, setBusySignedContract] = useState(false);
 
   const [statusSaving, setStatusSaving] = useState(false);
   const [localStatus, setLocalStatus] = useState("");
@@ -1657,6 +1658,36 @@ export default function ViewWorkOrder() {
     }
   };
 
+  // Residential WOs: "Upload Signed PDF" attaches the signed CONTRACT (stored on the
+  // contract row as signedPdfPath + status Signed), which the resolver serves as the
+  // WO sign-off document. Non-residential keeps handleReplacePdfUpload (pdfPath).
+  const handleUploadSignedContract = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!isPdfFile(file)) {
+      alert("Please choose a PDF file.");
+      e.target.value = "";
+      return;
+    }
+    setBusySignedContract(true);
+    try {
+      const form = new FormData();
+      form.append("pdf", file);
+      const res = await api.post(`/work-orders/${id}/residential-contract/upload-signed`, form, {
+        headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
+      });
+      if (res.data?.contract) setResidentialContract(res.data.contract);
+      await fetchWorkOrder();
+      alert("Signed contract uploaded.");
+    } catch (error) {
+      console.error("⚠️ Error uploading signed contract:", error);
+      alert(error?.response?.data?.error || "Failed to upload signed contract.");
+    } finally {
+      setBusySignedContract(false);
+      e.target.value = "";
+    }
+  };
+
 
   // Estimate upload = plain file picker, no QB metadata modal. POSTs the PDF
   // straight to the estimate-pdf route (status defaults to Pending; per-card
@@ -2269,6 +2300,175 @@ export default function ViewWorkOrder() {
         console.error("Download failed for:", key, err);
       }
     }
+  };
+
+  // For residential WOs the contract IS the sign-off document. Rendered inside the
+  // Sign-Off section (one home), with view/expand, Upload Signed PDF, and the
+  // contract fill-in / Generate / Send controls.
+  const renderContractSignOff = () => {
+    const s = residentialContract?.status || "Draft";
+    const badgeStyle = (() => {
+      const sl = s.toLowerCase();
+      if (sl === "sent") return { background: "rgba(0,113,227,0.1)", color: "var(--accent-blue)" };
+      if (sl === "signed") return { background: "rgba(52,199,89,0.12)", color: "#34c759" };
+      if (sl === "cancelled") return { background: "rgba(255,59,48,0.12)", color: "#ff3b30" };
+      return { background: "rgba(142,142,147,0.12)", color: "#8e8e93" };
+    })();
+    const isSigned = residentialContract?.status === "Signed";
+    const genPath = residentialContract?.generatedPdfPath;
+    const genHref = genPath ? pdfThumbUrl(genPath) : null;
+    const genName = genPath ? (genPath.split("/").pop() || "contract.pdf") : null;
+    const signedPath = residentialContract?.signedPdfPath;
+    const signedHref = signedPath ? pdfThumbUrl(signedPath) : null;
+    return (
+      <>
+        <h3 className="section-header">
+          Residential Contract (Sign-Off)
+          <span style={{ ...badgeStyle, marginLeft: 12, display: "inline-block", padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
+            {s}
+          </span>
+        </h3>
+
+        <div style={{ padding: "16px", display: "grid", gap: 12 }}>
+          {/* Signed contract PDF */}
+          {isSigned && (
+            <div style={{ background: "rgba(52,199,89,0.08)", border: "1px solid rgba(52,199,89,0.4)", borderRadius: 8, padding: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#1b7a3a", marginBottom: 8 }}>
+                ✓ Signed by {residentialContract?.signerName || "—"}
+                {residentialContract?.signedAt ? ` on ${new Date(residentialContract.signedAt).toLocaleString()}` : ""}
+              </div>
+              {signedHref ? (
+                <div className="po-pdf-card" style={{ maxWidth: 320 }}>
+                  <div className="po-pdf-thumbnail">
+                    <iframe title="Signed Contract PDF" src={signedHref} />
+                  </div>
+                  <a href={signedHref} target="_blank" rel="noopener noreferrer" className="po-pdf-label" title={(signedPath || "").split("/").pop()}>
+                    {(signedPath || "").split("/").pop()}
+                  </a>
+                  <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button type="button" className="po-btn-expand" onClick={() => openLightbox("pdf", signedHref, "Signed Residential Contract")}>Expand</button>
+                    <a href={signedHref} target="_blank" rel="noopener noreferrer" className="po-btn-expand" style={{ textDecoration: "none", display: "inline-block" }}>View</a>
+                  </div>
+                </div>
+              ) : (
+                <p className="tiny" style={{ color: "var(--text-secondary)", margin: 0 }}>Signed (PDF rendering pending).</p>
+              )}
+            </div>
+          )}
+
+          {/* Generated (unsigned) contract PDF — this is the sign-off document */}
+          {genHref ? (
+            <div className="po-pdf-card" style={{ maxWidth: 320 }}>
+              <div className="po-pdf-thumbnail">
+                <iframe title="Residential Contract PDF" src={genHref} />
+              </div>
+              <a href={genHref} target="_blank" rel="noopener noreferrer" className="po-pdf-label" title={genName}>
+                {genName}
+              </a>
+              <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button type="button" className="po-btn-expand" onClick={() => openLightbox("pdf", genHref, "Residential Contract")}>Expand</button>
+                <a href={genHref} target="_blank" rel="noopener noreferrer" className="po-btn-expand" style={{ textDecoration: "none", display: "inline-block" }}>View</a>
+              </div>
+            </div>
+          ) : (
+            <p className="tiny" style={{ color: "var(--text-secondary)", margin: 0 }}>
+              No contract PDF generated yet. Fill in the fields below and click Generate.
+            </p>
+          )}
+
+          {/* Upload the externally signed contract as the signed sign-off document */}
+          <div className="row-actions">
+            <label className="btn btn-light">
+              {busySignedContract ? "Uploading…" : (signedPath ? "Replace Signed PDF" : "Upload Signed PDF")}
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handleUploadSignedContract}
+                style={{ display: "none" }}
+                disabled={busySignedContract}
+              />
+            </label>
+          </div>
+
+          <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
+            Scope of work
+            <textarea
+              value={contractDraft.scopeOfWork}
+              onChange={(e) => setContractDraft((d) => ({ ...d, scopeOfWork: e.target.value }))}
+              disabled={isSigned || contractSaving}
+              rows={4}
+              style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14, fontFamily: "inherit", resize: "vertical" }}
+            />
+          </label>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
+              Contract total ($)
+              <input
+                type="number" step="0.01" min="0"
+                value={contractDraft.contractTotal}
+                onChange={(e) => setContractDraft((d) => ({ ...d, contractTotal: e.target.value }))}
+                disabled={isSigned || contractSaving}
+                style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
+              Down payment (%)
+              <input
+                type="number" step="0.01" min="0" max="100"
+                value={contractDraft.downPaymentPercent}
+                onChange={(e) => setContractDraft((d) => ({ ...d, downPaymentPercent: e.target.value }))}
+                disabled={isSigned || contractSaving}
+                style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
+              />
+            </label>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
+              Estimated start
+              <input
+                type="date"
+                value={contractDraft.startDate}
+                onChange={(e) => setContractDraft((d) => ({ ...d, startDate: e.target.value }))}
+                disabled={isSigned || contractSaving}
+                style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
+              Estimated completion
+              <input
+                type="date"
+                value={contractDraft.completionDate}
+                onChange={(e) => setContractDraft((d) => ({ ...d, completionDate: e.target.value }))}
+                disabled={isSigned || contractSaving}
+                style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
+              />
+            </label>
+          </div>
+
+          {isSigned ? (
+            <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0 }}>
+              Signed by <strong>{residentialContract?.signerName || "—"}</strong>
+              {residentialContract?.signedAt ? ` on ${new Date(residentialContract.signedAt).toLocaleString()}` : ""}
+              . Signed contracts cannot be edited.
+            </p>
+          ) : (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" className="btn btn-primary" onClick={saveResidentialContract} disabled={contractSaving} style={{ fontSize: 14, padding: "8px 16px" }}>
+                {contractSaving ? "Saving…" : "Save changes"}
+              </button>
+              <button type="button" className="btn btn-light" onClick={regenerateContract} disabled={contractSaving} style={{ fontSize: 14, padding: "8px 16px" }}>
+                {contractSaving ? "Working…" : genHref ? "Regenerate PDF" : "Generate PDF"}
+              </button>
+              <button type="button" className="btn btn-light" onClick={sendContractForSignature} disabled={contractSaving} style={{ fontSize: 14, padding: "8px 16px" }} title="Email the customer a link to review and sign">
+                Send for Signature
+              </button>
+            </div>
+          )}
+        </div>
+      </>
+    );
   };
 
   /* ======================= RENDER ======================= */
@@ -3270,8 +3470,10 @@ export default function ViewWorkOrder() {
         </div>
 
         {/* (rest of your attachments/notes rendering stays exactly the same) */}
-        {/* ======================= Signed Work Order PDF ======================= */}
+        {/* ======================= Sign-Off (contract for residential, else sheet) ======================= */}
         <div className="section-card">
+          {residentialContract ? renderContractSignOff() : (
+          <>
           <h3 className="section-header">Sign-Off Sheet PDF</h3>
 
           {signedHref ? (
@@ -3323,6 +3525,8 @@ export default function ViewWorkOrder() {
                 Move existing signed PDF to attachments
               </label>
             </div>
+          )}
+          </>
           )}
         </div>
 
@@ -3921,194 +4125,6 @@ export default function ViewWorkOrder() {
           )}
         </div>
 
-        {/* ======================= Residential Contract ======================= */}
-        {residentialContract && (
-        <div className="section-card">
-          <h3 className="section-header">
-            Residential Contract
-            {(() => {
-              const s = residentialContract?.status || "Draft";
-              const style = (() => {
-                const sl = s.toLowerCase();
-                if (sl === "sent") return { background: "rgba(0,113,227,0.1)", color: "var(--accent-blue)" };
-                if (sl === "signed") return { background: "rgba(52,199,89,0.12)", color: "#34c759" };
-                if (sl === "cancelled") return { background: "rgba(255,59,48,0.12)", color: "#ff3b30" };
-                return { background: "rgba(142,142,147,0.12)", color: "#8e8e93" };
-              })();
-              return (
-                <span style={{ ...style, marginLeft: 12, display: "inline-block", padding: "3px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600 }}>
-                  {s}
-                </span>
-              );
-            })()}
-          </h3>
-
-          {(() => {
-            const isSigned = residentialContract?.status === "Signed";
-            const genPath = residentialContract?.generatedPdfPath;
-            const genHref = genPath ? pdfThumbUrl(genPath) : null;
-            const genName = genPath ? (genPath.split("/").pop() || "contract.pdf") : null;
-            const signedPath = residentialContract?.signedPdfPath;
-            const signedHref = signedPath ? pdfThumbUrl(signedPath) : null;
-            return (
-              <div style={{ padding: "16px", display: "grid", gap: 12 }}>
-                {/* Signed contract PDF (Phase 3) */}
-                {isSigned && (
-                  <div style={{ background: "rgba(52,199,89,0.08)", border: "1px solid rgba(52,199,89,0.4)", borderRadius: 8, padding: 12 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1b7a3a", marginBottom: 8 }}>
-                      ✓ Signed by {residentialContract?.signerName || "—"}
-                      {residentialContract?.signedAt ? ` on ${new Date(residentialContract.signedAt).toLocaleString()}` : ""}
-                    </div>
-                    {signedHref ? (
-                      <div className="po-pdf-card" style={{ maxWidth: 320 }}>
-                        <div className="po-pdf-thumbnail">
-                          <iframe title="Signed Contract PDF" src={signedHref} />
-                        </div>
-                        <a href={signedHref} target="_blank" rel="noopener noreferrer" className="po-pdf-label" title={(signedPath || "").split("/").pop()}>
-                          {(signedPath || "").split("/").pop()}
-                        </a>
-                        <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                          <button type="button" className="po-btn-expand" onClick={() => openLightbox("pdf", signedHref, "Signed Residential Contract")}>Expand</button>
-                          <a href={signedHref} target="_blank" rel="noopener noreferrer" className="po-btn-expand" style={{ textDecoration: "none", display: "inline-block" }}>View</a>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="tiny" style={{ color: "var(--text-secondary)", margin: 0 }}>Signed (PDF rendering pending).</p>
-                    )}
-                  </div>
-                )}
-
-                {/* Generated (unsigned) contract PDF (Phase 2) */}
-                {genHref ? (
-                  <div className="po-pdf-card" style={{ maxWidth: 320 }}>
-                    <div className="po-pdf-thumbnail">
-                      <iframe title="Residential Contract PDF" src={genHref} />
-                    </div>
-                    <a href={genHref} target="_blank" rel="noopener noreferrer" className="po-pdf-label" title={genName}>
-                      {genName}
-                    </a>
-                    <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button type="button" className="po-btn-expand" onClick={() => openLightbox("pdf", genHref, "Residential Contract")}>
-                        Expand
-                      </button>
-                      <a href={genHref} target="_blank" rel="noopener noreferrer" className="po-btn-expand" style={{ textDecoration: "none", display: "inline-block" }}>
-                        View
-                      </a>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="tiny" style={{ color: "var(--text-secondary)", margin: 0 }}>
-                    No contract PDF generated yet. Fill in the fields below and click Generate.
-                  </p>
-                )}
-
-                <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
-                  Scope of work
-                  <textarea
-                    value={contractDraft.scopeOfWork}
-                    onChange={(e) => setContractDraft((d) => ({ ...d, scopeOfWork: e.target.value }))}
-                    disabled={isSigned || contractSaving}
-                    rows={4}
-                    style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14, fontFamily: "inherit", resize: "vertical" }}
-                  />
-                </label>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
-                    Contract total ($)
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={contractDraft.contractTotal}
-                      onChange={(e) => setContractDraft((d) => ({ ...d, contractTotal: e.target.value }))}
-                      disabled={isSigned || contractSaving}
-                      style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
-                    />
-                  </label>
-                  <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
-                    Down payment (%)
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      value={contractDraft.downPaymentPercent}
-                      onChange={(e) => setContractDraft((d) => ({ ...d, downPaymentPercent: e.target.value }))}
-                      disabled={isSigned || contractSaving}
-                      style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
-                    />
-                  </label>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
-                    Estimated start
-                    <input
-                      type="date"
-                      value={contractDraft.startDate}
-                      onChange={(e) => setContractDraft((d) => ({ ...d, startDate: e.target.value }))}
-                      disabled={isSigned || contractSaving}
-                      style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
-                    />
-                  </label>
-                  <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>
-                    Estimated completion
-                    <input
-                      type="date"
-                      value={contractDraft.completionDate}
-                      onChange={(e) => setContractDraft((d) => ({ ...d, completionDate: e.target.value }))}
-                      disabled={isSigned || contractSaving}
-                      style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", fontSize: 14 }}
-                    />
-                  </label>
-                </div>
-
-                {isSigned ? (
-                  <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0 }}>
-                    Signed by <strong>{residentialContract?.signerName || "—"}</strong>
-                    {residentialContract?.signedAt
-                      ? ` on ${new Date(residentialContract.signedAt).toLocaleString()}`
-                      : ""}
-                    . Signed contracts cannot be edited.
-                  </p>
-                ) : (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      onClick={saveResidentialContract}
-                      disabled={contractSaving}
-                      style={{ fontSize: 14, padding: "8px 16px" }}
-                    >
-                      {contractSaving ? "Saving…" : residentialContract ? "Save changes" : "Save draft"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-light"
-                      onClick={regenerateContract}
-                      disabled={contractSaving}
-                      style={{ fontSize: 14, padding: "8px 16px" }}
-                    >
-                      {contractSaving ? "Working…" : genHref ? "Regenerate PDF" : "Generate PDF"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-light"
-                      onClick={sendContractForSignature}
-                      disabled={contractSaving}
-                      style={{ fontSize: 14, padding: "8px 16px" }}
-                      title="Email the customer a link to review and sign"
-                    >
-                      Send for Signature
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-        </div>
-        )}
 
       </div>
     </div>
