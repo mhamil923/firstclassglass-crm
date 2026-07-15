@@ -2034,6 +2034,19 @@ export default function ViewWorkOrder() {
     }
   };
 
+  // Save a PO's material cost (feeds P&L COGS "PO materials"). Saves on blur.
+  const savePoAmount = async (poId, raw) => {
+    const amount = raw === "" ? null : Number(raw);
+    if (amount !== null && (!Number.isFinite(amount) || amount < 0)) return;
+    try {
+      await api.put(`/work-orders/${id}/pos/${poId}`, { amount }, { headers: authHeaders() });
+      await fetchWorkOrderPos();
+    } catch (err) {
+      console.error("Error saving PO amount:", err);
+      alert(err?.response?.data?.error || "Failed to save PO cost.");
+    }
+  };
+
   const handleUploadImageAttachment = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -3996,6 +4009,18 @@ export default function ViewWorkOrder() {
                     )}
 
                     <div className="po-pdf-label" title={label}>{label}</div>
+
+                    <div style={{ padding: "0 8px", display: "flex", alignItems: "center", gap: 6 }}>
+                      <span className="tiny" style={{ color: "var(--text-secondary)" }}>Cost $</span>
+                      <input
+                        type="number" step="0.01" min="0"
+                        defaultValue={po.amount != null ? String(po.amount) : ""}
+                        placeholder="0.00"
+                        onBlur={(e) => savePoAmount(po.id, e.target.value.trim())}
+                        title="Material cost for this PO — feeds the P&L COGS"
+                        style={{ width: 90, padding: "4px 6px", borderRadius: 6, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)", fontSize: 12 }}
+                      />
+                    </div>
 
                     <div className="po-pdf-actions">
                       {href ? (

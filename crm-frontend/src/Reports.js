@@ -103,6 +103,13 @@ function statusPillStyle(s) {
 /* ========================= AGING BUCKET COLORS ========================= */
 const BUCKET_COLORS = ["#34c759", "#0071e3", "#ff9f0a", "#ff6723", "#ff3b30"];
 
+// Fallback if /expense-categories hasn't loaded yet — kept in sync with the backend
+// (which is the single source of truth and overrides this on mount).
+const EXPENSE_CATEGORIES_FALLBACK = [
+  "Materials", "Fuel", "Vehicle", "Insurance", "Shop/Rent", "Utilities",
+  "Tools & Equipment", "Subcontractor", "Office/Admin", "Marketing", "Payroll", "Other",
+];
+
 /* ========================= Main component ========================= */
 export default function Reports() {
   const navigate = useNavigate();
@@ -129,6 +136,15 @@ export default function Reports() {
   const [pl, setPl] = useState(null);
   const [plLoading, setPlLoading] = useState(false);
   const [expandedBucket, setExpandedBucket] = useState(null);
+
+  // Expenses management (reached from the P&L tab)
+  const [expenses, setExpenses] = useState(null);
+  const [expLoading, setExpLoading] = useState(false);
+  const [expCategories, setExpCategories] = useState(EXPENSE_CATEGORIES_FALLBACK);
+  const [expFilterCat, setExpFilterCat] = useState("All");
+  const [showExpenses, setShowExpenses] = useState(false);
+  const [expForm, setExpForm] = useState(null); // null=closed; else the edit/create form object
+  const [expSaving, setExpSaving] = useState(false);
 
   const handlePreset = (key) => {
     setActivePreset(key);
@@ -186,6 +202,63 @@ export default function Reports() {
     catch (err) { console.error(err); }
     finally { setPlLoading(false); }
   }, [params]);
+
+  // ---- Expenses ----
+  const fetchExpenses = useCallback(async () => {
+    setExpLoading(true);
+    try {
+      const p = { ...params };
+      if (expFilterCat !== "All") p.category = expFilterCat;
+      const res = await api.get("/expenses", { params: p });
+      setExpenses(res.data);
+    } catch (err) { console.error(err); setExpenses(null); }
+    finally { setExpLoading(false); }
+  }, [params, expFilterCat]);
+
+  // Category list (single source: backend) loaded once.
+  useEffect(() => {
+    api.get("/expense-categories")
+      .then((r) => { if (Array.isArray(r.data?.categories) && r.data.categories.length) setExpCategories(r.data.categories); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { if (showExpenses) fetchExpenses(); }, [showExpenses, fetchExpenses]);
+
+  const newExpense = () => setExpForm({
+    id: null, expenseDate: new Date().toISOString().slice(0, 10),
+    category: (expCategories[0] || "Materials"), vendor: "", description: "", amount: "", workOrderId: "",
+  });
+  const editExpense = (e) => setExpForm({
+    id: e.id, expenseDate: String(e.expenseDate).slice(0, 10), category: e.category,
+    vendor: e.vendor || "", description: e.description || "", amount: String(e.amount), workOrderId: e.workOrderId || "",
+  });
+  const saveExpense = async () => {
+    if (!expForm) return;
+    const amt = Number(expForm.amount);
+    if (!expForm.expenseDate || !Number.isFinite(amt) || amt < 0) { alert("A valid date and amount are required."); return; }
+    setExpSaving(true);
+    try {
+      const payload = {
+        expenseDate: expForm.expenseDate, category: expForm.category,
+        vendor: expForm.vendor || null, description: expForm.description || null,
+        amount: amt, workOrderId: expForm.workOrderId === "" ? null : Number(expForm.workOrderId),
+      };
+      if (expForm.id) await api.put(`/expenses/${expForm.id}`, payload);
+      else await api.post("/expenses", payload);
+      setExpForm(null);
+      await fetchExpenses();
+      await fetchPL();
+    } catch (err) { alert(err?.response?.data?.error || "Failed to save expense."); }
+    finally { setExpSaving(false); }
+  };
+  const deleteExpense = async (id) => {
+    if (!window.confirm("Delete this expense?")) return;
+    try {
+      await api.delete(`/expenses/${id}`);
+      await fetchExpenses();
+      await fetchPL();
+    } catch (err) { alert(err?.response?.data?.error || "Failed to delete expense."); }
+  };
 
   // Fetch data when tab changes or date changes
   useEffect(() => {
@@ -666,57 +739,202 @@ export default function Reports() {
             {plLoading ? <Loader /> : pl ? (
               <>
                 <div className="rpt-section-header">
-                  <h3 className="rpt-section-title">Profit & Loss</h3>
-                  <button className="rpt-btn rpt-btn-secondary rpt-btn-sm" onClick={() => {
-                    if (!pl?.months) return;
-                    exportCsv("profit-loss.csv",
-                      ["Month", "Revenue"],
-                      [...pl.months.map(m => [m.label, m.revenue.toFixed(2)]),
-                       ["TOTAL", pl.totalRevenue.toFixed(2)]]);
-                  }}>Export CSV</button>
+                  <h3 className="rpt-section-title">Profit &amp; Loss</h3>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="rpt-btn rpt-btn-primary rpt-btn-sm" onClick={() => { setShowExpenses(true); }}>Manage Expenses</button>
+                    <button className="rpt-btn rpt-btn-secondary rpt-btn-sm" onClick={() => {
+                      const rows = (pl.monthly || []).map(m => [
+                        m.label, m.revenue.toFixed(2), m.cogs.poMaterials.toFixed(2), m.cogs.enteredMaterials.toFixed(2),
+                        m.cogs.total.toFixed(2), m.grossProfit.toFixed(2), m.totalExpenses.toFixed(2), m.netOperatingIncome.toFixed(2),
+                      ]);
+                      rows.push(["TOTAL", pl.revenue.toFixed(2), pl.cogs.poMaterials.toFixed(2), pl.cogs.enteredMaterials.toFixed(2),
+                        pl.cogs.total.toFixed(2), pl.grossProfit.toFixed(2), pl.totalExpenses.toFixed(2), pl.netOperatingIncome.toFixed(2)]);
+                      exportCsv("profit-loss.csv",
+                        ["Month", "Revenue", "PO Materials", "Entered Materials", "COGS", "Gross Profit", "Operating Expenses", "Net Operating Income"], rows);
+                    }}>Export CSV</button>
+                  </div>
                 </div>
 
-                {pl.note && (
-                  <div className="rpt-note-banner">{pl.note}</div>
-                )}
+                {/* Summary cards */}
+                <div className="rpt-kpi-row">
+                  <div className="rpt-kpi-card" style={{ borderLeftColor: "#34c759" }}>
+                    <div className="rpt-kpi-label">Revenue</div>
+                    <div className="rpt-kpi-value">{fmtMoney(pl.revenue)}</div>
+                    <div className="rpt-kpi-hint">{pl.revenueBasis}</div>
+                  </div>
+                  <div className="rpt-kpi-card" style={{ borderLeftColor: "#ff9f0a" }}>
+                    <div className="rpt-kpi-label">COGS (Materials)</div>
+                    <div className="rpt-kpi-value">{fmtMoney(pl.cogs.total)}</div>
+                    <div className="rpt-kpi-hint">PO {fmtMoney(pl.cogs.poMaterials)} + Entered {fmtMoney(pl.cogs.enteredMaterials)}</div>
+                  </div>
+                  <div className="rpt-kpi-card" style={{ borderLeftColor: "#0071e3" }}>
+                    <div className="rpt-kpi-label">Gross Profit</div>
+                    <div className="rpt-kpi-value">{fmtMoney(pl.grossProfit)}</div>
+                    <div className="rpt-kpi-hint">{pl.grossMarginPct}% margin</div>
+                  </div>
+                  <div className="rpt-kpi-card" style={{ borderLeftColor: "#ff6723" }}>
+                    <div className="rpt-kpi-label">Operating Expenses</div>
+                    <div className="rpt-kpi-value">{fmtMoney(pl.totalExpenses)}</div>
+                    <div className="rpt-kpi-hint">excl. materials</div>
+                  </div>
+                  <div className="rpt-kpi-card" style={{ borderLeftColor: pl.netOperatingIncome >= 0 ? "#34c759" : "#ff3b30" }}>
+                    <div className="rpt-kpi-label">Net Operating Income</div>
+                    <div className="rpt-kpi-value">{fmtMoney(pl.netOperatingIncome)}</div>
+                    <div className="rpt-kpi-hint">{pl.netMarginPct}% margin</div>
+                  </div>
+                </div>
 
+                {pl.cogs?.note && <div className="rpt-note-banner">COGS: {pl.cogs.note}</div>}
+
+                {/* Expenses by category */}
                 <div className="rpt-card">
+                  <div className="rpt-card-header">Operating Expenses by Category</div>
                   <table className="rpt-table">
-                    <thead>
-                      <tr><th>Month</th><th className="rpt-num">Revenue</th></tr>
-                    </thead>
+                    <thead><tr><th>Category</th><th className="rpt-num">Amount</th></tr></thead>
                     <tbody>
-                      {(pl.months || []).map(m => (
-                        <tr key={m.month}>
-                          <td>{m.label}</td>
-                          <td className="rpt-num rpt-mono">{fmtMoney(m.revenue)}</td>
-                        </tr>
-                      ))}
+                      {(pl.expensesByCategory || []).length === 0 ? (
+                        <tr><td colSpan={2} style={{ color: "var(--text-secondary)" }}>No operating expenses in this range. Use “Manage Expenses” to add.</td></tr>
+                      ) : (pl.expensesByCategory.map(e => (
+                        <tr key={e.category}><td>{e.category}</td><td className="rpt-num rpt-mono">{fmtMoney(e.amount)}</td></tr>
+                      )))}
                     </tbody>
-                    <tfoot>
-                      <tr>
-                        <td><strong>Total</strong></td>
-                        <td className="rpt-num rpt-mono"><strong>{fmtMoney(pl.totalRevenue)}</strong></td>
-                      </tr>
-                    </tfoot>
+                    <tfoot><tr><td><strong>Total Operating Expenses</strong></td><td className="rpt-num rpt-mono"><strong>{fmtMoney(pl.totalExpenses)}</strong></td></tr></tfoot>
                   </table>
                 </div>
 
-                {pl.months?.length > 0 && (
-                  <div className="rpt-card" style={{ padding: "20px 16px 16px" }}>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={pl.months} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
-                        <XAxis dataKey="label" tick={{ fill: secondaryColor, fontSize: 11 }} axisLine={{ stroke: gridColor }} tickLine={false} />
-                        <YAxis tick={{ fill: secondaryColor, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtMoneyShort} />
-                        <Tooltip formatter={(v) => fmtMoney(v)} contentStyle={chartTooltipStyle} labelStyle={{ color: textColor, fontWeight: 600 }} />
-                        <Bar dataKey="revenue" fill="#34c759" radius={[6, 6, 0, 0]} name="Revenue" />
-                      </BarChart>
-                    </ResponsiveContainer>
+                {/* Monthly trend */}
+                <div className="rpt-card">
+                  <div className="rpt-card-header">Monthly Trend</div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="rpt-table">
+                      <thead>
+                        <tr><th>Month</th><th className="rpt-num">Revenue</th><th className="rpt-num">COGS</th><th className="rpt-num">Gross Profit</th><th className="rpt-num">Op. Exp.</th><th className="rpt-num">Net Op. Income</th></tr>
+                      </thead>
+                      <tbody>
+                        {(pl.monthly || []).length === 0 ? (
+                          <tr><td colSpan={6} style={{ color: "var(--text-secondary)" }}>No activity in this range.</td></tr>
+                        ) : (pl.monthly.map(m => (
+                          <tr key={m.month}>
+                            <td>{m.label}</td>
+                            <td className="rpt-num rpt-mono">{fmtMoney(m.revenue)}</td>
+                            <td className="rpt-num rpt-mono">{fmtMoney(m.cogs.total)}</td>
+                            <td className="rpt-num rpt-mono">{fmtMoney(m.grossProfit)}</td>
+                            <td className="rpt-num rpt-mono">{fmtMoney(m.totalExpenses)}</td>
+                            <td className="rpt-num rpt-mono" style={{ color: m.netOperatingIncome < 0 ? "#ff3b30" : undefined }}>{fmtMoney(m.netOperatingIncome)}</td>
+                          </tr>
+                        )))}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td><strong>Total</strong></td>
+                          <td className="rpt-num rpt-mono"><strong>{fmtMoney(pl.revenue)}</strong></td>
+                          <td className="rpt-num rpt-mono"><strong>{fmtMoney(pl.cogs.total)}</strong></td>
+                          <td className="rpt-num rpt-mono"><strong>{fmtMoney(pl.grossProfit)}</strong></td>
+                          <td className="rpt-num rpt-mono"><strong>{fmtMoney(pl.totalExpenses)}</strong></td>
+                          <td className="rpt-num rpt-mono"><strong>{fmtMoney(pl.netOperatingIncome)}</strong></td>
+                        </tr>
+                      </tfoot>
+                    </table>
                   </div>
-                )}
+                </div>
+
+                <div className="rpt-note-banner" style={{ fontStyle: "italic" }}>
+                  Operating P&amp;L — cash-basis revenue, PO-based materials. Payroll/taxes/depreciation live in QuickBooks.
+                </div>
               </>
             ) : <div className="rpt-empty">No data available.</div>}
+          </div>
+        )}
+
+        {/* ==================== Expenses management modal ==================== */}
+        {showExpenses && (
+          <div className="rpt-modal-overlay" onClick={() => { if (!expForm) setShowExpenses(false); }}
+               style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+            <div onClick={(e) => e.stopPropagation()}
+                 style={{ background: "var(--bg-card-solid, #fff)", color: "var(--text-primary)", borderRadius: 12, width: "100%", maxWidth: 820, maxHeight: "90vh", overflowY: "auto", padding: 20, border: "1px solid var(--border-color)" }}>
+              <div className="rpt-section-header">
+                <h3 className="rpt-section-title">Expenses {dateFrom || dateTo ? `(${dateFrom || "…"} → ${dateTo || "today"})` : ""}</h3>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <select value={expFilterCat} onChange={(e) => setExpFilterCat(e.target.value)}
+                          style={{ padding: 6, borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}>
+                    <option value="All">All categories</option>
+                    {expCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <button className="rpt-btn rpt-btn-primary rpt-btn-sm" onClick={newExpense}>+ Add Expense</button>
+                  <button className="rpt-btn rpt-btn-secondary rpt-btn-sm" onClick={() => setShowExpenses(false)}>Close</button>
+                </div>
+              </div>
+
+              {expLoading ? <Loader /> : (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="rpt-table">
+                    <thead>
+                      <tr><th>Date</th><th>Category</th><th>Vendor</th><th>Description</th><th>WO</th><th className="rpt-num">Amount</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                      {(expenses?.expenses || []).length === 0 ? (
+                        <tr><td colSpan={7} style={{ color: "var(--text-secondary)" }}>No expenses in this range. Click “+ Add Expense”.</td></tr>
+                      ) : (expenses.expenses.map((e) => (
+                        <tr key={e.id}>
+                          <td>{fmtDate(e.expenseDate)}</td>
+                          <td>{e.category}</td>
+                          <td>{e.vendor || "—"}</td>
+                          <td>{e.description || "—"}</td>
+                          <td>{e.workOrderNumber || (e.workOrderId ? `#${e.workOrderId}` : "—")}</td>
+                          <td className="rpt-num rpt-mono">{fmtMoney(e.amount)}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            <button className="rpt-btn rpt-btn-secondary rpt-btn-sm" onClick={() => editExpense(e)}>Edit</button>{" "}
+                            <button className="rpt-btn rpt-btn-secondary rpt-btn-sm" style={{ color: "#ff3b30" }} onClick={() => deleteExpense(e.id)}>Delete</button>
+                          </td>
+                        </tr>
+                      )))}
+                    </tbody>
+                    {expenses?.expenses?.length > 0 && (
+                      <tfoot><tr><td colSpan={5}><strong>Total</strong></td><td className="rpt-num rpt-mono"><strong>{fmtMoney(expenses.total)}</strong></td><td></td></tr></tfoot>
+                    )}
+                  </table>
+                </div>
+              )}
+
+              {/* Add/Edit expense form */}
+              {expForm && (
+                <div style={{ marginTop: 16, borderTop: "1px solid var(--border-color)", paddingTop: 16 }}>
+                  <h4 style={{ margin: "0 0 12px" }}>{expForm.id ? "Edit Expense" : "New Expense"}</h4>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>Date
+                      <input type="date" value={expForm.expenseDate} onChange={(e) => setExpForm((f) => ({ ...f, expenseDate: e.target.value }))}
+                             style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)" }} />
+                    </label>
+                    <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>Category
+                      <select value={expForm.category} onChange={(e) => setExpForm((f) => ({ ...f, category: e.target.value }))}
+                              style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)" }}>
+                        {expCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>Vendor
+                      <input type="text" value={expForm.vendor} onChange={(e) => setExpForm((f) => ({ ...f, vendor: e.target.value }))}
+                             style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)" }} />
+                    </label>
+                    <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>Amount ($)
+                      <input type="number" step="0.01" min="0" value={expForm.amount} onChange={(e) => setExpForm((f) => ({ ...f, amount: e.target.value }))}
+                             style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)" }} />
+                    </label>
+                    <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>Work Order # (optional)
+                      <input type="number" value={expForm.workOrderId} onChange={(e) => setExpForm((f) => ({ ...f, workOrderId: e.target.value }))}
+                             placeholder="WO id" style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)" }} />
+                    </label>
+                    <label style={{ display: "grid", gap: 4, fontSize: 13, color: "var(--text-secondary)" }}>Description
+                      <input type="text" value={expForm.description} onChange={(e) => setExpForm((f) => ({ ...f, description: e.target.value }))}
+                             style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border-color)", background: "var(--bg-secondary)", color: "var(--text-primary)" }} />
+                    </label>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+                    <button className="rpt-btn rpt-btn-secondary" onClick={() => setExpForm(null)} disabled={expSaving}>Cancel</button>
+                    <button className="rpt-btn rpt-btn-primary" onClick={saveExpense} disabled={expSaving}>{expSaving ? "Saving…" : "Save Expense"}</button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

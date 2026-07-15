@@ -707,6 +707,54 @@ async function ensureSupplierPickupsTable() {
 
 ensureSupplierPickupsTable().catch(() => {});
 
+// ─── EXPENSES (operating expenses + entered materials for the real P&L) ──────
+// Fixed category list — the SINGLE SOURCE OF TRUTH, exposed at GET /expense-categories
+// and consumed by both backend validation and the frontend dropdown.
+const EXPENSE_CATEGORIES = [
+  'Materials', 'Fuel', 'Vehicle', 'Insurance', 'Shop/Rent', 'Utilities',
+  'Tools & Equipment', 'Subcontractor', 'Office/Admin', 'Marketing', 'Payroll', 'Other',
+];
+
+async function ensureExpensesTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS expenses (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        expenseDate DATE NOT NULL,
+        category VARCHAR(50) NOT NULL,
+        vendor VARCHAR(150) NULL,
+        description VARCHAR(255) NULL,
+        amount DECIMAL(10,2) NOT NULL,
+        workOrderId INT NULL,
+        createdBy VARCHAR(100) NULL,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_exp_date (expenseDate),
+        INDEX idx_exp_category (category),
+        INDEX idx_exp_wo (workOrderId)
+      )
+    `);
+    console.log('[Expenses Table] expenses table ready');
+  } catch (e) {
+    console.warn('[Expenses Table] Could not create expenses:', e.message);
+  }
+
+  // COGS source: work_order_pos had NO amount column (POs were reference-only).
+  // Add an idempotent nullable amount so POs can carry a material cost going forward.
+  try {
+    const [[exists]] = await db.query(
+      "SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='work_order_pos' AND COLUMN_NAME='amount'"
+    );
+    if (!exists.cnt) {
+      await db.query('ALTER TABLE work_order_pos ADD COLUMN amount DECIMAL(10,2) NULL');
+      console.log('[Migration] work_order_pos.amount CREATED (PO material cost)');
+    }
+  } catch (e) {
+    console.warn('[Migration] work_order_pos.amount failed:', e.message);
+  }
+}
+
+ensureExpensesTable().catch(() => {});
+
 // ─── WORK ORDER NOTES (migrated from work_orders.notes TEXT blob) ────────────
 // Notes were historically a single TEXT column on work_orders, appended as
 //   [YYYY-MM-DD HH:MM:SS.mmm] <author>: <text>   (blocks separated by \n\n)
@@ -6303,35 +6351,307 @@ app.get('/reports/work-orders', authenticate, async (req, res) => {
 });
 
 // GET /reports/profit-loss — simple P&L (revenue only)
+const PNL_MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const round2p = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const pct1 = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : 0);
+
+// Operating P&L for a date range. Single source used by /reports/profit-loss and
+// /api/reports/pnl-monthly so both stay consistent.
+//   REVENUE  = paid invoices (i.total WHERE Paid) by paidAt — cash basis.
+//   COGS     = PO materials (work_order_pos.amount by createdAt) + entered Materials expenses.
+//   OPEX     = expenses (excluding Materials) grouped by category.
+async function computePnL(from, to) {
+  // Revenue by month (cash basis, paidAt) — inclusive full day on `to`.
+  const revP = [];
+  let revW = "i.status = 'Paid' AND i.paidAt IS NOT NULL";
+  if (from) { revW += ' AND DATE(i.paidAt) >= ?'; revP.push(from); }
+  if (to)   { revW += ' AND DATE(i.paidAt) <= ?'; revP.push(to); }
+  const [revRows] = await db.query(
+    `SELECT DATE_FORMAT(i.paidAt,'%Y-%m') AS month, COALESCE(SUM(i.total),0) AS revenue
+     FROM invoices i WHERE ${revW} GROUP BY month`, revP
+  );
+
+  // PO materials by month (createdAt = the only PO date field).
+  const poP = [];
+  let poW = 'amount IS NOT NULL';
+  if (from) { poW += ' AND DATE(createdAt) >= ?'; poP.push(from); }
+  if (to)   { poW += ' AND DATE(createdAt) <= ?'; poP.push(to); }
+  const [poRows] = await db.query(
+    `SELECT DATE_FORMAT(createdAt,'%Y-%m') AS month, COALESCE(SUM(amount),0) AS po
+     FROM work_order_pos WHERE ${poW} GROUP BY month`, poP
+  );
+
+  // Expenses by month + category.
+  const expP = [];
+  let expW = '1=1';
+  if (from) { expW += ' AND expenseDate >= ?'; expP.push(from); }
+  if (to)   { expW += ' AND expenseDate <= ?'; expP.push(to); }
+  const [expRows] = await db.query(
+    `SELECT DATE_FORMAT(expenseDate,'%Y-%m') AS month, category, COALESCE(SUM(amount),0) AS amt
+     FROM expenses WHERE ${expW} GROUP BY month, category`, expP
+  );
+
+  const map = new Map();
+  const bucket = (mo) => {
+    if (!map.has(mo)) map.set(mo, { month: mo, revenue: 0, poMaterials: 0, enteredMaterials: 0, byCat: {} });
+    return map.get(mo);
+  };
+  for (const r of revRows) bucket(r.month).revenue = round2p(r.revenue);
+  for (const r of poRows) bucket(r.month).poMaterials = round2p(r.po);
+  for (const r of expRows) {
+    const g = bucket(r.month);
+    const amt = round2p(r.amt);
+    if (r.category === 'Materials') g.enteredMaterials = round2p(g.enteredMaterials + amt);
+    else g.byCat[r.category] = round2p((g.byCat[r.category] || 0) + amt);
+  }
+
+  const monthly = [...map.values()].sort((a, b) => a.month.localeCompare(b.month)).map((g) => {
+    const cogsTotal = round2p(g.poMaterials + g.enteredMaterials);
+    const totalExpenses = round2p(Object.values(g.byCat).reduce((s, v) => s + v, 0));
+    const grossProfit = round2p(g.revenue - cogsTotal);
+    const netOperatingIncome = round2p(grossProfit - totalExpenses);
+    const [y, mm] = g.month.split('-');
+    return {
+      month: g.month,
+      label: PNL_MONTH_LABELS[parseInt(mm, 10) - 1] + ' ' + y,
+      revenue: g.revenue,
+      cogs: { poMaterials: g.poMaterials, enteredMaterials: g.enteredMaterials, total: cogsTotal },
+      grossProfit,
+      grossMarginPct: pct1(grossProfit, g.revenue),
+      expensesByCategory: Object.entries(g.byCat).map(([category, amount]) => ({ category, amount })),
+      totalExpenses,
+      netOperatingIncome,
+      netMarginPct: pct1(netOperatingIncome, g.revenue),
+    };
+  });
+
+  const revenue = round2p(monthly.reduce((s, m) => s + m.revenue, 0));
+  const poMaterials = round2p(monthly.reduce((s, m) => s + m.cogs.poMaterials, 0));
+  const enteredMaterials = round2p(monthly.reduce((s, m) => s + m.cogs.enteredMaterials, 0));
+  const cogsTotal = round2p(poMaterials + enteredMaterials);
+  const grossProfit = round2p(revenue - cogsTotal);
+
+  const catMap = {};
+  for (const m of monthly) for (const e of m.expensesByCategory) catMap[e.category] = round2p((catMap[e.category] || 0) + e.amount);
+  const expensesByCategory = Object.entries(catMap).map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount);
+  const totalExpenses = round2p(Object.values(catMap).reduce((s, v) => s + v, 0));
+  const netOperatingIncome = round2p(grossProfit - totalExpenses);
+
+  return {
+    revenue,
+    revenueBasis: 'cash basis - paid invoices',
+    cogs: {
+      poMaterials, enteredMaterials, total: cogsTotal,
+      note: 'POs are the primary material source; "Entered materials" are Materials-category expenses (supplemental — not double-counted).',
+    },
+    grossProfit,
+    grossMarginPct: pct1(grossProfit, revenue),
+    expensesByCategory,
+    totalExpenses,
+    netOperatingIncome,
+    netMarginPct: pct1(netOperatingIncome, revenue),
+    monthly,
+  };
+}
+
 app.get('/reports/profit-loss', authenticate, async (req, res) => {
   try {
     const { from, to } = req.query;
-    const params = [];
-    let where = "i.status = 'Paid'";
-    if (from) { where += ' AND i.paidAt >= ?'; params.push(from); }
-    if (to) { where += ' AND i.paidAt <= ?'; params.push(to); }
-
-    const [rows] = await db.query(
-      `SELECT DATE_FORMAT(i.paidAt, '%Y-%m') AS month, COALESCE(SUM(i.total), 0) AS revenue
-       FROM invoices i WHERE ${where} AND i.paidAt IS NOT NULL
-       GROUP BY month ORDER BY month`, params
-    );
-
-    const monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const months = rows.map(r => {
-      const [y, m] = r.month.split('-');
-      return { month: r.month, label: monthLabels[parseInt(m, 10) - 1] + ' ' + y, revenue: Number(r.revenue) || 0 };
-    });
-
-    const totalRevenue = months.reduce((s, m) => s + m.revenue, 0);
-
+    const pnl = await computePnL(from || null, to || null);
     res.json({
-      months, totalRevenue,
-      note: 'Cost tracking is not yet available. This report shows revenue only.',
+      ...pnl,
+      note: 'Operating P&L — cash-basis revenue, PO-based materials. Payroll/taxes/depreciation live in QuickBooks.',
     });
   } catch (err) {
     console.error('Error fetching P&L report:', err);
     res.status(500).json({ error: 'Failed to fetch P&L report.' });
+  }
+});
+
+// ─── EXPENSES CRUD ───────────────────────────────────────────────────────────
+// Shared category list (single source of truth) for the frontend dropdown.
+app.get('/expense-categories', authenticate, (req, res) => res.json({ categories: EXPENSE_CATEGORIES }));
+
+app.get('/expenses', authenticate, async (req, res) => {
+  try {
+    const { from, to, category } = req.query;
+    const wheres = [];
+    const params = [];
+    if (from) { wheres.push('e.expenseDate >= ?'); params.push(from); }
+    if (to) { wheres.push('e.expenseDate <= ?'); params.push(to); }
+    if (category && category !== 'All') { wheres.push('e.category = ?'); params.push(category); }
+    const where = wheres.length ? 'WHERE ' + wheres.join(' AND ') : '';
+    const [rows] = await db.query(
+      `SELECT e.*, w.workOrderNumber
+         FROM expenses e LEFT JOIN work_orders w ON w.id = e.workOrderId
+         ${where}
+         ORDER BY e.expenseDate DESC, e.id DESC`, params
+    );
+    const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    res.json({ expenses: rows, total: round2p(total), count: rows.length });
+  } catch (err) {
+    console.error('Error listing expenses:', err);
+    res.status(500).json({ error: 'Failed to list expenses.' });
+  }
+});
+
+app.post('/expenses', authenticate, async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const expenseDate = b.expenseDate && /^\d{4}-\d{2}-\d{2}/.test(String(b.expenseDate)) ? String(b.expenseDate).slice(0, 10) : null;
+    const category = String(b.category || '').trim();
+    const amount = Number(b.amount);
+    if (!expenseDate) return res.status(400).json({ error: 'A valid expenseDate (YYYY-MM-DD) is required.' });
+    if (!EXPENSE_CATEGORIES.includes(category)) return res.status(400).json({ error: `category must be one of: ${EXPENSE_CATEGORIES.join(', ')}` });
+    if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ error: 'A valid amount is required.' });
+    const workOrderId = b.workOrderId != null && b.workOrderId !== '' && Number.isFinite(Number(b.workOrderId)) ? Number(b.workOrderId) : null;
+    const [result] = await db.query(
+      `INSERT INTO expenses (expenseDate, category, vendor, description, amount, workOrderId, createdBy)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [expenseDate, category, b.vendor ? String(b.vendor).slice(0, 150) : null,
+       b.description ? String(b.description).slice(0, 255) : null, round2p(amount), workOrderId, req.user?.username || null]
+    );
+    const [[row]] = await db.query('SELECT * FROM expenses WHERE id = ?', [result.insertId]);
+    res.status(201).json(row);
+  } catch (err) {
+    console.error('Error creating expense:', err);
+    res.status(500).json({ error: 'Failed to create expense.' });
+  }
+});
+
+app.put('/expenses/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const b = coerceBody(req);
+    const sets = [];
+    const params = [];
+    if (b.expenseDate !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}/.test(String(b.expenseDate || ''))) return res.status(400).json({ error: 'Invalid expenseDate.' });
+      sets.push('expenseDate=?'); params.push(String(b.expenseDate).slice(0, 10));
+    }
+    if (b.category !== undefined) {
+      const c = String(b.category).trim();
+      if (!EXPENSE_CATEGORIES.includes(c)) return res.status(400).json({ error: 'Invalid category.' });
+      sets.push('category=?'); params.push(c);
+    }
+    if (b.vendor !== undefined) { sets.push('vendor=?'); params.push(b.vendor ? String(b.vendor).slice(0, 150) : null); }
+    if (b.description !== undefined) { sets.push('description=?'); params.push(b.description ? String(b.description).slice(0, 255) : null); }
+    if (b.amount !== undefined) {
+      const a = Number(b.amount);
+      if (!Number.isFinite(a) || a < 0) return res.status(400).json({ error: 'Invalid amount.' });
+      sets.push('amount=?'); params.push(round2p(a));
+    }
+    if (b.workOrderId !== undefined) {
+      const w = b.workOrderId != null && b.workOrderId !== '' && Number.isFinite(Number(b.workOrderId)) ? Number(b.workOrderId) : null;
+      sets.push('workOrderId=?'); params.push(w);
+    }
+    if (!sets.length) return res.status(400).json({ error: 'No fields to update.' });
+    params.push(req.params.id);
+    await db.query(`UPDATE expenses SET ${sets.join(', ')} WHERE id = ?`, params);
+    const [[row]] = await db.query('SELECT * FROM expenses WHERE id = ?', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Expense not found.' });
+    res.json(row);
+  } catch (err) {
+    console.error('Error updating expense:', err);
+    res.status(500).json({ error: 'Failed to update expense.' });
+  }
+});
+
+app.delete('/expenses/:id', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [result] = await db.query('DELETE FROM expenses WHERE id = ?', [req.params.id]);
+    if (!result.affectedRows) return res.status(404).json({ error: 'Expense not found.' });
+    res.json({ ok: true, deleted: Number(req.params.id) });
+  } catch (err) {
+    console.error('Error deleting expense:', err);
+    res.status(500).json({ error: 'Failed to delete expense.' });
+  }
+});
+
+// PUT /work-orders/:id/pos/:poId — set/edit a PO's material cost (amount) + fields.
+app.put('/work-orders/:id/pos/:poId', authenticate, requireNumericParam('id'), requireNumericParam('poId'), async (req, res) => {
+  try {
+    const wid = Number(req.params.id);
+    const poId = Number(req.params.poId);
+    const [[po]] = await db.query('SELECT id FROM work_order_pos WHERE id = ? AND workOrderId = ?', [poId, wid]);
+    if (!po) return res.status(404).json({ error: 'PO not found on this work order.' });
+    const b = coerceBody(req);
+    const sets = [];
+    const params = [];
+    if (b.amount !== undefined) {
+      const a = (b.amount === '' || b.amount == null) ? null : Number(b.amount);
+      if (a !== null && (!Number.isFinite(a) || a < 0)) return res.status(400).json({ error: 'Invalid amount.' });
+      sets.push('amount=?'); params.push(a === null ? null : round2p(a));
+    }
+    if (b.poNumber !== undefined) { sets.push('poNumber=?'); params.push(b.poNumber ? String(b.poNumber).trim() : null); }
+    if (b.poSupplier !== undefined) { sets.push('poSupplier=?'); params.push(b.poSupplier ? String(b.poSupplier).trim() : null); }
+    if (!sets.length) return res.status(400).json({ error: 'No fields to update.' });
+    params.push(poId, wid);
+    await db.query(`UPDATE work_order_pos SET ${sets.join(', ')} WHERE id = ? AND workOrderId = ?`, params);
+    const [[row]] = await db.query('SELECT * FROM work_order_pos WHERE id = ?', [poId]);
+    res.json(row);
+  } catch (err) {
+    console.error('PO update error:', err);
+    res.status(500).json({ error: 'Failed to update PO.' });
+  }
+});
+
+// ─── EXCEL / POWER QUERY ENDPOINTS (read-only, JWT-auth like the other reports) ──
+// GET /api/reports/pnl-monthly — flat monthly P&L series for the workbook.
+app.get('/api/reports/pnl-monthly', authenticate, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const pnl = await computePnL(from || null, to || null);
+    const rows = pnl.monthly.map((m) => {
+      const flatCats = {};
+      for (const e of m.expensesByCategory) flatCats['exp_' + e.category.replace(/[^A-Za-z0-9]+/g, '_')] = e.amount;
+      return {
+        month: m.month,
+        revenue: m.revenue,
+        cogs: m.cogs.total,
+        poMaterials: m.cogs.poMaterials,
+        enteredMaterials: m.cogs.enteredMaterials,
+        grossProfit: m.grossProfit,
+        totalExpenses: m.totalExpenses,
+        netOperatingIncome: m.netOperatingIncome,
+        ...flatCats,
+      };
+    });
+    res.json({ months: rows, generatedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error('pnl-monthly error:', err);
+    res.status(500).json({ error: 'Failed to build pnl-monthly.' });
+  }
+});
+
+// GET /api/reports/aging-summary — bucket totals + per-invoice rows for the workbook.
+app.get('/api/reports/aging-summary', authenticate, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT i.id, i.invoiceNumber, c.companyName AS customerName,
+        i.issueDate, i.dueDate, i.total, i.balanceDue,
+        DATEDIFF(CURDATE(), i.dueDate) AS daysOverdue
+       FROM invoices i LEFT JOIN customers c ON c.id = i.customerId
+       WHERE i.balanceDue > 0 AND i.status NOT IN ('Void','Draft','Paid')
+       ORDER BY i.dueDate ASC`
+    );
+    const bucketOf = (d) => (d <= 0 ? 'Current' : d <= 30 ? '1-30 Days' : d <= 60 ? '31-60 Days' : d <= 90 ? '61-90 Days' : '90+ Days');
+    const summary = { 'Current': 0, '1-30 Days': 0, '31-60 Days': 0, '61-90 Days': 0, '90+ Days': 0 };
+    const invoices = rows.map((r) => {
+      const days = Number(r.daysOverdue) || 0;
+      const bal = Number(r.balanceDue) || 0;
+      const bucket = bucketOf(days);
+      summary[bucket] = round2p(summary[bucket] + bal);
+      return {
+        id: r.id, invoiceNumber: r.invoiceNumber, customerName: r.customerName,
+        issueDate: r.issueDate, dueDate: r.dueDate, total: Number(r.total) || 0,
+        balanceDue: bal, daysPastDue: Math.max(0, days), bucket,
+      };
+    });
+    const buckets = Object.entries(summary).map(([bucket, total]) => ({ bucket, total }));
+    res.json({ buckets, invoices, totalOutstanding: round2p(invoices.reduce((s, r) => s + r.balanceDue, 0)), generatedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error('aging-summary error:', err);
+    res.status(500).json({ error: 'Failed to build aging-summary.' });
   }
 });
 
