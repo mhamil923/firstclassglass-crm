@@ -733,8 +733,9 @@ export default function WorkOrders() {
             <tbody>
               {filteredOrders.map((order) => {
                 const latest = parseLatestNote(order?.notes);
+                // Note createdAt is stored UTC-naive; parse as UTC so "X ago" isn't ~5h off.
                 const noteTime = latest?.createdAt
-                  ? moment(latest.createdAt).fromNow()
+                  ? moment.utc(latest.createdAt).fromNow()
                   : null;
 
                 // ---- Robust location/address logic ----

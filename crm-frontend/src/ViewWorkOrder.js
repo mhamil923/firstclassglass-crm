@@ -33,6 +33,22 @@ async function compressImage(file, maxDim = 1600, quality = 0.8) {
   }
 }
 
+// Note timestamps are stored UTC-naive ("YYYY-MM-DD HH:mm:ss", the server/DB run in
+// UTC and appendWorkOrderNote writes new Date().toISOString()). Display them as
+// 12-hour America/Chicago, e.g. "Jul 8, 2026, 10:59 AM".  (15:59 UTC == 10:59 AM CDT.)
+function fmtNoteTime(raw) {
+  if (!raw) return "—";
+  const s = String(raw).trim();
+  // Already carries a zone (Z or ±hh:mm)? use as-is. Otherwise it's UTC-naive → append Z.
+  const iso = /(z|[+-]\d{2}:?\d{2})$/i.test(s) ? s : s.replace(" ", "T") + "Z";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(raw);
+  return d.toLocaleString("en-US", {
+    timeZone: "America/Chicago",
+    month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
 // Keep this in sync with AddWorkOrder.js and WorkOrders.js
 const STATUS_OPTIONS = [
   "New",
@@ -1363,7 +1379,7 @@ export default function ViewWorkOrder() {
       .slice()
       .reverse()
       .map((n) => {
-        const ts = n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "";
+        const ts = n.createdAt ? fmtNoteTime(n.createdAt) : "";
         const by = n.by ? ` — ${n.by}` : "";
         return `${ts}${by}\n${n.text || ""}`.trim();
       })
@@ -3148,7 +3164,7 @@ export default function ViewWorkOrder() {
                       <li key={n.id ?? `${n.createdAt || "na"}-${idx}`} className="note-item">
                         <div className="note-header">
                           <small className="note-timestamp">
-                            {n.createdAt ? moment(n.createdAt).format("YYYY-MM-DD HH:mm") : "—"}
+                            {fmtNoteTime(n.createdAt)}
                             {n.by ? ` — ${n.by}` : ""}
                           </small>
                           <button
@@ -3522,65 +3538,7 @@ export default function ViewWorkOrder() {
         </div>
 
         {/* (rest of your attachments/notes rendering stays exactly the same) */}
-        {/* ======================= Sign-Off (contract for residential, else sheet) ======================= */}
-        <div className="section-card">
-          {residentialContract ? renderContractSignOff() : (
-          <>
-          <h3 className="section-header">Sign-Off Sheet PDF</h3>
-
-          {signedHref ? (
-            <div className="attachments-grid">
-              <FileTile
-                kind="pdf"
-                href={signedHref}
-                fileName={(pdfPath || "").split("/").pop() || "signed.pdf"}
-                onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")}
-              />
-            </div>
-          ) : (
-            <div>
-              <p className="empty-text">No PDF attached.</p>
-              <label className="btn btn-light">
-                {busyReplace ? "Uploading…" : "Upload Signed PDF"}
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleReplacePdfUpload}
-                  style={{ display: "none" }}
-                  disabled={busyReplace}
-                />
-              </label>
-            </div>
-          )}
-
-          {signedHref && (
-            <div className="row-actions">
-              <a className="btn btn-outline" href={signedHref} target="_blank" rel="noreferrer">
-                Open in new tab
-              </a>
-              <label className="btn btn-light">
-                {busyReplace ? "Replacing…" : "Replace Signed PDF"}
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={handleReplacePdfUpload}
-                  style={{ display: "none" }}
-                  disabled={busyReplace}
-                />
-              </label>
-              <label className="checkline">
-                <input
-                  type="checkbox"
-                  checked={keepOldInAttachments}
-                  onChange={(e) => setKeepOldInAttachments(e.target.checked)}
-                />
-                Move existing signed PDF to attachments
-              </label>
-            </div>
-          )}
-          </>
-          )}
-        </div>
+        {/* Sign-Off / Residential Contract (Sign-Off) section moved to the BOTTOM (below Draw Notes). */}
 
         {/* ======================= Estimates (combined: CRM estimates + uploaded PDFs) ======================= */}
         <div className="section-card">
@@ -4187,6 +4145,66 @@ export default function ViewWorkOrder() {
             </div>
           ) : (
             <p className="empty-text">No draw notes attached.</p>
+          )}
+        </div>
+
+        {/* ======================= Sign-Off (contract for residential, else sheet) — BOTTOM ======================= */}
+        <div className="section-card">
+          {residentialContract ? renderContractSignOff() : (
+          <>
+          <h3 className="section-header">Sign-Off Sheet PDF</h3>
+
+          {signedHref ? (
+            <div className="attachments-grid">
+              <FileTile
+                kind="pdf"
+                href={signedHref}
+                fileName={(pdfPath || "").split("/").pop() || "signed.pdf"}
+                onExpand={() => openLightbox("pdf", signedHref, "Signed PDF")}
+              />
+            </div>
+          ) : (
+            <div>
+              <p className="empty-text">No PDF attached.</p>
+              <label className="btn btn-light">
+                {busyReplace ? "Uploading…" : "Upload Signed PDF"}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleReplacePdfUpload}
+                  style={{ display: "none" }}
+                  disabled={busyReplace}
+                />
+              </label>
+            </div>
+          )}
+
+          {signedHref && (
+            <div className="row-actions">
+              <a className="btn btn-outline" href={signedHref} target="_blank" rel="noreferrer">
+                Open in new tab
+              </a>
+              <label className="btn btn-light">
+                {busyReplace ? "Replacing…" : "Replace Signed PDF"}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleReplacePdfUpload}
+                  style={{ display: "none" }}
+                  disabled={busyReplace}
+                />
+              </label>
+              <label className="checkline">
+                <input
+                  type="checkbox"
+                  checked={keepOldInAttachments}
+                  onChange={(e) => setKeepOldInAttachments(e.target.checked)}
+                />
+                Move existing signed PDF to attachments
+              </label>
+            </div>
+          )}
+          </>
           )}
         </div>
 
