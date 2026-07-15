@@ -540,6 +540,8 @@ export default function ViewWorkOrder() {
     status: "Pending",
     amountPaid: "",
     notes: "",
+    termsDays: "",
+    dueDate: "",
   });
   const [qbSaving, setQbSaving] = useState(false);
   const [busyImageUpload, setBusyImageUpload] = useState(false);
@@ -804,6 +806,8 @@ export default function ViewWorkOrder() {
         status: doc.status || QB_STATUS_OPTS(docType)[0],
         amountPaid: doc.amountPaid != null ? String(doc.amountPaid) : "",
         notes: doc.notes || "",
+        termsDays: doc.termsDays != null ? String(doc.termsDays) : "",
+        dueDate: doc.dueDate ? String(doc.dueDate).slice(0, 10) : "",
       });
       setQbModal({ docType, editingId: doc.id });
     } else {
@@ -815,6 +819,8 @@ export default function ViewWorkOrder() {
         status: QB_STATUS_OPTS(docType)[0],
         amountPaid: "",
         notes: "",
+        termsDays: "",
+        dueDate: "",
       });
       setQbModal({ docType, editingId: null });
     }
@@ -843,6 +849,8 @@ export default function ViewWorkOrder() {
             status: qbForm.status,
             amountPaid: qbForm.amountPaid === "" ? 0 : Number(qbForm.amountPaid),
             notes: qbForm.notes,
+            termsDays: qbForm.termsDays === "" ? null : Number(qbForm.termsDays),
+            dueDate: qbForm.dueDate || undefined,
           },
           { headers: authHeaders() }
         );
@@ -881,6 +889,8 @@ export default function ViewWorkOrder() {
             form.append("status", qbForm.status);
             if (!isEstimate && qbForm.amountPaid !== "") form.append("amountPaid", qbForm.amountPaid);
             if (qbForm.notes) form.append("notes", qbForm.notes);
+            if (!isEstimate && qbForm.termsDays !== "") form.append("termsDays", qbForm.termsDays);
+            if (!isEstimate && qbForm.dueDate) form.append("dueDate", qbForm.dueDate);
           }
           await api.post(url, form, {
             headers: { "Content-Type": "multipart/form-data", ...authHeaders() },
@@ -2803,6 +2813,35 @@ export default function ViewWorkOrder() {
                   />
                 </div>
               )}
+              {qbModal.docType === "Invoice" && (
+                <div>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
+                    Terms (days)
+                  </label>
+                  <input
+                    type="number" step="1" min="0"
+                    placeholder="45 (default)"
+                    value={qbForm.termsDays}
+                    onChange={(e) => setQbForm((f) => ({ ...f, termsDays: e.target.value, dueDate: "" }))}
+                    style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--border-color, #d1d5db)" }}
+                  />
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>Blank = Net 45. Due date recomputes from Date + Terms.</div>
+                </div>
+              )}
+              {qbModal.docType === "Invoice" && (
+                <div>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-primary)" }}>
+                    Due date (override)
+                  </label>
+                  <input
+                    type="date"
+                    value={qbForm.dueDate}
+                    onChange={(e) => setQbForm((f) => ({ ...f, dueDate: e.target.value }))}
+                    style={{ width: "100%", padding: 8, borderRadius: 8, border: "1px solid var(--border-color, #d1d5db)" }}
+                  />
+                  <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>Set to force an exact due date.</div>
+                </div>
+              )}
             </div>
 
             <div style={{ marginBottom: 16 }}>
@@ -3839,6 +3878,7 @@ export default function ViewWorkOrder() {
                           <div className="po-pdf-label" title={label} style={{ fontWeight: 600 }}>{label}</div>
                           <div className="tiny" style={{ color: "var(--text-secondary)", padding: "0 8px" }}>
                             {inv.docDate || inv.issueDate ? new Date(inv.docDate || inv.issueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "No date"}
+                            {inv.dueDate ? ` • Due ${new Date(inv.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}` : ""}
                             {sl === "partial" ? ` • Paid ${money(paid)} of ${money(total)}` : ""}
                           </div>
                           {(() => {

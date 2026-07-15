@@ -387,10 +387,11 @@ export default function Reports() {
                     const rows = [];
                     for (const b of aging.buckets) {
                       for (const inv of b.invoices) {
-                        rows.push([b.label, inv.invoiceNumber, inv.customerName, fmtDate(inv.issueDate), fmtDate(inv.dueDate), inv.total.toFixed(2), inv.balanceDue.toFixed(2), inv.daysOverdue]);
+                        const dpd = inv.daysPastDue != null ? inv.daysPastDue : Math.max(0, Number(inv.daysOverdue) || 0);
+                        rows.push([b.label, inv.invoiceNumber, inv.customerName, fmtDate(inv.issueDate), fmtDate(inv.dueDate), inv.total.toFixed(2), inv.balanceDue.toFixed(2), dpd]);
                       }
                     }
-                    exportCsv("aging-report.csv", ["Bucket", "Invoice #", "Customer", "Issue Date", "Due Date", "Total", "Balance Due", "Days Overdue"], rows);
+                    exportCsv("aging-report.csv", ["Bucket", "Invoice #", "Customer", "Issue Date", "Due Date", "Total", "Balance Due", "Days Past Due"], rows);
                   }}>Export CSV</button>
                 </div>
 
@@ -437,10 +438,12 @@ export default function Reports() {
                     <div className="rpt-card-header">{aging.buckets[expandedBucket].label} Invoices</div>
                     <table className="rpt-table">
                       <thead>
-                        <tr><th>Invoice #</th><th>Customer</th><th>Issue Date</th><th>Due Date</th><th className="rpt-num">Total</th><th className="rpt-num">Balance Due</th><th className="rpt-num">Days</th></tr>
+                        <tr><th>Invoice #</th><th>Customer</th><th>Issue Date</th><th>Due Date</th><th className="rpt-num">Total</th><th className="rpt-num">Balance Due</th><th className="rpt-num">Days Past Due</th></tr>
                       </thead>
                       <tbody>
-                        {aging.buckets[expandedBucket].invoices.map(inv => (
+                        {aging.buckets[expandedBucket].invoices.map(inv => {
+                          const dpd = inv.daysPastDue != null ? inv.daysPastDue : Math.max(0, Number(inv.daysOverdue) || 0);
+                          return (
                           <tr key={inv.id} onClick={() => navigate(`/invoices/${inv.id}`)} style={{ cursor: "pointer" }}>
                             <td style={{ fontWeight: 600 }}>{inv.invoiceNumber || "\u2014"}</td>
                             <td>{inv.customerName || "\u2014"}</td>
@@ -448,9 +451,10 @@ export default function Reports() {
                             <td>{fmtDate(inv.dueDate)}</td>
                             <td className="rpt-num rpt-mono">{fmtMoney(inv.total)}</td>
                             <td className="rpt-num rpt-mono">{fmtMoney(inv.balanceDue)}</td>
-                            <td className="rpt-num">{inv.daysOverdue}</td>
+                            <td className="rpt-num">{dpd > 0 ? dpd : "\u2014"}</td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

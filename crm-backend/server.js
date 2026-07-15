@@ -1388,6 +1388,7 @@ async function ensureIndexes() {
     { table: 'invoices',       index: 'idx_invoices_createdAt',     col: 'createdAt' },
     { table: 'invoices',       index: 'idx_invoices_customerId',    col: 'customerId' },
     { table: 'invoices',       index: 'idx_invoices_invoiceSentAt', col: 'invoiceSentAt' },
+    { table: 'invoices',       index: 'idx_invoices_dueDate',       col: 'dueDate' },
     { table: 'work_order_pos', index: 'idx_wop_workOrderId',        col: 'workOrderId' },
     { table: 'work_orders',    index: 'idx_work_orders_customerId', col: 'customerId' },
   ];
@@ -1821,7 +1822,7 @@ async function ensurePublicTokenTables() {
       } catch (e) { /* */ }
     }
 
-    // Add publicToken/tokenExpiresAt/payment columns to invoices
+    // Add publicToken/tokenExpiresAt/payment/due-date columns to invoices
     const invCols = [
       { name: 'publicToken', def: 'VARCHAR(64) NULL' },
       { name: 'tokenExpiresAt', def: 'DATETIME NULL' },
@@ -1829,6 +1830,8 @@ async function ensurePublicTokenTables() {
       { name: 'paidAt', def: 'DATETIME NULL' },
       { name: 'paidAmount', def: 'DECIMAL(10,2) NULL' },
       { name: 'paymentMethod', def: "VARCHAR(50) NULL" },
+      { name: 'dueDate', def: 'DATE NULL' },       // idempotent — already present on most envs
+      { name: 'termsDays', def: 'INT NULL' },      // NULL = company default (Net 45)
     ];
     for (const col of invCols) {
       try {
@@ -1836,8 +1839,22 @@ async function ensurePublicTokenTables() {
           "SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='invoices' AND COLUMN_NAME=?",
           [col.name]
         );
-        if (!exists.cnt) await db.query(`ALTER TABLE invoices ADD COLUMN ${col.name} ${col.def}`);
+        if (!exists.cnt) {
+          await db.query(`ALTER TABLE invoices ADD COLUMN ${col.name} ${col.def}`);
+          console.log(`[Migration] invoices.${col.name} CREATED`);
+        }
       } catch (e) { /* */ }
+    }
+
+    // Backfill dueDate = issueDate + 45 days for legacy invoices (NULL dueDate). Idempotent:
+    // once populated, subsequent runs match 0 rows.
+    try {
+      const [bf] = await db.query(
+        "UPDATE invoices SET dueDate = DATE_ADD(issueDate, INTERVAL 45 DAY) WHERE dueDate IS NULL AND issueDate IS NOT NULL"
+      );
+      console.log(`[Migration] dueDate backfill (issueDate + 45): ${bf.affectedRows} invoice(s) updated.`);
+    } catch (e) {
+      console.warn('[Migration] dueDate backfill failed:', e.message);
     }
 
     console.log('[Migration] Public token + payment tables ensured');
@@ -4128,6 +4145,26 @@ app.get('/invoices/:id', authenticate, requireNumericParam('id'), async (req, re
 });
 
 // POST /invoices - create invoice
+// Company default payment terms (Net 45). Single source of truth for due-date math.
+const DEFAULT_TERMS_DAYS = 45;
+
+// Resolution rule used EVERYWHERE a due date is set:
+//   dueDate = explicit dueDate if provided, else issueDate + (termsDays ?? 45)
+// Returns 'YYYY-MM-DD' or null when there is no issue date to anchor from.
+function computeDueDate(issueDate, termsDays, explicitDueDate) {
+  if (explicitDueDate && /^\d{4}-\d{2}-\d{2}/.test(String(explicitDueDate))) {
+    return String(explicitDueDate).slice(0, 10);
+  }
+  if (!issueDate) return null;
+  const base = new Date(String(issueDate).slice(0, 10) + 'T00:00:00Z');
+  if (isNaN(base.getTime())) return null;
+  const days = (termsDays != null && termsDays !== '' && Number.isFinite(Number(termsDays)))
+    ? Number(termsDays)
+    : DEFAULT_TERMS_DAYS;
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString().split('T')[0];
+}
+
 app.post('/invoices', authenticate, async (req, res) => {
   try {
     const b = coerceBody(req);
@@ -4148,7 +4185,8 @@ app.post('/invoices', authenticate, async (req, res) => {
 
     const invoiceNumber = await getNextInvoiceNumber();
     const issueDate = b.issueDate || new Date().toISOString().split('T')[0];
-    const dueDate = b.dueDate || (() => { const d = new Date(issueDate); d.setDate(d.getDate() + 45); return d.toISOString().split('T')[0]; })();
+    const termsDays = (b.termsDays != null && b.termsDays !== '' && Number.isFinite(Number(b.termsDays))) ? Number(b.termsDays) : null;
+    const dueDate = computeDueDate(issueDate, termsDays, b.dueDate);
 
     // Get default terms from settings if not provided
     let terms = b.terms;
@@ -4158,14 +4196,14 @@ app.post('/invoices', authenticate, async (req, res) => {
     }
 
     const [result] = await db.query(
-      `INSERT INTO invoices (invoiceNumber, customerId, workOrderId, estimateId, status, issueDate, dueDate,
+      `INSERT INTO invoices (invoiceNumber, customerId, workOrderId, estimateId, status, issueDate, dueDate, termsDays,
         poNumber, projectName, shipToAddress, shipToCity, shipToState, shipToZip,
         billingAddress, billingCity, billingState, billingZip,
         subtotal, taxRate, taxAmount, total, amountPaid, balanceDue, notes, terms, templateId)
-       VALUES (?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, 'Draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
       [
         invoiceNumber, resolvedCustomerId, b.workOrderId || null, b.estimateId || null,
-        issueDate, dueDate,
+        issueDate, dueDate, termsDays,
         b.poNumber || null, b.projectName || null,
         b.shipToAddress || null, b.shipToCity || null, b.shipToState || null, b.shipToZip || null,
         b.billingAddress || null, b.billingCity || null, b.billingState || null, b.billingZip || null,
@@ -4191,7 +4229,7 @@ app.post('/invoices', authenticate, async (req, res) => {
 app.put('/invoices/:id', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const b = coerceBody(req);
-    const fields = ['customerId', 'workOrderId', 'estimateId', 'issueDate', 'dueDate', 'poNumber', 'projectName',
+    const fields = ['customerId', 'workOrderId', 'estimateId', 'issueDate', 'dueDate', 'termsDays', 'poNumber', 'projectName',
       'shipToAddress', 'shipToCity', 'shipToState', 'shipToZip',
       'billingAddress', 'billingCity', 'billingState', 'billingZip',
       'taxRate', 'notes', 'terms', 'templateId'];
@@ -4201,6 +4239,16 @@ app.put('/invoices/:id', authenticate, requireNumericParam('id'), async (req, re
       if (b[f] !== undefined) { sets.push(`${f}=?`); params.push(b[f]); }
     }
     if (!sets.length) return res.status(400).json({ error: 'No fields to update' });
+
+    // Recompute dueDate when issueDate/termsDays change and no explicit dueDate was given.
+    if (b.dueDate === undefined && (b.issueDate !== undefined || b.termsDays !== undefined)) {
+      const [[cur]] = await db.query('SELECT issueDate, termsDays FROM invoices WHERE id = ?', [req.params.id]);
+      const issueDate = b.issueDate !== undefined ? b.issueDate : cur?.issueDate;
+      const termsDays = b.termsDays !== undefined ? b.termsDays : cur?.termsDays;
+      const newDue = computeDueDate(issueDate, termsDays, null);
+      if (newDue) { sets.push('dueDate=?'); params.push(newDue); }
+    }
+
     sets.push('updatedAt=NOW()');
     params.push(req.params.id);
     await db.query(`UPDATE invoices SET ${sets.join(',')} WHERE id=?`, params);
@@ -6094,7 +6142,8 @@ app.get('/reports/aging', authenticate, async (req, res) => {
     ];
 
     for (const inv of rows) {
-      const days = Number(inv.daysOverdue) || 0;
+      const days = Number(inv.daysOverdue) || 0; // negative when not yet due (bucketed as Current)
+      const daysPastDue = Math.max(0, days);      // never negative for display/CSV
       const bal = Number(inv.balanceDue) || 0;
       for (const b of buckets) {
         if (days >= b.min && days <= b.max) {
@@ -6103,7 +6152,7 @@ app.get('/reports/aging', authenticate, async (req, res) => {
           b.invoices.push({
             id: inv.id, invoiceNumber: inv.invoiceNumber, customerName: inv.customerName,
             issueDate: inv.issueDate, dueDate: inv.dueDate, total: Number(inv.total) || 0, balanceDue: bal,
-            daysOverdue: days
+            daysOverdue: days, daysPastDue
           });
           break;
         }
@@ -8644,13 +8693,15 @@ app.post(
       const docDate = body.docDate && /^\d{4}-\d{2}-\d{2}/.test(String(body.docDate)) ? String(body.docDate).slice(0, 10) : null;
       const issueDate = docDate || new Date().toISOString().split('T')[0];
       const balanceDue = Math.max(0, total - amountPaid);
+      const termsDays = (body.termsDays != null && body.termsDays !== '' && Number.isFinite(Number(body.termsDays))) ? Number(body.termsDays) : null;
+      const dueDate = computeDueDate(issueDate, termsDays, body.dueDate);
 
       const [result] = await db.query(
         `INSERT INTO invoices
-           (invoiceNumber, customerId, workOrderId, status, issueDate, docDate, qbDocNumber,
+           (invoiceNumber, customerId, workOrderId, status, issueDate, dueDate, termsDays, docDate, qbDocNumber,
             subtotal, total, amountPaid, balanceDue, pdfPath, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [invoiceNumber, customerId, wid, status, issueDate, docDate, qbDocNumber || null,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [invoiceNumber, customerId, wid, status, issueDate, dueDate, termsDays, docDate, qbDocNumber || null,
          total, total, amountPaid, balanceDue, pdfPath, body.notes || null]
       );
 
@@ -8680,7 +8731,8 @@ app.put(
       const sets = [];
       const params = [];
       if (b.qbDocNumber !== undefined) { sets.push('qbDocNumber=?', 'invoiceNumber=?'); const v = String(b.qbDocNumber).trim() || null; params.push(v, v || inv.invoiceNumber); }
-      if (b.docDate !== undefined) { const d = /^\d{4}-\d{2}-\d{2}/.test(String(b.docDate || '')) ? String(b.docDate).slice(0,10) : null; sets.push('docDate=?', 'issueDate=?'); params.push(d, d || inv.issueDate); }
+      let effIssueDate = inv.issueDate; // track for dueDate recompute
+      if (b.docDate !== undefined) { const d = /^\d{4}-\d{2}-\d{2}/.test(String(b.docDate || '')) ? String(b.docDate).slice(0,10) : null; sets.push('docDate=?', 'issueDate=?'); params.push(d, d || inv.issueDate); effIssueDate = d || inv.issueDate; }
       if (b.status !== undefined) {
         const allowed = ['Sent', 'Partial', 'Paid', 'Draft', 'Overdue', 'Void'];
         const s = allowed.includes(String(b.status).trim()) ? String(b.status).trim() : inv.status;
@@ -8693,6 +8745,20 @@ app.put(
       if (b.amountPaid !== undefined) { sets.push('amountPaid=?'); params.push(newPaid); }
       if (b.amount !== undefined || b.amountPaid !== undefined) { sets.push('balanceDue=?'); params.push(Math.max(0, newTotal - newPaid)); }
       if (b.notes !== undefined) { sets.push('notes=?'); params.push(b.notes == null ? null : String(b.notes)); }
+
+      // Payment terms: store termsDays and/or an explicit dueDate; recompute due date otherwise.
+      let effTermsDays = inv.termsDays;
+      if (b.termsDays !== undefined) {
+        effTermsDays = (b.termsDays === '' || b.termsDays == null) ? null : Number(b.termsDays);
+        sets.push('termsDays=?'); params.push(effTermsDays);
+      }
+      if (b.dueDate !== undefined && b.dueDate) {
+        const dd = /^\d{4}-\d{2}-\d{2}/.test(String(b.dueDate)) ? String(b.dueDate).slice(0, 10) : null;
+        if (dd) { sets.push('dueDate=?'); params.push(dd); }
+      } else if (b.docDate !== undefined || b.termsDays !== undefined) {
+        const newDue = computeDueDate(effIssueDate, effTermsDays, null);
+        if (newDue) { sets.push('dueDate=?'); params.push(newDue); }
+      }
 
       if (!sets.length) return res.json(inv);
       sets.push('updatedAt=NOW()');
