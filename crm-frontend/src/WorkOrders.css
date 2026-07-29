@@ -323,6 +323,13 @@
   color: var(--text-primary);
 }
 
+/* Created date cell — muted, single line so the narrow column fits "Jul 28 '25" */
+.wo-created {
+  color: var(--text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 /* Latest note */
 .latest-note {
   margin-top: 8px;

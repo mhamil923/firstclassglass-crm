@@ -106,6 +106,50 @@ const clampStyle = (lines) => ({
 });
 
 /* -------------------------------------------------------------------------- */
+/* Created-date helpers — America/Chicago, consistent with the note-timestamp
+   formatting in ViewWorkOrder (parse UTC-naive by appending Z, render via
+   toLocaleString with timeZone "America/Chicago").                           */
+const parseUtcNaive = (raw) => {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  // Already carries a zone (Z or ±hh:mm)? use as-is. Otherwise treat as UTC.
+  const iso = /(z|[+-]\d{2}:?\d{2})$/i.test(s) ? s : s.replace(" ", "T") + "Z";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+const chicagoYear = (d) =>
+  d.toLocaleString("en-US", { timeZone: "America/Chicago", year: "numeric" });
+
+// Compact date: "Jul 28" for the current year, "Jul 28 '25" for prior years.
+const fmtCreatedCompact = (raw) => {
+  const d = parseUtcNaive(raw);
+  if (!d) return "—";
+  const monthDay = d.toLocaleString("en-US", {
+    timeZone: "America/Chicago",
+    month: "short",
+    day: "numeric",
+  });
+  const yr = chicagoYear(d);
+  const nowYr = chicagoYear(new Date());
+  return yr === nowYr ? monthDay : `${monthDay} '${yr.slice(-2)}`;
+};
+
+// Full date/time for the title/hover, e.g. "Jul 28, 2026, 10:59 AM".
+const fmtCreatedFull = (raw) => {
+  const d = parseUtcNaive(raw);
+  if (!d) return "";
+  return d.toLocaleString("en-US", {
+    timeZone: "America/Chicago",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
+/* -------------------------------------------------------------------------- */
 /* Notes helpers — tolerant of server TEXT format like:
    "[2025-11-05 19:06:12.555] Mark: test note from curl"
    and also supports JSON-array notes if present.                             */
@@ -720,13 +764,14 @@ export default function WorkOrders() {
           <table className="wo-table">
             <thead>
               <tr>
-                <th style={{ width: 130 }}>WO / PO</th>
-                <th style={{ width: 170 }}>Customer</th>
-                <th style={{ width: 220 }}>Site Location</th>
-                <th>Site Address</th>
-                <th style={{ width: 360 }}>Problem Description</th>
-                <th style={{ width: 190 }}>Status</th>
-                {userRole !== "tech" && <th style={{ width: 190 }}>Assigned To</th>}
+                <th style={{ width: 84 }}>Created</th>
+                <th style={{ width: 118 }}>WO / PO</th>
+                <th style={{ width: 150 }}>Customer</th>
+                <th style={{ width: 168 }}>Site Location</th>
+                <th style={{ width: 188 }}>Site Address</th>
+                <th style={{ width: 460 }}>Problem Description</th>
+                <th style={{ width: 168 }}>Status</th>
+                {userRole !== "tech" && <th style={{ width: 176 }}>Assigned To</th>}
               </tr>
             </thead>
 
@@ -766,6 +811,13 @@ export default function WorkOrders() {
                       })
                     }
                   >
+                    <td
+                      className="wo-created"
+                      title={fmtCreatedFull(order.createdAt) || undefined}
+                    >
+                      {fmtCreatedCompact(order.createdAt)}
+                    </td>
+
                     <td>
                       <div className="wo-idcell">
                         <div className="wo-idline">
@@ -802,7 +854,7 @@ export default function WorkOrders() {
                     </td>
 
                     <td title={order.problemDescription || ""}>
-                      <div style={clampStyle(4)}>{order.problemDescription || "—"}</div>
+                      <div style={clampStyle(6)}>{order.problemDescription || "—"}</div>
 
                       {latest?.text ? (
                         <div
@@ -904,7 +956,7 @@ export default function WorkOrders() {
 
               {filteredOrders.length === 0 && (
                 <tr>
-                  <td colSpan={userRole !== "tech" ? 7 : 6}>
+                  <td colSpan={userRole !== "tech" ? 8 : 7}>
                     <div className="empty-state">No work orders for this filter.</div>
                   </td>
                 </tr>
