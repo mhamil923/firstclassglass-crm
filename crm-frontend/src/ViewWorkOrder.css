@@ -205,6 +205,10 @@
   background: var(--bg-card-solid);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
+  /* Blue accent top border, applied unconditionally so it no longer depends on
+     WorkOrders.css being loaded (lazy-loaded routes meant the blue only showed
+     when a WO was opened via the Work Orders list, not from History/Home/etc). */
+  border-top: 3px solid var(--accent-blue);
   overflow: hidden;
   margin-bottom: 16px;
   box-shadow: var(--shadow-sm);
