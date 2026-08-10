@@ -599,6 +599,98 @@ async function ensurePoTable() {
 
 ensurePoTable().catch(() => {});
 
+// ─── WORK_ORDER_PHOTO_PHASES TABLE (photo lifecycle phase) ──────────────────
+// Photos are a comma-separated key list in work_orders.photoPath — there is no
+// per-photo row to hang a photoPhase column on. This side table tags individual
+// photo keys instead. A key with NO row here is unclassified (NULL = general
+// Image Attachments), so every existing photo and every existing caller is
+// untouched. Keys are stored normalized so a later /fix-keys pass can't desync
+// the tags from photoPath.
+async function ensurePhotoPhaseTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS work_order_photo_phases (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        workOrderId INT NOT NULL,
+        photoKey    VARCHAR(512) NOT NULL,
+        photoPhase  VARCHAR(20)  NULL,
+        createdAt   DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_wo_photo (workOrderId, photoKey(255)),
+        KEY idx_wo (workOrderId),
+        FOREIGN KEY (workOrderId) REFERENCES work_orders(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('[Photo Phase] work_order_photo_phases table ready');
+  } catch (e) {
+    console.warn('[Photo Phase] Could not create work_order_photo_phases:', e.message);
+  }
+}
+
+ensurePhotoPhaseTable().catch(() => {});
+
+const PHOTO_PHASES = new Set(['before']);
+
+// Optional photoPhase parameter on an upload request. Absent/blank/unknown => null
+// (general). ViewWorkOrder "Upload Photos" and every shipped Field-tech-app build
+// send nothing, so they keep landing in general Image Attachments exactly as before.
+function readPhotoPhase(req) {
+  const raw = String(req?.body?.photoPhase ?? '').trim().toLowerCase();
+  return PHOTO_PHASES.has(raw) ? raw : null;
+}
+
+// Tag freshly-uploaded photo keys with a phase. No-op when phase is null.
+async function recordPhotoPhase(wid, keys, phase) {
+  if (!phase || !Array.isArray(keys) || !keys.length) return;
+  for (const k of keys) {
+    const norm = normalizeStoredKey(k);
+    if (!norm) continue;
+    try {
+      await db.execute(
+        `INSERT INTO work_order_photo_phases (workOrderId, photoKey, photoPhase)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE photoPhase = VALUES(photoPhase)`,
+        [wid, norm, phase]
+      );
+    } catch (e) {
+      console.warn('[Photo Phase] tag failed:', wid, norm, e.message);
+    }
+  }
+}
+
+// Drop the tag for a photo key (called when the attachment itself is deleted).
+async function clearPhotoPhase(wid, key) {
+  const norm = normalizeStoredKey(key);
+  if (!norm) return;
+  try {
+    await db.execute(
+      'DELETE FROM work_order_photo_phases WHERE workOrderId = ? AND photoKey = ?',
+      [wid, norm]
+    );
+  } catch (e) {
+    console.warn('[Photo Phase] untag failed:', wid, norm, e.message);
+  }
+}
+
+// The WO's photoPath entries carrying the given phase, returned in photoPath form
+// (not normalized) so the client can string-match the list it already renders.
+// Intersecting with photoPath means a stale tag for a removed photo shows nothing.
+async function getPhotoKeysByPhase(wid, photoPathCsv, phase) {
+  const parts = String(photoPathCsv || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!parts.length) return [];
+  try {
+    const [rows] = await db.execute(
+      'SELECT photoKey FROM work_order_photo_phases WHERE workOrderId = ? AND photoPhase = ?',
+      [wid, phase]
+    );
+    if (!rows.length) return [];
+    const tagged = new Set(rows.map(r => normalizeStoredKey(r.photoKey)).filter(Boolean));
+    return parts.filter(p => tagged.has(normalizeStoredKey(p)));
+  } catch (e) {
+    console.warn('[Photo Phase] lookup failed:', wid, e.message);
+    return [];
+  }
+}
+
 // ─── WORK_ORDER_ESTIMATE_PDFS TABLE (multi estimate PDFs) ───────────────────
 async function ensureEstimatePdfsTable() {
   try {
@@ -7082,6 +7174,10 @@ app.get('/work-orders/:id', authenticate, requireNumericParam('id'), async (req,
     await attachTechsToWorkOrders([row]);
     await attachNotesToWorkOrders([row], { withRows: true }); // notesRows carries ids for per-note delete
 
+    // Which of this WO's photos were captured at creation time. Everything not
+    // listed here is a general Image Attachment (the default for all old photos).
+    row.beforePhotoKeys = await getPhotoKeysByPhase(id, row.photoPath, 'before');
+
     // Attach captured QuickBooks documents (read-only) so the field app
     // Documents section can list the QB invoice/estimate PDFs too.
     try {
@@ -7626,6 +7722,11 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
       );
     }
 
+    // Photos sent inline with the create request are "before" photos only when the
+    // caller says so (web AddWorkOrder). Without the flag they stay unclassified —
+    // that keeps the Field-tech-app's create-with-photo path landing in general.
+    await recordPhotoPhase(r.insertId, images.map(fileKey), readPhotoPhase(req));
+
     // Auto-create customer and link to work order if no customerId was provided
     if (!customerId || !Number.isFinite(Number(customerId))) {
       try {
@@ -8008,6 +8109,13 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     await stampEstimateSentIfWaiting(wid, cStatus);
     await maybeLogApprovalNote(wid, existing.status, cStatus, req.user?.username || 'System');
 
+    // Tag this batch's photos only if the caller passed photoPhase. The web
+    // AddWorkOrder uploads its creation photos through here one at a time with
+    // photoPhase=before; ViewWorkOrder "Upload Photos" and the Field-tech-app
+    // send nothing, so their photos stay general. Tagged after the UPDATE so a
+    // failed write never leaves a tag behind.
+    await recordPhotoPhase(wid, newPhotos, readPhotoPhase(req));
+
     // Sync legacy PO columns from work_order_pos if a PO was added
     if (newPoPdfFile && wantReplacePo) {
       await syncLegacyPoColumns(wid);
@@ -8233,6 +8341,9 @@ app.delete(
         updated.join(','),
         wid,
       ]);
+
+      // Drop any phase tag for this key so it can't outlive the photo
+      await clearPhotoPhase(wid, key);
 
       // Best-effort file deletion
       await deleteStoredFileByKey(key);

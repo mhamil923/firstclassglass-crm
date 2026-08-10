@@ -1216,6 +1216,16 @@ export default function ViewWorkOrder() {
   const drawNoteImages = allImageAttachments.filter((k) => isDrawNote(k));
   const photoImages = allImageAttachments.filter((k) => !isDrawNote(k));
 
+  // Photos captured while the work order was being created ("before" photos) get
+  // their own section. The backend returns the subset of photoPath tagged 'before';
+  // anything untagged — every photo predating this feature, every ViewWorkOrder
+  // upload, every field-app upload — stays in general Image Attachments.
+  const beforeKeySet = new Set(
+    Array.isArray(workOrder?.beforePhotoKeys) ? workOrder.beforePhotoKeys : []
+  );
+  const beforePhotoImages = photoImages.filter((k) => beforeKeySet.has(k));
+  const generalPhotoImages = photoImages.filter((k) => !beforeKeySet.has(k));
+
 
   // ✅ Date Created (robust field fallbacks)
   const createdRaw =
@@ -4062,6 +4072,48 @@ export default function ViewWorkOrder() {
           </div>
         </div>
 
+        {/* ======================= Before Photos ======================= */}
+        {/* Creation-time photos only. Scoped Download All — it never reaches the
+            general Image Attachments below. */}
+        <div className="section-card">
+          <div className="section-row">
+            <h3 className="section-header" style={{ margin: 0 }}>
+              Before Photos
+            </h3>
+
+            <div className="section-actions">
+              <button
+                className="btn btn-outline"
+                onClick={() => downloadMany(beforePhotoImages)}
+                disabled={!beforePhotoImages.length}
+              >
+                Download All
+              </button>
+            </div>
+          </div>
+
+          {beforePhotoImages.length ? (
+            <div className="attachments-grid">
+              {beforePhotoImages.map((relPath, i) => {
+                const href = urlFor(relPath);
+                const fileName = relPath.split("/").pop() || `before-${i + 1}.jpg`;
+                return (
+                  <FileTile
+                    key={`${relPath}-${i}`}
+                    kind="image"
+                    href={href}
+                    fileName={fileName}
+                    onExpand={() => openLightbox("image", href, fileName)}
+                    onDelete={() => handleDeleteAttachment(relPath)}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <p className="empty-text">No before photos.</p>
+          )}
+        </div>
+
         {/* ======================= Photos ======================= */}
         <div className="section-card">
           <div className="section-row">
@@ -4070,11 +4122,11 @@ export default function ViewWorkOrder() {
             </h3>
 
             <div className="section-actions">
-              <button className="btn btn-outline" onClick={() => downloadMany(photoImages)} disabled={!photoImages.length}>
+              <button className="btn btn-outline" onClick={() => downloadMany(generalPhotoImages)} disabled={!generalPhotoImages.length}>
                 Download All Photos
               </button>
 
-              <button className="btn btn-outline" onClick={() => printAllPhotos(photoImages.map(urlFor))} disabled={!photoImages.length}>
+              <button className="btn btn-outline" onClick={() => printAllPhotos(generalPhotoImages.map(urlFor))} disabled={!generalPhotoImages.length}>
                 Print All Photos
               </button>
 
@@ -4092,9 +4144,9 @@ export default function ViewWorkOrder() {
             </div>
           </div>
 
-          {photoImages.length ? (
+          {generalPhotoImages.length ? (
             <div className="attachments-grid">
-              {photoImages.map((relPath, i) => {
+              {generalPhotoImages.map((relPath, i) => {
                 const href = urlFor(relPath);
                 const fileName = relPath.split("/").pop() || `image-${i + 1}.jpg`;
                 return (

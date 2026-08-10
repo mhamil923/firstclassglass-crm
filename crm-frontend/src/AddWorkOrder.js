@@ -656,6 +656,8 @@ export default function AddWorkOrder() {
 
     // Upload photos ONE AT A TIME to the existing photo endpoint, compressed first.
     // Each request stays small; a single failure doesn't abort the batch or the WO.
+    // photoPhase=before marks these as creation-time photos so ViewWorkOrder can
+    // show them in their own Before Photos section.
     const failedPhotos = [];
     for (let i = 0; i < photos.length; i++) {
       setSubmitLabel(`Uploading photo ${i + 1} of ${photos.length}…`);
@@ -663,6 +665,7 @@ export default function AddWorkOrder() {
         const compressed = await compressImage(photos[i]);
         const pf = new FormData();
         pf.append("photoFile", compressed);
+        pf.append("photoPhase", "before");
         await api.put(`/work-orders/${newId}/edit`, pf, {
           headers: { "Content-Type": "multipart/form-data" },
           timeout: 120000,
