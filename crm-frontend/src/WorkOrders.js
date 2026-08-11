@@ -24,8 +24,27 @@ const STATUS_LIST = [
   "Completed",
 ];
 
+/**
+ * Tabs that get the DAYS WAITING column. These are the three "parked" statuses
+ * where a work order sits until someone acts, so age is the signal that matters.
+ * The tab is sorted longest-waiting first.
+ */
+const AGING_TABS = ["Waiting on Parts", "Needs to be Scheduled", "Waiting for Approval"];
+
 // ---------- helpers ----------
 const norm = (v) => (v ?? "").toString().trim();
+
+/**
+ * Whole days since the WO entered its current status.
+ * Returns null when statusChangedAt is NULL — no history exists for that WO and
+ * the column shows "—" rather than a number derived from a guess.
+ */
+const daysInStatus = (o) => {
+  if (!o?.statusChangedAt) return null;
+  const t = moment.utc(o.statusChangedAt);
+  if (!t.isValid()) return null;
+  return Math.max(0, moment().diff(t, "days"));
+};
 const statusKey = (s) =>
   norm(s).toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
 const normStatus = statusKey;
@@ -330,6 +349,19 @@ export default function WorkOrders() {
       rows = workOrders.filter((o) => normStatus(o.status) === f);
     }
 
+    // Staleness tabs lead with the longest-waiting work order. Unknown ages
+    // (statusChangedAt NULL) sort to the bottom — they're missing data, not fresh.
+    if (AGING_TABS.includes(selectedFilter)) {
+      rows = [...rows].sort((a, b) => {
+        const da = daysInStatus(a);
+        const db_ = daysInStatus(b);
+        if (da == null && db_ == null) return b.id - a.id;
+        if (da == null) return 1;
+        if (db_ == null) return -1;
+        return db_ - da || b.id - a.id;
+      });
+    }
+
     setFilteredOrders(rows);
   }, [workOrders, selectedFilter]);
 
@@ -358,6 +390,50 @@ export default function WorkOrders() {
   }, [workOrders]);
 
   const setFilter = (value) => setSelectedFilter(value);
+
+  // Days Waiting column: the three parked-status tabs. Parts indicator: Waiting
+  // on Parts only — it's the only tab where a PO's pickup state is the next action.
+  const showAging = AGING_TABS.includes(selectedFilter);
+  const showParts = selectedFilter === "Waiting on Parts";
+
+  /**
+   * Compact one-line parts state from work_order_pos, e.g.
+   *   "PO 585 · Chicago Tempered · not picked up"
+   *   "PO 585 · Chicago Tempered · PICKED UP ✓ — parts are in"
+   * Returns null when the WO has no POs, so those rows stay unchanged.
+   *
+   * A picked-up PO on a WO still sitting in Waiting on Parts is the actionable
+   * anomaly — the parts arrived and nobody moved the job — so it gets the red
+   * attention treatment rather than the orange "still on order" state.
+   */
+  const partsIndicator = (order) => {
+    const count = Number(order.poCount || 0);
+    if (!count) return null;
+
+    const pickedUp = Number(order.poPickedUpCount || 0);
+    const label = order.firstPoNumber ? `PO ${order.firstPoNumber}` : "PO (no #)";
+    const supplier = norm(order.firstPoSupplier);
+    const more = count > 1 ? ` +${count - 1}` : "";
+    const head = `${label}${more}${supplier ? ` · ${supplier}` : ""}`;
+
+    if (pickedUp > 0) {
+      const which = count > 1 ? `${pickedUp} of ${count} POs picked up` : "PO picked up";
+      return {
+        text: `${head} · PARTS IN ✓`,
+        color: "var(--accent-red)",
+        title: `${which}, but the work order is still Waiting on Parts — ready to schedule.`,
+      };
+    }
+
+    return {
+      text: `${head} · not picked up`,
+      color: "var(--accent-orange)",
+      title:
+        count > 1
+          ? `${count} purchase orders, none picked up yet.`
+          : "Purchase order not picked up yet.",
+    };
+  };
 
   /* ------------------------------------------------------------------------ */
   /* FOLLOW-UP: Log Call modal                                                */
@@ -423,6 +499,15 @@ export default function WorkOrders() {
     if (d > 14) return "#dc2626";
     if (d >= 7) return "#f59e0b";
     return "#22c55e";
+  };
+
+  // Same green/orange/red thresholds as the Follow-Up badge, but using the design
+  // system's accent tokens so the table tracks light/dark themes.
+  const agingColorToken = (d) => {
+    if (d == null) return "var(--text-secondary)";
+    if (d > 14) return "var(--accent-red)";
+    if (d >= 7) return "var(--accent-orange)";
+    return "var(--accent-green)";
   };
 
   /* ------------------------------------------------------------------------ */
@@ -765,7 +850,9 @@ export default function WorkOrders() {
             <thead>
               <tr>
                 <th style={{ width: 84 }}>Created</th>
-                <th style={{ width: 118 }}>WO / PO</th>
+                {showAging && <th style={{ width: 84 }}>Days Waiting</th>}
+                {/* Widened on the parts tab to fit the PO/supplier indicator line */}
+                <th style={{ width: showParts ? 210 : 118 }}>WO / PO</th>
                 <th style={{ width: 150 }}>Customer</th>
                 <th style={{ width: 168 }}>Site Location</th>
                 <th style={{ width: 188 }}>Site Address</th>
@@ -801,6 +888,9 @@ export default function WorkOrders() {
 
                 const cleanedPO = order.allPoNumbersFormatted || displayPO(order.workOrderNumber, order.poNumber);
 
+                const days = showAging ? daysInStatus(order) : null;
+                const parts = showParts ? partsIndicator(order) : null;
+
                 return (
                   <tr
                     key={order.id}
@@ -818,6 +908,32 @@ export default function WorkOrders() {
                       {fmtCreatedCompact(order.createdAt)}
                     </td>
 
+                    {showAging && (
+                      <td
+                        className="wo-days"
+                        title={
+                          days == null
+                            ? "No status-change history for this work order"
+                            : `In "${toCanonicalStatus(order.status)}" since ${moment
+                                .utc(order.statusChangedAt)
+                                .local()
+                                .format("MMM D, YYYY h:mm A")}`
+                        }
+                      >
+                        <span
+                          className="wo-days-value"
+                          style={{ color: agingColorToken(days) }}
+                        >
+                          {days == null ? "—" : days}
+                        </span>
+                        {days != null && (
+                          <span className="wo-days-unit">
+                            {days === 1 ? "day" : "days"}
+                          </span>
+                        )}
+                      </td>
+                    )}
+
                     <td>
                       <div className="wo-idcell">
                         <div className="wo-idline">
@@ -828,6 +944,15 @@ export default function WorkOrders() {
                           <div className="wo-idline subtle">
                             <span className="badge badge-subtle">PO</span>
                             <span className="mono">{cleanedPO}</span>
+                          </div>
+                        ) : null}
+                        {parts ? (
+                          <div
+                            className="wo-parts"
+                            style={{ color: parts.color }}
+                            title={parts.title}
+                          >
+                            {parts.text}
                           </div>
                         ) : null}
                       </div>
@@ -956,7 +1081,7 @@ export default function WorkOrders() {
 
               {filteredOrders.length === 0 && (
                 <tr>
-                  <td colSpan={userRole !== "tech" ? 8 : 7}>
+                  <td colSpan={(userRole !== "tech" ? 8 : 7) + (showAging ? 1 : 0)}>
                     <div className="empty-state">No work orders for this filter.</div>
                   </td>
                 </tr>

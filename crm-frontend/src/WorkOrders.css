@@ -330,6 +330,39 @@
   white-space: nowrap;
 }
 
+/* Days-in-status cell (staleness tabs only). The number carries the green/orange/
+   red accent inline; the unit stays muted so a wall of rows reads as numbers. */
+.wo-days {
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.wo-days-value {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.wo-days-unit {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+/* Parts / PO pickup indicator under the WO-PO cell. Clipped to a SINGLE line so
+   adding it can't grow row height; the full text lives in the title tooltip.
+   Color is set inline (orange = on order, red = picked up but job still waiting). */
+.wo-parts {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 /* Latest note */
 .latest-note {
   margin-top: 8px;

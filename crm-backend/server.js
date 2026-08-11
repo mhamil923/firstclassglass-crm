@@ -424,6 +424,23 @@ async function maybeLogApprovalNote(woId, priorStatus, newStatus, who) {
   }
 }
 
+// Stamp work_orders.statusChangedAt when a WO actually ENTERS a new status.
+// Same transition-only guard as maybeLogApprovalNote — a re-save that keeps the
+// status identical must not reset the clock, or nothing would ever look stale.
+// A create (priorStatus null) counts as entering its initial status.
+// Never throws: an aging stamp must not fail the status update itself.
+async function stampStatusChangedAt(woId, priorStatus, newStatus) {
+  try {
+    const prior = priorStatus == null ? null : canonStatus(priorStatus);
+    const next  = canonStatus(newStatus);
+    if (!next) return;
+    if (prior === next) return;
+    await db.execute('UPDATE work_orders SET statusChangedAt = NOW() WHERE id = ?', [Number(woId)]);
+  } catch (e) {
+    console.warn('[stampStatusChangedAt] failed (non-fatal):', e.message);
+  }
+}
+
 // ===============================
 // END Part 1/6
 // Next: Part 2/6
@@ -470,6 +487,9 @@ async function ensureCols() {
     { name: 'assignedTo',        type: 'INT NULL' },
     { name: 'customerId',        type: 'INT NULL' },
     { name: 'updatedAt',         type: 'DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP' },
+    // When the WO last ENTERED its current status. Distinct from updatedAt, which
+    // moves on any edit (a photo upload, a note) and so can't measure staleness.
+    { name: 'statusChangedAt',   type: 'DATETIME NULL' },
   ];
 
   try {
@@ -547,7 +567,68 @@ async function ensureCols() {
   } catch {}
 }
 
-ensureCols().catch(() => {});
+// One-time, idempotent backfill of statusChangedAt for work orders that predate
+// the column. Only two of the eleven statuses can be dated honestly:
+//
+//   Approved             — the auto-note "Approved M/D/YYYY" is written on the
+//                          transition INTO Approved, so its createdAt IS the entry time.
+//   Waiting for Approval — estimateSentAt is stamped by stampEstimateSentIfWaiting
+//                          only on entering that status, and only while it is NULL.
+//
+// Both are guarded on the WO's CURRENT status: an old Approved note on a WO that
+// has since moved to Waiting on Parts dates the *previous* status, not this one.
+// No other transition leaves a trace (no note mentions Waiting on Parts at all),
+// so every other row stays NULL and the UI shows "—" rather than inventing a date.
+// Touches only rows where statusChangedAt IS NULL, so redeploys are no-ops.
+async function backfillStatusChangedAt() {
+  try {
+    if (!(await columnExists('work_orders', 'statusChangedAt'))) return;
+
+    const [[before]] = await db.query(
+      'SELECT COUNT(*) AS total, SUM(statusChangedAt IS NULL) AS nulls FROM work_orders'
+    );
+    if (Number(before.nulls) === 0) {
+      console.log('[statusChangedAt backfill] nothing to do (no NULL rows)');
+      return;
+    }
+
+    const [approved] = await db.query(`
+      UPDATE work_orders w
+        JOIN (
+          SELECT workOrderId, MAX(createdAt) AS enteredAt
+            FROM work_order_notes
+           WHERE noteText REGEXP '^Approved [0-9]+/[0-9]+/[0-9]+'
+           GROUP BY workOrderId
+        ) n ON n.workOrderId = w.id
+         SET w.statusChangedAt = n.enteredAt
+       WHERE w.statusChangedAt IS NULL
+         AND w.status = 'Approved'
+    `);
+
+    const [waiting] = await db.query(`
+      UPDATE work_orders
+         SET statusChangedAt = estimateSentAt
+       WHERE statusChangedAt IS NULL
+         AND status = 'Waiting for Approval'
+         AND estimateSentAt IS NOT NULL
+    `);
+
+    const [[after]] = await db.query(
+      'SELECT COUNT(*) AS total, SUM(statusChangedAt IS NOT NULL) AS derived, SUM(statusChangedAt IS NULL) AS still_null FROM work_orders'
+    );
+    console.log(
+      `[statusChangedAt backfill] derived from Approved notes: ${approved.affectedRows}, ` +
+      `from estimateSentAt: ${waiting.affectedRows} | ` +
+      `total WOs: ${after.total}, dated: ${after.derived}, NULL (shown as "—"): ${after.still_null}`
+    );
+  } catch (e) {
+    console.warn('[statusChangedAt backfill] failed (non-fatal):', e.message);
+  }
+}
+
+ensureCols()
+  .then(backfillStatusChangedAt)
+  .catch(() => {});
 
 // ─── WORK_ORDER_POS TABLE (multi-PO support) ────────────────────────────────
 async function ensurePoTable() {
@@ -1255,6 +1336,10 @@ function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', l
   return `
     SELECT w.*, ${assignedSel}, ${createdSel},
            poAgg.allPoNumbers,
+           COALESCE(poParts.poCount, 0)        AS poCount,
+           COALESCE(poParts.poPickedUpCount, 0) AS poPickedUpCount,
+           poParts.firstPoCreatedAt,
+           poFirst.firstPoNumber, poFirst.firstPoSupplier,
            qbAgg.qbInvoiceNumbers, qbAgg.qbAllDocNumbers,
            qbAgg.qbInvoiceAmount, qbAgg.qbInvoicePaid, qbAgg.qbInvoiceStatus
       FROM work_orders w
@@ -1265,6 +1350,27 @@ function workOrdersSelectSQL({ whereSql = '', orderSql = 'ORDER BY w.id DESC', l
         WHERE poNumber IS NOT NULL AND poNumber <> ''
         GROUP BY workOrderId
       ) poAgg ON poAgg.workOrderId = w.id
+      -- Parts state for the Waiting on Parts staleness view. Counts every PO
+      -- (including un-numbered ones, unlike poAgg above, which is display-only).
+      LEFT JOIN (
+        SELECT workOrderId,
+               COUNT(*)                        AS poCount,
+               SUM(COALESCE(poPickedUp, 0))    AS poPickedUpCount,
+               MIN(createdAt)                  AS firstPoCreatedAt
+        FROM work_order_pos
+        GROUP BY workOrderId
+      ) poParts ON poParts.workOrderId = w.id
+      -- The WO's first PO, for the compact "PO 585 · Chicago Tempered" label.
+      -- Joined by MIN(id) rather than string-splitting a GROUP_CONCAT, so a
+      -- supplier name containing a comma can't be truncated.
+      LEFT JOIN (
+        SELECT p.workOrderId,
+               p.poNumber   AS firstPoNumber,
+               p.poSupplier AS firstPoSupplier
+        FROM work_order_pos p
+        JOIN (SELECT workOrderId, MIN(id) AS mid FROM work_order_pos GROUP BY workOrderId) mp
+          ON mp.workOrderId = p.workOrderId AND mp.mid = p.id
+      ) poFirst ON poFirst.workOrderId = w.id
       LEFT JOIN (
         SELECT workOrderId,
           GROUP_CONCAT(invoiceNumber ORDER BY id SEPARATOR ', ') AS qbInvoiceNumbers,
@@ -3994,6 +4100,7 @@ app.put('/estimates/:id/status', authenticate, requireNumericParam('id'), async 
           await db.query("UPDATE work_orders SET status='Approved' WHERE id=?", [est.workOrderId]);
           console.log('[Estimate] Accepted - Updated WO #' + est.workOrderId + ' status to Approved');
           await maybeLogApprovalNote(est.workOrderId, prevWo?.status, 'Approved', req.user?.username || 'System');
+          await stampStatusChangedAt(est.workOrderId, prevWo?.status, 'Approved');
         } catch (woErr) {
           console.warn('[PUT /estimates] Failed to sync WO status:', woErr.message);
         }
@@ -7709,6 +7816,7 @@ app.post('/work-orders', authenticate, withMulter(upload.any()), async (req, res
 
     // If a WO is created already in Approved status, record the approval note (no prior status).
     await maybeLogApprovalNote(r.insertId, null, cStatus, req.user?.username || 'System');
+    await stampStatusChangedAt(r.insertId, null, cStatus);
 
     // If more than 1 image uploaded, append remaining to photoPath
     if (images.length > 1) {
@@ -8108,6 +8216,7 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     await db.execute(sql, params);
     await stampEstimateSentIfWaiting(wid, cStatus);
     await maybeLogApprovalNote(wid, existing.status, cStatus, req.user?.username || 'System');
+    await stampStatusChangedAt(wid, existing.status, cStatus);
 
     // Tag this batch's photos only if the caller passed photoPhase. The web
     // AddWorkOrder uploads its creation photos through here one at a time with
@@ -8201,6 +8310,7 @@ app.put('/work-orders/:id/status', authenticate, requireNumericParam('id'), asyn
     await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [c, Number(req.params.id)]);
     await stampEstimateSentIfWaiting(Number(req.params.id), c);
     await maybeLogApprovalNote(Number(req.params.id), prevRow?.status, c, req.user?.username || 'System');
+    await stampStatusChangedAt(Number(req.params.id), prevRow?.status, c);
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [Number(req.params.id)]);
     if (!updated) return res.status(404).json({ error: 'Not found.' });
 
@@ -11679,6 +11789,7 @@ app.post('/public/estimate/:token/respond', async (req, res) => {
           const [woResult] = await db.query("UPDATE work_orders SET status='Approved' WHERE id=?", [woId]);
           console.log('[DEBUG] WO update affectedRows:', woResult.affectedRows);
           await maybeLogApprovalNote(woId, prevWo?.status, 'Approved', 'System');
+          await stampStatusChangedAt(woId, prevWo?.status, 'Approved');
         } else {
           console.log('[DEBUG] No workOrderId on estimate — work order NOT updated');
         }
@@ -11899,6 +12010,7 @@ app.post(['/public/estimate-response/:token', '/api/public/estimate-response/:to
     const [[prevWo]] = await db.execute('SELECT status FROM work_orders WHERE id = ?', [wid]);
     await db.execute('UPDATE work_orders SET status = ? WHERE id = ?', [newWoStatus, wid]);
     await maybeLogApprovalNote(wid, prevWo?.status, newWoStatus, 'System');
+    await stampStatusChangedAt(wid, prevWo?.status, newWoStatus);
 
     // Mark this estimate PDF Approved/Declined (same column the per-card dropdown uses)
     if (tok.estimatePdfId) {
