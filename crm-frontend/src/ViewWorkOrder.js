@@ -357,10 +357,30 @@ function Lightbox({ open, onClose, kind, src, title }) {
 /* ---------- Tile component (image or pdf) ---------- */
 function FileTile({ kind, href, fileName, onDelete, onExpand, extraAction }) {
   const isPdf = kind === "pdf";
+  // A handful of legacy work orders reference image files that are no longer in
+  // storage (the key is well-formed, the object just isn't there — /files 404s).
+  // Without this the browser renders its broken-image glyph plus the raw alt
+  // text, which looks like the page itself is broken. Show a proper placeholder
+  // that keeps the tile's dimensions so the grid doesn't reflow.
+  const [imgFailed, setImgFailed] = useState(false);
   return (
     <div className="tile">
       <div className="tile-media">
-        {isPdf ? <iframe title={fileName} src={href} className="tile-iframe" /> : <img src={href} alt={fileName} className="tile-img" />}
+        {isPdf ? (
+          <iframe title={fileName} src={href} className="tile-iframe" />
+        ) : imgFailed ? (
+          <div className="tile-missing" role="img" aria-label={`${fileName} — file unavailable`}>
+            <span className="tile-missing-icon" aria-hidden="true">🖼</span>
+            <span className="tile-missing-text">File unavailable</span>
+          </div>
+        ) : (
+          <img
+            src={href}
+            alt={fileName}
+            className="tile-img"
+            onError={() => setImgFailed(true)}
+          />
+        )}
       </div>
 
       <div className="tile-name">

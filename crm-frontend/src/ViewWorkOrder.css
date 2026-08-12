@@ -214,6 +214,19 @@
   box-shadow: var(--shadow-sm);
 }
 
+/* Card padding MUST be declared here. It used to come ONLY from WorkOrders.css,
+   which is a separate lazy webpack chunk — so a work order opened without ever
+   visiting the Work Orders list (straight from History, or a direct URL) got
+   cards with zero padding, and the `overflow: hidden` above then clipped the
+   flush content. That is the "text cut off / content outside the card" bug on
+   work orders opened from History. Same 20px value WorkOrders.css uses, so the
+   two agree no matter which chunk loads first.
+   Scoped to .section-card only: .wo-card above is also used by AddWorkOrder and
+   RouteBuilder, and padding it from here would just move the bleed elsewhere. */
+.section-card {
+  padding: 20px;
+}
+
 .wo-card-header,
 .section-header {
   display: flex;
@@ -546,6 +559,31 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* Placeholder for an attachment whose file is missing from storage (the /files
+   lookup 404s). Fills the same 160px .tile-media box so the grid never reflows. */
+.tile-missing {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.tile-missing-icon {
+  font-size: 26px;
+  opacity: 0.45;
+  line-height: 1;
+}
+
+.tile-missing-text {
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .tile-iframe {
@@ -1130,6 +1168,11 @@
     padding: 16px;
   }
 
+  /* Mirrors WorkOrders.css's responsive card padding so the two never disagree */
+  .section-card {
+    padding: 16px;
+  }
+
   .view-wo-title {
     font-size: 24px;
   }
@@ -1171,4 +1214,49 @@
   .po-pdf-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ===========================================================================
+   SELF-SUFFICIENCY GUARD
+   ---------------------------------------------------------------------------
+   These class names are shared with other route stylesheets (WorkOrders.css,
+   HistoryReport.css, Calendar.css, AddWorkOrder.css). Every route is a lazy
+   webpack chunk, so whether those files are present — and in what order they
+   were injected — depends purely on which pages the user happened to visit
+   first in that tab. That made this page render differently depending on how
+   it was reached: the exact class of bug that produced the unpadded, clipped
+   cards on work orders opened from History.
+
+   Scoping to .view-container (used only by this page) raises specificity above
+   the bare class selectors in those files, so the values below always win no
+   matter what else is loaded. Values are pinned to how the page looks when it
+   renders correctly today.
+   =========================================================================== */
+
+.view-container .empty-text {
+  /* HistoryReport.css and Calendar.css otherwise center/italicize these */
+  text-align: left;
+  font-style: normal;
+  margin: 8px 0 0;
+}
+
+.view-container .loading-text {
+  text-align: left;
+  font-style: normal;
+}
+
+.view-container .empty-state {
+  font-size: 15px;
+}
+
+.view-container .status-badge {
+  white-space: nowrap;
+}
+
+.view-container .control {
+  font-weight: 500;
+}
+
+.view-container .pill.subtle {
+  background-color: var(--bg-hover);
 }
