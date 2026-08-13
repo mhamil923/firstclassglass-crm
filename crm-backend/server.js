@@ -6514,9 +6514,15 @@ app.get('/reports/work-orders', authenticate, async (req, res) => {
   try {
     const { from, to } = req.query;
     const params = [];
+    // The physical column is `created_at` here; other installs have `createdAt`.
+    // COALESCE can NOT paper over that — MySQL resolves identifiers at parse
+    // time, so naming a column that doesn't exist is ER_BAD_FIELD_ERROR before
+    // any row is read. Resolve the real name once, the same way the dashboard
+    // and workOrdersSelectSQL do.
+    const createdCol = SCHEMA.createdAtCol || 'created_at';
     let where = '1=1';
-    if (from) { where += ' AND COALESCE(wo.createdAt, wo.created_at) >= ?'; params.push(from); }
-    if (to) { where += ' AND COALESCE(wo.createdAt, wo.created_at) <= ?'; params.push(to); }
+    if (from) { where += ` AND wo.\`${createdCol}\` >= ?`; params.push(from); }
+    if (to) { where += ` AND wo.\`${createdCol}\` <= ?`; params.push(to); }
 
     const [rows] = await db.query(
       `SELECT wo.status, COUNT(*) AS cnt FROM work_orders wo WHERE ${where} GROUP BY wo.status`, params
@@ -6529,7 +6535,9 @@ app.get('/reports/work-orders', authenticate, async (req, res) => {
     // Average completion days for completed work orders
     const completedParams = [...params];
     const [[avgRow]] = await db.query(
-      `SELECT AVG(DATEDIFF(COALESCE(wo.updatedAt, wo.createdAt, wo.created_at), COALESCE(wo.createdAt, wo.created_at))) AS avgDays
+      // COALESCE(updatedAt, created) IS a real null fallback — updatedAt is
+      // nullable — so it stays. Only the bogus column name is removed.
+      `SELECT AVG(DATEDIFF(COALESCE(wo.updatedAt, wo.\`${createdCol}\`), wo.\`${createdCol}\`)) AS avgDays
        FROM work_orders wo WHERE wo.status = 'Completed' AND ${where}`, completedParams
     );
     const avgCompletionDays = Math.round(Number(avgRow?.avgDays) || 0);
