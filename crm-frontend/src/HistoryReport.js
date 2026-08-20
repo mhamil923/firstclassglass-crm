@@ -1,6 +1,6 @@
 // File: src/HistoryReport.js
-import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import api from "./api";
 import "./HistoryReport.css"; // keep existing styles
 
@@ -68,10 +68,15 @@ function addToHistory(query) {
 export default function HistoryReport() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => searchParams.get("q") || "");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Remembers the last query actually executed, so syncing the URL after a
+  // manual search doesn't make the ?q= effect below run the same search twice.
+  const lastRunRef = useRef(null);
 
   // history state
   const [history, setHistory] = useState([]);
@@ -124,14 +129,39 @@ export default function HistoryReport() {
     }
   };
 
+  // Single entry point for running a search, so lastRunRef always reflects
+  // what was actually executed.
+  const runSearch = async (text) => {
+    lastRunRef.current = norm(text).toLowerCase();
+    await performSearch(text);
+  };
+
+  // Deep-link support: /history?q=smith runs the search on mount, and any later
+  // change to ?q= (e.g. the navbar search firing while already on this page)
+  // re-runs it. A blank/absent q is deliberately NOT auto-run — visiting
+  // /history with no query keeps showing the empty state, exactly as before.
+  useEffect(() => {
+    const q = searchParams.get("q") || "";
+    if (!norm(q)) return;
+    if (lastRunRef.current === norm(q).toLowerCase()) return; // already executed
+    setQuery(q);
+    runSearch(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const handleSearch = async (e) => {
     if (e) e.preventDefault();
-    await performSearch(query);
+    await runSearch(query);
+    // Mirror the query into the URL so the result set is shareable/refreshable
+    // and the navbar input stays in step. replace: no extra history entry per keystroke-search.
+    const next = norm(query) ? { q: query } : {};
+    setSearchParams(next, { replace: true });
   };
 
   const runFromHistory = async (h) => {
     setQuery(h.query);
-    await performSearch(h.query);
+    await runSearch(h.query);
+    setSearchParams(norm(h.query) ? { q: h.query } : {}, { replace: true });
   };
 
   const removeHistoryItem = (key) => {

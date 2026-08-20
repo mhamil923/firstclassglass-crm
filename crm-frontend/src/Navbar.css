@@ -641,3 +641,155 @@
   font-weight: 500;
   color: var(--text-primary);
 }
+
+/* ===== GLOBAL SEARCH (navbar) =====
+   Sits between the nav links and the right-side controls. margin-left:auto so it
+   absorbs the free space and parks itself next to the controls; .navbar-right
+   then has nothing left to push against and stays flush right. */
+.navbar-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  flex: 0 1 260px;
+  min-width: 160px;
+}
+
+/* Default (>1200px and the ≤1024px stacked layout): the icon is a decorative
+   glyph sitting inside the always-visible input, not an interactive control. */
+.navbar-search-icon-btn {
+  position: absolute;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.navbar-search-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 12px 0 31px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: var(--transition-fast);
+  box-sizing: border-box;
+}
+
+.navbar-search-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
+.navbar-search-input:hover {
+  border-color: var(--border-color-strong);
+}
+
+.navbar-search-input:focus {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+
+/* Drop the WebKit "x" — Escape already clears, and the glyph collides with the
+   tight padding at narrow widths. */
+.navbar-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* ===== CRAMPED BAND: 1025-1200px =====
+   Measured: with the links (683px), brand (175px) and right-hand controls
+   (176px), the bar fits a 1100px viewport with ZERO px to spare. There is no
+   room for even a 160px input, so here the field collapses to a 30px icon and
+   expands as an ABSOLUTE overlay (expanding costs no layout width). Nav links
+   also give back a little horizontal padding to buy the icon its space. */
+@media (min-width: 1025px) and (max-width: 1200px) {
+  /* Reclaim the icon's width from the bar's own chrome. NOT from .nav-link —
+     Bootstrap's `.navbar-expand-lg .navbar-nav .nav-link` (specificity 0,3,0)
+     already pins those to 8px and out-ranks any bare `.nav-link` rule here. */
+  .navbar,
+  .navbar.navbar-expand-lg {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .navbar-right {
+    gap: 8px;
+  }
+
+  .navbar-search {
+    flex: 0 0 auto;
+    min-width: 0;
+    width: 30px;
+    margin-left: auto;
+  }
+
+  .navbar-search-icon-btn {
+    position: static;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card-solid);
+    color: var(--text-secondary);
+    cursor: pointer;
+    pointer-events: auto;
+    opacity: 1;
+    transition: var(--transition-fast);
+  }
+
+  .navbar-search-icon-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--border-color-strong);
+  }
+
+  /* Collapsed: field hidden. Expanded: overlays leftward from the icon. */
+  .navbar-search .navbar-search-input {
+    display: none;
+  }
+
+  .navbar-search.expanded .navbar-search-input {
+    display: block;
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 260px;
+    z-index: 20;
+    padding-left: 12px;
+    box-shadow: var(--shadow-md, 0 4px 16px rgba(0, 0, 0, 0.18));
+  }
+
+  .navbar-search.expanded .navbar-search-icon-btn {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+/* Mobile: the collapse stacks, so the search gets its own full-width row */
+@media (max-width: 1024px) {
+  .navbar-search {
+    margin-left: 0;
+    width: 100%;
+    flex-basis: auto;
+    padding-top: 16px;
+  }
+
+  .navbar-search-input {
+    height: 40px;
+    font-size: 14px;
+  }
+}

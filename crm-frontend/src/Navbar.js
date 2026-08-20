@@ -33,8 +33,10 @@ const NAV_ITEMS = [
     id: "records",
     label: "Records",
     children: [
+      // "History" moved out of this menu — it's reachable from the navbar search
+      // box (Enter searches and lands on /history?q=…). The /history route and
+      // direct links still work unchanged.
       { label: "Customers", to: "/customers" },
-      { label: "History", to: "/history" },
       { label: "Reports", to: "/reports" },
     ],
   },
@@ -650,6 +652,52 @@ export default function Navbar() {
     setOpenDropdown((prev) => (prev === id ? null : id));
   };
 
+  /* ===== Global History search ===== */
+  const [navSearch, setNavSearch] = useState("");
+  // Between 1025-1200px the navbar has literally zero spare horizontal space,
+  // so the input collapses to an icon there and expands as an overlay on click
+  // (absolutely positioned, so expanding never reflows the bar). Above 1200px
+  // and in the ≤1024px stacked layout the input is always visible and this
+  // flag is inert.
+  const [searchExpanded, setSearchExpanded] = useState(false);
+  const searchInputRef = useRef(null);
+
+  const openSearch = () => {
+    setSearchExpanded(true);
+    // focus after the CSS transition starts so the caret lands correctly
+    setTimeout(() => searchInputRef.current?.focus(), 0);
+  };
+
+  // Keep the box showing whatever History is currently filtered by, so the two
+  // never disagree. Only tracks the URL — clearing with Escape sticks until the
+  // next navigation.
+  useEffect(() => {
+    if (currentPath === "/history") {
+      const q = new URLSearchParams(location.search).get("q") || "";
+      setNavSearch(q);
+    }
+  }, [currentPath, location.search]);
+
+  const submitNavSearch = (e) => {
+    e.preventDefault();
+    const q = navSearch.trim();
+    // Already on History? Replace, so repeated searches don't pile up history
+    // entries the Back button has to chew through.
+    const replace = currentPath === "/history";
+    navigate(q ? `/history?q=${encodeURIComponent(q)}` : "/history", { replace });
+    setSearchExpanded(false);
+    closeNavbar();
+  };
+
+  const onNavSearchKeyDown = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setNavSearch("");
+      setSearchExpanded(false);
+      e.currentTarget.blur();
+    }
+  };
+
   const orderedItems = useMemo(
     () => navOrder.map((id) => NAV_ITEMS_MAP.get(id)).filter(Boolean),
     [navOrder]
@@ -746,6 +794,44 @@ export default function Navbar() {
             )
           )}
         </ul>
+
+        {/* Global work-order search — Enter jumps to History with the query.
+            Deliberately Enter-to-search only (no live results): every keystroke
+            would refetch the whole work-order list. */}
+        <form
+          className={`navbar-search${searchExpanded ? " expanded" : ""}`}
+          onSubmit={submitNavSearch}
+          role="search"
+        >
+          {/* Icon is decorative when the input is inline; at the cramped
+              breakpoint CSS turns it into the button that expands the field. */}
+          <button
+            type="button"
+            className="navbar-search-icon-btn"
+            onClick={openSearch}
+            aria-label="Search work orders"
+            tabIndex={-1}
+          >
+            <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+              <path
+                fillRule="evenodd"
+                d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a1 1 0 01-1.414 1.414l-3.329-3.328A7 7 0 012 9z"
+                clipRule="evenodd"
+              />
+            </svg>
+          </button>
+          <input
+            ref={searchInputRef}
+            type="search"
+            className="navbar-search-input"
+            placeholder="Search work orders…"
+            aria-label="Search work orders"
+            value={navSearch}
+            onChange={(e) => setNavSearch(e.target.value)}
+            onKeyDown={onNavSearchKeyDown}
+            onBlur={() => { if (!navSearch.trim()) setSearchExpanded(false); }}
+          />
+        </form>
 
         <div className="navbar-right">
           <button
