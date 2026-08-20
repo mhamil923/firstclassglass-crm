@@ -1161,10 +1161,20 @@ export default function WorkOrderCalendar() {
           assignedToName: full?.assignedToName ?? ev.meta?.assignedToName ?? ev.assignedToName ?? "",
           techIds: Array.isArray(full?.techIds) ? full.techIds.map(Number) : [],
           techNames: Array.isArray(full?.techNames) ? full.techNames : [],
+          // Per-day service position. Calendar events don't carry it, so take it
+          // from the full work-order record.
+          serviceOrder:
+            full?.serviceOrder ?? ev.meta?.serviceOrder ?? ev.serviceOrder ?? null,
         };
       });
 
+      // Arranged service order first (1 = first job of the day); anything not yet
+      // sequenced falls to the bottom by scheduled time. Same rule as the Work
+      // Orders "Today" tab, so the two views never disagree.
       normalized.sort((a, b) => {
+        const oa = a.serviceOrder == null ? Infinity : Number(a.serviceOrder);
+        const ob = b.serviceOrder == null ? Infinity : Number(b.serviceOrder);
+        if (oa !== ob) return oa - ob;
         const sa = a.scheduledDate ? +a.scheduledDate : 0;
         const sb = b.scheduledDate ? +b.scheduledDate : 0;
         return sa - sb;
@@ -1180,6 +1190,69 @@ export default function WorkOrderCalendar() {
     } catch (e) {
       console.error("⚠️ Error loading day:", e);
       alert("Failed to load that day.");
+    }
+  }
+
+  /* ===== Day modal: drag cards to arrange the day's service order =====
+     Native HTML5 drag, same mechanism the calendar already uses for dragging
+     jobs onto dates, and the same one the Work Orders "Today" tab uses. The
+     ref (not state) keeps the drag from re-rendering the modal mid-gesture. */
+  const dmDragIdRef = useRef(null);
+  const [dmDragOverId, setDmDragOverId] = useState(null);
+  const [dmSavingOrder, setDmSavingOrder] = useState(false);
+
+  const dmDragStart = (e, id) => {
+    dmDragIdRef.current = id;
+    e.stopPropagation();
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData("text/plain", String(id)); } catch {}
+  };
+
+  const dmDragOver = (e, id) => {
+    if (dmDragIdRef.current == null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    if (dmDragOverId !== id) setDmDragOverId(id);
+  };
+
+  const dmDragEnd = () => {
+    dmDragIdRef.current = null;
+    setDmDragOverId(null);
+  };
+
+  async function dmDrop(e, targetId) {
+    e.preventDefault();
+    e.stopPropagation();
+    const srcId = dmDragIdRef.current;
+    dmDragIdRef.current = null;
+    setDmDragOverId(null);
+    if (srcId == null || srcId === targetId) return;
+
+    const from = dayOrders.findIndex((o) => o.id === srcId);
+    const to = dayOrders.findIndex((o) => o.id === targetId);
+    if (from < 0 || to < 0) return;
+
+    const next = [...dayOrders];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    // Optimistic: renumber locally so the badges update instantly
+    setDayOrders(next.map((o, i) => ({ ...o, serviceOrder: i + 1 })));
+
+    const date = moment(dayForModal || next[0]?.scheduledDate).format("YYYY-MM-DD");
+    setDmSavingOrder(true);
+    try {
+      await api.put("/work-orders/day-order", {
+        date,
+        orderedIds: next.map((o) => o.id),
+      });
+    } catch (err) {
+      console.error("⚠️ Failed to save the day order:", err);
+      alert(err?.response?.data?.error || "Couldn't save the new order.");
+      // Put the server's truth back
+      setDayOrders(dayOrders);
+    } finally {
+      setDmSavingOrder(false);
     }
   }
 
@@ -2012,6 +2085,11 @@ export default function WorkOrderCalendar() {
                 <h3 className="dm-title">{dayModalTitle}</h3>
                 <p className="dm-subtitle">
                   {dayOrders.length} job{dayOrders.length !== 1 ? "s" : ""} scheduled
+                  {dayOrders.length > 1 && (
+                    <span className="dm-seq-hint">
+                      {dmSavingOrder ? " · saving order…" : " · drag cards to set the service order"}
+                    </span>
+                  )}
                 </p>
               </div>
               <button
@@ -2071,12 +2149,27 @@ export default function WorkOrderCalendar() {
 
                   const isEditing = inlineEditId === o.id;
 
+                  const seq = o.serviceOrder == null ? null : o.serviceOrder;
+
                   return (
                     <div
                       key={o.id}
-                      className="dm-card"
+                      className={`dm-card${dmDragOverId === o.id ? " dm-card-dragover" : ""}`}
                       style={{ borderLeftColor: borderColor }}
+                      draggable={!isEditing}
+                      onDragStart={(e) => dmDragStart(e, o.id)}
+                      onDragOver={(e) => dmDragOver(e, o.id)}
+                      onDrop={(e) => dmDrop(e, o.id)}
+                      onDragEnd={dmDragEnd}
                     >
+                      <div
+                        className="dm-seq"
+                        title="Drag the card to change the service order"
+                      >
+                        <span className="dm-seq-grip" aria-hidden="true">⋮⋮</span>
+                        <span className="dm-seq-num">{seq == null ? "—" : seq}</span>
+                      </div>
+
                       {isEditing ? (
                         /* Inline time editor */
                         <div className="dm-inline-edit">

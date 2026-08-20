@@ -12,32 +12,22 @@ import "./Navbar.css";
 const NAV_ITEMS = [
   { id: "home", label: "Home", to: "/" },
   { id: "work-orders", label: "Work Orders", to: "/work-orders" },
-  { id: "collections", label: "Collections", to: "/collections" },
   { id: "purchase-orders", label: "Purchase Orders", to: "/purchase-orders" },
-  {
-    id: "planning",
-    label: "Planning",
-    children: [
-      { label: "Calendar", to: "/calendar" },
-      { label: "Route Builder", to: "/route-builder" },
-    ],
-  },
-  {
-    // PDF Templates + Line Item Templates removed; only Email Templates remains,
-    // so this collapses from a dropdown to a direct link (id kept for saved nav order).
-    id: "templates",
-    label: "Email Templates",
-    to: "/email-templates",
-  },
+  // Calendar promoted out of the old "Planning" dropdown into the slot Planning
+  // occupied; Route Builder (its only other child) moved into Records.
+  { id: "calendar", label: "Calendar", to: "/calendar" },
   {
     id: "records",
     label: "Records",
     children: [
-      // "History" moved out of this menu — it's reachable from the navbar search
-      // box (Enter searches and lands on /history?q=…). The /history route and
-      // direct links still work unchanged.
+      // "History" lives in the navbar search box (Enter → /history?q=…), not here.
+      // Collections, Email Templates and Route Builder demoted from top level.
+      // Every route below is unchanged — only where the link lives moved.
       { label: "Customers", to: "/customers" },
       { label: "Reports", to: "/reports" },
+      { label: "Collections", to: "/collections" },
+      { label: "Email Templates", to: "/email-templates" },
+      { label: "Route Builder", to: "/route-builder" },
     ],
   },
 ];

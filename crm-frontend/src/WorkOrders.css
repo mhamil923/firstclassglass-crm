@@ -576,3 +576,57 @@ select.control.select {
     justify-content: center;
   }
 }
+
+/* ===== TODAY: drag-to-arrange service order ===== */
+.wo-seq {
+  white-space: nowrap;
+  cursor: grab;
+  user-select: none;
+}
+
+.wo-row[draggable="true"] {
+  cursor: grab;
+}
+
+.wo-row[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.wo-seq-grip {
+  color: var(--text-secondary);
+  opacity: 0.45;
+  font-size: 13px;
+  letter-spacing: -1px;
+  margin-right: 6px;
+}
+
+.wo-row:hover .wo-seq-grip {
+  opacity: 0.9;
+}
+
+.wo-seq-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(0, 113, 227, 0.12);
+  color: var(--accent-blue);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Drop indicator: a solid rule on the row being hovered over */
+.wo-row-dragover td {
+  box-shadow: inset 0 2px 0 0 var(--accent-blue);
+}
+
+.wo-seq-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}

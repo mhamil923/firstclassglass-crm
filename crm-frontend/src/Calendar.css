@@ -1767,3 +1767,57 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ===== DAY MODAL: drag cards to arrange the day's service order ===== */
+.dm-card[draggable="true"] {
+  cursor: grab;
+  position: relative;
+}
+
+.dm-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.dm-seq {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  user-select: none;
+}
+
+.dm-seq-grip {
+  color: var(--text-secondary);
+  opacity: 0.45;
+  font-size: 13px;
+  letter-spacing: -1px;
+}
+
+.dm-card:hover .dm-seq-grip {
+  opacity: 0.9;
+}
+
+.dm-seq-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(0, 113, 227, 0.12);
+  color: var(--accent-blue);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Drop indicator */
+.dm-card-dragover {
+  box-shadow: inset 0 3px 0 0 var(--accent-blue);
+}
+
+.dm-seq-hint {
+  color: var(--text-secondary);
+  font-weight: 500;
+}

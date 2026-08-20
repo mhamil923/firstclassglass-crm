@@ -1,5 +1,5 @@
 // File: src/WorkOrders.js
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import api from "./api";
 import { Link, useNavigate } from "react-router-dom";
 import moment from "moment";
@@ -349,6 +349,21 @@ export default function WorkOrders() {
       rows = workOrders.filter((o) => normStatus(o.status) === f);
     }
 
+    // Today is the crew's run sheet, so it sorts by the arranged service order
+    // (1 = first job). Unsequenced jobs (serviceOrder NULL) fall to the bottom
+    // ordered by scheduled time, which is where a newly-added job belongs.
+    if (selectedFilter === "Today") {
+      rows = [...rows].sort((a, b) => {
+        const sa = a.serviceOrder == null ? Infinity : Number(a.serviceOrder);
+        const sb = b.serviceOrder == null ? Infinity : Number(b.serviceOrder);
+        if (sa !== sb) return sa - sb;
+        const ta = a.scheduledDate ? +moment(a.scheduledDate) : Infinity;
+        const tb = b.scheduledDate ? +moment(b.scheduledDate) : Infinity;
+        if (ta !== tb) return ta - tb;
+        return a.id - b.id;
+      });
+    }
+
     // Staleness tabs lead with the longest-waiting work order. Unknown ages
     // (statusChangedAt NULL) sort to the bottom — they're missing data, not fresh.
     if (AGING_TABS.includes(selectedFilter)) {
@@ -395,6 +410,72 @@ export default function WorkOrders() {
   // on Parts only — it's the only tab where a PO's pickup state is the next action.
   const showAging = AGING_TABS.includes(selectedFilter);
   const showParts = selectedFilter === "Waiting on Parts";
+  // Only Today is drag-arrangeable — it's the one tab that represents a single
+  // day's run. Every other tab spans many days, where a per-day sequence is
+  // meaningless.
+  const showSequence = selectedFilter === "Today";
+
+  /* ---------- Today: drag to arrange the day's service order ---------- */
+  // Native HTML5 drag-and-drop rather than a library: CalendarPage already
+  // reorders this way, react-dnd is only wired into the settings modal, and a
+  // table-row reorder needs nothing fancier.
+  const dragIdRef = useRef(null);
+  const [dragOverId, setDragOverId] = useState(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+
+  const onRowDragStart = (e, id) => {
+    dragIdRef.current = id;
+    e.dataTransfer.effectAllowed = "move";
+    // Firefox refuses to start a drag without payload
+    try { e.dataTransfer.setData("text/plain", String(id)); } catch {}
+  };
+
+  const onRowDragOver = (e, id) => {
+    if (dragIdRef.current == null) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverId !== id) setDragOverId(id);
+  };
+
+  const onRowDragEnd = () => {
+    dragIdRef.current = null;
+    setDragOverId(null);
+  };
+
+  const onRowDrop = async (e, targetId) => {
+    e.preventDefault();
+    const srcId = dragIdRef.current;
+    dragIdRef.current = null;
+    setDragOverId(null);
+    if (srcId == null || srcId === targetId) return;
+
+    const cur = filteredOrders;
+    const from = cur.findIndex((o) => o.id === srcId);
+    const to = cur.findIndex((o) => o.id === targetId);
+    if (from < 0 || to < 0) return;
+
+    const next = [...cur];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setFilteredOrders(next); // optimistic; the refetch below re-sorts from the server
+
+    const date = moment().format("YYYY-MM-DD");
+    setSavingOrder(true);
+    try {
+      await api.put(
+        "/work-orders/day-order",
+        { date, orderedIds: next.map((o) => o.id) },
+        { headers: authHeaders() }
+      );
+      await fetchWorkOrders();
+    } catch (err) {
+      console.error("⚠️ Failed to save the day order:", err);
+      alert(err?.response?.data?.error || "Couldn't save the new order — reloading.");
+      await fetchWorkOrders(); // discard the optimistic order
+    } finally {
+      setSavingOrder(false);
+    }
+  };
 
   /**
    * Compact one-line parts state from work_order_pos, e.g.
@@ -844,11 +925,20 @@ export default function WorkOrders() {
           </div>
         )}
 
+        {showSequence && (
+          <div className="wo-seq-hint">
+            {savingOrder
+              ? "Saving service order…"
+              : "Drag a row to set the order techs run today's jobs."}
+          </div>
+        )}
+
         {selectedFilter !== "Follow-Up" && (
         <div className="table-wrap">
           <table className="wo-table">
             <thead>
               <tr>
+                {showSequence && <th style={{ width: 62 }}>Order</th>}
                 <th style={{ width: 84 }}>Created</th>
                 {showAging && <th style={{ width: 84 }}>Days Waiting</th>}
                 {/* Widened on the parts tab to fit the PO/supplier indicator line */}
@@ -894,13 +984,29 @@ export default function WorkOrders() {
                 return (
                   <tr
                     key={order.id}
-                    className="wo-row"
+                    className={`wo-row${
+                      showSequence && dragOverId === order.id ? " wo-row-dragover" : ""
+                    }`}
+                    draggable={showSequence}
+                    onDragStart={showSequence ? (e) => onRowDragStart(e, order.id) : undefined}
+                    onDragOver={showSequence ? (e) => onRowDragOver(e, order.id) : undefined}
+                    onDrop={showSequence ? (e) => onRowDrop(e, order.id) : undefined}
+                    onDragEnd={showSequence ? onRowDragEnd : undefined}
                     onClick={() =>
                       navigate(`/view-work-order/${order.id}`, {
                         state: { from: "/work-orders" },
                       })
                     }
                   >
+                    {showSequence && (
+                      <td className="wo-seq" title="Drag the row to change the service order">
+                        <span className="wo-seq-grip" aria-hidden="true">⋮⋮</span>
+                        <span className="wo-seq-num">
+                          {order.serviceOrder == null ? "—" : order.serviceOrder}
+                        </span>
+                      </td>
+                    )}
+
                     <td
                       className="wo-created"
                       title={fmtCreatedFull(order.createdAt) || undefined}
@@ -1081,7 +1187,7 @@ export default function WorkOrders() {
 
               {filteredOrders.length === 0 && (
                 <tr>
-                  <td colSpan={(userRole !== "tech" ? 8 : 7) + (showAging ? 1 : 0)}>
+                  <td colSpan={(userRole !== "tech" ? 8 : 7) + (showAging ? 1 : 0) + (showSequence ? 1 : 0)}>
                     <div className="empty-state">No work orders for this filter.</div>
                   </td>
                 </tr>

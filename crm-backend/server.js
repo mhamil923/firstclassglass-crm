@@ -490,6 +490,13 @@ async function ensureCols() {
     // When the WO last ENTERED its current status. Distinct from updatedAt, which
     // moves on any edit (a photo upload, a note) and so can't measure staleness.
     { name: 'statusChangedAt',   type: 'DATETIME NULL' },
+    // Position within the WO's scheduled DAY (1 = first job of the day).
+    // NULL = unsequenced; those sort after the ordered ones, by scheduled time.
+    // NOTE: the older `dayOrder` column above is NOT this — it is an unwired
+    // remnant of an abandoned attempt (2 stale rows from Oct 2025, no reader or
+    // writer anywhere in this file). Left untouched rather than silently
+    // repurposed; safe to drop separately.
+    { name: 'serviceOrder',      type: 'INT NULL' },
   ];
 
   try {
@@ -8150,6 +8157,20 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
       }
     }
 
+    // A work order's service position is meaningful only within the day it is
+    // scheduled on. If this edit moves it to a different day (or unschedules it),
+    // the old position is stale — clear it so it lands unsequenced at the end of
+    // the new day instead of jumping into someone else's slot.
+    const dayOf = (v) => {
+      if (!v) return null;
+      const s = String(v);
+      const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+      if (m) return m[1];
+      const d = new Date(s);
+      return isNaN(d) ? null : d.toISOString().slice(0, 10);
+    };
+    const dayChanged = dayOf(scheduledDate) !== dayOf(existing.scheduledDate);
+
     let sql = `
       UPDATE work_orders
          SET workOrderNumber=?,poNumber=?,customer=?,siteLocation=?,siteAddress=?,billingAddress=?,
@@ -8157,6 +8178,7 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
              billingPhone=?,sitePhone=?,customerPhone=?,customerEmail=?,notes=?,
              poSupplier=?,poPickedUp=?,
              scheduledDate=?,scheduledEnd=?
+             ${dayChanged ? ',serviceOrder=NULL' : ''}
     `;
     const params = [
       workOrderNumber || null,
@@ -8364,6 +8386,83 @@ async function deleteStoredFileByKey(rawKey) {
     console.warn('⚠️ Local file delete failed:', key, e?.message || e);
   }
 }
+
+// ─── PER-DAY SERVICE ORDER ──────────────────────────────────────────────────
+// PUT /work-orders/day-order
+//   body { date: 'YYYY-MM-DD', orderedIds: [12, 45, 7] }
+// Writes serviceOrder = 1..N across those work orders, in the order given.
+//
+// Declared BEFORE nothing conflicting: every other /work-orders/* PUT has a
+// second path segment (/edit, /status, /techs), so the single-segment
+// "day-order" can't be swallowed by a :id route.
+//
+// Work orders scheduled that day but NOT in orderedIds are left alone rather
+// than nulled — a client sending a filtered subset should never silently wipe
+// the rest of the day's sequence. Unsequenced rows are NULL and sort last.
+app.put('/work-orders/day-order', authenticate, async (req, res) => {
+  const b = coerceBody(req);
+  const date = String(b?.date || '').trim();
+  const rawIds = Array.isArray(b?.orderedIds) ? b.orderedIds : [];
+  const orderedIds = rawIds.map(Number).filter(Number.isFinite);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ error: 'date must be YYYY-MM-DD.' });
+  }
+  if (!orderedIds.length || orderedIds.length !== rawIds.length) {
+    return res.status(400).json({ error: 'orderedIds must be a non-empty array of numeric work order ids.' });
+  }
+  if (new Set(orderedIds).size !== orderedIds.length) {
+    return res.status(400).json({ error: 'orderedIds contains duplicate ids.' });
+  }
+
+  let conn;
+  try {
+    conn = await db.getConnection();
+    await conn.beginTransaction();
+
+    // Every id must really be scheduled on that date. If not, the caller is
+    // working from a stale list and would stamp a sequence onto the wrong day.
+    const ph = orderedIds.map(() => '?').join(',');
+    const [rows] = await conn.query(
+      `SELECT id FROM work_orders WHERE id IN (${ph}) AND DATE(scheduledDate) = ?`,
+      [...orderedIds, date]
+    );
+    const onDate = new Set(rows.map((r) => Number(r.id)));
+    const strays = orderedIds.filter((id) => !onDate.has(id));
+    if (strays.length) {
+      await conn.rollback();
+      return res.status(409).json({
+        error: 'Some work orders are not scheduled on that date.',
+        date,
+        notOnDate: strays,
+      });
+    }
+
+    for (let i = 0; i < orderedIds.length; i++) {
+      await conn.execute('UPDATE work_orders SET serviceOrder = ? WHERE id = ?', [i + 1, orderedIds[i]]);
+    }
+
+    await conn.commit();
+
+    // Return the authoritative day sequence so the client can re-render from
+    // the server rather than trusting its optimistic local order.
+    const [day] = await db.query(
+      `SELECT id, serviceOrder, scheduledDate, customer, status
+         FROM work_orders
+        WHERE DATE(scheduledDate) = ?
+        ORDER BY (serviceOrder IS NULL), serviceOrder ASC, scheduledDate ASC, id ASC`,
+      [date]
+    );
+    console.log(`[day-order] ${date}: sequenced ${orderedIds.length} work order(s) -> ${orderedIds.join(',')}`);
+    return res.json({ ok: true, date, count: orderedIds.length, day });
+  } catch (err) {
+    if (conn) { try { await conn.rollback(); } catch {} }
+    console.error('Day-order update error:', err);
+    return res.status(500).json({ error: 'Failed to save the day order.' });
+  } finally {
+    if (conn) { try { conn.release(); } catch {} }
+  }
+});
 
 // DELETE /work-orders/:id
 // Optional: pass ?deleteFiles=1 to also delete stored uploads linked to the work order
