@@ -706,16 +706,13 @@
   appearance: none;
 }
 
-/* ===== CRAMPED BAND: 1025-1200px =====
-   Measured: with the links (683px), brand (175px) and right-hand controls
-   (176px), the bar fits a 1100px viewport with ZERO px to spare. There is no
-   room for even a 160px input, so here the field collapses to a 30px icon and
-   expands as an ABSOLUTE overlay (expanding costs no layout width). Nav links
-   also give back a little horizontal padding to buy the icon its space. */
+/* ===== 1025-1200px =====
+   The nav restructure (Calendar promoted, Collections/Email Templates/Route
+   Builder folded into Records) cut the link row from ~683px to ~453px, which
+   freed enough room for the inline input all the way down to 1025px. The
+   icon-collapse fallback this band used to need is gone; just trim the field
+   and the bar's own chrome a little. */
 @media (min-width: 1025px) and (max-width: 1200px) {
-  /* Reclaim the icon's width from the bar's own chrome. NOT from .nav-link —
-     Bootstrap's `.navbar-expand-lg .navbar-nav .nav-link` (specificity 0,3,0)
-     already pins those to 8px and out-ranks any bare `.nav-link` rule here. */
   .navbar,
   .navbar.navbar-expand-lg {
     padding-left: 12px;
@@ -727,55 +724,7 @@
   }
 
   .navbar-search {
-    flex: 0 0 auto;
-    min-width: 0;
-    width: 30px;
-    margin-left: auto;
-  }
-
-  .navbar-search-icon-btn {
-    position: static;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 30px;
-    height: 30px;
-    padding: 0;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    background: var(--bg-card-solid);
-    color: var(--text-secondary);
-    cursor: pointer;
-    pointer-events: auto;
-    opacity: 1;
-    transition: var(--transition-fast);
-  }
-
-  .navbar-search-icon-btn:hover {
-    color: var(--text-primary);
-    border-color: var(--border-color-strong);
-  }
-
-  /* Collapsed: field hidden. Expanded: overlays leftward from the icon. */
-  .navbar-search .navbar-search-input {
-    display: none;
-  }
-
-  .navbar-search.expanded .navbar-search-input {
-    display: block;
-    position: absolute;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 260px;
-    z-index: 20;
-    padding-left: 12px;
-    box-shadow: var(--shadow-md, 0 4px 16px rgba(0, 0, 0, 0.18));
-  }
-
-  .navbar-search.expanded .navbar-search-icon-btn {
-    opacity: 0;
-    pointer-events: none;
+    flex-basis: 200px;
   }
 }
 

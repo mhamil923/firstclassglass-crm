@@ -644,19 +644,6 @@ export default function Navbar() {
 
   /* ===== Global History search ===== */
   const [navSearch, setNavSearch] = useState("");
-  // Between 1025-1200px the navbar has literally zero spare horizontal space,
-  // so the input collapses to an icon there and expands as an overlay on click
-  // (absolutely positioned, so expanding never reflows the bar). Above 1200px
-  // and in the ≤1024px stacked layout the input is always visible and this
-  // flag is inert.
-  const [searchExpanded, setSearchExpanded] = useState(false);
-  const searchInputRef = useRef(null);
-
-  const openSearch = () => {
-    setSearchExpanded(true);
-    // focus after the CSS transition starts so the caret lands correctly
-    setTimeout(() => searchInputRef.current?.focus(), 0);
-  };
 
   // Keep the box showing whatever History is currently filtered by, so the two
   // never disagree. Only tracks the URL — clearing with Escape sticks until the
@@ -675,7 +662,6 @@ export default function Navbar() {
     // entries the Back button has to chew through.
     const replace = currentPath === "/history";
     navigate(q ? `/history?q=${encodeURIComponent(q)}` : "/history", { replace });
-    setSearchExpanded(false);
     closeNavbar();
   };
 
@@ -683,7 +669,6 @@ export default function Navbar() {
     if (e.key === "Escape") {
       e.preventDefault();
       setNavSearch("");
-      setSearchExpanded(false);
       e.currentTarget.blur();
     }
   };
@@ -788,20 +773,8 @@ export default function Navbar() {
         {/* Global work-order search — Enter jumps to History with the query.
             Deliberately Enter-to-search only (no live results): every keystroke
             would refetch the whole work-order list. */}
-        <form
-          className={`navbar-search${searchExpanded ? " expanded" : ""}`}
-          onSubmit={submitNavSearch}
-          role="search"
-        >
-          {/* Icon is decorative when the input is inline; at the cramped
-              breakpoint CSS turns it into the button that expands the field. */}
-          <button
-            type="button"
-            className="navbar-search-icon-btn"
-            onClick={openSearch}
-            aria-label="Search work orders"
-            tabIndex={-1}
-          >
+        <form className="navbar-search" onSubmit={submitNavSearch} role="search">
+          <span className="navbar-search-icon-btn" aria-hidden="true">
             <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
               <path
                 fillRule="evenodd"
@@ -809,9 +782,8 @@ export default function Navbar() {
                 clipRule="evenodd"
               />
             </svg>
-          </button>
+          </span>
           <input
-            ref={searchInputRef}
             type="search"
             className="navbar-search-input"
             placeholder="Search work orders…"
@@ -819,7 +791,6 @@ export default function Navbar() {
             value={navSearch}
             onChange={(e) => setNavSearch(e.target.value)}
             onKeyDown={onNavSearchKeyDown}
-            onBlur={() => { if (!navSearch.trim()) setSearchExpanded(false); }}
           />
         </form>
 
