@@ -1260,3 +1260,57 @@
 .view-container .pill.subtle {
   background-color: var(--bg-hover);
 }
+
+/* ===== PRINT TO QUOTE — include-photos chooser ===== */
+.quote-chooser-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 10000;
+}
+
+.quote-chooser-card {
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border-color);
+  border-top: 3px solid var(--accent-blue);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.3));
+  padding: 24px;
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+}
+
+.quote-chooser-title {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.quote-chooser-sub {
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.quote-chooser-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.quote-chooser-actions .btn {
+  min-width: 148px;
+}
+
+.quote-chooser-cancel {
+  margin-top: 12px;
+  font-size: 13px;
+}

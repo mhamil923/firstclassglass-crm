@@ -1178,6 +1178,39 @@ export default function ViewWorkOrder() {
     }
   };
 
+  /* ---------- Print to Quote: ask about photos each time ----------
+     These hooks MUST stay above the `if (!workOrder) return` below: putting them
+     after it makes the hook count change once the work order loads, which React
+     rejects outright. handlePrintToQuote is referenced only inside the click
+     handler, so its later `const` declaration is already initialised by then. */
+  /* ---------- Print to Quote: ask about photos each time ---------- */
+  const [quoteChooserOpen, setQuoteChooserOpen] = useState(false);
+  const withPhotosBtnRef = useRef(null);
+
+  // Esc closes the chooser without printing anything.
+  useEffect(() => {
+    if (!quoteChooserOpen) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setQuoteChooserOpen(false);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    // "With Photos" matches today's behaviour, so it takes focus — Enter repeats
+    // what the button has always done.
+    const t = setTimeout(() => withPhotosBtnRef.current?.focus(), 0);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      clearTimeout(t);
+    };
+  }, [quoteChooserOpen]);
+
+  const chooseQuotePhotos = (includePhotos) => {
+    setQuoteChooserOpen(false);
+    handlePrintToQuote(includePhotos);
+  };
+
   if (!workOrder) {
     return (
       <div className="view-container">
@@ -1400,7 +1433,10 @@ export default function ViewWorkOrder() {
   };
 
   /* ---------------- PRINT: To Quote ---------------- */
-  const handlePrintToQuote = () => {
+  // includePhotos: whether the job-site photo pages are appended. Draw notes are
+  // a separate section and always print — they're sketch/measurement pages, not
+  // "photos" in the sense this toggle is about.
+  const handlePrintToQuote = (includePhotos = true) => {
     const siteDisplayName = (siteLocation || customer || "").trim();
     const siteAddr = (siteAddress || "").trim();
     const agreementNo = cleanedPo || id;
@@ -1419,11 +1455,13 @@ export default function ViewWorkOrder() {
     const photos = photoImages || [];
     const draws = drawNoteImages || [];
 
-    const photoPages = photos
-      .map((k, idx) => {
-        const src = urlFor(k);
-        const name = fileNameFromKey(k);
-        return `
+    const photoPages = !includePhotos
+      ? ""
+      : photos
+          .map((k, idx) => {
+            const src = urlFor(k);
+            const name = fileNameFromKey(k);
+            return `
           <div class="page">
             <div class="page-hdr">
               <div><b>Work Order:</b> ${safe(cleanedWo)} &nbsp;&nbsp; <b>PO #:</b> ${safe(agreementNo)}</div>
@@ -1434,8 +1472,8 @@ export default function ViewWorkOrder() {
             </div>
           </div>
         `;
-      })
-      .join("");
+          })
+          .join("");
 
     const drawPages = draws
       .map((k, idx) => {
@@ -1454,6 +1492,17 @@ export default function ViewWorkOrder() {
         `;
       })
       .join("");
+
+    // Everything after the cover sheet. Drives both the cover's page break and
+    // the fine-print summary, so excluding photos can't leave the cover
+    // promising pages that aren't there or trailing a blank sheet.
+    const pagesHtml = `${drawPages}${photoPages}`;
+    const hasFollowingPages = pagesHtml.trim().length > 0;
+
+    const includedBits = ["Cover", "Notes"];
+    if (draws.length) includedBits.push("Draw Notes (1/page)");
+    if (includePhotos && photos.length) includedBits.push("Photos (1/page)");
+    const fineText = `This packet prints: ${includedBits.join(" + ")}.`;
 
     const html = `<!doctype html>
 <html>
@@ -1485,8 +1534,16 @@ export default function ViewWorkOrder() {
     .box.notes { min-height: 2.0in; }
     .box.problem { min-height: 1.2in; }
 
-    .page { page-break-after: always; }
-    .page:last-child { page-break-after: auto; }
+    /* One image per sheet. page-break-inside guards against a renderer trying to
+       flow the image across sheets; .imgwrap is already height-capped below. */
+    .page { page-break-after: always; page-break-inside: avoid; break-inside: avoid; }
+    /* :last-of-type, NOT :last-child — the trailing print script element is
+       body's real last child, so the old :last-child never matched and every
+       run emitted a trailing blank sheet.
+       (Deliberately not spelling that tag out literally here: a script tag
+       written inside this style block trips naive HTML parsers downstream.) */
+    .page:last-of-type { page-break-after: auto; }
+    .imgwrap, .imgwrap img { page-break-inside: avoid; break-inside: avoid; }
     .page-hdr { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; border-bottom: 2px solid #000; padding-bottom: 6px; }
     .page-hdr .small { font-size: 10px; color: #222; max-width: 60%; text-align: right; word-break: break-all; }
     .imgwrap { width: 100%; height: calc(11in - 1in - 40px); display: flex; align-items: center; justify-content: center; }
@@ -1497,7 +1554,7 @@ export default function ViewWorkOrder() {
 </head>
 <body>
 
-  <div class="sheet cover">
+  <div class="sheet${hasFollowingPages ? " cover" : ""}">
     <div class="hdr">
       <img class="logo" src="${safe(LOGO_URL)}" alt="First Class Glass logo" />
       <div class="company">
@@ -1544,13 +1601,10 @@ export default function ViewWorkOrder() {
     <div class="section-title">Notes</div>
     <div class="box notes">${safe(notesText || "No notes.")}</div>
 
-    <div class="fine">
-      This packet prints: Cover + Notes + Draw Notes (1/page) + Photos (1/page).
-    </div>
+    <div class="fine">${safe(fineText)}</div>
   </div>
 
-  ${drawPages}
-  ${photoPages}
+  ${pagesHtml}
 
   <script>
     window.onload = function() {
@@ -2551,6 +2605,46 @@ export default function ViewWorkOrder() {
         title={lightbox.title}
       />
 
+      {/* ───── Print to Quote — include photos? ───── */}
+      {quoteChooserOpen && (
+        <div
+          className="quote-chooser-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="quote-chooser-title"
+          onClick={() => setQuoteChooserOpen(false)}
+        >
+          <div className="quote-chooser-card" onClick={(e) => e.stopPropagation()}>
+            <h3 className="quote-chooser-title" id="quote-chooser-title">
+              Include photos?
+            </h3>
+            <p className="quote-chooser-sub">
+              {photoImages.length
+                ? `${photoImages.length} photo${photoImages.length === 1 ? "" : "s"} on this work order, one per page.`
+                : "This work order has no photos — either choice prints the same."}
+            </p>
+            <div className="quote-chooser-actions">
+              <button
+                ref={withPhotosBtnRef}
+                className="btn btn-primary"
+                onClick={() => chooseQuotePhotos(true)}
+              >
+                With Photos
+              </button>
+              <button className="btn btn-outline" onClick={() => chooseQuotePhotos(false)}>
+                Without Photos
+              </button>
+            </div>
+            <button
+              className="btn btn-ghost quote-chooser-cancel"
+              onClick={() => setQuoteChooserOpen(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ───── Send Estimate to Customer — compose modal ───── */}
       {estSendModal && (() => {
         const m = estSendModal;
@@ -3106,7 +3200,7 @@ export default function ViewWorkOrder() {
               Print Work Order
             </button>
 
-            <button className="btn btn-primary" onClick={handlePrintToQuote}>
+            <button className="btn btn-primary" onClick={() => setQuoteChooserOpen(true)}>
               Print to Quote
             </button>
 
