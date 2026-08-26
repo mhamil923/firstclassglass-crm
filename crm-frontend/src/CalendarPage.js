@@ -22,6 +22,26 @@ import "./Calendar.css";
 const localizer = momentLocalizer(moment);
 const DnDCalendar = withDragAndDrop(Calendar);
 
+/* Stable identities for react-big-calendar.
+   These used to be inline literals in the JSX, so every parent render handed RBC
+   a brand-new `views` / `components` / `min` / `max` / `style` object. RBC keys a
+   lot of internal memoization off those props, so fresh identities defeat it and
+   the whole grid reconciles on every unrelated state change. */
+const RBC_MIN = moment().startOf("day").add(6, "hours").toDate();
+const RBC_MAX = moment().startOf("day").add(21, "hours").toDate();
+const RBC_STYLE_MONTH = { height: "auto", minHeight: "78vh" };
+const RBC_STYLE_WEEK = { height: "auto", minHeight: "86vh" };
+const RBC_COMPONENTS = { event: CustomEvent };
+// StackedWeekView / StackedDayView / CardAgendaView are hoisted function
+// declarations, so referencing them here at module-eval time is fine.
+const RBC_VIEWS = {
+  month: true,
+  week: StackedWeekView,
+  day: StackedDayView,
+  agenda: CardAgendaView,
+};
+const alwaysDraggable = () => true;
+
 // ✅ Context lets the custom Day view (defined at module scope) access
 // parent state like the tech list and the assign-tech handler.
 const CalendarTechContext = createContext({
@@ -80,6 +100,14 @@ function fromDbString(val) {
 
   return m.isValid() ? m.toDate() : null;
 }
+
+// Whole days between a past scheduled date and today (0 = due today).
+const daysLate = (scheduledDate) => {
+  if (!scheduledDate) return null;
+  const d = fromDbString(scheduledDate);
+  if (!d) return null;
+  return Math.max(0, moment().startOf("day").diff(moment(d).startOf("day"), "days"));
+};
 
 const fmtDate = (d) => moment(d).format("YYYY-MM-DD");
 const fmtTime = (d) => moment(d).format("HH:mm");
@@ -265,7 +293,12 @@ function CustomEvent({ event }) {
 
   return (
     <OverlayTrigger trigger={["hover", "focus"]} placement="top" overlay={popover}>
-      <span className="rbc-event-title">{event.title}</span>
+      <span className="cal-chip" title={event.title}>
+        {idLabel && idLabel !== "N/A" ? (
+          <span className="cal-chip-id">{idLabel}</span>
+        ) : null}
+        <span className="cal-chip-name">{event.customer || event.title}</span>
+      </span>
     </OverlayTrigger>
   );
 }
@@ -782,6 +815,16 @@ export default function WorkOrderCalendar() {
   const [unscheduledOrders, setUnscheduledOrders] = useState([]);
   const [unscheduledSearch, setUnscheduledSearch] = useState("");
 
+  // Lightweight toast, used to report a failed optimistic scheduling change.
+  const [toast, setToast] = useState(null); // { msg, kind }
+  const toastTimerRef = useRef(null);
+  const showToast = useCallback((msg, kind = "info") => {
+    setToast({ msg, kind });
+    clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 5000);
+  }, []);
+  useEffect(() => () => clearTimeout(toastTimerRef.current), []);
+
   // Past Due strip data
   const [pastDueOrders, setPastDueOrders] = useState([]);
   const [showPastDue, setShowPastDue] = useState(true);
@@ -916,16 +959,20 @@ export default function WorkOrderCalendar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, currentDate]);
 
+  // NOTE: /work-orders (the ENTIRE table — measured at 907KB / 597 rows) used to
+  // be fetched here. refreshLists runs on mount AND after every drop, reschedule,
+  // status change and pickup save (11 call sites), so a single drag-to-schedule
+  // was paying ~1MB of download + JSON parse before the card would move.
+  // The full table is only needed for the rail's global search, so it is now
+  // lazy-loaded on first search instead (see ensureAllOrdersLoaded).
   const refreshLists = useCallback(async () => {
     try {
-      const [allRes, unRes, pickupsRes, supRes, pastDueRes] = await Promise.all([
-        api.get("/work-orders"),
+      const [unRes, pickupsRes, supRes, pastDueRes] = await Promise.all([
         api.get("/work-orders/unscheduled"),
         api.get("/supplier-pickups").catch(() => ({ data: [] })),
         api.get("/supplier-pickups/suppliers").catch(() => ({ data: [] })),
         api.get("/work-orders", { params: { pastDue: "true" } }).catch(() => ({ data: [] })),
       ]);
-      setAllOrders(Array.isArray(allRes.data) ? allRes.data : []);
       setUnscheduledOrders(
         (Array.isArray(unRes.data) ? unRes.data : []).filter(
           (o) => !EXCLUDED_FROM_SCHEDULING.has(o?.status)
@@ -941,6 +988,34 @@ export default function WorkOrderCalendar() {
     } catch (e) {
       console.error("⚠️ Error loading lists:", e);
     }
+  }, []);
+
+  // The rail's search box searches ALL work orders, not just unscheduled ones,
+  // so it still needs the full table — but only once the user actually searches.
+  const allOrdersLoadedRef = useRef(false);
+  const [allOrdersLoading, setAllOrdersLoading] = useState(false);
+  const ensureAllOrdersLoaded = useCallback(async () => {
+    if (allOrdersLoadedRef.current) return;
+    allOrdersLoadedRef.current = true;
+    setAllOrdersLoading(true);
+    try {
+      const { data } = await api.get("/work-orders");
+      setAllOrders(Array.isArray(data) ? data : []);
+    } catch (e) {
+      allOrdersLoadedRef.current = false; // let a later keystroke retry
+      console.error("⚠️ Error loading work orders for search:", e);
+    } finally {
+      setAllOrdersLoading(false);
+    }
+  }, []);
+
+  // Vertical wheel scrolls the horizontal rails — otherwise the page scrolls
+  // away while the user is trying to browse the cards.
+  const railWheel = useCallback((e) => {
+    const el = e.currentTarget;
+    if (el.scrollWidth <= el.clientWidth) return;
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    el.scrollLeft += e.deltaY;
   }, []);
 
   const handleReschedule = (wo) => openEditModal(wo, currentDate);
@@ -1107,11 +1182,8 @@ export default function WorkOrderCalendar() {
       // modal list matches what's visible on the day cell.
       const list = events;
 
-      // Build lookup from allOrders (from /work-orders endpoint, which always
-      // includes assignedTo + assignedToName). This is the authoritative source.
-      const allOrdersById = {};
-      allOrders.forEach((wo) => { allOrdersById[wo.id] = wo; });
-
+      // Tech + sequence data now rides along on each event's meta (see
+      // /calendar/events). No full-table lookup needed here any more.
       // Filter to the clicked day using date-only string comparison (defensive
       // against timezone shifts and mixed datetime formats).
       const filteredForDay = list.filter((ev) => {
@@ -1141,8 +1213,7 @@ export default function WorkOrderCalendar() {
           fromDbString(ev.scheduledEnd) ||
           (s ? moment(s).add(DEFAULT_WINDOW_MIN, "minutes").toDate() : null);
 
-        // Cross-reference with allOrders for assignedTo data
-        const full = allOrdersById[ev.id];
+        const full = ev.meta || {};
 
         return {
           id: ev.id,
@@ -1400,19 +1471,63 @@ export default function WorkOrderCalendar() {
     }
 
     const minutes = minutesWindowForOrder(item);
+    const endDate = moment(start).add(minutes, "minutes").toDate();
+
+    // OPTIMISTIC: move the card out of the rail and onto the grid immediately.
+    // Previously the UI did nothing until the PUT *and* a full list refresh had
+    // resolved, which is what made a drop feel like it hadn't registered.
+    const prevUnscheduled = unscheduledOrders;
+    const prevPastDue = pastDueOrders;
+    const prevEvents = events;
+
+    setUnscheduledOrders((list) => list.filter((o) => Number(o.id) !== Number(item.id)));
+    setPastDueOrders((list) => list.filter((o) => Number(o.id) !== Number(item.id)));
+    setEvents((list) => [
+      ...list.filter((e) => Number(e.id) !== Number(item.id)),
+      {
+        ...item,
+        id: item.id,
+        start,
+        end: endDate,
+        meta: {
+          ...(item.meta || {}),
+          status: "Scheduled",
+          customer: item.customer,
+          siteLocation: getSiteLocation(item),
+          siteAddress: getSiteAddress(item),
+          problemDescription: item.problemDescription,
+          assignedTo: item.assignedTo ?? null,
+          assignedToName: item.assignedToName ?? "",
+          techIds: item.techIds || [],
+          techNames: item.techNames || [],
+          serviceOrder: null,
+        },
+      },
+    ]);
+    endGlobalDrag();
 
     setSchedulePayload(item.id, {
       date: fmtDate(start),
       time: fmtTime(start),
-      endTime: fmtTime(moment(start).add(minutes, "minutes").toDate()),
+      endTime: fmtTime(endDate),
       status: "Scheduled",
     })
       .then(async () => {
-        endGlobalDrag();
         if (dayForModal) await openDayModal(dayForModal);
+        // Reconcile against the server (cheap now — no full-table fetch).
         await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
       })
-      .catch((e) => console.error("⚠️ Error scheduling work order:", e));
+      .catch((e) => {
+        console.error("⚠️ Error scheduling work order:", e);
+        // Roll the optimistic move back and tell the user.
+        setUnscheduledOrders(prevUnscheduled);
+        setPastDueOrders(prevPastDue);
+        setEvents(prevEvents);
+        showToast(
+          e?.response?.data?.error || "Couldn't schedule that work order — put it back.",
+          "error"
+        );
+      });
   }
 
   function onSelectEvent(event) {
@@ -1426,8 +1541,9 @@ export default function WorkOrderCalendar() {
         return;
       }
     }
-    const full = allOrders.find((o) => Number(o.id) === Number(event.id)) || event;
-    openEditModal(full);
+    // The event already carries start/end/scheduledDate, which is all
+    // openEditModal reads — no full-table lookup needed.
+    openEditModal(event);
   }
 
   function onSelectSlot(slotInfo) {
@@ -1444,21 +1560,16 @@ export default function WorkOrderCalendar() {
 
   /* ===== Build RBC events from server events ===== */
   const rbcEvents = useMemo(() => {
-    // Cross-reference with /work-orders so each event carries the
-    // authoritative assignedTo / assignedToName (the /calendar/events
-    // payload doesn't always include it).
-    const allOrdersById = {};
-    allOrders.forEach((wo) => {
-      allOrdersById[wo.id] = wo;
-    });
-
+    // /calendar/events now carries assignedTo/assignedToName (and techIds,
+    // techNames, serviceOrder) in meta, so this no longer cross-references the
+    // full work-orders table — which is what kept that 900KB fetch on the
+    // critical path for every render of the grid.
     const woEvents = events.map((o) => {
       const start = fromDbString(o.start) || new Date();
       const end = fromDbString(o.end) || moment(start).add(DEFAULT_WINDOW_MIN, "minutes").toDate();
 
       const idLabel = displayWOThenPO(o);
       const title = o.customer ? `${o.customer} — ${idLabel}` : idLabel;
-      const full = allOrdersById[o.id];
 
       return {
         ...o,
@@ -1467,9 +1578,8 @@ export default function WorkOrderCalendar() {
         end,
         allDay: false,
         kind: "wo",
-        assignedTo: full?.assignedTo ?? o.meta?.assignedTo ?? o.assignedTo ?? null,
-        assignedToName:
-          full?.assignedToName ?? o.meta?.assignedToName ?? o.assignedToName ?? "",
+        assignedTo: o.meta?.assignedTo ?? o.assignedTo ?? null,
+        assignedToName: o.meta?.assignedToName ?? o.assignedToName ?? "",
       };
     });
 
@@ -1499,11 +1609,17 @@ export default function WorkOrderCalendar() {
       });
 
     return [...woEvents, ...pickupEvents];
-  }, [events, allOrders, supplierPickups]);
+  }, [events, supplierPickups]);
 
-  // Context value for the custom Day view's tech dropdown.
-  // Built fresh each render so the handler always closes over current state.
-  const techContextValue = { techs, onAssignTech: handleAssignTech, techSavedId, supplierPickups };
+  // Context value for the custom Day view's tech dropdown. MUST be memoized:
+  // a fresh object each render makes every context consumer (i.e. every event
+  // chip in the grid) re-render on any unrelated parent state change.
+  const techContextValue = useMemo(
+    () => ({ techs, onAssignTech: handleAssignTech, techSavedId, supplierPickups }),
+    // handleAssignTech is a stable function declaration on the component
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [techs, techSavedId, supplierPickups]
+  );
 
   /* ===== Unscheduled bar search (includes Site Address) ===== */
   const listForStrip = useMemo(() => {
@@ -1645,6 +1761,7 @@ export default function WorkOrderCalendar() {
           >
             <h4 className="mb-0">
               {unscheduledSearch ? "Search Results (All Work Orders)" : "Unscheduled Work Orders"}
+              <span className="cal-count-badge">{listForStrip.length}</span>
             </h4>
 
             <div className="d-flex align-items-center" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -1654,8 +1771,15 @@ export default function WorkOrderCalendar() {
                   className="form-control"
                   placeholder="Search customer, site location, site address, WO #, or PO # (includes scheduled)"
                   value={unscheduledSearch}
-                  onChange={(e) => setUnscheduledSearch(e.target.value)}
+                  onFocus={ensureAllOrdersLoaded}
+                  onChange={(e) => {
+                    ensureAllOrdersLoaded();
+                    setUnscheduledSearch(e.target.value);
+                  }}
                 />
+                {allOrdersLoading ? (
+                  <span className="input-group-text cal-search-loading">Loading…</span>
+                ) : null}
                 {unscheduledSearch ? (
                   <button className="btn btn-outline-secondary" onClick={clearUnscheduledSearch}>
                     Clear
@@ -1691,139 +1815,52 @@ export default function WorkOrderCalendar() {
                   alignItems: "center",
                   gap: 8,
                   cursor: "pointer",
-                  padding: "8px 12px",
-                  background: "rgba(220,38,38,0.15)",
-                  borderRadius: 8,
-                  border: "1px solid #dc2626",
                   marginBottom: showPastDue ? 8 : 0,
                 }}
+                className="cal-rail-head cal-rail-head-late"
               >
-                <span style={{ color: "#dc2626", fontWeight: 700, fontSize: 13 }}>⚠ PAST DUE</span>
-                <span
-                  style={{
-                    background: "#dc2626",
-                    color: "#fff",
-                    borderRadius: 10,
-                    padding: "1px 8px",
-                    fontSize: 12,
-                    fontWeight: 700,
-                  }}
-                >
-                  {pastDueOrders.length}
-                </span>
-                <span style={{ color: "#9ca3af", fontSize: 12, marginLeft: "auto" }}>
+                <span className="cal-rail-title">⚠ Past Due</span>
+                <span className="cal-count-badge cal-count-badge-late">{pastDueOrders.length}</span>
+                <span className="cal-rail-hint">
                   {showPastDue ? "▲ Hide" : "▼ Show"} — scheduled dates that passed without completion
                 </span>
               </div>
 
               {showPastDue && (
-                <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
-                  {pastDueOrders.map((wo) => (
-                    <div
-                      key={wo.id}
-                      style={{
-                        background: "rgba(220,38,38,0.1)",
-                        border: "1px solid #dc2626",
-                        borderRadius: 10,
-                        padding: "12px 14px",
-                        minWidth: 220,
-                        maxWidth: 220,
-                        flexShrink: 0,
-                      }}
-                    >
-                      <div style={{ color: "#fca5a5", fontWeight: 600, fontSize: 12, marginBottom: 4 }}>
-                        {wo.scheduledDate ? `Was: ${new Date(wo.scheduledDate).toLocaleDateString()}` : ""}
-                      </div>
-                      <div
-                        style={{
-                          fontWeight: 600,
-                          fontSize: 13,
-                          color: "#fff",
-                          overflow: "hidden",
-                          whiteSpace: "nowrap",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {wo.customer || "—"} — {wo.workOrderNumber || wo.woNumber || "N/A"}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "#fca5a5",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {getSiteLocation(wo) || ""}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: "#6b7280",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {getSiteAddress(wo) || ""}
-                      </div>
-                      {wo.problemDescription && (
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: "#9ca3af",
-                            marginTop: 4,
-                            display: "-webkit-box",
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: "vertical",
-                            overflow: "hidden",
-                          }}
-                        >
-                          {wo.problemDescription}
-                        </div>
+                <div className="cal-rail cal-rail-pastdue" onWheel={railWheel}>
+                  {pastDueOrders.map((wo) => {
+                    const late = daysLate(wo.scheduledDate);
+                    return (
+                    <div key={wo.id} className="cal-card cal-card-late">
+                      {late != null && (
+                        <span className="cal-late-chip" title={`Was scheduled ${new Date(wo.scheduledDate).toLocaleDateString()}`}>
+                          {late === 0 ? "due today" : `${late} day${late === 1 ? "" : "s"} late`}
+                        </span>
                       )}
-                      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                        <button
-                          onClick={() => navigateToView(wo.id)}
-                          style={{
-                            flex: 1,
-                            padding: "5px",
-                            borderRadius: 6,
-                            background: "#374151",
-                            color: "#fff",
-                            border: "none",
-                            cursor: "pointer",
-                            fontSize: 11,
-                          }}
-                        >
-                          Open
-                        </button>
-                        <button
-                          onClick={() => handleReschedule(wo)}
-                          style={{
-                            flex: 1,
-                            padding: "5px",
-                            borderRadius: 6,
-                            background: "#dc2626",
-                            color: "#fff",
-                            border: "none",
-                            cursor: "pointer",
-                            fontSize: 11,
-                            fontWeight: 600,
-                          }}
-                        >
-                          Reschedule
-                        </button>
+                      <div className="cal-card-title" title={`${wo.customer || "—"} — ${wo.workOrderNumber || wo.woNumber || "N/A"}`}>
+                        <span className="cal-card-cust">{wo.customer || "—"}</span>
+                        {(wo.workOrderNumber || wo.woNumber) ? (
+                          <span className="cal-card-id">{wo.workOrderNumber || wo.woNumber}</span>
+                        ) : null}
+                      </div>
+                      <div className="cal-card-site" title={getSiteLocation(wo) || ""}>{getSiteLocation(wo) || ""}</div>
+                      <div className="cal-card-addr" title={getSiteAddress(wo) || ""}>{getSiteAddress(wo) || ""}</div>
+                      {wo.problemDescription && (
+                        <div className="cal-card-desc">{wo.problemDescription}</div>
+                      )}
+                      <div className="cal-card-actions">
+                        <button className="btn btn-outline btn-xs" onClick={() => navigateToView(wo.id)}>Open</button>
+                        <button className="btn btn-danger btn-xs" onClick={() => handleReschedule(wo)}>Reschedule</button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
           )}
 
-          <div className="unscheduled-list">
+          <div className="unscheduled-list" onWheel={railWheel}>
             {listForStrip.map((order) => {
               const idLabel = displayWOThenPO(order);
               const customerLabel = order.customer ? order.customer : "Work Order";
@@ -1861,16 +1898,14 @@ export default function WorkOrderCalendar() {
                   }}
                   onDragEnd={endGlobalDrag}
                   title={`${customerLabel} — ${idLabel}`}
-                  style={{
-                    minHeight: 160,
-                    display: "flex",
-                    flexDirection: "column",
-                    opacity: isFinished ? 0.65 : 1,
-                  }}
+                  style={{ opacity: isFinished ? 0.65 : 1 }}
                 >
                   <div className="d-flex align-items-center justify-content-between" style={{ gap: 8 }}>
-                    <div className="fw-bold" style={clamp1}>
-                      {customerLabel} — {idLabel}
+                    <div className="cal-card-title" title={`${customerLabel} — ${idLabel}`}>
+                      <span className="cal-card-cust">{customerLabel}</span>
+                      {idLabel && idLabel !== "N/A" ? (
+                        <span className="cal-card-id">{idLabel}</span>
+                      ) : null}
                     </div>
                     {isFinished ? (
                       <span
@@ -2023,6 +2058,13 @@ export default function WorkOrderCalendar() {
         </div>
 
         {/* Calendar */}
+        {toast && (
+          <div className={`cal-toast cal-toast-${toast.kind}`} role="status" aria-live="polite">
+            <span>{toast.msg}</span>
+            <button className="cal-toast-x" onClick={() => setToast(null)} aria-label="Dismiss">×</button>
+          </div>
+        )}
+
         <div
           className="calendar-container"
           onDragOver={(e) => e.preventDefault()}
@@ -2036,10 +2078,10 @@ export default function WorkOrderCalendar() {
             endAccessor="end"
             step={15}
             timeslots={4}
-            min={moment().startOf("day").add(6, "hours").toDate()}
-            max={moment().startOf("day").add(21, "hours").toDate()}
+            min={RBC_MIN}
+            max={RBC_MAX}
             selectable
-            draggableAccessor={() => true}
+            draggableAccessor={alwaysDraggable}
             dragFromOutsideItem={() => dragItemRef.current}
             onDropFromOutside={handleDropFromOutside}
             onEventDrop={handleEventDrop}
@@ -2048,25 +2090,15 @@ export default function WorkOrderCalendar() {
             onDoubleClickEvent={(e) => navigateToView(e.id)}
             onSelectSlot={onSelectSlot}
             onShowMore={onShowMore}
-            views={{
-              month: true,
-              week: StackedWeekView,
-              day: StackedDayView,
-              agenda: CardAgendaView,
-            }}
+            views={RBC_VIEWS}
             view={view}
             onView={(v) => setView(v)}
             date={currentDate}
             onNavigate={(d) => setCurrentDate(d)}
-            components={{
-              event: CustomEvent,
-            }}
+            components={RBC_COMPONENTS}
             eventPropGetter={eventPropGetter}
             className={`rbc-enhanced ${view === "week" ? "rbc-week-pretty" : ""}`}
-            style={{
-              height: "auto",
-              minHeight: view === "week" ? "86vh" : "78vh",
-            }}
+            style={view === "week" ? RBC_STYLE_WEEK : RBC_STYLE_MONTH}
             showAllEvents
             resizable={false}
             popup={false}

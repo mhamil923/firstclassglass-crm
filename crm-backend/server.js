@@ -10542,7 +10542,7 @@ app.get('/calendar/events', authenticate, async (req, res) => {
 
     const [rows] = await db.execute(
       `SELECT w.id, w.workOrderNumber, w.poNumber, w.customer, w.siteLocation, w.siteAddress, w.problemDescription, w.status,
-              w.scheduledDate, w.scheduledEnd${assignedSel}
+              w.scheduledDate, w.scheduledEnd, w.serviceOrder${assignedSel}
          FROM work_orders w
          ${assignedJoin}
         WHERE w.scheduledDate IS NOT NULL
@@ -10551,6 +10551,30 @@ app.get('/calendar/events', authenticate, async (req, res) => {
         ORDER BY w.scheduledDate ASC`,
       [endSql, startSql]
     );
+
+    // One extra round trip for every tech assignment in range, instead of a
+    // per-event query or a full-table download on the client.
+    const techsByWo = {};
+    if (rows.length) {
+      try {
+        const ids = rows.map(r => r.id);
+        const ph = ids.map(() => '?').join(',');
+        const [tRows] = await db.query(
+          `SELECT t.workOrderId, t.userId, u.username
+             FROM work_order_techs t
+             LEFT JOIN users u ON u.id = t.userId
+            WHERE t.workOrderId IN (${ph})`,
+          ids
+        );
+        for (const t of tRows) {
+          const b = (techsByWo[t.workOrderId] ||= { ids: [], names: [] });
+          b.ids.push(Number(t.userId));
+          if (t.username) b.names.push(t.username);
+        }
+      } catch (e) {
+        console.warn('[calendar/events] tech attach failed:', e.message);
+      }
+    }
 
     const events = rows.map(r => ({
       id: r.id,
@@ -10574,6 +10598,12 @@ app.get('/calendar/events', authenticate, async (req, res) => {
         poNumber: r.poNumber || null,
         assignedTo: r.assignedTo || null,
         assignedToName: r.assignedToName || null,
+        // Multi-tech + per-day sequence. Carried here so the Calendar page can
+        // render its day modal without also downloading the ENTIRE work-orders
+        // table (~900KB / 597 rows) purely to look these three fields up.
+        techIds: techsByWo[r.id]?.ids || [],
+        techNames: techsByWo[r.id]?.names || [],
+        serviceOrder: r.serviceOrder ?? null,
       }
     }));
 

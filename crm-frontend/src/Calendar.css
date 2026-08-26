@@ -1821,3 +1821,448 @@
   color: var(--text-secondary);
   font-weight: 500;
 }
+
+/* ===== Toast (optimistic-scheduling failures) ===== */
+.cal-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 11000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 420px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--accent-blue);
+  background: var(--bg-card-solid);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg, 0 10px 32px rgba(0, 0, 0, 0.28));
+}
+
+.cal-toast-error {
+  border-left-color: var(--accent-red);
+}
+
+.cal-toast-x {
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+/* ==========================================================================
+   CALENDAR REVAMP — design-system pass
+   Everything below uses the shared tokens. The rails previously hardcoded
+   #dc2626 / #fff / #9ca3af, which made Past Due card text invisible in light
+   theme; those are now token-driven and theme-correct in both.
+   ========================================================================== */
+
+/* ---- Rail headers + count badges ---- */
+.cal-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-hover);
+  cursor: pointer;
+}
+
+.cal-rail-head-late {
+  border-color: var(--accent-red);
+  background: rgba(255, 59, 48, 0.10);
+}
+
+.cal-rail-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-red);
+  letter-spacing: 0.01em;
+}
+
+.cal-rail-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.cal-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 7px;
+  margin-left: 8px;
+  border-radius: 999px;
+  background: rgba(0, 113, 227, 0.12);
+  color: var(--accent-blue);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-count-badge-late {
+  margin-left: 0;
+  background: var(--accent-red);
+  color: #ffffff;
+}
+
+/* ---- Horizontal rails: scroll affordance + edge fade ---- */
+.cal-rail,
+.unscheduled-list {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+  /* Fade the right edge so it's obvious there's more to scroll to */
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 28px), transparent 100%);
+}
+
+.cal-rail::-webkit-scrollbar,
+.unscheduled-list::-webkit-scrollbar { height: 8px; }
+.cal-rail::-webkit-scrollbar-thumb,
+.unscheduled-list::-webkit-scrollbar-thumb {
+  background: var(--border-color-strong);
+  border-radius: 999px;
+}
+
+/* ---- Rail cards: denser, one line per field ---- */
+.cal-card,
+.unscheduled-item {
+  flex: 0 0 auto;
+  width: 224px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  border-top: 2px solid var(--accent-blue);
+  background: var(--bg-card-solid);
+  box-shadow: var(--shadow-sm);
+  cursor: grab;
+}
+
+.cal-card:active,
+.unscheduled-item:active { cursor: grabbing; }
+
+.cal-card-late {
+  border-color: var(--accent-red);
+  border-top-color: var(--accent-red);
+  background: rgba(255, 59, 48, 0.06);
+}
+
+.cal-late-chip {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-red);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.cal-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cal-card-id {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: rgba(0, 113, 227, 0.12);
+  color: var(--accent-blue);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.cal-card-site,
+.cal-card-addr {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.45;
+}
+
+.cal-card-addr { opacity: 0.8; }
+
+/* Description clamped to 2 lines — no mid-word cuts */
+.cal-card-desc {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.cal-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.cal-card-actions .btn { flex: 1; }
+
+/* Compact button size used inside the rails */
+.btn-xs {
+  padding: 5px 8px !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  border-radius: 6px !important;
+}
+
+/* ---- Month grid chips ---- */
+.cal-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 1px 2px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.cal-chip-id {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--accent-blue);
+  color: #ffffff;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.cal-chip-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- react-big-calendar default colour overrides (both themes) ---- */
+.rbc-enhanced .rbc-month-view,
+.rbc-enhanced .rbc-time-view,
+.rbc-enhanced .rbc-header,
+.rbc-enhanced .rbc-day-bg,
+.rbc-enhanced .rbc-month-row,
+.rbc-enhanced .rbc-time-header-content,
+.rbc-enhanced .rbc-timeslot-group {
+  border-color: var(--border-color) !important;
+}
+
+.rbc-enhanced .rbc-header {
+  padding: 7px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.rbc-enhanced .rbc-month-view,
+.rbc-enhanced .rbc-time-view {
+  background: var(--bg-card-solid);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Denser cells so a full month fits without scrolling */
+.rbc-enhanced .rbc-date-cell {
+  padding: 3px 6px 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.rbc-enhanced .rbc-row-segment { padding: 0 3px 1px; }
+
+.rbc-enhanced .rbc-event {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 1px 2px !important;
+  margin-bottom: 1px;
+  border-radius: 4px;
+}
+
+.rbc-enhanced .rbc-event:hover { background: var(--bg-hover) !important; }
+.rbc-enhanced .rbc-event.rbc-selected { background: rgba(0, 113, 227, 0.12) !important; }
+
+/* Off-range days recede; today's cell is unmistakable */
+.rbc-enhanced .rbc-off-range-bg { background: var(--bg-hover); }
+.rbc-enhanced .rbc-off-range { color: var(--text-secondary); opacity: 0.45; }
+
+.rbc-enhanced .rbc-day-bg.rbc-today {
+  background: rgba(0, 113, 227, 0.10);
+  box-shadow: inset 0 0 0 2px var(--accent-blue);
+}
+
+.rbc-enhanced .rbc-date-cell.rbc-now .rbc-button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent-blue);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.rbc-enhanced .rbc-show-more {
+  color: var(--accent-blue);
+  background: transparent;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.rbc-enhanced .rbc-toolbar button {
+  color: var(--text-primary);
+  border-color: var(--border-color-strong);
+  background: var(--bg-card-solid);
+  border-radius: var(--radius-sm);
+}
+
+.rbc-enhanced .rbc-toolbar button:hover { background: var(--bg-hover); }
+
+.rbc-enhanced .rbc-toolbar button.rbc-active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #ffffff;
+}
+
+.rbc-enhanced .rbc-toolbar-label {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Agenda view */
+.rbc-enhanced .rbc-agenda-view table,
+.rbc-enhanced .rbc-agenda-view table th,
+.rbc-enhanced .rbc-agenda-view table td {
+  border-color: var(--border-color) !important;
+  color: var(--text-primary);
+}
+
+.rbc-enhanced .rbc-agenda-view table thead th {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+/* Search box loading pill */
+.cal-search-loading {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  border-color: var(--border-color);
+}
+
+/* ---- Day modal + Supplier Pickup: design-system alignment ---- */
+.dm-card { border-top: 2px solid var(--accent-blue); }
+.dm-container {
+  border-top: 3px solid var(--accent-blue);
+  border-radius: var(--radius-md);
+}
+
+@media (max-width: 1200px) {
+  .cal-card,
+  .unscheduled-item { width: 200px; }
+  .rbc-enhanced .rbc-header { font-size: 10px; }
+}
+
+.cal-card-cust {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Buttons used inside the calendar rails/modal ----
+   .btn-outline / .btn-light / .btn-ghost live in ViewWorkOrder.css, which is a
+   SEPARATE lazy route chunk — on /calendar it may never be loaded, leaving these
+   buttons unstyled (invisible dark-on-dark). Define them here so this page is
+   self-sufficient, matching the shared token values. */
+.calendar-page .btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1.2;
+  text-decoration: none;
+  transition: var(--transition-fast);
+}
+
+.calendar-page .btn-outline {
+  background: var(--bg-card-solid);
+  border-color: var(--border-color-strong);
+  color: var(--text-primary);
+}
+
+.calendar-page .btn-outline:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.calendar-page .btn-light {
+  background: var(--bg-hover);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+.calendar-page .btn-light:hover { background: var(--bg-card-solid); }
+
+.calendar-page .btn-primary {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #ffffff;
+}
+
+.calendar-page .btn-primary:hover { background: var(--accent-blue-hover); }
+
+.calendar-page .btn-danger {
+  background: var(--accent-red);
+  border-color: var(--accent-red);
+  color: #ffffff;
+}
+
+.calendar-page .btn-danger:hover { filter: brightness(1.08); }
