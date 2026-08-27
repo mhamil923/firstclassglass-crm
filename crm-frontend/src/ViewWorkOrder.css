@@ -741,12 +741,96 @@
   font-size: 12px;
 }
 
+/* ===== Card action rows (invoice / estimate / PO cards) =====
+   flex-wrap is the safety net: without it a row that runs out of width shrinks its
+   buttons below their own labels, and because the labels are white-space:nowrap the
+   text renders OUTSIDE the button box and collides with the neighbouring button.
+   Wrapping to a second line is always better than overlapping. */
 .po-pdf-actions {
   display: flex;
   gap: 8px;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   width: 100%;
+}
+
+/* Stack of action rows. Invoice cards carry five actions — ~276px of buttons in a
+   227px-wide card — so they can't share one row at any sane font size. They split
+   into a green primary pair (Send / Record Payment) over compact secondaries
+   (Expand / Edit / Remove). Estimate cards keep a single row; three buttons fit. */
+.po-card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.po-card-actions .po-pdf-actions {
+  gap: 6px;
+}
+
+/* Even-buttons pattern: one height, one radius, sized to their own content, and
+   flex:0 0 auto so they never shrink under the label. */
+.po-btn-card {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.po-btn-card:hover {
+  background: var(--bg-card-solid);
+  border-color: var(--accent-blue);
+}
+
+.po-btn-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The primary pair splits its own row evenly — growing is fine, shrinking below the
+   label is not, so flex-basis stays auto. */
+.po-card-actions-primary .po-btn-card {
+  flex: 1 1 auto;
+}
+
+.po-btn-card--green {
+  background: var(--accent-green);
+  border-color: var(--accent-green);
+  color: #fff;
+}
+
+.po-btn-card--green:hover {
+  background: var(--accent-green);
+  border-color: var(--accent-green);
+  filter: brightness(1.08);
+}
+
+/* Same tinted-destructive treatment .po-btn-delete already uses on PO cards, so the
+   card family reads consistently and Remove doesn't outshout the green primaries. */
+.po-btn-card--danger {
+  background: rgba(255, 59, 48, 0.12);
+  border-color: rgba(255, 59, 48, 0.25);
+  color: var(--accent-red);
+}
+
+.po-btn-card--danger:hover {
+  background: rgba(255, 59, 48, 0.25);
+  border-color: var(--accent-red);
 }
 
 .po-pdf-actions .po-btn-expand {

@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import api from "./api";
-import RecordPaymentModal, { PaymentHistory, RECORD_PAYMENT_BTN } from "./RecordPaymentModal";
+import RecordPaymentModal, { PaymentHistory } from "./RecordPaymentModal";
 import moment from "moment";
 import API_BASE_URL from "./config";
 import "./ViewWorkOrder.css";
@@ -3877,40 +3877,32 @@ export default function ViewWorkOrder() {
                         </div>
                       ) : null;
                     })()}
-                    <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
-                      {(() => {
-                        // Identical sizing for all three so they read as a matching set
-                        const estBtn = { flex: "1 1 0", minWidth: 0, maxWidth: "none", whiteSpace: "nowrap", padding: "0 6px", fontSize: 12, lineHeight: 1.2, height: 32, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center" };
-                        return (
-                          <>
-                            <button
-                              type="button"
-                              className="po-btn-expand"
-                              style={estBtn}
-                              onClick={() => openLightbox("pdf", href, name)}
-                            >
-                              Expand
-                            </button>
-                            <button
-                              type="button"
-                              className="po-btn-expand"
-                              style={{ ...estBtn, background: "#1b5e20", color: "#ffffff", borderColor: "#1b5e20" }}
-                              onClick={() => openEstimateSend(pdf.id)}
-                            >
-                              Send
-                            </button>
-                            <button
-                              type="button"
-                              className="po-btn-expand"
-                              style={{ ...estBtn, background: "#dc2626", color: "#ffffff", borderColor: "#dc2626" }}
-                              onClick={() => handleRemoveEstimatePdf(pdf.id)}
-                              disabled={busyEstimateUpload}
-                            >
-                              Remove
-                            </button>
-                          </>
-                        );
-                      })()}
+                    {/* Three actions fit one row comfortably (~215px of 227px), but they use
+                        the same content-sized .po-btn-card classes as the invoice card so the
+                        cards read as one family and neither can overlap at narrow widths. */}
+                    <div className="po-pdf-actions">
+                      <button
+                        type="button"
+                        className="po-btn-card"
+                        onClick={() => openLightbox("pdf", href, name)}
+                      >
+                        Expand
+                      </button>
+                      <button
+                        type="button"
+                        className="po-btn-card po-btn-card--green"
+                        onClick={() => openEstimateSend(pdf.id)}
+                      >
+                        Send
+                      </button>
+                      <button
+                        type="button"
+                        className="po-btn-card po-btn-card--danger"
+                        onClick={() => handleRemoveEstimatePdf(pdf.id)}
+                        disabled={busyEstimateUpload}
+                      >
+                        Remove
+                      </button>
                     </div>
                   </div>
                 );
@@ -4030,29 +4022,28 @@ export default function ViewWorkOrder() {
                             payments={invoicePayments[inv.id]}
                             onChanged={onPaymentChanged}
                           />
-                          <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
-                            {(() => {
-                              const invBtn = { flex: "1 1 0", minWidth: 0, maxWidth: "none", whiteSpace: "nowrap", padding: "0 6px", fontSize: 12, lineHeight: 1.2, height: 32, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center" };
-                              return (
-                                <>
-                                  {href && (
-                                    <button type="button" className="po-btn-expand" style={invBtn} onClick={() => openLightbox("pdf", href, label)}>Expand</button>
-                                  )}
-                                  {money2Out > 0 && (
-                                    <button
-                                      type="button" className="po-btn-expand"
-                                      style={{ ...invBtn, ...RECORD_PAYMENT_BTN }}
-                                      onClick={() => setPayModal({ id: inv.id, label: `Invoice #${invNo}`, customer: workOrder?.customer || "", total, outstanding: money2Out })}
-                                    >
-                                      Payment
-                                    </button>
-                                  )}
-                                  <button type="button" className="po-btn-expand" style={{ ...invBtn, background: "#1b5e20", color: "#ffffff", borderColor: "#1b5e20" }} onClick={() => openInvoiceSend(inv.id)}>Send</button>
-                                  <button type="button" className="po-btn-expand" style={invBtn} onClick={() => openQbModal("Invoice", inv)}>Edit</button>
-                                  <button type="button" className="po-btn-expand" style={{ ...invBtn, background: "#dc2626", color: "#ffffff", borderColor: "#dc2626" }} onClick={() => deleteUploadedInvoice(inv.id)}>Remove</button>
-                                </>
-                              );
-                            })()}
+                          {/* Five actions don't fit one 227px-wide row (they need ~276px), so they
+                              split: green primary pair on top, compact secondaries underneath. */}
+                          <div className="po-card-actions">
+                            <div className="po-pdf-actions po-card-actions-primary">
+                              <button type="button" className="po-btn-card po-btn-card--green" onClick={() => openInvoiceSend(inv.id)}>Send</button>
+                              {money2Out > 0 && (
+                                <button
+                                  type="button"
+                                  className="po-btn-card po-btn-card--green"
+                                  onClick={() => setPayModal({ id: inv.id, label: `Invoice #${invNo}`, customer: workOrder?.customer || "", total, outstanding: money2Out })}
+                                >
+                                  Record Payment
+                                </button>
+                              )}
+                            </div>
+                            <div className="po-pdf-actions">
+                              {href && (
+                                <button type="button" className="po-btn-card" onClick={() => openLightbox("pdf", href, label)}>Expand</button>
+                              )}
+                              <button type="button" className="po-btn-card" onClick={() => openQbModal("Invoice", inv)}>Edit</button>
+                              <button type="button" className="po-btn-card po-btn-card--danger" onClick={() => deleteUploadedInvoice(inv.id)}>Remove</button>
+                            </div>
                           </div>
                         </div>
                       );
