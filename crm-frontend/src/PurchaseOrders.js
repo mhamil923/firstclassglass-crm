@@ -354,7 +354,6 @@ export default function PurchaseOrders() {
 
   const handleMarkPickedUp = async (row) => {
     const woId = firstNonNullish(row?.workOrderId, row?.work_order_id, row?.woId, null);
-    const poNum = row?.poNumber || "";
     const isSynthetic = typeof row?.id === "string" && String(row.id).startsWith("wo-");
 
     if (!woId) {
@@ -435,13 +434,22 @@ export default function PurchaseOrders() {
         })
       );
 
-      alert(
-        `Marked Picked Up.\n` +
-          `Work Order moved to: ${NEEDS_TO_BE_SCHEDULED}` +
-          (poNum ? `\nPO: ${poNum}` : "")
-      );
-
-      loadPurchaseOrders();
+      // Was: a blocking alert() followed by an immediate full reload, so the row
+      // vanished behind a modal dialog. Now the row shows a "✓ Picked Up" state
+      // in place for a beat, then the list refreshes underneath it.
+      setJustDoneIds((prev) => {
+        const next = new Set(prev);
+        next.add(String(row.id));
+        return next;
+      });
+      setTimeout(() => {
+        setJustDoneIds((prev) => {
+          const next = new Set(prev);
+          next.delete(String(row.id));
+          return next;
+        });
+        loadPurchaseOrders();
+      }, 900);
     } catch (err) {
       console.error("❌ Error marking picked up:", err?.response || err);
       const status = err?.response?.status;
@@ -666,7 +674,108 @@ export default function PurchaseOrders() {
     });
   }, [combinedWaitingRows, search, supplierFilter, statusFilter]);
 
-  const actionBtnStyle = { minWidth: 110, width: 110, fontSize: 12, padding: '8px 6px' };
+  /* ===== Amount roll-up for the CURRENT filter ===== */
+  const amountSummary = useMemo(() => {
+    const rows = filteredPurchaseOrders || [];
+    const real = rows.filter((r) => !r.__synthetic);
+    const entered = real.filter((r) => r.amount != null);
+    const total = entered.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+    return { count: rows.length, total, missing: real.length - entered.length };
+  }, [filteredPurchaseOrders]);
+
+  /* ===== Inline PO amount (COGS) editing ===== */
+  const [editingAmountId, setEditingAmountId] = useState(null);
+  const [amountDraft, setAmountDraft] = useState("");
+  const [amountSaving, setAmountSaving] = useState(false);
+  // Rows that just completed an action, held briefly so the change is visible
+  // before the row leaves the list.
+  const [justDoneIds, setJustDoneIds] = useState(new Set());
+
+  const money = (n) =>
+    Number(n).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+
+  const beginEditAmount = (row) => {
+    if (row.__synthetic) return; // no work_order_pos row to write to
+    setEditingAmountId(String(row.id));
+    setAmountDraft(row.amount == null ? "" : String(row.amount));
+  };
+
+  const cancelEditAmount = () => {
+    setEditingAmountId(null);
+    setAmountDraft("");
+  };
+
+  const saveAmount = async (row) => {
+    const raw = String(amountDraft).trim().replace(/[$,]/g, "");
+    const value = raw === "" ? null : Number(raw);
+    if (value !== null && (!Number.isFinite(value) || value < 0)) {
+      setError("Amount must be a positive number.");
+      return;
+    }
+    setAmountSaving(true);
+    const prev = purchaseOrders;
+    // Optimistic — the number appears immediately.
+    setPurchaseOrders((list) =>
+      (list || []).map((po) => (String(po.id) === String(row.id) ? { ...po, amount: value } : po))
+    );
+    setEditingAmountId(null);
+    try {
+      await api.put(
+        `/work-orders/${row.workOrderId}/pos/${row.id}`,
+        { amount: value },
+        { headers: { "Content-Type": "application/json", ...authHeaders() } }
+      );
+      setError("");
+    } catch (e) {
+      console.error("❌ Error saving PO amount:", e?.response || e);
+      setPurchaseOrders(prev); // roll back
+      setError(e?.response?.data?.error || "Failed to save the amount.");
+    } finally {
+      setAmountSaving(false);
+      setAmountDraft("");
+    }
+  };
+
+  const renderAmountCell = (row) => {
+    if (row.__synthetic) return <span className="po-muted">—</span>;
+    if (String(editingAmountId) === String(row.id)) {
+      return (
+        <input
+          className="po-amount-input"
+          autoFocus
+          inputMode="decimal"
+          value={amountDraft}
+          disabled={amountSaving}
+          onChange={(e) => setAmountDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); saveAmount(row); }
+            if (e.key === "Escape") { e.preventDefault(); cancelEditAmount(); }
+          }}
+          onBlur={() => saveAmount(row)}
+          placeholder="0.00"
+          aria-label="PO amount"
+        />
+      );
+    }
+    if (row.amount == null) {
+      return (
+        <button type="button" className="po-amount-add" onClick={() => beginEditAmount(row)}>
+          Add
+        </button>
+      );
+    }
+    return (
+      <button
+        type="button"
+        className="po-amount-value"
+        onClick={() => beginEditAmount(row)}
+        title="Click to edit"
+      >
+        {money(row.amount)}
+      </button>
+    );
+  };
+
 
   const pdfCanMarkPickedUp = useMemo(() => {
     if (!pdfPo) return false;
@@ -689,9 +798,12 @@ export default function PurchaseOrders() {
         <div className="po-header">
           <div>
             <h1 className="po-title">Purchase Orders</h1>
-            <p className="text-muted" style={{ marginTop: 4, fontSize: 13 }}>
+            <p className="po-subtitle">
               Showing all work orders in <b>Waiting on Parts</b> — mark "Picked Up" to move to{" "}
               <b>{NEEDS_TO_BE_SCHEDULED}</b>.
+            </p>
+            <p className="po-note">
+              Derived from work orders (PO number, supplier, PO PDF).
             </p>
           </div>
         </div>
@@ -760,22 +872,16 @@ export default function PurchaseOrders() {
 
             <div className="col-md-2 text-end">
               <button
-                className="btn btn-primary mt-3 mt-md-0"
+                className="po-btn po-btn-ghost po-btn-lg"
                 type="button"
                 onClick={loadPurchaseOrders}
                 disabled={loading}
-                style={{ minWidth: 120 }}
               >
-                Refresh
+                {loading ? "Refreshing…" : "Refresh"}
               </button>
             </div>
           </div>
 
-          <div className="mt-3 text-muted" style={{ fontSize: "0.9rem" }}>
-            Purchase orders are derived from work orders (PO Number, Supplier, and PO PDF).
-            <br />
-            <b>Showing ALL work orders with status: "Waiting on Parts".</b>
-          </div>
       </div>
 
       {error && (
@@ -786,10 +892,24 @@ export default function PurchaseOrders() {
 
       <div className="po-section-card" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', background: 'var(--bg-hover)', borderBottom: '2px solid var(--accent-blue)' }}>
-          <h3 style={{ margin: 0, padding: 0, fontSize: 14, fontWeight: 600, color: 'var(--accent-blue)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Purchase Orders List</h3>
-          {loading ? (
-            <span className="text-muted" style={{ fontSize: 12 }}>Loading…</span>
-          ) : null}
+          <h3 className="po-list-title">Purchase Orders List</h3>
+          <span className="po-list-summary">
+            {loading ? (
+              "Loading…"
+            ) : (
+              <>
+                {amountSummary.count} PO{amountSummary.count === 1 ? "" : "s"}
+                {" · "}
+                <b>{money(amountSummary.total)}</b> entered
+                {amountSummary.missing > 0 ? (
+                  <>
+                    {" · "}
+                    <span className="po-missing">{amountSummary.missing} missing amount{amountSummary.missing === 1 ? "" : "s"}</span>
+                  </>
+                ) : null}
+              </>
+            )}
+          </span>
         </div>
 
         <div style={{ padding: 0 }}>
@@ -802,6 +922,7 @@ export default function PurchaseOrders() {
                   <th>Customer</th>
                   <th>Site</th>
                   <th>Work Order #</th>
+                  <th className="po-amount-col">Amount</th>
                   <th>PO Status</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
@@ -810,7 +931,7 @@ export default function PurchaseOrders() {
               <tbody>
                 {filteredPurchaseOrders.length === 0 && !loading && (
                   <tr>
-                    <td colSpan="7" className="text-center py-3">
+                    <td colSpan="8" className="text-center py-3">
                       No purchase orders found.
                     </td>
                   </tr>
@@ -829,34 +950,39 @@ export default function PurchaseOrders() {
                     : row.poNumber ? `#${row.poNumber}` : "-";
 
                   return (
-                    <tr key={row.id}>
-                      <td>{row.supplier || "-"}</td>
-                      <td>{poDisplay}</td>
-                      <td>{row.customer || "-"}</td>
-                      <td>{row.siteLocation || row.siteAddress || "-"}</td>
-                      <td>{row.workOrderNumber || "-"}</td>
-                      <td>{row.poStatus || (row.poPickedUp ? "Picked Up" : "On Order")}</td>
+                    <tr key={row.id} className={justDoneIds.has(String(row.id)) ? "po-row po-row-done" : "po-row"}>
+                      <td>{row.supplier || <span className="po-muted">—</span>}</td>
+                      <td>{poDisplay === "-" ? <span className="po-muted">—</span> : poDisplay}</td>
+                      <td className="po-cell-strong">{row.customer || <span className="po-muted">—</span>}</td>
+                      <td>{row.siteLocation || row.siteAddress || <span className="po-muted">—</span>}</td>
+                      <td>{row.workOrderNumber || <span className="po-muted">—</span>}</td>
+
+                      <td className="po-amount-col">{renderAmountCell(row)}</td>
 
                       <td>
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                        <span className={`po-status-pill ${row.poPickedUp ? "is-picked" : "is-open"}`}>
+                          {row.poStatus || (row.poPickedUp ? "Picked Up" : "On Order")}
+                        </span>
+                      </td>
+
+                      <td>
+                        {/* Right-aligned so an absent PDF button just shortens the
+                            group instead of leaving a hole that shifts the rest. */}
+                        <div className="po-actions">
                           {row.poPdfPath ? (
                             <button
                               type="button"
-                              className="btn btn-sm btn-info"
-                              style={actionBtnStyle}
+                              className="po-btn po-btn-ghost"
                               onClick={() => handleOpenPdf(row)}
                               disabled={isBusy}
                             >
                               View PDF
                             </button>
-                          ) : (
-                            <div style={{ ...actionBtnStyle, visibility: 'hidden' }} />
-                          )}
+                          ) : null}
 
                           <button
                             type="button"
-                            className="btn btn-sm btn-primary"
-                            style={actionBtnStyle}
+                            className="po-btn po-btn-ghost"
                             onClick={() => handleViewWorkOrder(row)}
                             disabled={isBusy}
                           >
@@ -866,16 +992,17 @@ export default function PurchaseOrders() {
                           {stillWaiting ? (
                             <button
                               type="button"
-                              className="btn btn-sm btn-success"
-                              style={actionBtnStyle}
+                              className="po-btn po-btn-go"
                               onClick={() => handleMarkPickedUp(row)}
                               disabled={isBusy}
                             >
-                              {isBusy ? "Working..." : "Mark Picked Up"}
+                              {justDoneIds.has(String(row.id))
+                                ? "✓ Picked Up"
+                                : isBusy
+                                ? "Working…"
+                                : "Mark Picked Up"}
                             </button>
-                          ) : (
-                            <div style={{ ...actionBtnStyle, visibility: 'hidden' }} />
-                          )}
+                          ) : null}
                         </div>
                       </td>
                     </tr>

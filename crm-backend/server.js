@@ -10269,7 +10269,7 @@ app.get('/purchase-orders', authenticate, async (req, res) => {
     }
 
     const sql = `
-      SELECT p.id AS poId, p.workOrderId, p.poNumber, p.poSupplier, p.poPdfPath, p.poPickedUp, p.createdAt AS poCreatedAt,
+      SELECT p.id AS poId, p.workOrderId, p.poNumber, p.poSupplier, p.poPdfPath, p.poPickedUp, p.amount, p.createdAt AS poCreatedAt,
              w.customer, w.siteLocation, w.siteAddress, w.workOrderNumber, w.status,
              poAgg.allPoNumbers
       FROM work_order_pos p
@@ -10301,6 +10301,10 @@ app.get('/purchase-orders', authenticate, async (req, res) => {
       poPdfPath: r.poPdfPath || null,
       poPickedUp: !!Number(r.poPickedUp || 0),
       poStatus: Number(r.poPickedUp || 0) ? 'Picked Up' : 'On Order',
+      // Material cost for this PO. Feeds the COGS side of the P&L, and is now
+      // editable inline from the Purchase Orders table — so the list has to
+      // return it, not just the per-work-order PO endpoints.
+      amount: r.amount == null ? null : Number(r.amount),
       createdAt: r.poCreatedAt || null,
       workOrderStatus: displayStatusOrDefault(r.status),
     }));
