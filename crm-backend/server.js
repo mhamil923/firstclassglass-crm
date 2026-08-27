@@ -2293,6 +2293,32 @@ function sanitizeFilename(originalname) {
   return (base || fallback) + ext;
 }
 
+// Uniqueness prefix for every stored upload key.
+//
+// Uploads used to be keyed as `uploads/<sanitized original name>` with nothing
+// unique in them, so two files that happened to share a filename — Paper_ticket.pdf,
+// Sign_off_sheet.pdf, IMG_1044.jpg — silently overwrote each other in S3, and the
+// bucket has no versioning to fall back on. Every upload key now carries this
+// millisecond stamp.
+//
+// Date.now() on its own is not enough: several files inside one multipart request
+// are parsed in the same millisecond, so a plain timestamp would put two same-named
+// files from the SAME request back on one key. The per-process sequence disambiguates
+// repeats within a millisecond, keeping the common-case key shape unchanged
+// (`uploads/1787849429375_Paper_ticket.pdf`).
+let __uploadStampMs = 0;
+let __uploadStampSeq = 0;
+function uploadStamp() {
+  const now = Date.now();
+  if (now === __uploadStampMs) {
+    __uploadStampSeq += 1;
+    return `${now}-${__uploadStampSeq}`;
+  }
+  __uploadStampMs = now;
+  __uploadStampSeq = 0;
+  return String(now);
+}
+
 function makeUploader() {
   const limits = {
     fileSize: MAX_FILE_SIZE_MB * 1024 * 1024,
@@ -2310,7 +2336,7 @@ function makeUploader() {
         acl: 'private',
         contentType: multerS3.AUTO_CONTENT_TYPE,
         key: (req, file, cb) => {
-          cb(null, `uploads/${sanitizeFilename(file.originalname)}`);
+          cb(null, `uploads/${uploadStamp()}_${sanitizeFilename(file.originalname)}`);
         }
       }),
       limits,
@@ -2324,7 +2350,7 @@ function makeUploader() {
   const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, localDir),
     filename: (req, file, cb) => {
-      cb(null, sanitizeFilename(file.originalname));
+      cb(null, `${uploadStamp()}_${sanitizeFilename(file.originalname)}`);
     }
   });
 
