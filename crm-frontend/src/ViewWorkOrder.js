@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import api from "./api";
+import RecordPaymentModal, { PaymentHistory, RECORD_PAYMENT_BTN } from "./RecordPaymentModal";
 import moment from "moment";
 import API_BASE_URL from "./config";
 import "./ViewWorkOrder.css";
@@ -564,6 +565,12 @@ export default function ViewWorkOrder() {
   const [invSendModal, setInvSendModal] = useState(null);
   const [invoiceSends, setInvoiceSends] = useState([]);
 
+  // Payment recording on the invoice cards. invoicePayments is keyed by invoiceId
+  // so each card renders only its own history — paying one of a WO's invoices must
+  // never touch the others.
+  const [invoicePayments, setInvoicePayments] = useState({});
+  const [payModal, setPayModal] = useState(null);   // { id, label, customer, total, outstanding }
+
   // QuickBooks metadata capture — folded into the Estimate + Invoice upload flows.
   // qbModal: null when closed, otherwise { docType: 'Estimate'|'Invoice', editingId|null }
   const [qbModal, setQbModal] = useState(null);
@@ -786,6 +793,28 @@ export default function ViewWorkOrder() {
     } catch (err) {
       console.error("Error fetching linked invoices:", err);
     }
+  };
+
+  const fetchInvoicePayments = async () => {
+    try {
+      const res = await api.get(`/work-orders/${id}/invoice-payments`, { headers: authHeaders() });
+      const byInvoice = {};
+      for (const p of Array.isArray(res.data) ? res.data : []) {
+        (byInvoice[p.invoiceId] = byInvoice[p.invoiceId] || []).push(p);
+      }
+      setInvoicePayments(byInvoice);
+    } catch (err) {
+      console.error("Error fetching invoice payments:", err);
+      setInvoicePayments({});
+    }
+  };
+
+  // Record/delete both return the recomputed invoice + that invoice's payment list.
+  // Patch just that one card in place — the other invoices on this WO are untouched.
+  const onPaymentChanged = (updated, payments) => {
+    if (!updated) return;
+    setLinkedInvoices((prev) => prev.map((inv) => (inv.id === updated.id ? { ...inv, ...updated } : inv)));
+    setInvoicePayments((prev) => ({ ...prev, [updated.id]: payments || [] }));
   };
 
   const fetchEstimatePdfs = async () => {
@@ -1080,6 +1109,7 @@ export default function ViewWorkOrder() {
     fetchEstimatePdfs();
     fetchEstimateSends();
     fetchInvoiceSends();
+    fetchInvoicePayments();
     fetchResidentialContract();
     fetchTechUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2751,6 +2781,15 @@ export default function ViewWorkOrder() {
         );
       })()}
 
+      {/* Same Record Payment modal Collections and the Aging tab use. */}
+      {payModal && (
+        <RecordPaymentModal
+          invoice={payModal}
+          onClose={() => setPayModal(null)}
+          onSaved={onPaymentChanged}
+        />
+      )}
+
       {/* ───── Send Invoice to Customer — compose modal (mirrors estimate modal) ───── */}
       {invSendModal && (() => {
         const m = invSendModal;
@@ -3954,6 +3993,8 @@ export default function ViewWorkOrder() {
                       const href = inv.pdfPath ? pdfThumbUrl(inv.pdfPath) : null;
                       const total = Number(inv.total) || 0;
                       const paid = Number(inv.amountPaid) || 0;
+                      // What's still owed on THIS invoice — the Payment button hides once it's cleared.
+                      const money2Out = Math.max(0, Math.round((total - paid) * 100) / 100);
                       const sl = (inv.status || "").toLowerCase();
                       const badgeBg = sl === "paid" ? "#22c55e" : (sl === "partial" || sl === "sent") ? "#f59e0b" : "#6b7280";
                       const invNo = inv.qbDocNumber || inv.invoiceNumber || inv.id;
@@ -3984,6 +4025,11 @@ export default function ViewWorkOrder() {
                               </div>
                             ) : null;
                           })()}
+                          <PaymentHistory
+                            invoiceId={inv.id}
+                            payments={invoicePayments[inv.id]}
+                            onChanged={onPaymentChanged}
+                          />
                           <div className="po-pdf-actions" style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
                             {(() => {
                               const invBtn = { flex: "1 1 0", minWidth: 0, maxWidth: "none", whiteSpace: "nowrap", padding: "0 6px", fontSize: 12, lineHeight: 1.2, height: 32, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center" };
@@ -3991,6 +4037,15 @@ export default function ViewWorkOrder() {
                                 <>
                                   {href && (
                                     <button type="button" className="po-btn-expand" style={invBtn} onClick={() => openLightbox("pdf", href, label)}>Expand</button>
+                                  )}
+                                  {money2Out > 0 && (
+                                    <button
+                                      type="button" className="po-btn-expand"
+                                      style={{ ...invBtn, ...RECORD_PAYMENT_BTN }}
+                                      onClick={() => setPayModal({ id: inv.id, label: `Invoice #${invNo}`, customer: workOrder?.customer || "", total, outstanding: money2Out })}
+                                    >
+                                      Payment
+                                    </button>
                                   )}
                                   <button type="button" className="po-btn-expand" style={{ ...invBtn, background: "#1b5e20", color: "#ffffff", borderColor: "#1b5e20" }} onClick={() => openInvoiceSend(inv.id)}>Send</button>
                                   <button type="button" className="po-btn-expand" style={invBtn} onClick={() => openQbModal("Invoice", inv)}>Edit</button>

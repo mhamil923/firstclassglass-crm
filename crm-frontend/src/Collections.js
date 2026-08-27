@@ -12,6 +12,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "./api";
+import RecordPaymentModal, { RECORD_PAYMENT_BTN } from "./RecordPaymentModal";
 import "./Invoices.css";
 
 function fmtMoney(val) {
@@ -67,6 +68,7 @@ export default function Collections() {
   const [collectionsLoading, setCollectionsLoading] = useState(false);
   const [payLinkEdit, setPayLinkEdit] = useState({}); // { [invoiceId]: draftValue }
   const [draftModal, setDraftModal] = useState(null);
+  const [payModal, setPayModal] = useState(null);   // the row being paid, or null
 
   const fetchCollections = useCallback(async () => {
     setCollectionsLoading(true);
@@ -144,6 +146,25 @@ export default function Collections() {
     }
   };
 
+  // A payment either clears the invoice — in which case the backend flipped it to
+  // Paid and the collections query (status IN Sent/Partial/Overdue/Unpaid AND
+  // total-amountPaid > 0) no longer returns it — or it's partial, and the row stays
+  // with its new outstanding. Drop it locally for the instant update, then refetch
+  // so the recomputed late fee and reminder stage come from the engine, not guesses.
+  const onPaymentSaved = async (updated) => {
+    if (updated) {
+      const stillOpen = Number(updated.balanceDue) > 0 && updated.status !== "Paid";
+      setCollections((prev) =>
+        stillOpen
+          ? prev.map((c) => (c.id === updated.id
+              ? { ...c, status: updated.status, total: Number(updated.total) || 0, amountPaid: Number(updated.amountPaid) || 0, outstanding: Number(updated.balanceDue) || 0 }
+              : c))
+          : prev.filter((c) => c.id !== updated.id)
+      );
+    }
+    await fetchCollections();
+  };
+
   // Overdue badge colors from design tokens: green (not due) / amber (0–44) / red (45+)
   const daysOverdueBadge = (d) => {
     if (d == null || d < 0) return { background: "var(--accent-green)", color: "#fff", label: d == null ? "—" : "Not due" };
@@ -175,7 +196,7 @@ export default function Collections() {
                   <th>Reminder Stage</th>
                   <th>Last Reminded</th>
                   <th>Pay Link</th>
-                  <th style={{ width: 250 }}></th>
+                  <th style={{ width: 380 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -242,6 +263,7 @@ export default function Collections() {
                       </td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         <div style={{ display: "inline-flex", gap: 6 }}>
+                          <button type="button" style={{ ...ROW_BTN, ...RECORD_PAYMENT_BTN }} onClick={() => setPayModal(row)}>Record Payment</button>
                           <button type="button" className="btn-primary-apple" style={ROW_BTN} onClick={() => openDraft(row)}>Draft Reminder</button>
                           <button type="button" style={{ ...ROW_BTN, ...SECONDARY_BTN }} onClick={() => navigate(`/invoices/${row.id}`)}>Open</button>
                           <button type="button" style={{ ...ROW_BTN, ...SECONDARY_BTN }} onClick={() => skipReminder(row.id)}>Skip</button>
@@ -258,6 +280,14 @@ export default function Collections() {
           )}
         </div>
       </div>
+
+      {payModal && (
+        <RecordPaymentModal
+          invoice={{ id: payModal.id, label: `Invoice #${payModal.invoiceNumber}`, customer: payModal.customer, total: payModal.total, outstanding: payModal.outstanding }}
+          onClose={() => setPayModal(null)}
+          onSaved={onPaymentSaved}
+        />
+      )}
 
       {/* Review-before-send Draft Reminder modal */}
       {draftModal && (

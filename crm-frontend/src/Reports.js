@@ -3,6 +3,7 @@ import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTheme } from "./contexts/ThemeContext";
 import api from "./api";
+import RecordPaymentModal, { RECORD_PAYMENT_BTN } from "./RecordPaymentModal";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
@@ -125,6 +126,7 @@ export default function Reports() {
   const [revenue, setRevenue] = useState(null);
   const [revLoading, setRevLoading] = useState(false);
   const [aging, setAging] = useState(null);
+  const [payModal, setPayModal] = useState(null);   // aging row being paid, or null
   const [agingLoading, setAgingLoading] = useState(false);
   const [customers, setCustomers] = useState(null);
   const [custLoading, setCustLoading] = useState(false);
@@ -511,7 +513,7 @@ export default function Reports() {
                     <div className="rpt-card-header">{aging.buckets[expandedBucket].label} Invoices</div>
                     <table className="rpt-table">
                       <thead>
-                        <tr><th>Invoice #</th><th>Customer</th><th>Issue Date</th><th>Due Date</th><th className="rpt-num">Total</th><th className="rpt-num">Balance Due</th><th className="rpt-num">Days Past Due</th></tr>
+                        <tr><th>Invoice #</th><th>Customer</th><th>Issue Date</th><th>Due Date</th><th className="rpt-num">Total</th><th className="rpt-num">Balance Due</th><th className="rpt-num">Days Past Due</th><th></th></tr>
                       </thead>
                       <tbody>
                         {aging.buckets[expandedBucket].invoices.map(inv => {
@@ -525,6 +527,15 @@ export default function Reports() {
                             <td className="rpt-num rpt-mono">{fmtMoney(inv.total)}</td>
                             <td className="rpt-num rpt-mono">{fmtMoney(inv.balanceDue)}</td>
                             <td className="rpt-num">{dpd > 0 ? dpd : "\u2014"}</td>
+                            <td style={{ textAlign: "right", whiteSpace: "nowrap" }} onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                style={{ ...RECORD_PAYMENT_BTN, fontSize: 12, height: 28, padding: "0 10px", borderRadius: 6 }}
+                                onClick={() => setPayModal({ id: inv.id, label: `Invoice #${inv.invoiceNumber}`, customer: inv.customerName, total: inv.total, outstanding: inv.balanceDue })}
+                              >
+                                Record Payment
+                              </button>
+                            </td>
                           </tr>
                           );
                         })}
@@ -938,6 +949,17 @@ export default function Reports() {
           </div>
         )}
       </div>
+
+      {/* Same modal component as Collections and the WO invoice cards — recording a
+          payment here re-pulls the aging buckets (and the P&L, whose cash-basis
+          revenue picks the invoice up once paidAt is stamped). */}
+      {payModal && (
+        <RecordPaymentModal
+          invoice={payModal}
+          onClose={() => setPayModal(null)}
+          onSaved={() => { fetchAging(); if (pl) fetchPL(); }}
+        />
+      )}
     </div>
   );
 }

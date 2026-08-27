@@ -1631,6 +1631,40 @@ async function ensureInvoiceTables() {
 }
 ensureInvoiceTables().catch(() => {});
 
+// ─── payments_v2 — single source of truth for recorded customer payments ─────
+// Why a NEW table instead of reusing the existing `payments`: `payments` (created
+// 2026-02, 0 rows) is claimed by the Stripe checkout flow, which INSERTs
+// stripeSessionId/status/customerEmail — columns the live table does not have, so
+// that writer is already broken. Folding manual payments in would put two
+// incompatible semantics in one table. `invoice_payments` (0 rows) was closer but
+// pins paymentMethod to enum('check','credit_card','cash','other') — no ACH — and
+// splits the reference across checkNumber/referenceNote. Both legacy tables are
+// empty, so nothing needs migrating; every payment read below now uses payments_v2.
+async function ensurePaymentsV2Table() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS payments_v2 (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        invoiceId   INT NOT NULL,
+        amount      DECIMAL(10,2) NOT NULL,
+        paymentDate DATE NOT NULL,
+        method      VARCHAR(20) NULL,
+        reference   VARCHAR(100) NULL,
+        notes       VARCHAR(255) NULL,
+        createdBy   VARCHAR(100) NULL,
+        createdAt   DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pv2_invoiceId (invoiceId),
+        INDEX idx_pv2_paymentDate (paymentDate),
+        CONSTRAINT fk_pv2_invoice FOREIGN KEY (invoiceId) REFERENCES invoices(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('[Payments] payments_v2 table ready');
+  } catch (e) {
+    console.warn('[Payments] Could not create payments_v2 table:', e.message);
+  }
+}
+ensurePaymentsV2Table().catch(() => {});
+
 // ─── PERFORMANCE INDEXES (idempotent, non-destructive: ADD INDEX only) ───────
 // MySQL 8 has no CREATE INDEX IF NOT EXISTS, so we check information_schema first.
 // Each single-column secondary index on InnoDB builds ALGORITHM=INPLACE (online).
@@ -4185,6 +4219,69 @@ async function getNextInvoiceNumber() {
   return String(current);
 }
 
+// ─── PAYMENT RECORDING (payments_v2) ────────────────────────────────────────
+const PAYMENT_METHODS = ['Check', 'ACH', 'Card', 'Cash', 'Other'];
+const money2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// Accept 'YYYY-MM-DD' (what the date input posts). Anything unparseable is rejected
+// by the caller rather than silently defaulted, so a bad date can't land in the P&L.
+function normalizePaymentDate(v) {
+  if (v == null || v === '') return new Date().toISOString().slice(0, 10);
+  const s = String(v).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(s + 'T00:00:00Z');
+  return Number.isNaN(d.getTime()) ? null : s;
+}
+
+// Recompute an invoice's money columns from the payments_v2 sum. Runs on the
+// caller's transaction connection with the invoice row already locked.
+//
+// Deliberately does NOT recompute `total` the way recalcInvoiceTotals does: these
+// invoices come from QuickBooks PDFs and carry no invoice_line_items rows, so
+// deriving the total from line items would zero every one of them out.
+async function syncInvoiceFromPayments(conn, invoiceId, { paymentDate = null } = {}) {
+  const [[inv]] = await conn.query(
+    'SELECT id, total, status, paidAt FROM invoices WHERE id = ?', [invoiceId]
+  );
+  if (!inv) return null;
+  const [[{ paid }]] = await conn.query(
+    'SELECT COALESCE(SUM(amount),0) AS paid FROM payments_v2 WHERE invoiceId = ?', [invoiceId]
+  );
+  const total = money2(inv.total);
+  const amountPaid = money2(paid);
+  const balanceDue = money2(Math.max(0, total - amountPaid));
+  const paymentStatus = amountPaid <= 0 ? 'Unpaid' : (balanceDue <= 0 ? 'Paid' : 'Partial');
+
+  // Aging reads balanceDue; Collections reads (total - amountPaid). Both are set
+  // here so the two pages can never disagree about the same invoice.
+  const sets = ['amountPaid=?', 'balanceDue=?', 'paymentStatus=?', 'updatedAt=NOW()'];
+  const params = [amountPaid, balanceDue, paymentStatus];
+
+  // Draft/Void invoices keep their workflow status regardless of money movement.
+  if (inv.status !== 'Draft' && inv.status !== 'Void') {
+    if (balanceDue <= 0 && amountPaid > 0) {
+      sets.push("status='Paid'");
+      // paidAt is the cash-basis date the P&L groups revenue by — stamp it once
+      // from the payment that cleared the balance and never overwrite it after.
+      if (!inv.paidAt) { sets.push('paidAt=?'); params.push(paymentDate || new Date().toISOString().slice(0, 10)); }
+    } else if (inv.status === 'Paid') {
+      // A deleted payment un-zeroed the balance: reverse the flip so the invoice
+      // returns to Collections/Aging and drops back out of cash-basis revenue.
+      sets.push("status='Sent'", 'paidAt=NULL');
+    }
+    // Partial on a still-open invoice: status untouched. That is what keeps the
+    // row in Collections (which matches Sent/Partial/Overdue/Unpaid) at its new balance.
+  }
+
+  await conn.query(`UPDATE invoices SET ${sets.join(',')} WHERE id=?`, [...params, invoiceId]);
+  const [[updated]] = await conn.query(
+    `SELECT id, invoiceNumber, qbDocNumber, workOrderId, total, amountPaid, balanceDue,
+            status, paymentStatus, paidAt, dueDate
+       FROM invoices WHERE id=?`, [invoiceId]
+  );
+  return updated;
+}
+
 async function recalcInvoiceTotals(invoiceId) {
   const [[{ s }]] = await db.query(
     'SELECT COALESCE(SUM(amount), 0) AS s FROM invoice_line_items WHERE invoiceId = ?',
@@ -4196,7 +4293,7 @@ async function recalcInvoiceTotals(invoiceId) {
   const taxAmount = Math.round(subtotal * taxRate) / 100;
   const total = subtotal + taxAmount;
   const [[{ paid }]] = await db.query(
-    'SELECT COALESCE(SUM(amount), 0) AS paid FROM invoice_payments WHERE invoiceId = ?',
+    'SELECT COALESCE(SUM(amount), 0) AS paid FROM payments_v2 WHERE invoiceId = ?',
     [invoiceId]
   );
   const amountPaid = Number(paid) || 0;
@@ -4386,7 +4483,7 @@ app.get('/invoices/:id', authenticate, requireNumericParam('id'), async (req, re
       [req.params.id]
     );
     const [payments] = await db.query(
-      'SELECT * FROM invoice_payments WHERE invoiceId = ? ORDER BY paymentDate DESC, id DESC',
+      'SELECT * FROM payments_v2 WHERE invoiceId = ? ORDER BY paymentDate DESC, id DESC',
       [req.params.id]
     );
     invoice.lineItems = lineItems;
@@ -4671,120 +4768,128 @@ app.post('/invoices/:id/send-email', authenticate, requireNumericParam('id'), as
   }
 });
 
-// GET /invoices/:id/payments - list payments for an invoice
+// GET /invoices/:id/payments — payment history, oldest first.
 app.get('/invoices/:id/payments', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
     const [rows] = await db.query(
-      'SELECT * FROM invoice_payments WHERE invoiceId = ? ORDER BY paymentDate ASC, id ASC',
+      'SELECT * FROM payments_v2 WHERE invoiceId = ? ORDER BY paymentDate ASC, id ASC',
       [req.params.id]
     );
     res.json(rows);
   } catch (err) {
     console.error('Error fetching payments:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Failed to fetch payments.' });
   }
 });
 
-// POST /invoices/:id/payments - record a payment
+// POST /invoices/:id/payments — record a customer payment.
+// One transaction: lock the invoice, validate against the live outstanding balance,
+// insert the payment, then recompute amountPaid/balanceDue/status/paidAt from the
+// payments_v2 sum. Overpayments are rejected — no negative balances, no credits.
 app.post('/invoices/:id/payments', authenticate, requireNumericParam('id'), async (req, res) => {
+  const invoiceId = req.params.id;
+  const b = coerceBody(req);
+  const amount = money2(b.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'Payment amount is required and must be greater than $0.00.' });
+  }
+  const paymentDate = normalizePaymentDate(b.paymentDate);
+  if (!paymentDate) return res.status(400).json({ error: 'Payment date must be a valid YYYY-MM-DD date.' });
+  const method = PAYMENT_METHODS.includes(b.method) ? b.method : 'Other';
+  const reference = String(b.reference ?? '').trim().slice(0, 100) || null;
+  const notes = String(b.notes ?? '').trim().slice(0, 255) || null;
+  const createdBy = req.user?.name || req.user?.username || 'Unknown';
+
+  const conn = await db.getConnection();
   try {
-    const b = coerceBody(req);
-    const amount = Number(b.amount);
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'Payment amount is required and must be > 0' });
-
-    const invoiceId = req.params.id;
-    const [[invoice]] = await db.query('SELECT * FROM invoices WHERE id = ?', [invoiceId]);
-    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
-
-    const paymentMethod = b.paymentMethod || 'check';
-    const checkNumber = b.checkNumber || null;
-    const referenceNote = b.referenceNote ?? b.notes ?? null;
-    const paymentDate = b.paymentDate || new Date().toISOString().split('T')[0];
-    const recordedBy = req.user?.name || req.user?.username || 'Admin';
-
-    const [result] = await db.query(
-      `INSERT INTO invoice_payments
-        (invoiceId, workOrderId, amount, paymentMethod, checkNumber, referenceNote, paymentDate, recordedBy)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [invoiceId, invoice.workOrderId || null, amount, paymentMethod, checkNumber, referenceNote, paymentDate, recordedBy]
+    await conn.beginTransaction();
+    const [[inv]] = await conn.query(
+      'SELECT id, invoiceNumber, total, status FROM invoices WHERE id = ? FOR UPDATE', [invoiceId]
     );
-
-    await recalcInvoiceTotals(invoiceId);
-
-    const [[totals]] = await db.query(
-      'SELECT COALESCE(SUM(amount),0) AS totalPaid FROM invoice_payments WHERE invoiceId = ?',
-      [invoiceId]
-    );
-    const totalPaid = parseFloat(totals.totalPaid);
-    const invoiceTotal = parseFloat(invoice.total || 0);
-
-    let paymentStatus = 'Unpaid';
-    if (totalPaid >= invoiceTotal && invoiceTotal > 0) paymentStatus = 'Paid';
-    else if (totalPaid > 0) paymentStatus = 'Partial';
-
-    await db.query(
-      'UPDATE invoices SET paymentStatus = ?, amountPaid = ? WHERE id = ?',
-      [paymentStatus, totalPaid, invoiceId]
-    );
-
-    if (paymentStatus === 'Paid' && invoice.workOrderId) {
-      await db.query("UPDATE work_orders SET status = 'Completed' WHERE id = ?", [invoice.workOrderId]);
+    if (!inv) { await conn.rollback(); return res.status(404).json({ error: 'Invoice not found' }); }
+    if (inv.status === 'Void') {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Cannot record a payment against a voided invoice.' });
     }
 
-    const balanceRemaining = Math.round((invoiceTotal - totalPaid) * 100) / 100;
-    res.json({
-      success: true,
-      paymentId: result.insertId,
-      totalPaid,
-      paymentStatus,
-      balanceRemaining,
-    });
+    const [[{ paid }]] = await conn.query(
+      'SELECT COALESCE(SUM(amount),0) AS paid FROM payments_v2 WHERE invoiceId = ?', [invoiceId]
+    );
+    const total = money2(inv.total);
+    const outstanding = money2(Math.max(0, total - money2(paid)));
+
+    if (outstanding <= 0) {
+      await conn.rollback();
+      return res.status(400).json({
+        error: `Invoice #${inv.invoiceNumber} is already paid in full — there is nothing outstanding to apply a payment to.`,
+        outstanding: 0,
+      });
+    }
+    // Half-cent tolerance so a legitimate exact-balance payment can't be tripped
+    // up by float noise, while a real overpayment still fails.
+    if (amount > outstanding + 0.004) {
+      await conn.rollback();
+      return res.status(400).json({
+        error: `Payment of ${fmtMoney(amount)} exceeds the ${fmtMoney(outstanding)} outstanding on invoice #${inv.invoiceNumber}. Record ${fmtMoney(outstanding)} or less.`,
+        outstanding,
+      });
+    }
+
+    const [ins] = await conn.query(
+      `INSERT INTO payments_v2 (invoiceId, amount, paymentDate, method, reference, notes, createdBy)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [invoiceId, amount, paymentDate, method, reference, notes, createdBy]
+    );
+    const invoice = await syncInvoiceFromPayments(conn, invoiceId, { paymentDate });
+    await conn.commit();
+
+    const [payments] = await db.query(
+      'SELECT * FROM payments_v2 WHERE invoiceId = ? ORDER BY paymentDate ASC, id ASC', [invoiceId]
+    );
+    console.log(`[Payment] Invoice #${inv.invoiceNumber} (id ${invoiceId}) +${fmtMoney(amount)} ${method} by ${createdBy} → status ${invoice.status}, balance ${fmtMoney(invoice.balanceDue)}`);
+    res.json({ success: true, paymentId: ins.insertId, invoice, payments });
   } catch (err) {
-    console.error('[Payment] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    try { await conn.rollback(); } catch (_) { /* connection already gone */ }
+    console.error('[Payment] record error:', err);
+    res.status(500).json({ error: 'Failed to record payment: ' + err.message });
+  } finally {
+    conn.release();
   }
 });
 
-// DELETE /invoices/:id/payments/:paymentId
-app.delete('/invoices/:id/payments/:paymentId', authenticate, requireNumericParam('id'), async (req, res) => {
+// DELETE /invoices/:id/payments/:paymentId — mistake-fix. Removes the payment and
+// recomputes the balance from total minus the REMAINING payments; if that un-zeros
+// the balance, the Paid status and paidAt stamp are reversed (dropping the invoice
+// back out of cash-basis revenue and back into Collections/Aging).
+app.delete('/invoices/:id/payments/:paymentId', authenticate, requireNumericParam('id'), requireNumericParam('paymentId'), async (req, res) => {
+  const invoiceId = req.params.id;
+  const conn = await db.getConnection();
   try {
-    const invoiceId = req.params.id;
-    await db.query(
-      'DELETE FROM invoice_payments WHERE id = ? AND invoiceId = ?',
-      [req.params.paymentId, invoiceId]
+    await conn.beginTransaction();
+    const [[inv]] = await conn.query('SELECT id, invoiceNumber FROM invoices WHERE id = ? FOR UPDATE', [invoiceId]);
+    if (!inv) { await conn.rollback(); return res.status(404).json({ error: 'Invoice not found' }); }
+
+    const [del] = await conn.query(
+      'DELETE FROM payments_v2 WHERE id = ? AND invoiceId = ?', [req.params.paymentId, invoiceId]
     );
-
-    await recalcInvoiceTotals(invoiceId);
-
-    const [[totals]] = await db.query(
-      'SELECT COALESCE(SUM(amount),0) AS totalPaid FROM invoice_payments WHERE invoiceId = ?',
-      [invoiceId]
-    );
-    const [[inv]] = await db.query('SELECT total, workOrderId FROM invoices WHERE id = ?', [invoiceId]);
-    const totalPaid = parseFloat(totals.totalPaid);
-    const invoiceTotal = parseFloat(inv?.total || 0);
-
-    let paymentStatus = 'Unpaid';
-    if (totalPaid >= invoiceTotal && invoiceTotal > 0) paymentStatus = 'Paid';
-    else if (totalPaid > 0) paymentStatus = 'Partial';
-
-    await db.query(
-      'UPDATE invoices SET paymentStatus = ?, amountPaid = ? WHERE id = ?',
-      [paymentStatus, totalPaid, invoiceId]
-    );
-
-    // If unpaid/partial after deletion, revert linked WO from Completed back to Invoiced Waiting for Payment
-    if (paymentStatus !== 'Paid' && inv?.workOrderId) {
-      await db.query(
-        "UPDATE work_orders SET status = 'Invoiced Waiting for Payment' WHERE id = ? AND status = 'Completed'",
-        [inv.workOrderId]
-      );
+    if (!del.affectedRows) {
+      await conn.rollback();
+      return res.status(404).json({ error: 'Payment not found on this invoice.' });
     }
+    const invoice = await syncInvoiceFromPayments(conn, invoiceId);
+    await conn.commit();
 
-    res.json({ success: true, totalPaid, paymentStatus });
+    const [payments] = await db.query(
+      'SELECT * FROM payments_v2 WHERE invoiceId = ? ORDER BY paymentDate ASC, id ASC', [invoiceId]
+    );
+    console.log(`[Payment] Deleted payment ${req.params.paymentId} from invoice #${inv.invoiceNumber} → status ${invoice.status}, balance ${fmtMoney(invoice.balanceDue)}`);
+    res.json({ success: true, invoice, payments });
   } catch (err) {
-    console.error('Error deleting payment:', err);
-    res.status(500).json({ error: err.message });
+    try { await conn.rollback(); } catch (_) { /* connection already gone */ }
+    console.error('[Payment] delete error:', err);
+    res.status(500).json({ error: 'Failed to delete payment: ' + err.message });
+  } finally {
+    conn.release();
   }
 });
 
@@ -9161,6 +9266,26 @@ app.post('/work-orders/:id/invoice-send', authenticate, requireNumericParam('id'
   } catch (err) {
     console.error('Invoice-send error:', err);
     res.status(500).json({ error: err.message || 'Failed to send invoice.' });
+  }
+});
+
+// GET /work-orders/:id/invoice-payments — every payment across this WO's invoices,
+// in one call, so the invoice cards can each render their own history line without
+// N round-trips. Keyed by invoiceId on the client; the multi-invoice model holds
+// because each payment carries the single invoice it was applied to.
+app.get('/work-orders/:id/invoice-payments', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT p.* FROM payments_v2 p
+         JOIN invoices i ON i.id = p.invoiceId
+        WHERE i.workOrderId = ?
+        ORDER BY p.invoiceId ASC, p.paymentDate ASC, p.id ASC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching work order payments:', err);
+    res.status(500).json({ error: 'Failed to fetch payments.' });
   }
 });
 
