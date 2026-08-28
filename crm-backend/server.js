@@ -8211,10 +8211,38 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     }
 
     const newPhotos    = images.map(fileKeySafe);
-    const extraPdfKeys = (otherPdfs || []).map(fileKeySafe);
+    let   extraPdfKeys = (otherPdfs || []).map(fileKeySafe);
     if (newPhotos.length) {
       console.log('[Photo Upload] WO ID:', wid, '| New photos:', JSON.stringify(newPhotos));
     }
+
+    // Idempotency for signed documents. multer-s3 has already streamed the body to
+    // S3 by the time we get here, so a duplicate is discarded rather than prevented —
+    // the effect is the same: the work order keeps exactly one copy, and the client
+    // still gets a 2xx so a retry-after-lost-response settles instead of looping.
+    const suppressedDuplicates = [];
+    if (extraPdfKeys.length) {
+      const kept = [];
+      for (const key of extraPdfKeys) {
+        if (!SIGNOFF_KEY_RE.test(key)) { kept.push(key); continue; }  // ordinary attachment
+        try {
+          const dup = await findDuplicateSignoffOnWo(wid, key);
+          if (dup.duplicate) {
+            console.log(`[Signoffs] duplicate suppressed on WO ${wid}: ${key} is byte-identical to ${dup.existingKey}`);
+            await discardRedundantUpload(key);
+            suppressedDuplicates.push({ discardedKey: key, existingKey: dup.existingKey, sha256: dup.sha });
+            continue;
+          }
+        } catch (e) {
+          // If the check itself fails, keep the upload — losing a document is far
+          // worse than storing a second copy of one.
+          console.warn(`[Signoffs] dedupe check failed for ${key}, keeping it: ${e.message}`);
+        }
+        kept.push(key);
+      }
+      extraPdfKeys = kept;
+    }
+
     attachments = uniq([...attachments, ...newPhotos, ...extraPdfKeys]);
 
     const body = { ...existing, ...req.body };
@@ -8392,7 +8420,14 @@ app.put('/work-orders/:id/edit', authenticate, requireNumericParam('id'), withMu
     }
 
     const [[updated]] = await db.execute('SELECT * FROM work_orders WHERE id = ?', [wid]);
-    res.json({ ...updated, status: displayStatusOrDefault(updated.status) });
+    res.json({
+      ...updated,
+      status: displayStatusOrDefault(updated.status),
+      // Present only when an identical signed document was already on this WO. The
+      // request still succeeded from the client's point of view — that is the whole
+      // point — but this says plainly that nothing new was stored.
+      ...(suppressedDuplicates.length ? { duplicateSuppressed: suppressedDuplicates } : {}),
+    });
   } catch (err) {
     console.error('Work-order edit error:', err.message, err.code, err.stack);
     const detail = err && err.code ? `${err.code}: ${err.message}` : (err?.message || 'Failed to update work order.');
@@ -10145,6 +10180,24 @@ app.post(
       const pdfFile = files.find((f) => isPdf(f));
       if (!pdfFile) return res.status(400).json({ error: 'Please upload a PDF file.' });
       const key = fileKey(pdfFile);
+
+      // Same idempotency rule as the annotator path: re-uploading byte-identical
+      // signed content is a retry, not a new document.
+      try {
+        const dup = await findDuplicateSignoffOnWo(wid, key);
+        if (dup.duplicate) {
+          console.log(`[Signoffs] duplicate suppressed on WO ${wid}: ${key} is byte-identical to ${dup.existingKey}`);
+          await discardRedundantUpload(key);
+          const [[row]] = await db.query('SELECT * FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+          return res.json({
+            ok: true,
+            contract: row,
+            duplicateSuppressed: [{ discardedKey: key, existingKey: dup.existingKey, sha256: dup.sha }],
+          });
+        }
+      } catch (e) {
+        console.warn(`[Signoffs] contract dedupe check failed for ${key}, keeping it: ${e.message}`);
+      }
 
       // Ensure a contract row exists (residential WOs normally already have one).
       const [[existing]] = await db.query('SELECT id FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
@@ -12677,6 +12730,87 @@ async function refreshSignoffHashes() {
     console.log(`[Signoffs] hash index refreshed: +${hashed} hashed, -${pruned} pruned, ${failed} unreadable, ${keys.size} known keys`);
   }
   return { known: keys.size, hashed, pruned, failed };
+}
+
+
+// ─── IDEMPOTENT SIGNED-PDF UPLOADS ──────────────────────────────────────────
+//
+// The field app retries an upload whenever it doesn't see a 2xx — including the case
+// where the upload actually succeeded and only the RESPONSE was lost (dead spot,
+// backgrounded app, timeout after the body was accepted). Without a content check
+// that produces a second identical sign-off on the work order, which is exactly the
+// duplication Mark is seeing.
+//
+// So: hash the incoming bytes and compare against the signed documents already on
+// THAT work order. Identical content -> report success with the existing document and
+// store nothing new, which makes retry-after-lost-response safe and lets the queue
+// clear normally. Different content is a genuinely new or re-signed document and is
+// stored as usual.
+//
+// Scoped to signed documents (SIGNOFF_KEY_RE). Ordinary attachments may legitimately
+// be re-uploaded and are left alone.
+
+async function sha256OfKey(key) {
+  if (S3_BUCKET) {
+    const obj = await s3.getObject({ Bucket: S3_BUCKET, Key: key }).promise();
+    return { sha: crypto.createHash('sha256').update(obj.Body).digest('hex'), size: obj.Body.length };
+  }
+  const buf = fs.readFileSync(path.resolve(__dirname, key));
+  return { sha: crypto.createHash('sha256').update(buf).digest('hex'), size: buf.length };
+}
+
+// Hash for a key, using the cache and filling it on a miss.
+async function cachedHashForKey(key, workOrderId = null) {
+  const [[hit]] = await db.query('SELECT sha256, size FROM signoff_hashes WHERE s3Key = ? LIMIT 1', [key]);
+  if (hit) return hit.sha256;
+  try {
+    const { sha, size } = await sha256OfKey(key);
+    await db.query(
+      `INSERT INTO signoff_hashes (s3Key, sha256, size, workOrderId, source)
+       VALUES (?, ?, ?, ?, 'upload-dedupe')
+       ON DUPLICATE KEY UPDATE sha256=VALUES(sha256), size=VALUES(size),
+                               workOrderId=COALESCE(VALUES(workOrderId), workOrderId), hashedAt=NOW()`,
+      [key, sha, size, workOrderId]
+    );
+    return sha;
+  } catch (e) {
+    console.warn(`[Signoffs] could not hash ${key}: ${e.message}`);
+    return null;
+  }
+}
+
+/** Every signed-document key currently attached to a work order. */
+async function existingSignoffKeysForWo(wid) {
+  const keys = [];
+  const [[wo]] = await db.query('SELECT photoPath FROM work_orders WHERE id = ?', [wid]);
+  for (const raw of String(wo?.photoPath || '').split(',')) {
+    const k = raw.trim();
+    if (k && SIGNOFF_KEY_RE.test(k)) keys.push(k);
+  }
+  const [[rc]] = await db.query('SELECT signedPdfPath FROM residential_contracts WHERE workOrderId = ? LIMIT 1', [wid]);
+  if (rc?.signedPdfPath) keys.push(rc.signedPdfPath);
+  return keys;
+}
+
+/**
+ * Is `newKey`'s content already on this work order?
+ * @returns {Promise<{duplicate:boolean, existingKey?:string, sha?:string}>}
+ */
+async function findDuplicateSignoffOnWo(wid, newKey) {
+  const newSha = await cachedHashForKey(newKey, wid);
+  if (!newSha) return { duplicate: false };
+  for (const k of await existingSignoffKeysForWo(wid)) {
+    if (k === newKey) continue;
+    const sha = await cachedHashForKey(k, wid);
+    if (sha && sha === newSha) return { duplicate: true, existingKey: k, sha: newSha };
+  }
+  return { duplicate: false, sha: newSha };
+}
+
+/** Drop a redundant just-uploaded object and forget its cache row. */
+async function discardRedundantUpload(key) {
+  try { await deleteStoredFileByKey(key); } catch (e) { console.warn('[Signoffs] discard failed:', e.message); }
+  try { await db.query('DELETE FROM signoff_hashes WHERE s3Key = ?', [key]); } catch {}
 }
 
 // POST /api/signoffs/hashes
