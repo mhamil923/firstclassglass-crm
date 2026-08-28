@@ -12653,8 +12653,30 @@ async function refreshSignoffHashes() {
       if (failed <= 5) console.warn(`[Signoffs] could not hash ${key}: ${e.message}`);
     }
   }
-  if (hashed || failed) console.log(`[Signoffs] hash index refreshed: +${hashed} hashed, ${failed} unreadable, ${keys.size} known keys`);
-  return { known: keys.size, hashed, failed };
+  // Prune rows whose object no longer exists — a cached hash MUST NOT outlive the
+  // file it describes. A stale row would report "already uploaded" for a document
+  // that is no longer on the server, and the app treats a match as authorisation to
+  // delete the local copy. That would destroy the only remaining copy of a genuine
+  // sign-off. Observed for real: a key uploaded and removed again minutes later.
+  let pruned = 0;
+  try {
+    const live = [...keys.keys()];
+    if (live.length) {
+      const [del] = await db.query(
+        `DELETE FROM signoff_hashes WHERE s3Key NOT IN (${live.map(() => '?').join(',')})`,
+        live
+      );
+      pruned = del.affectedRows || 0;
+    } else {
+      const [del] = await db.query('DELETE FROM signoff_hashes');
+      pruned = del.affectedRows || 0;
+    }
+  } catch (e) { console.warn('[Signoffs] prune failed:', e.message); }
+
+  if (hashed || failed || pruned) {
+    console.log(`[Signoffs] hash index refreshed: +${hashed} hashed, -${pruned} pruned, ${failed} unreadable, ${keys.size} known keys`);
+  }
+  return { known: keys.size, hashed, pruned, failed };
 }
 
 // POST /api/signoffs/hashes
