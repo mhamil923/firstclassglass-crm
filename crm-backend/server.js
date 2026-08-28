@@ -12516,6 +12516,231 @@ app.post('/public/invoice/:token/pay', async (req, res) => {
   }
 });
 
+
+// ─── SIGNED-DOCUMENT HASH INDEX ─────────────────────────────────────────────
+//
+// Backs the field app's "recovered sign-offs" dedupe. The pre-failsafe app wrote
+// every signed PDF to the OS cache and never cleaned up — success or failure — so
+// the recovery sweep surfaced ~10 months of signed documents, the overwhelming
+// majority of which uploaded fine at the time and are already on the server. The app
+// SHA-256s each recovered file and asks here whether those exact bytes already exist.
+// A match is the only thing that authorises deleting a local copy, so this must be
+// exact-bytes, never heuristic.
+//
+// WHERE SIGNED PDFS LIVE (audited against prod):
+//   • work_orders.photoPath — a CSV of keys; the annotator's output lands here as
+//     uploads/WO-<tag>_<YYYY-MM-DD>_SIGNED_<epochMs>.pdf. 131 refs across 104 rows;
+//     this is the only column carrying sign-off sheets.
+//   • residential_contracts.signedPdfPath — where POST /residential-contract/
+//     sign-infield stores uploads/residential_contract_signed_<woId>_<ts>.pdf.
+//     Currently 0 rows (10 contracts, all Draft), but the path is live code.
+//   • work_orders.pdfPath / estimatePdfPath / poPdfPath / signaturePath and
+//     work_order_estimate_pdfs / invoices hold NO signed documents (verified 0).
+// Plus an S3 key-shape sweep, so a signed PDF whose DB row was lost is still
+// recognised as present on the server. Widening the index can only ever turn a
+// "genuine orphan" into a confirmed duplicate — it can never cause a false match,
+// because matching is on full content hash.
+const SIGNOFF_KEY_RE = /(_SIGNED_|-signed\.pdf$|residential_contract_signed_)/i;
+
+async function ensureSignoffHashTable() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS signoff_hashes (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        s3Key       VARCHAR(512) NOT NULL,
+        sha256      CHAR(64) NOT NULL,
+        size        BIGINT NOT NULL,
+        workOrderId INT NULL,
+        source      VARCHAR(40) NULL,
+        hashedAt    DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_signoff_key (s3Key(255)),
+        INDEX idx_signoff_sha (sha256),
+        INDEX idx_signoff_wo (workOrderId)
+      )
+    `);
+    console.log('[Signoffs] signoff_hashes table ready');
+  } catch (e) {
+    console.warn('[Signoffs] Could not create signoff_hashes table:', e.message);
+  }
+}
+ensureSignoffHashTable().catch(() => {});
+
+// Every signed-document key we know about, with the work order it belongs to.
+async function collectSignoffKeys() {
+  const out = new Map(); // key -> { workOrderId, source }
+  const add = (key, workOrderId, source) => {
+    if (!key) return;
+    const k = String(key).trim();
+    if (!k) return;
+    const prev = out.get(k);
+    // A DB-derived work order beats a key-name guess.
+    if (!prev || (prev.workOrderId == null && workOrderId != null)) out.set(k, { workOrderId, source });
+  };
+
+  try {
+    const [rows] = await db.query(
+      "SELECT id, photoPath FROM work_orders WHERE photoPath LIKE '%\\_SIGNED\\_%' OR photoPath LIKE '%-signed.pdf%' OR photoPath LIKE '%residential\\_contract\\_signed\\_%'"
+    );
+    for (const r of rows) {
+      for (const raw of String(r.photoPath || '').split(',')) {
+        const k = raw.trim();
+        if (k && SIGNOFF_KEY_RE.test(k)) add(k, r.id, 'work_orders.photoPath');
+      }
+    }
+  } catch (e) { console.warn('[Signoffs] photoPath scan failed:', e.message); }
+
+  try {
+    const [rows] = await db.query('SELECT workOrderId, signedPdfPath FROM residential_contracts WHERE signedPdfPath IS NOT NULL');
+    for (const r of rows) add(r.signedPdfPath, r.workOrderId, 'residential_contracts.signedPdfPath');
+  } catch (e) { console.warn('[Signoffs] contract scan failed:', e.message); }
+
+  // S3 key-shape sweep — catches signed PDFs whose DB reference was lost.
+  if (S3_BUCKET) {
+    try {
+      let token;
+      do {
+        const page = await s3.listObjectsV2({ Bucket: S3_BUCKET, Prefix: 'uploads/', ContinuationToken: token }).promise();
+        for (const o of page.Contents || []) {
+          if (!SIGNOFF_KEY_RE.test(o.Key)) continue;
+          if (out.has(o.Key)) continue;
+          // Best-effort work order from uploads/WO-<tag>_..., where <tag> may be a
+          // work order id or a PO/customer reference.
+          let woId = null;
+          const m = /uploads\/WO-([^_]+)_/i.exec(o.Key);
+          if (m && /^\d+$/.test(m[1])) {
+            const [[hit]] = await db.query('SELECT id FROM work_orders WHERE id = ?', [Number(m[1])]);
+            if (hit) woId = hit.id;
+          }
+          add(o.Key, woId, 's3-prefix-sweep');
+        }
+        token = page.IsTruncated ? page.NextContinuationToken : null;
+      } while (token);
+    } catch (e) { console.warn('[Signoffs] S3 sweep failed:', e.message); }
+  }
+
+  return out;
+}
+
+// Fetch + hash anything not already cached. Runs once per key, ever.
+async function refreshSignoffHashes() {
+  const keys = await collectSignoffKeys();
+  const [cached] = await db.query('SELECT s3Key FROM signoff_hashes');
+  const have = new Set(cached.map((r) => r.s3Key));
+  const todo = [...keys.entries()].filter(([k]) => !have.has(k));
+
+  let hashed = 0, failed = 0;
+  for (const [key, meta] of todo) {
+    try {
+      let buf;
+      if (S3_BUCKET) {
+        const obj = await s3.getObject({ Bucket: S3_BUCKET, Key: key }).promise();
+        buf = obj.Body;
+      } else {
+        buf = fs.readFileSync(path.resolve(__dirname, key));
+      }
+      const sha = crypto.createHash('sha256').update(buf).digest('hex');
+      await db.query(
+        `INSERT INTO signoff_hashes (s3Key, sha256, size, workOrderId, source)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE sha256=VALUES(sha256), size=VALUES(size),
+                                 workOrderId=COALESCE(VALUES(workOrderId), workOrderId),
+                                 source=VALUES(source), hashedAt=NOW()`,
+        [key, sha, buf.length, meta.workOrderId, meta.source]
+      );
+      hashed += 1;
+    } catch (e) {
+      failed += 1;
+      if (failed <= 5) console.warn(`[Signoffs] could not hash ${key}: ${e.message}`);
+    }
+  }
+  if (hashed || failed) console.log(`[Signoffs] hash index refreshed: +${hashed} hashed, ${failed} unreadable, ${keys.size} known keys`);
+  return { known: keys.size, hashed, failed };
+}
+
+// POST /api/signoffs/hashes
+// Body: [{ hash, size }]  (or { hashes: [...] })
+// Returns one row per input: { hash, matched, workOrderId, workOrderLabel, s3Key }
+app.post('/api/signoffs/hashes', authenticate, async (req, res) => {
+  try {
+    const body = coerceBody(req);
+    const list = Array.isArray(body) ? body : Array.isArray(body?.hashes) ? body.hashes : null;
+    if (!list) return res.status(400).json({ error: 'Body must be an array of { hash, size }.' });
+    if (list.length > 1000) return res.status(413).json({ error: 'Too many hashes in one request (max 1000).' });
+
+    const stats = await refreshSignoffHashes();
+
+    const wanted = list
+      .map((x) => String(x?.hash || '').trim().toLowerCase())
+      .filter((h) => /^[0-9a-f]{64}$/.test(h));
+
+    let byHash = new Map();
+    if (wanted.length) {
+      const [rows] = await db.query(
+        `SELECT h.sha256, h.s3Key, h.size, h.workOrderId, w.customer, w.siteLocation
+           FROM signoff_hashes h
+           LEFT JOIN work_orders w ON w.id = h.workOrderId
+          WHERE h.sha256 IN (${wanted.map(() => '?').join(',')})`,
+        wanted
+      );
+      for (const r of rows) if (!byHash.has(r.sha256)) byHash.set(r.sha256, r);
+    }
+
+    const results = list.map((x) => {
+      const hash = String(x?.hash || '').trim().toLowerCase();
+      const hit = byHash.get(hash);
+      if (!hit) return { hash, matched: false, workOrderId: null, workOrderLabel: null, s3Key: null };
+      const label = hit.workOrderId
+        ? `#${hit.workOrderId}${hit.customer ? ` — ${hit.customer}` : ''}${hit.siteLocation ? ` (${hit.siteLocation})` : ''}`
+        : 'on server (not linked to a work order)';
+      return {
+        hash,
+        matched: true,
+        workOrderId: hit.workOrderId ?? null,
+        workOrderLabel: label,
+        s3Key: hit.s3Key,
+      };
+    });
+
+    const matched = results.filter((r) => r.matched).length;
+    console.log(`[Signoffs] hash check: ${list.length} submitted, ${matched} matched (index: ${stats.known} keys)`);
+    res.json({ index: stats, checked: list.length, matched, results });
+  } catch (err) {
+    console.error('[Signoffs] hash check error:', err);
+    res.status(500).json({ error: 'Failed to check signed-document hashes: ' + err.message });
+  }
+});
+
+// GET /api/work-orders/near?date=YYYY-MM-DD&days=5
+// Work orders whose scheduledDate or statusChangedAt sits within ±days of a capture
+// date, nearest first. Lets a recovered sign-off be identified from when it was
+// captured instead of by scrolling the whole work-order list.
+app.get('/api/work-orders/near', authenticate, async (req, res) => {
+  try {
+    const date = String(req.query.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 5, 1), 60);
+
+    const [rows] = await db.query(
+      `SELECT w.id, w.customer, w.siteLocation, w.siteAddress, w.poNumber, w.status,
+              w.scheduledDate, w.statusChangedAt,
+              LEAST(
+                COALESCE(ABS(DATEDIFF(w.scheduledDate, ?)), 9999),
+                COALESCE(ABS(DATEDIFF(w.statusChangedAt, ?)), 9999)
+              ) AS daysAway
+         FROM work_orders w
+        WHERE ABS(DATEDIFF(w.scheduledDate, ?)) <= ?
+           OR ABS(DATEDIFF(w.statusChangedAt, ?)) <= ?
+        ORDER BY daysAway ASC, w.scheduledDate DESC
+        LIMIT 40`,
+      [date, date, date, days, date, days]
+    );
+    res.json(rows.map((r) => ({ ...r, daysAway: Number(r.daysAway) })));
+  } catch (err) {
+    console.error('[Signoffs] near-date lookup error:', err);
+    res.status(500).json({ error: 'Failed to load nearby work orders: ' + err.message });
+  }
+});
+
 // ─── STRIPE WEBHOOK HANDLER ────────────────────────────────────────────────
 async function handleStripeWebhook(req, res) {
   let event;
