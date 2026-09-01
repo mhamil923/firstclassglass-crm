@@ -405,7 +405,7 @@ function toTitleCase(str) {
  *   SERVICE INSTRUCTIONS
  *   The door near the restrooms is not closing properly. ...
  */
-function extractClearVisionFields(text) {
+function extractClearVisionFields(text, opts = {}) {
   const result = {
     workOrderNumber: null,
     siteLocation: null,
@@ -413,10 +413,70 @@ function extractClearVisionFields(text) {
     problemDescription: null,
   };
 
-  // Work Order # — #R77544 or R77544 → "R77544"
-  const woMatch = text.match(/#?(r\d{4,6})/i);
-  if (woMatch) {
-    result.workOrderNumber = woMatch[1].toUpperCase();
+  // ── Work Order # ──────────────────────────────────────────────────────────
+  // Clear Vision dropped the "#R" prefix; numbers are now bare "#79533". The old
+  // pattern required the letter, so Work Order # came back empty on every new PDF.
+  //
+  // A bare "#(\d+)" is NOT safe on its own: these PDFs carry the SITE number in the
+  // same form, twice ("#9367 Vacant Unit #9367"), and it appears above the work order
+  // number in the verification form. So the number is matched by ANCHOR, and any
+  // candidate equal to the site number is rejected outright.
+  //
+  // Site number first — it is the thing we must not mistake for the WO number.
+  const siteNumMatch = text.match(/service location\s*\n+\s*#(\d+)/i);
+  const siteNumber = siteNumMatch ? siteNumMatch[1] : null;
+  console.log('[CLEAR VISION] site number (excluded from WO candidates):', siteNumber || 'none');
+
+  const notSite = (n) => n && n !== siteNumber;
+  let woNum = null, woVia = null;
+
+  // 1. Legacy "#R77544" / "R77544". Unambiguous (a letter can't collide with the site
+  //    number), so it is tried first and old PDFs keep parsing exactly as before.
+  const legacy = text.match(/(?:^|[^a-z0-9])#?(r\d{4,6})\b/i);
+  if (legacy) { woNum = legacy[1].toUpperCase(); woVia = 'legacy #R'; }
+
+  // 2. "#79533" immediately preceding the WORK ORDER heading:
+  //       #79533
+  //       WORK ORDER
+  //       Date: ...
+  //    (digital text + OCR are concatenated, so this often reads "#79533#79533\nWORK
+  //    ORDER" — the regex naturally takes the one adjacent to the heading.)
+  if (!woNum) {
+    const m = text.match(/#(\d{3,8})\s*\n\s*WORK\s+ORDER\b/i);
+    if (m && notSite(m[1])) { woNum = m[1]; woVia = 'WORK ORDER heading anchor'; }
+    else if (m) console.log('[CLEAR VISION] heading anchor yielded the site number, falling through:', m[1]);
+  }
+
+  // 3. The value under "CV Request # / Tracking #" on the verification form. The two
+  //    form columns linearise as: both labels, then the job-name/site block, THEN the
+  //    tracking number — so scan forward past the label and take the first candidate
+  //    that isn't the site number.
+  if (!woNum) {
+    const label = text.search(/CV\s*Request\s*#\s*\/\s*Tracking\s*#/i);
+    if (label >= 0) {
+      const window = text.slice(label, label + 400);
+      for (const m of window.matchAll(/#(\d{3,8})\b/g)) {
+        if (notSite(m[1])) { woNum = m[1]; woVia = 'CV Request # / Tracking #'; break; }
+      }
+      if (!woNum) console.log('[CLEAR VISION] tracking-# window held only the site number');
+    }
+  }
+
+  // 4. Filename, when it is "#79533.pdf" (how Clear Vision names their emails).
+  if (!woNum && opts.filename) {
+    const m = String(opts.filename).match(/#?(\d{3,8})\s*\.pdf$/i);
+    if (m && notSite(m[1])) { woNum = m[1]; woVia = 'filename'; }
+  }
+
+  if (woNum) {
+    // Stored digits-only, no "#": that is the convention every other profile follows
+    // (250 stored WO numbers, and the only 2 containing "#" were typed by hand when
+    // this extraction was broken). The legacy R prefix is part of the number itself
+    // and is kept, matching the existing R77544-style rows.
+    result.workOrderNumber = woNum.replace(/^#/, '').toUpperCase();
+    console.log(`[CLEAR VISION] WO# matched via ${woVia}:`, result.workOrderNumber);
+  } else {
+    console.log('[CLEAR VISION] WARNING: No WO# found');
   }
 
   // Site Location — first non-empty line after "service location"
@@ -458,13 +518,22 @@ function extractClearVisionFields(text) {
 
   // Problem Description — ONLY the SERVICE INSTRUCTIONS content
   // Stop BEFORE any work-order numbers, "work order" labels, dates, or blank lines
+  // The bare "#79533" form must stop the description too. Previously only the "#R"
+  // form did, so the new-style number ran into the text as "... code 2332 #79533#79533".
   const descMatch = text.match(
-    /service instructions\s*\n+([\s\S]*?)(?=#?r\d{4,6}|\bwork order\b|\bdate\s*:|\n\s*\n|$)/i
+    /service instructions\s*\n+([\s\S]*?)(?=#?r\d{4,6}|#\d{3,8}\s*\n\s*work\s+order\b|\bwork order\b|\bdate\s*:|\n\s*\n|$)/i
   );
   if (descMatch) {
     let desc = descMatch[1].trim();
     // Safety: strip any stray WO numbers or date lines that slipped through
     desc = desc.replace(/#?r\d{4,6}/gi, '');
+    // Strip the specific number we extracted, rather than every "#1234" — site and
+    // unit numbers are legitimate description content ("check unit #12") and must
+    // survive.
+    if (result.workOrderNumber) {
+      const esc = result.workOrderNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      desc = desc.replace(new RegExp('#?' + esc, 'gi'), '');
+    }
     desc = desc.replace(/work\s*order[^.\n]*/gi, '');
     desc = desc.replace(/date:\s*\d{4}-\d{2}-\d{2}/gi, '');
     desc = desc.replace(/\s+/g, ' ').trim();
@@ -1396,7 +1465,9 @@ function extractGenericWorkOrderFields(text) {
  * Uses customer-specific extraction rules when a known customer is detected
  * Returns structured object with all detected fields
  */
-function extractWorkOrderFields(text) {
+// opts.filename lets a profile fall back to the uploaded filename (Clear Vision
+// emails their work orders as "#79533.pdf"). Optional everywhere else.
+function extractWorkOrderFields(text, opts = {}) {
   console.log("=== WORK ORDER FIELD EXTRACTION START ===");
   console.log(`[WO Extract] Input text length: ${text ? text.length : 0} chars`);
 
@@ -1442,7 +1513,7 @@ function extractWorkOrderFields(text) {
     if (profile.customExtract) {
       // Use dedicated extraction function for this customer
       console.log(`[WO Extract] Using custom extraction function for ${profile.displayName}`);
-      const custom = profile.customExtract(text);
+      const custom = profile.customExtract(text, opts);
       console.log(`[WO Extract] customExtract returned:`, JSON.stringify({
         workOrderNumber: custom.workOrderNumber,
         poNumber: custom.poNumber,

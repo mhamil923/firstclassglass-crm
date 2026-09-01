@@ -7603,7 +7603,7 @@ app.post('/work-orders/extract-pdf', authenticate, extractUploader.single('pdf')
 
     // Step 4: Extract work order fields from text
     console.log("[EXTRACT-PDF] Step 4: Extracting fields from text...");
-    const extracted = extractWorkOrderFields(text);
+    const extracted = extractWorkOrderFields(text, { filename: file.originalname });
     console.log("[EXTRACT-PDF] Extracted fields:", JSON.stringify(extracted, null, 2));
     console.log("[EXTRACT-PDF] Step 4: PASSED - Fields extracted");
 
@@ -7710,7 +7710,7 @@ app.post('/api/debug-extract-pdf', authenticate, extractUploader.single('pdf'), 
     const finalText = extractionMethod === "ocr" ? ocrText : digitalText;
 
     // Step 2: Run field extraction
-    const extracted = extractWorkOrderFields(finalText);
+    const extracted = extractWorkOrderFields(finalText, { filename: req.file?.originalname });
 
     // Step 3: Clean up
     try { fs.unlinkSync(filePath); filePath = null; } catch (e) {}
@@ -7820,7 +7820,7 @@ app.get('/test-extract-pdf', authenticate, async (req, res) => {
     console.log("[TEST] Extracted", text.length, "characters");
     console.log("[TEST] First 500 chars:", text.substring(0, 500));
 
-    const extracted = extractWorkOrderFields(text);
+    const extracted = extractWorkOrderFields(text, { filename: path.basename(testFile) });
     console.log("[TEST] Extracted fields:", extracted);
 
     res.json({
