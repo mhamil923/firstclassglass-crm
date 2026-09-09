@@ -1045,10 +1045,34 @@
   background: var(--bg-hover);
 }
 
+/* Filename + "3 of 4" travel together; the filename is what gives when the
+   topbar runs out of room. */
+.lightbox-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .lightbox-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lightbox-count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
 }
 
 .lightbox-actions {
@@ -1063,6 +1087,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 }
 
 .lightbox-img {
@@ -1070,6 +1095,56 @@
   max-height: 100%;
   object-fit: contain;
 }
+
+/* Prev/next arrows. Pinned to the body's edges rather than the image's, so a
+   portrait photo keeps them out in the letterbox gutter instead of on the glass. */
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(20, 20, 22, 0.55);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.lightbox-nav svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.lightbox-nav:hover {
+  background: rgba(20, 20, 22, 0.82);
+}
+
+.lightbox-nav:active {
+  transform: translateY(-50%) scale(0.94);
+}
+
+.lightbox-nav:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+.lightbox-nav-prev { left: 12px; }
+.lightbox-nav-next { right: 12px; }
 
 .lightbox-iframe {
   width: 100%;
@@ -1183,6 +1258,21 @@
 
 [data-theme="dark"] .lightbox-body {
   background: #000000;
+}
+
+/* The dark body is pure black, so the light-theme dark scrim would disappear
+   into it — flip the arrows to a frosted-light chip instead. */
+[data-theme="dark"] .lightbox-nav {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+[data-theme="dark"] .lightbox-nav:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+[data-theme="dark"] .lightbox-count {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 [data-theme="dark"] .pill {

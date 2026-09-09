@@ -275,9 +275,57 @@ function PONumberEditor({ orderId, initialPo, onSaved }) {
   );
 }
 
-/* ---------- Lightbox modal ---------- */
-function Lightbox({ open, onClose, kind, src, title }) {
+/* ---------- Lightbox modal ----------
+   `items` is the navigable set the opened file belongs to — one entry for a PDF
+   or a lone photo, the whole section's photos when opened from a photo grid.
+   Navigation never leaves that set, so Before Photos and Image Attachments
+   can't bleed into each other. */
+function Lightbox({ open, onClose, kind, items, index, onStep }) {
   const [downloading, setDownloading] = useState(false);
+
+  // Memoised: a fresh [] fallback each render would re-fire the preload effect.
+  const list = useMemo(() => (Array.isArray(items) ? items : []), [items]);
+  const current = list[index] || {};
+  const src = current.src || "";
+  const title = current.title || "";
+  const count = list.length;
+  const canNavigate = kind === "image" && count > 1;
+  const hasPrev = canNavigate && index > 0;
+  const hasNext = canNavigate && index < count - 1;
+
+  // Arrows step, Escape closes. Bound only while the modal is open; the cleanup
+  // fires on close as well as on unmount.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        onStep?.(-1);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        onStep?.(1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose, onStep]);
+
+  // Warm the neighbours so a click swaps an already-decoded image instead of
+  // starting a fresh fetch. Browser cache does the rest.
+  useEffect(() => {
+    if (!open || kind !== "image") return;
+    [list[index - 1], list[index + 1]].forEach((it) => {
+      if (!it?.src) return;
+      const img = new Image();
+      img.src = it.src;
+    });
+  }, [open, kind, index, list]);
+
   if (!open) return null;
 
   const inferredName =
@@ -313,7 +361,14 @@ function Lightbox({ open, onClose, kind, src, title }) {
     <div className="lightbox-overlay" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="lightbox-card" onClick={(e) => e.stopPropagation()}>
         <div className="lightbox-topbar">
-          <strong className="lightbox-title">{title || "Preview"}</strong>
+          <div className="lightbox-heading">
+            <strong className="lightbox-title">{title || "Preview"}</strong>
+            {canNavigate && (
+              <span className="lightbox-count">
+                {index + 1} of {count}
+              </span>
+            )}
+          </div>
           <div className="lightbox-actions">
             {kind === "image" && (
               <button className="btn btn-light" onClick={handleDownload} disabled={downloading}>
@@ -345,7 +400,41 @@ function Lightbox({ open, onClose, kind, src, title }) {
 
         {kind === "image" ? (
           <div className="lightbox-body">
+            {hasPrev && (
+              <button
+                type="button"
+                className="lightbox-nav lightbox-nav-prev"
+                aria-label="Previous photo"
+                title="Previous photo"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStep?.(-1);
+                }}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M15 5 L8 12 L15 19" />
+                </svg>
+              </button>
+            )}
+
             <img className="lightbox-img" src={src} alt={title || "preview"} />
+
+            {hasNext && (
+              <button
+                type="button"
+                className="lightbox-nav lightbox-nav-next"
+                aria-label="Next photo"
+                title="Next photo"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onStep?.(1);
+                }}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M9 5 L16 12 L9 19" />
+                </svg>
+              </button>
+            )}
           </div>
         ) : (
           <iframe title={title || "preview"} src={src} className="lightbox-iframe" />
@@ -611,9 +700,28 @@ export default function ViewWorkOrder() {
   // Draw-note overrides
   const [drawNoteOverrides, setDrawNoteOverrides] = useState(new Set());
 
-  const [lightbox, setLightbox] = useState({ open: false, kind: "pdf", src: "", title: "" });
-  const openLightbox = (kind, src, title) => setLightbox({ open: true, kind, src, title });
+  // `items` is the set the lightbox can page through: a single entry for PDFs and
+  // one-off previews, the whole section for photos opened via openPhotoLightbox.
+  const [lightbox, setLightbox] = useState({ open: false, kind: "pdf", items: [], index: 0 });
+  const openLightbox = (kind, src, title) =>
+    setLightbox({ open: true, kind, items: [{ src, title }], index: 0 });
+  // keys: the section's rel-paths, in the order they're rendered. Navigation stays
+  // inside whatever list is passed, so sections never cross-mix.
+  const openPhotoLightbox = (keys, startIndex, nameFor) =>
+    setLightbox({
+      open: true,
+      kind: "image",
+      items: keys.map((k, i) => ({ src: urlFor(k), title: nameFor(k, i) })),
+      index: startIndex,
+    });
   const closeLightbox = () => setLightbox((l) => ({ ...l, open: false }));
+  // No wraparound — clamping at the ends keeps your place in a big set.
+  const stepLightbox = (delta) =>
+    setLightbox((l) => {
+      const next = l.index + delta;
+      if (!l.open || next < 0 || next >= l.items.length) return l;
+      return { ...l, index: next };
+    });
 
   // ✅ Estimate-approval prompt (when WO status -> Approved with multiple estimates)
   const [showApproveEstimateModal, setShowApproveEstimateModal] = useState(false);
@@ -2631,8 +2739,9 @@ export default function ViewWorkOrder() {
         open={lightbox.open}
         onClose={closeLightbox}
         kind={lightbox.kind}
-        src={lightbox.src}
-        title={lightbox.title}
+        items={lightbox.items}
+        index={lightbox.index}
+        onStep={stepLightbox}
       />
 
       {/* ───── Print to Quote — include photos? ───── */}
@@ -4263,7 +4372,13 @@ export default function ViewWorkOrder() {
                     kind="image"
                     href={href}
                     fileName={fileName}
-                    onExpand={() => openLightbox("image", href, fileName)}
+                    onExpand={() =>
+                      openPhotoLightbox(
+                        beforePhotoImages,
+                        i,
+                        (k, n) => k.split("/").pop() || `before-${n + 1}.jpg`
+                      )
+                    }
                     onDelete={() => handleDeleteAttachment(relPath)}
                   />
                 );
@@ -4315,7 +4430,13 @@ export default function ViewWorkOrder() {
                     kind="image"
                     href={href}
                     fileName={fileName}
-                    onExpand={() => openLightbox("image", href, fileName)}
+                    onExpand={() =>
+                      openPhotoLightbox(
+                        generalPhotoImages,
+                        i,
+                        (k, n) => k.split("/").pop() || `image-${n + 1}.jpg`
+                      )
+                    }
                     onDelete={() => handleDeleteAttachment(relPath)}
                   />
                 );
@@ -4349,7 +4470,13 @@ export default function ViewWorkOrder() {
                     kind="image"
                     href={href}
                     fileName={fileName}
-                    onExpand={() => openLightbox("image", href, fileName)}
+                    onExpand={() =>
+                      openPhotoLightbox(
+                        drawNoteImages,
+                        i,
+                        (k, n) => k.split("/").pop() || `draw-note-${n + 1}.jpg`
+                      )
+                    }
                     onDelete={() => handleDeleteAttachment(relPath)}
                   />
                 );
