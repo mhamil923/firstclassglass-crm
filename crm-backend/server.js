@@ -383,6 +383,66 @@ function displayStatusOrDefault(s) {
   return canonStatus(s) || (String(s || '').trim() ? String(s) : 'New');
 }
 
+// ─── CENTRAL-TIME CALENDAR DAYS ─────────────────────────────────────────────
+// The business runs on one clock. Day boundaries for anything the office thinks
+// of as "a day's schedule" are Central, independent of the host's TZ env.
+const CHICAGO_TZ = 'America/Chicago';
+
+// Today in Central as 'YYYY-MM-DD' ('en-CA' renders ISO order).
+function chicagoDayStr(d = new Date()) {
+  return new Date(d).toLocaleDateString('en-CA', { timeZone: CHICAGO_TZ });
+}
+
+// Shift a 'YYYY-MM-DD' day string by whole days. Done in UTC on purpose: a
+// DST-shifted local midnight can land back on the same date, UTC never does.
+function addDaysToDayStr(dayStr, delta) {
+  const [Y, M, D] = String(dayStr).split('-').map(Number);
+  const u = new Date(Date.UTC(Y, M - 1, D));
+  u.setUTCDate(u.getUTCDate() + Number(delta));
+  return u.toISOString().slice(0, 10);
+}
+
+// 'YYYY-MM-DD' out of a DATETIME the driver may hand back as a string
+// (dateStrings:true, the pool's setting) or, defensively, as a Date.
+function dayPartOf(v) {
+  if (!v) return null;
+  if (v instanceof Date) {
+    return `${v.getFullYear()}-${pad2(v.getMonth() + 1)}-${pad2(v.getDate())}`;
+  }
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(v));
+  return m ? m[1] : null;
+}
+
+// ─── DAY REVIEW BUCKETS ─────────────────────────────────────────────────────
+// One source of truth for the morning-after debrief, shared by the summary
+// counts and the per-row bucket in GET /work-orders/day-review. Three outcomes
+// for a work order that was on a past day's schedule:
+//   done   — serviced and already moved into the billing chain
+//   missed — still sitting in 'Scheduled' after its day passed: either nobody
+//            went or nobody closed it out. This is the reschedule list.
+//   moved  — serviced, but the visit produced downstream work (parts, a quote,
+//            an approval) or ended in a decline.
+// 'Paid' is an invoices.status value and never appears in work_orders.status;
+// it is listed only so the mapping stays correct if a WO-level Paid is added.
+const DAY_REVIEW_DONE = new Set(
+  ['Completed', 'Needs to be Invoiced', 'Invoiced Waiting for Payment', 'Paid'].map(statusKey)
+);
+
+/**
+ * Bucket one work order for a day review.
+ * `dayIsPast` must be true only when the reviewed calendar day is strictly
+ * before today in Central — 'Scheduled' means *missed* only once the day is
+ * gone, not while there are still hours left to run the job. The endpoint
+ * rejects non-past days, so it is always true there; the argument keeps the
+ * helper honest for any later caller.
+ */
+function dayReviewBucket(status, dayIsPast) {
+  const k = statusKey(displayStatusOrDefault(status));
+  if (DAY_REVIEW_DONE.has(k)) return 'done';
+  if (k === statusKey('Scheduled')) return dayIsPast ? 'missed' : 'scheduled';
+  return 'moved';
+}
+
 // When a WO moves to "Waiting for Approval", stamp estimateSentAt once.
 // Uses COALESCE so a re-save never resets the clock (only fills when NULL).
 async function stampEstimateSentIfWaiting(woId, statusCanon) {
@@ -1678,6 +1738,12 @@ async function ensureIndexes() {
     { table: 'invoices',       index: 'idx_invoices_dueDate',       col: 'dueDate' },
     { table: 'work_order_pos', index: 'idx_wop_workOrderId',        col: 'workOrderId' },
     { table: 'work_orders',    index: 'idx_work_orders_customerId', col: 'customerId' },
+    // Day Review / Today / calendar range scans all filter on scheduledDate.
+    // Those queries use a half-open datetime range (>= day 00:00 AND < next day
+    // 00:00) rather than DATE(scheduledDate) = ?, so this index is actually
+    // usable — wrapping the column in DATE() would make the predicate
+    // non-sargable and force a full scan.
+    { table: 'work_orders',    index: 'idx_work_orders_scheduledDate', col: 'scheduledDate' },
   ];
   console.log('[ensureIndexes] starting index check…');
   for (const { table, index, col } of wanted) {
@@ -7403,6 +7469,106 @@ app.get('/work-orders/followup', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Follow-up list error:', err);
     res.status(500).json({ error: 'Failed to load follow-up list.' });
+  }
+});
+
+// ─── DAY REVIEW ─────────────────────────────────────────────────────────────
+// Morning-after debrief of one past day's schedule: what got done, what was
+// missed and needs rescheduling, what moved to a downstream status. MUST be
+// declared before the /:id route so "day-review" isn't captured as an id.
+//
+// TIMEZONE — work_orders.scheduledDate is a DATETIME holding *Central
+// wall-clock components exactly as the scheduler typed them*: the write path
+// (parseDateTimeFlexible -> toSqlDateTimeFromParts) formats the picked Y/M/D
+// H:M:S into a literal 'YYYY-MM-DD HH:MM:SS' string, and the pool runs
+// dateStrings:true so nothing is re-interpreted on the way back out. There is
+// no UTC instant here to convert. The Central calendar day is therefore just
+// the date part, and a half-open range over it keeps a 19:00 job on its own
+// day. Running this through CONVERT_TZ(..., 'UTC', 'America/Chicago') would
+// shift every evening job back a day — it would *introduce* the off-by-one
+// bug, not fix one.
+app.get('/work-orders/day-review', authenticate, async (req, res) => {
+  try {
+    const today = chicagoDayStr();
+    const todayStart = `${today} 00:00:00`;
+    const requested = String(req.query.date || '').trim();
+
+    // No date -> the most recent past day that actually had jobs on it. That is
+    // yesterday on a normal weekday and skips empty weekends and holidays, so
+    // the tab opens on something worth reading instead of an empty Sunday.
+    let date = requested;
+    if (!date) {
+      const [[landing]] = await db.query(
+        `SELECT MAX(scheduledDate) AS d FROM work_orders WHERE scheduledDate < ?`,
+        [todayStart]
+      );
+      date = dayPartOf(landing && landing.d) || addDaysToDayStr(today, -1);
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'date must be YYYY-MM-DD.' });
+    }
+    // A debrief only makes sense once the day is over. Allowing today would
+    // make every not-yet-run job read as "missed", which is the one number on
+    // this screen that has to be trustworthy.
+    if (date >= today) {
+      return res.status(400).json({ error: 'Day Review only covers days before today.' });
+    }
+
+    const dayStart = `${date} 00:00:00`;
+    const dayEnd = `${addDaysToDayStr(date, 1)} 00:00:00`;
+
+    // Same column set the work-orders list renders from (w.* carries status,
+    // statusChangedAt and scheduledDate), ordered by the day's arranged run.
+    const [raw] = await db.query(
+      workOrdersSelectSQL({
+        whereSql: 'WHERE w.scheduledDate >= ? AND w.scheduledDate < ?',
+        orderSql:
+          'ORDER BY (w.serviceOrder IS NULL), w.serviceOrder ASC, w.scheduledDate ASC, w.id ASC',
+      }),
+      [dayStart, dayEnd]
+    );
+
+    let rows = raw.map((r) => ({
+      ...r,
+      status: displayStatusOrDefault(r.status),
+      allPoNumbersFormatted: formatPoNumberList(r.allPoNumbers),
+    }));
+    await attachTechsToWorkOrders(rows);
+    await attachNotesToWorkOrders(rows); // latest note is parsed off this blob
+
+    rows = rows.map((r) => ({ ...r, bucket: dayReviewBucket(r.status, true) }));
+
+    // Counted from the same per-row buckets the sections render, so the header
+    // strip and the sections can never disagree.
+    const byBucket = { done: 0, missed: 0, moved: 0 };
+    for (const r of rows) {
+      if (Object.prototype.hasOwnProperty.call(byBucket, r.bucket)) byBucket[r.bucket] += 1;
+    }
+
+    // Adjacent days that actually have jobs, so the prev/next arrows skip empty
+    // weekends the same way the default landing day does. Capped below today.
+    const [[prevRow]] = await db.query(
+      `SELECT MAX(scheduledDate) AS d FROM work_orders WHERE scheduledDate < ?`,
+      [dayStart]
+    );
+    const [[nextRow]] = await db.query(
+      `SELECT MIN(scheduledDate) AS d FROM work_orders
+         WHERE scheduledDate >= ? AND scheduledDate < ?`,
+      [dayEnd, todayStart]
+    );
+
+    res.json({
+      date,
+      today,
+      prevDay: dayPartOf(prevRow && prevRow.d),
+      nextDay: dayPartOf(nextRow && nextRow.d),
+      summary: { scheduled: rows.length, byBucket },
+      workOrders: rows,
+    });
+  } catch (err) {
+    console.error('Day-review error:', err);
+    res.status(500).json({ error: 'Failed to load the day review.' });
   }
 });
 

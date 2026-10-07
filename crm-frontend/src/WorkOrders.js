@@ -124,6 +124,92 @@ const clampStyle = (lines) => ({
   whiteSpace: "normal",
 });
 
+/**
+ * Site name / address for a row. The siteLocation column holds a *name* on
+ * newer work orders but an *address* on legacy ones, so whichever slot is
+ * still empty absorbs it. Shared by the main table and the Day Review rows so
+ * the two can't drift apart.
+ */
+const deriveSite = (order) => {
+  const rawLocField = norm(order.siteLocation);
+  let siteLocationName = norm(order.siteName) || norm(order.siteLocationName);
+  let siteAddress =
+    norm(order.siteAddress) || norm(order.serviceAddress) || norm(order.address);
+
+  if (!siteAddress && rawLocField) siteAddress = rawLocField;
+  else if (!siteLocationName && rawLocField) siteLocationName = rawLocField;
+
+  return { siteLocationName, siteAddress };
+};
+
+/* -------------------------------------------------------------------------- */
+/* Day Review helpers — Central-time calendar days.                           */
+/* scheduledDate is stored as naive Central wall-clock (see the day-review     */
+/* endpoint's timezone note), so a day is just its 'YYYY-MM-DD' prefix and     */
+/* every comparison here is a plain string compare — no Date parsing, no       */
+/* browser-timezone drift.                                                     */
+/* -------------------------------------------------------------------------- */
+const CHICAGO_TZ = "America/Chicago";
+
+// Today in Central as 'YYYY-MM-DD' ("en-CA" renders ISO order).
+const chicagoToday = () =>
+  new Date().toLocaleDateString("en-CA", { timeZone: CHICAGO_TZ });
+
+// Shift a 'YYYY-MM-DD' by whole days, in UTC so a DST-shifted local midnight
+// can't land back on the same date.
+const addDaysToDayStr = (dayStr, delta) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dayStr || ""));
+  if (!m) return "";
+  const u = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  u.setUTCDate(u.getUTCDate() + Number(delta));
+  return u.toISOString().slice(0, 10);
+};
+
+// "Tuesday, Oct 6" — built from the parts so the label never shifts a day.
+const fmtDayLabel = (dayStr) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dayStr || ""));
+  if (!m) return "—";
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString(
+    "en-US",
+    { weekday: "long", month: "short", day: "numeric" }
+  );
+};
+
+// Scheduled time-of-day, e.g. "7:00 PM". Reads the stored wall clock directly.
+const fmtSchedTime = (raw) => {
+  const m = /^\d{4}-\d{2}-\d{2}[ T](\d{2}):(\d{2})/.exec(String(raw || "").trim());
+  if (!m) return "";
+  let h = Number(m[1]);
+  const suffix = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return `${h}:${m[2]} ${suffix}`;
+};
+
+// The three Day Review sections, rendered in this order: the action list first.
+const REVIEW_SECTIONS = [
+  {
+    key: "missed",
+    title: "Missed",
+    blurb: "Still Scheduled after the day passed — these need rescheduling.",
+    accent: "var(--accent-red)",
+  },
+  {
+    key: "moved",
+    title: "Moved Along",
+    blurb: "Serviced, but the visit left downstream work.",
+    accent: "var(--accent-orange)",
+  },
+  {
+    key: "done",
+    title: "Done",
+    blurb: "Serviced and into the billing chain.",
+    accent: "var(--accent-green)",
+  },
+];
+
+// How long a rescheduled job is blocked out for, matching CalendarPage.
+const RESCHEDULE_WINDOW_MIN = 120;
+
 /* -------------------------------------------------------------------------- */
 /* Created-date helpers — America/Chicago, consistent with the note-timestamp
    formatting in ViewWorkOrder (parse UTC-naive by appending Z, render via
@@ -264,6 +350,21 @@ export default function WorkOrders() {
   const [callNotes, setCallNotes] = useState("");
   const [callSaving, setCallSaving] = useState(false);
 
+  // Day Review tab state. `reviewDate` is null until the user navigates: the
+  // first load lets the server choose the landing day (most recent past day
+  // that actually had jobs), so an empty weekend never opens as a blank page.
+  const [reviewDate, setReviewDate] = useState(null);
+  const [review, setReview] = useState(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+
+  // Reschedule modal (Missed rows): { wo } when open, null when closed
+  const [rescheduleWO, setRescheduleWO] = useState(null);
+  const [rsDate, setRsDate] = useState("");
+  const [rsTime, setRsTime] = useState("");
+  const [rsEndTime, setRsEndTime] = useState("");
+  const [rsSaving, setRsSaving] = useState(false);
+
   const CALL_OUTCOMES = [
     "Left Voicemail",
     "Spoke - Considering",
@@ -284,6 +385,33 @@ export default function WorkOrders() {
       setFollowup([]);
     } finally {
       setFollowupLoading(false);
+    }
+  };
+
+  /**
+   * Load one day's debrief. Buckets and counts come from the server so the
+   * summary strip and the sections are computed once, in one place.
+   * Passing no date asks the server for the landing day.
+   */
+  const fetchDayReview = async (date) => {
+    setReviewLoading(true);
+    setReviewError("");
+    try {
+      const res = await api.get("/work-orders/day-review", {
+        params: date ? { date } : {},
+        headers: authHeaders(),
+      });
+      setReview(res.data || null);
+      return res.data || null;
+    } catch (err) {
+      console.error("Error fetching day review:", err);
+      setReview(null);
+      setReviewError(
+        err?.response?.data?.error || "Couldn't load the day review."
+      );
+      return null;
+    } finally {
+      setReviewLoading(false);
     }
   };
 
@@ -325,6 +453,12 @@ export default function WorkOrders() {
     if (selectedFilter === "Follow-Up") fetchFollowup();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFilter]);
+
+  // Day Review loads when its tab opens and whenever the reviewed day changes.
+  useEffect(() => {
+    if (selectedFilter === "Day Review") fetchDayReview(reviewDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFilter, reviewDate]);
 
   const isPastDue = (o) =>
     toCanonicalStatus(o.status) === "Scheduled" &&
@@ -667,6 +801,107 @@ export default function WorkOrders() {
     }
   };
 
+  /* ------------------------------------------------------------------------ */
+  /* DAY REVIEW: reschedule a missed job                                      */
+  /* ------------------------------------------------------------------------ */
+  // Latest day the review can cover: the debrief is a morning-after read, so
+  // "Scheduled" only means "missed" once the day is over. Server-reported
+  // Central today wins; the local compute only covers the first paint.
+  const maxReviewDate = addDaysToDayStr(review?.today || chicagoToday(), -1);
+
+  const reviewRows = Array.isArray(review?.workOrders) ? review.workOrders : [];
+  const reviewBuckets = useMemo(() => {
+    const out = { missed: [], moved: [], done: [] };
+    for (const r of reviewRows) {
+      if (out[r.bucket]) out[r.bucket].push(r);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [review]);
+
+  /**
+   * Open the reschedule picker for a missed job. Defaults to tomorrow, keeping
+   * the job's original time of day (that slot was chosen for a reason — site
+   * access, a tenant's hours); noon when it had none, matching the server's
+   * date-only default. End time blocks out the same window the calendar uses.
+   */
+  const openReschedule = (wo) => {
+    const prevTime = /^\d{4}-\d{2}-\d{2}[ T](\d{2}:\d{2})/.exec(
+      String(wo?.scheduledDate || "").trim()
+    );
+    const startHHmm = prevTime ? prevTime[1] : "12:00";
+    const [h, mi] = startHHmm.split(":").map(Number);
+    const endMins = h * 60 + mi + RESCHEDULE_WINDOW_MIN;
+    const endHHmm = `${String(Math.floor(endMins / 60) % 24).padStart(2, "0")}:${String(
+      endMins % 60
+    ).padStart(2, "0")}`;
+
+    setRescheduleWO(wo);
+    setRsDate(addDaysToDayStr(review?.today || chicagoToday(), 1));
+    setRsTime(startHHmm);
+    setRsEndTime(endHHmm);
+  };
+
+  const closeReschedule = () => {
+    setRescheduleWO(null);
+    setRsSaving(false);
+  };
+
+  /**
+   * Save the new slot. Mirrors CalendarPage's schedule flow exactly — the same
+   * multipart PUT /work-orders/:id/edit with scheduledDate + endTime and
+   * status "Scheduled" — so a job rescheduled from here is indistinguishable
+   * from one dragged on the calendar. Moving scheduledDate to a future day is
+   * what drops the row out of Missed on the refresh below.
+   */
+  const saveReschedule = async () => {
+    if (!rescheduleWO || !rsDate || !rsTime) return;
+    if (rsEndTime && rsEndTime <= rsTime) {
+      alert("End time must be after the start time.");
+      return;
+    }
+    setRsSaving(true);
+    try {
+      const form = new FormData();
+      form.append("scheduledDate", `${rsDate} ${rsTime}`);
+      if (rsEndTime) form.append("endTime", rsEndTime);
+      form.append("status", "Scheduled");
+
+      await api.put(`/work-orders/${rescheduleWO.id}/edit`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      const woNum = rescheduleWO.workOrderNumber || rescheduleWO.id;
+      closeReschedule();
+      await Promise.all([fetchDayReview(review?.date), fetchWorkOrders()]);
+      setFlashMsg(`WO ${woNum} rescheduled to ${fmtDayLabel(rsDate)}.`);
+      setTimeout(() => setFlashMsg(""), 4000);
+    } catch (err) {
+      console.error("Error rescheduling:", err);
+      alert(err?.response?.data?.error || "Failed to reschedule.");
+      setRsSaving(false);
+    }
+  };
+
+  // Status change from a review row. Same endpoint as the table, but the
+  // refresh re-buckets the day — marking a forgotten job Completed moves it
+  // out of Missed and into Done.
+  const handleReviewStatusChange = async (e, id) => {
+    e.stopPropagation();
+    const newStatus = toCanonicalStatus(e.target.value);
+    try {
+      await api.put(
+        `/work-orders/${id}/status`,
+        { status: newStatus },
+        { headers: authHeaders() }
+      );
+      await Promise.all([fetchDayReview(review?.date), fetchWorkOrders()]);
+    } catch (err) {
+      console.error("Error updating status:", err);
+      alert(err?.response?.data?.error || "Failed to update status.");
+    }
+  };
+
   // maps
   const googleMapsApiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
   const openAddressInMaps = (e, addr, fallbackLabel) => {
@@ -708,6 +943,10 @@ export default function WorkOrders() {
           <div className="chips-row" role="tablist" aria-label="Work order filters">
             {[
               { key: "Today", label: "Today", count: chipCounts.Today },
+              // Day Review sits next to Today: both are day-scoped views, and
+              // the debrief is the first thing the office opens in the morning.
+              // No count — it describes one chosen day, not a standing queue.
+              { key: "Day Review", label: "Day Review", count: null },
               ...visibleStatusList.map((s) => ({
                 key: s,
                 label: s,
@@ -739,23 +978,25 @@ export default function WorkOrders() {
                   onClick={() => setFilter(key)}
                 >
                   <span className="chip-label">{label}</span>
-                  <span
-                    className={accent ? "" : "chip-count"}
-                    style={
-                      accent
-                        ? {
-                            background: active ? "#fff" : accent,
-                            color: active ? accent : "#fff",
-                            borderRadius: 10,
-                            padding: "1px 8px",
-                            fontSize: 12,
-                            fontWeight: 700,
-                          }
-                        : undefined
-                    }
-                  >
-                    {count ?? 0}
-                  </span>
+                  {count == null ? null : (
+                    <span
+                      className={accent ? "" : "chip-count"}
+                      style={
+                        accent
+                          ? {
+                              background: active ? "#fff" : accent,
+                              color: active ? accent : "#fff",
+                              borderRadius: 10,
+                              padding: "1px 8px",
+                              fontSize: 12,
+                              fontWeight: 700,
+                            }
+                          : undefined
+                      }
+                    >
+                      {count}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -925,6 +1166,282 @@ export default function WorkOrders() {
           </div>
         )}
 
+        {selectedFilter === "Day Review" && (
+          <div className="day-review">
+            {/* Date control — the arrows hop to the adjacent day that actually
+                had jobs (server-supplied), so they skip empty weekends; the
+                picker reaches any past day directly. */}
+            <div className="dr-datebar">
+              <button
+                type="button"
+                className="dr-nav"
+                onClick={() => setReviewDate(review?.prevDay)}
+                disabled={reviewLoading || !review?.prevDay}
+                title={
+                  review?.prevDay
+                    ? `Previous day with jobs — ${fmtDayLabel(review.prevDay)}`
+                    : "No earlier day has scheduled jobs"
+                }
+                aria-label="Previous day with jobs"
+              >
+                ‹
+              </button>
+
+              {/* Shows the day being navigated to right away, so the label
+                  doesn't sit on the previous day while the fetch is in flight. */}
+              <div className="dr-daylabel">
+                {reviewDate || review?.date
+                  ? `Reviewing ${fmtDayLabel(reviewDate || review.date)}`
+                  : reviewLoading
+                  ? "Loading…"
+                  : "Day Review"}
+                {reviewLoading ? <span className="dr-loading"> · loading…</span> : null}
+              </div>
+
+              <button
+                type="button"
+                className="dr-nav"
+                onClick={() => setReviewDate(review?.nextDay)}
+                disabled={reviewLoading || !review?.nextDay}
+                title={
+                  review?.nextDay
+                    ? `Next day with jobs — ${fmtDayLabel(review.nextDay)}`
+                    : "No later finished day has scheduled jobs"
+                }
+                aria-label="Next day with jobs"
+              >
+                ›
+              </button>
+
+              <input
+                type="date"
+                className="control dr-datepicker"
+                value={reviewDate || review?.date || ""}
+                max={maxReviewDate}
+                onChange={(e) => {
+                  if (e.target.value) setReviewDate(e.target.value);
+                }}
+                title="Jump to a day"
+                aria-label="Review date"
+              />
+            </div>
+
+            {reviewError ? (
+              <div className="dr-error">{reviewError}</div>
+            ) : reviewLoading && !review ? (
+              <div className="empty-state">Loading the day review…</div>
+            ) : !review?.summary ? null : review.summary.scheduled === 0 ? (
+              <div className="empty-state">
+                Nothing was scheduled for {fmtDayLabel(review.date)}.
+              </div>
+            ) : (
+              <>
+                {/* Summary strip — counts come straight from the server's
+                    buckets, the same ones the sections below render. */}
+                <div className="dr-summary">
+                  <span className="dr-stat">
+                    <b>{review.summary.scheduled}</b> scheduled
+                  </span>
+                  <span className="dr-sep">·</span>
+                  <span className="dr-stat">
+                    <b>{review.summary.byBucket?.done ?? 0}</b> done
+                  </span>
+                  <span className="dr-sep">·</span>
+                  <span className="dr-stat dr-stat-missed">
+                    <b>{review.summary.byBucket?.missed ?? 0}</b> missed
+                  </span>
+                  <span className="dr-sep">·</span>
+                  <span className="dr-stat">
+                    <b>{review.summary.byBucket?.moved ?? 0}</b> moved along
+                  </span>
+                </div>
+
+                {REVIEW_SECTIONS.map(({ key, title, blurb, accent }) => {
+                  const rows = reviewBuckets[key] || [];
+
+                  // Zero missed is the goal state, so it gets said out loud.
+                  // The other two sections just disappear when empty.
+                  if (!rows.length) {
+                    if (key !== "missed") return null;
+                    return (
+                      <div key={key} className="dr-allclear">
+                        All serviced ✓ — nothing from {fmtDayLabel(review.date)}{" "}
+                        needs rescheduling.
+                      </div>
+                    );
+                  }
+
+                  const isMissed = key === "missed";
+                  return (
+                    <div key={key} className="dr-section">
+                      <div
+                        className="dr-section-head"
+                        style={{ borderLeftColor: accent }}
+                      >
+                        <span className="dr-section-title" style={{ color: accent }}>
+                          {title}
+                        </span>
+                        <span className="dr-section-count">{rows.length}</span>
+                        <span className="dr-section-blurb">{blurb}</span>
+                      </div>
+
+                      <div className="table-wrap">
+                        <table className="wo-table dr-table">
+                          <thead>
+                            <tr>
+                              <th style={{ width: 76 }}>Time</th>
+                              <th style={{ width: 76 }}>Created</th>
+                              <th style={{ width: 112 }}>WO / PO</th>
+                              <th style={{ width: 140 }}>Customer</th>
+                              <th style={{ width: 210 }}>Site</th>
+                              <th>Problem</th>
+                              <th style={{ width: 110 }}>Techs</th>
+                              <th style={{ width: 168 }}>Status</th>
+                              <th style={{ width: isMissed ? 150 : 84 }}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map((order) => {
+                              const { siteLocationName, siteAddress } = deriveSite(order);
+                              const latest = parseLatestNote(order?.notes);
+                              const noteTime = latest?.createdAt
+                                ? moment.utc(latest.createdAt).fromNow()
+                                : null;
+                              const cleanedPO =
+                                order.allPoNumbersFormatted ||
+                                displayPO(order.workOrderNumber, order.poNumber);
+                              const techs =
+                                (Array.isArray(order.techNames) && order.techNames.length
+                                  ? order.techNames
+                                  : [order.assignedToName].filter(Boolean)
+                                ).join(", ");
+
+                              return (
+                                <tr
+                                  key={order.id}
+                                  className="wo-row"
+                                  onClick={() =>
+                                    navigate(`/view-work-order/${order.id}`, {
+                                      state: { from: "/work-orders" },
+                                    })
+                                  }
+                                >
+                                  <td className="wo-created">
+                                    {fmtSchedTime(order.scheduledDate) || "—"}
+                                  </td>
+
+                                  <td
+                                    className="wo-created"
+                                    title={fmtCreatedFull(order.createdAt) || undefined}
+                                  >
+                                    {fmtCreatedCompact(order.createdAt)}
+                                  </td>
+
+                                  <td>
+                                    <div className="wo-idcell">
+                                      <div className="wo-idline">
+                                        <span className="badge">WO</span>
+                                        <span className="mono">
+                                          {order.workOrderNumber || "—"}
+                                        </span>
+                                      </div>
+                                      {cleanedPO ? (
+                                        <div className="wo-idline subtle">
+                                          <span className="badge badge-subtle">PO</span>
+                                          <span className="mono">{cleanedPO}</span>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </td>
+
+                                  <td className="cell-strong">{order.customer || "N/A"}</td>
+
+                                  <td title={[siteLocationName, siteAddress].filter(Boolean).join(" — ") || "—"}>
+                                    <div style={clampStyle(2)}>{siteLocationName || "—"}</div>
+                                    {siteAddress ? (
+                                      <button
+                                        type="button"
+                                        className="linklike dr-addr"
+                                        onClick={(e) =>
+                                          openAddressInMaps(e, siteAddress, siteLocationName)
+                                        }
+                                      >
+                                        {siteAddress}
+                                      </button>
+                                    ) : null}
+                                  </td>
+
+                                  <td title={order.problemDescription || ""}>
+                                    <div style={clampStyle(3)}>
+                                      {order.problemDescription || "—"}
+                                    </div>
+                                    {latest?.text ? (
+                                      <div
+                                        className="latest-note"
+                                        title={`${latest.text}${noteTime ? ` • ${noteTime}` : ""}`}
+                                      >
+                                        <span aria-hidden="true">📝</span> {latest.text}
+                                        {noteTime ? ` • ${noteTime}` : ""}
+                                      </div>
+                                    ) : null}
+                                  </td>
+
+                                  <td className="dr-techs" title={techs || "Unassigned"}>
+                                    {techs || "—"}
+                                  </td>
+
+                                  <td onClick={(e) => e.stopPropagation()}>
+                                    <select
+                                      className="control select"
+                                      value={toCanonicalStatus(order.status)}
+                                      onChange={(e) => handleReviewStatusChange(e, order.id)}
+                                    >
+                                      {STATUS_LIST.map((s) => (
+                                        <option key={s} value={s}>
+                                          {s}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </td>
+
+                                  <td onClick={(e) => e.stopPropagation()}>
+                                    <div className="dr-actions">
+                                      {isMissed && (
+                                        <button
+                                          type="button"
+                                          className="btn-primary-apple dr-resched"
+                                          onClick={() => openReschedule(order)}
+                                        >
+                                          Reschedule
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="chip dr-open"
+                                        onClick={() =>
+                                          navigate(`/view-work-order/${order.id}`, {
+                                            state: { from: "/work-orders" },
+                                          })
+                                        }
+                                      >
+                                        Open
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        )}
+
         {showSequence && (
           <div className="wo-seq-hint">
             {savingOrder
@@ -933,7 +1450,7 @@ export default function WorkOrders() {
           </div>
         )}
 
-        {selectedFilter !== "Follow-Up" && (
+        {selectedFilter !== "Follow-Up" && selectedFilter !== "Day Review" && (
         <div className="table-wrap">
           <table className="wo-table">
             <thead>
@@ -960,21 +1477,7 @@ export default function WorkOrders() {
                   ? moment.utc(latest.createdAt).fromNow()
                   : null;
 
-                // ---- Robust location/address logic ----
-                const rawLocField = norm(order.siteLocation); // may be a name (new) OR an address (legacy)
-                const explicitName = norm(order.siteName) || norm(order.siteLocationName);
-                let siteLocationName = explicitName;
-
-                let siteAddress =
-                  norm(order.siteAddress) ||
-                  norm(order.serviceAddress) ||
-                  norm(order.address);
-
-                if (!siteAddress && rawLocField) {
-                  siteAddress = rawLocField;
-                } else if (!siteLocationName && rawLocField) {
-                  siteLocationName = rawLocField;
-                }
+                const { siteLocationName, siteAddress } = deriveSite(order);
 
                 const cleanedPO = order.allPoNumbersFormatted || displayPO(order.workOrderNumber, order.poNumber);
 
@@ -1198,6 +1701,101 @@ export default function WorkOrders() {
         )}
       </div>
       </div>
+
+      {/* ───── Reschedule modal (Day Review → Missed) ───── */}
+      {rescheduleWO && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="dr-modal-overlay"
+          onClick={closeReschedule}
+        >
+          <div className="dr-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="dr-modal-title">
+              Reschedule — {rescheduleWO.customer || "Work Order"}
+            </h3>
+            <div className="dr-modal-sub">
+              <span className="mono">WO {rescheduleWO.workOrderNumber || rescheduleWO.id}</span>
+              {rescheduleWO.scheduledDate ? (
+                <>
+                  {" · missed "}
+                  {fmtDayLabel(String(rescheduleWO.scheduledDate).slice(0, 10))}
+                  {fmtSchedTime(rescheduleWO.scheduledDate)
+                    ? ` at ${fmtSchedTime(rescheduleWO.scheduledDate)}`
+                    : ""}
+                </>
+              ) : null}
+            </div>
+            {rescheduleWO.problemDescription ? (
+              <div className="dr-modal-problem" style={clampStyle(2)}>
+                {rescheduleWO.problemDescription}
+              </div>
+            ) : null}
+
+            <div className="dr-modal-grid">
+              <div>
+                <label className="dr-label" htmlFor="dr-rs-date">
+                  Date
+                </label>
+                <input
+                  id="dr-rs-date"
+                  type="date"
+                  className="control"
+                  value={rsDate}
+                  onChange={(e) => setRsDate(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="dr-label" htmlFor="dr-rs-start">
+                  Start
+                </label>
+                <input
+                  id="dr-rs-start"
+                  type="time"
+                  className="control"
+                  value={rsTime}
+                  onChange={(e) => setRsTime(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="dr-label" htmlFor="dr-rs-end">
+                  End
+                </label>
+                <input
+                  id="dr-rs-end"
+                  type="time"
+                  className="control"
+                  value={rsEndTime}
+                  onChange={(e) => setRsEndTime(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="dr-modal-note">
+              Saving sets the status back to <b>Scheduled</b> on the new day.
+            </div>
+
+            <div className="dr-modal-actions">
+              <button
+                type="button"
+                className="chip"
+                onClick={closeReschedule}
+                disabled={rsSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary-apple"
+                onClick={saveReschedule}
+                disabled={rsSaving || !rsDate || !rsTime}
+              >
+                {rsSaving ? "Saving…" : "Reschedule"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ───── Log Call modal ───── */}
       {callModalWO && (
