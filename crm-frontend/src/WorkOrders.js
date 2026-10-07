@@ -873,9 +873,16 @@ export default function WorkOrders() {
 
       const woNum = rescheduleWO.workOrderNumber || rescheduleWO.id;
       closeReschedule();
-      await Promise.all([fetchDayReview(review?.date), fetchWorkOrders()]);
       setFlashMsg(`WO ${woNum} rescheduled to ${fmtDayLabel(rsDate)}.`);
       setTimeout(() => setFlashMsg(""), 4000);
+
+      // Only the day review is awaited — it is one day's rows and comes back
+      // fast. The full work-orders list (every WO, with notes and PO rollups)
+      // takes tens of seconds and is needed here only to refresh the chip
+      // counts, so it is left to land on its own rather than freezing the
+      // screen the user is still reading.
+      await fetchDayReview(review?.date);
+      fetchWorkOrders();
     } catch (err) {
       console.error("Error rescheduling:", err);
       alert(err?.response?.data?.error || "Failed to reschedule.");
@@ -895,7 +902,10 @@ export default function WorkOrders() {
         { status: newStatus },
         { headers: authHeaders() }
       );
-      await Promise.all([fetchDayReview(review?.date), fetchWorkOrders()]);
+      // Re-bucket the day first (fast); refresh the chip counts in the
+      // background — see the note in saveReschedule.
+      await fetchDayReview(review?.date);
+      fetchWorkOrders();
     } catch (err) {
       console.error("Error updating status:", err);
       alert(err?.response?.data?.error || "Failed to update status.");
