@@ -1784,6 +1784,97 @@ async function ensureIndexes() {
 }
 ensureIndexes().catch((e) => console.error('[ensureIndexes] fatal:', e.message));
 
+// ─── ONE-TIME DATA CLEANUP: double commas in stored addresses ───────────────
+// Cause: the web AddWorkOrder "Same as billing address" copy joined the billing
+// textarea's lines with ", " without stripping each line's trailing comma, so a
+// line typed as "168 N Gregory St," produced "168 N Gregory St,, Aurora, IL".
+// The copy handler now normalizes before joining (crm-frontend/src/AddWorkOrder.js);
+// this repairs the rows written before that fix.
+//
+// Safe to run on every boot: no legitimate address contains ",,", and once the
+// rows are clean the LIKE match finds nothing and the function no-ops. The
+// REPLACE loop runs until it stops changing rows so ",,,," collapses fully
+// (REPLACE is non-overlapping: ",,,," -> ",," -> ",").
+async function cleanDoubleCommaAddresses() {
+  // Every stored free-text address column. City/state/zip are separate columns
+  // and can't carry the artifact, so they're left alone.
+  const targets = [
+    ['work_orders', 'siteAddress'],
+    ['work_orders', 'billingAddress'],
+    ['customers',   'billingAddress'],
+    ['customers',   'siteAddress'],
+    ['estimates',   'billingAddress'],
+    ['estimates',   'projectAddress'],
+    ['invoices',    'billingAddress'],
+    ['invoices',    'shipToAddress'],
+  ];
+
+  console.log('[addr-cleanup] starting double-comma check…');
+  let grandBefore = 0, grandFixed = 0, grandAfter = 0;
+
+  for (const [table, col] of targets) {
+    try {
+      // SHOW COLUMNS throws on a missing table, so this also covers that.
+      if (!(await columnExists(table, col))) {
+        console.log(`[addr-cleanup] SKIPPED(no column) ${table}.${col}`);
+        continue;
+      }
+
+      const [[before]] = await db.query(
+        `SELECT COUNT(*) AS c FROM \`${table}\` WHERE \`${col}\` LIKE '%,,%'`
+      );
+      const beforeCount = Number(before.c) || 0;
+      if (beforeCount === 0) {
+        console.log(`[addr-cleanup] clean already: ${table}.${col}`);
+        continue;
+      }
+      grandBefore += beforeCount;
+
+      // Sample BEFORE touching anything, so the log shows what was repaired.
+      const [sample] = await db.query(
+        `SELECT id, \`${col}\` AS val FROM \`${table}\` WHERE \`${col}\` LIKE '%,,%' ORDER BY id LIMIT 5`
+      );
+      console.log(`[addr-cleanup] ${table}.${col}: ${beforeCount} row(s) with ',,'. Sample:`);
+      for (const r of sample) console.log(`[addr-cleanup]     id=${r.id}  ${JSON.stringify(r.val)}`);
+
+      let passes = 0, fixed = 0;
+      for (;;) {
+        const [res] = await db.query(
+          `UPDATE \`${table}\` SET \`${col}\` = REPLACE(\`${col}\`, ',,', ',') WHERE \`${col}\` LIKE '%,,%'`
+        );
+        passes++;
+        fixed += res.affectedRows;
+        if (res.affectedRows === 0 || passes >= 10) break;
+      }
+      grandFixed += fixed;
+
+      const [[after]] = await db.query(
+        `SELECT COUNT(*) AS c FROM \`${table}\` WHERE \`${col}\` LIKE '%,,%'`
+      );
+      const afterCount = Number(after.c) || 0;
+      grandAfter += afterCount;
+
+      const [verify] = await db.query(
+        `SELECT id, \`${col}\` AS val FROM \`${table}\` WHERE id IN (?) ORDER BY id`,
+        [sample.map((r) => r.id)]
+      );
+      console.log(
+        `[addr-cleanup] ${table}.${col}: before=${beforeCount} after=${afterCount} ` +
+        `(${passes} pass(es), ${fixed} row-update(s)). Same rows now:`
+      );
+      for (const r of verify) console.log(`[addr-cleanup]     id=${r.id}  ${JSON.stringify(r.val)}`);
+    } catch (e) {
+      console.error(`[addr-cleanup] ERROR on ${table}.${col}: ${e.message}`);
+    }
+  }
+
+  console.log(
+    `[addr-cleanup] done. total before=${grandBefore}, row-updates=${grandFixed}, total after=${grandAfter}` +
+    (grandAfter === 0 ? ' ✓' : ' ← STILL DIRTY')
+  );
+}
+cleanDoubleCommaAddresses().catch((e) => console.error('[addr-cleanup] fatal:', e.message));
+
 // ─── LINE ITEM TEMPLATES TABLE ──────────────────────────────────────────────
 async function ensureLineItemTemplateTable() {
   try {

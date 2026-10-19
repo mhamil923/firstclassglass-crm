@@ -35,6 +35,42 @@ async function compressImage(file, maxDim = 1600, quality = 0.8) {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/* Address normalization for the "Same as …" copy handlers.                   */
+/*                                                                            */
+/* People type the billing textarea the way an address is printed on an        */
+/* envelope, which often leaves a trailing comma on a line:                    */
+/*     Lakeview Townhomes                                                      */
+/*     168 N Gregory St,                                                       */
+/*     Aurora, IL 60504, USA                                                   */
+/* Joining those lines with ", " used to yield "168 N Gregory St,, Aurora, …". */
+/* Strip the trailing comma off each line BEFORE joining, and collapse any     */
+/* residual doubles as a backstop (a line could end ",," on its own).          */
+/* -------------------------------------------------------------------------- */
+
+// One address line: trimmed, with any trailing commas (and the space before
+// them) removed. "168 N Gregory St, " -> "168 N Gregory St".
+const cleanAddressLine = (line) =>
+  String(line ?? "")
+    .trim()
+    .replace(/[\s,]+$/, "");
+
+// Billing textarea -> non-empty, cleaned lines.
+const addressLines = (raw) =>
+  String(raw ?? "")
+    .split(/\r?\n/)
+    .map(cleanAddressLine)
+    .filter(Boolean);
+
+// Join cleaned lines into a single-line address, collapsing any ",," that
+// survives (e.g. a line that was literally "," between two real lines).
+const joinAddressLines = (lines) =>
+  lines
+    .join(", ")
+    .replace(/,\s*(?=,)/g, "")   // ",," / ", ," -> ","  (repeats collapse too)
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
 // Keep this list in sync with WorkOrders.js and server.js
 const STATUS_LIST = [
   "New",
@@ -191,12 +227,17 @@ export default function AddWorkOrder() {
   const [siteFromBilling, setSiteFromBilling] = useState(false);
   const [billingFromSite, setBillingFromSite] = useState(false);
 
+  // Mapping is unchanged: line 1 -> Site Location (Name), the remaining lines
+  // joined into Site Address. Only the normalization is new.
   function splitBillingForSite(billing) {
-    const lines = String(billing || "").split("\n").map((l) => l.trim()).filter(Boolean);
+    const lines = addressLines(billing);
     if (lines.length >= 2) {
-      return { siteLocation: lines[0], siteAddress: lines.slice(1).join(", ") };
+      return { siteLocation: lines[0], siteAddress: joinAddressLines(lines.slice(1)) };
     }
-    return { siteLocation: "", siteAddress: String(billing || "").trim() };
+    // 0 or 1 usable lines: nothing to name the site with, so the whole thing
+    // is the address (previously this returned the raw string untrimmed of
+    // trailing commas).
+    return { siteLocation: "", siteAddress: joinAddressLines(lines) };
   }
 
   useEffect(() => {
@@ -210,9 +251,10 @@ export default function AddWorkOrder() {
   }, [siteFromBilling, workOrder.billingAddress]);
   useEffect(() => {
     if (billingFromSite) {
-      setWorkOrder((prev) =>
-        prev.billingAddress === prev.siteAddress ? prev : { ...prev, billingAddress: prev.siteAddress }
-      );
+      setWorkOrder((prev) => {
+        const next = cleanAddressLine(prev.siteAddress);
+        return prev.billingAddress === next ? prev : { ...prev, billingAddress: next };
+      });
     }
   }, [billingFromSite, workOrder.siteAddress]);
 
@@ -322,11 +364,9 @@ export default function AddWorkOrder() {
 
   const extractCustomerFromBilling = (addr) => {
     if (!addr) return "";
-    const first = addr
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean)[0];
-    return first || "";
+    // Same line cleaning as the address copy, so a typed "Lakeview Townhomes,"
+    // doesn't become the customer's name with the comma attached.
+    return addressLines(addr)[0] || "";
   };
 
   // Filter customers for dropdown
@@ -1048,7 +1088,13 @@ export default function AddWorkOrder() {
                           setBillingFromSite(e.target.checked);
                           if (e.target.checked) {
                             setSiteFromBilling(false);
-                            setWorkOrder((prev) => ({ ...prev, billingAddress: prev.siteAddress }));
+                            // Site Address is a single-line input, so there is
+                            // nothing to join here — just don't carry a stray
+                            // trailing comma back into the billing textarea.
+                            setWorkOrder((prev) => ({
+                              ...prev,
+                              billingAddress: cleanAddressLine(prev.siteAddress),
+                            }));
                           } else {
                             setWorkOrder((prev) => ({ ...prev, billingAddress: "" }));
                           }
