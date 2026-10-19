@@ -516,6 +516,14 @@ export default function AddWorkOrder() {
           filledFields.push("Billing Address");
           console.log("[PDF Extract] Found billingAddress:", updates.billingAddress);
         }
+        if (ext.customerPhone && ext.customerPhone.trim()) {
+          updates.customerPhone = ext.customerPhone.trim();
+          filledFields.push("Customer Phone");
+        }
+        if (ext.customerEmail && ext.customerEmail.trim()) {
+          updates.customerEmail = ext.customerEmail.trim();
+          filledFields.push("Customer Email");
+        }
         if (ext.poNumber && ext.poNumber.trim()) {
           updates.poNumber = ext.poNumber.trim();
           filledFields.push("PO Number");

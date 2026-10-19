@@ -1281,7 +1281,105 @@ function extractKFMFields(text) {
   return result;
 }
 
+// Same rules as AddWorkOrder.js cleanAddressLine/joinAddressLines (the ",," fix):
+// strip trailing commas per line, join with ", ", collapse any surviving ",,".
+function cleanAddressLine(line) {
+  return String(line ?? "").trim().replace(/[\s,]+$/, "");
+}
+function joinAddressLines(lines) {
+  return lines
+    .map(cleanAddressLine)
+    .filter(Boolean)
+    .join(", ")
+    .replace(/,\s*(?=,)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function extractLaserFields(text) {
+  console.log('[LASER] === Laser Facility Management Extraction Start ===');
+
+  const result = {
+    workOrderNumber: null,
+    skipPoNumber: true, // "Client PO #" is Laser's client's PO; FCG assigns its own PO
+    customerPhone: null,
+    customerEmail: null,
+    siteLocation: null,
+    siteAddress: null,
+    problemDescription: null,
+  };
+
+  // These PDFs are two pages (page 2 = sign-off sheet with IVR pin) and
+  // extractTextSmart may append an OCR pass after the text layer, so Service
+  // Location / Vendor PO # repeat. Work on page 1 only; every match below is
+  // first-occurrence on top of that.
+  const pageBreak = text.search(/Signoff\s+and\s+IVR\s+Instructions\s+on\s+the\s+Next\s+Page|SIGN\s+OFF\s+SHEET/i);
+  const page1 = pageBreak > 0 ? text.slice(0, pageBreak) : text;
+
+  // pdf-parse emits the header values BEFORE their labels ("194160-02" ...
+  // "VENDOR PO #"), so anchor on the value shape instead of label adjacency.
+  // Vendor PO is the only NNNNNN-NN token; Client PO (8 digits), Dispatch ID
+  // and phones don't fit it. Keep the full hyphenated form.
+  const woMatch = page1.match(/VENDOR\s+PO\s*#[^\n]*?\b(\d{4,8}-\d{1,3})\b/i)
+    || page1.match(/\b(\d{4,8}-\d{1,3})\b(?!-)/);
+  if (woMatch) result.workOrderNumber = woMatch[1];
+
+  // Contact block: WO manager email + direct line (a bare phone on its own
+  // line, unlike the "Phone # ..." company/location numbers).
+  const emailMatch = page1.match(/\b(?!billing@)([A-Za-z0-9._%+-]+@laserfacility\.com)\b/i);
+  if (emailMatch) result.customerEmail = emailMatch[1].toLowerCase();
+  const directPhone = page1.match(/^[ \t]*(\d{3}[-.]\d{3}[-.]\d{4})[ \t]*$/m);
+  const mainPhone = page1.match(/Phone\s*#\s*(\d{3}[-.]\d{3}[-.]\d{4})/i);
+  result.customerPhone = (directPhone || mainPhone || [])[1] || null;
+
+  // Service Location block: first line = "Zara - Loc # 3010", remaining lines
+  // up to the location's "Phone #" = address.
+  const locMatch = page1.match(/Service\s+Location[ \t]*\n([^\n]+)\n([\s\S]*?)\n[ \t]*Phone\s*#/i);
+  if (locMatch) {
+    result.siteLocation = locMatch[1].replace(/\s+/g, ' ').trim();
+    const addrLines = locMatch[2].split('\n').map(l => l.replace(/\.+\s*$/, ''));
+    result.siteAddress = joinAddressLines(addrLines) || null;
+  }
+  // The text layer is column-interleaved; if the block ever captures header
+  // debris, drop the address rather than fill the form with label text.
+  if (result.siteAddress && /\b(NTE|Priority|Order\s*Type|Service\s*Date|VENDOR\s*PO|Client\s*PO|Dispatch\s*ID)\b/i.test(result.siteAddress)) {
+    console.warn('[LASER] Rejected siteAddress containing header labels:', JSON.stringify(result.siteAddress));
+    result.siteAddress = null;
+  }
+
+  // Service Instructions, prefixed with the header constraints. Each piece is
+  // optional; if none parse the prefix is dropped entirely.
+  const instrMatch = page1.match(/Service\s+Instructions[ \t]*\n([\s\S]*?)(?:\n[ \t]*(?:Billing\s+Instructions|WO\s+Checklist|Safety\s+Requirements|Store\s+Manager)|$)/i);
+  if (instrMatch) {
+    const instructions = instrMatch[1].split('\n').map(l => l.trim()).filter(Boolean).join('\n');
+    if (instructions) {
+      const nte = page1.match(/NTE[ \t]*\$\s*([\d,]+\.\d{2})/i) || page1.match(/\$\s*([\d,]+\.\d{2})\s*\n\s*NTE\b/i);
+      const priorityMatch = page1.match(/\b(P\d+\s*-\s*\d+\s*Hours?)\b/i);
+      const orderType = page1.match(/Order\s+Type[ \t]+([A-Za-z][^\n]*?)[ \t]*$/im)
+        || page1.match(/\bP\d+\s*-\s*\d+\s*Hours?[ \t]*\n[ \t]*([A-Za-z][A-Za-z /&-]*?)[ \t]*\n/i);
+      const parts = [];
+      if (nte) parts.push(`NTE $${nte[1]}`);
+      if (priorityMatch) parts.push(`Priority ${priorityMatch[1].replace(/\s*-\s*/, ' - ')}`);
+      if (orderType) parts.push(`Order Type: ${orderType[1].trim()}`);
+      result.problemDescription = (parts.length ? parts.join(' · ') + ' — ' : '') + instructions;
+    }
+  }
+
+  console.log('[LASER] Results:', JSON.stringify({ ...result, problemDescription: result.problemDescription?.substring(0, 100) }));
+  return result;
+}
+
+// Dispatch is first substring match in insertion order. Laser sits first: its
+// anchors are long and specific, whereas the bare "CLM"/"KFM" names below
+// could substring-match free text in a Laser PDF.
 const CUSTOMER_PROFILES = {
+  LASER: {
+    names: ["LASER FACILITY MANAGEMENT", "LASERFACILITY.COM"],
+    displayName: "Laser Facility Management",
+    billingAddress: "Laser Facility Management, LLC, 2451 W Grapevine Mills Circle, Suite 303, Grapevine, TX 76051",
+    customExtract: extractLaserFields,
+  },
+
   CLEAR_VISION: {
     names: ["CLEAR VISION", "CLEARVISION", "CLEAR VISION FACILITIES"],
     displayName: "Clear Vision",
@@ -1528,6 +1626,8 @@ function extractWorkOrderFields(text, opts = {}) {
       if (custom.siteLocation) result.siteLocation = custom.siteLocation;
       if (custom.siteAddress) result.siteAddress = custom.siteAddress;
       if (custom.problemDescription) result.problemDescription = custom.problemDescription;
+      if (custom.customerPhone) result.customerPhone = custom.customerPhone;
+      if (custom.customerEmail) result.customerEmail = custom.customerEmail;
     } else if (profile.patterns) {
       // Extract each field using customer's specific pattern
       if (profile.patterns.workOrderNumber) {
