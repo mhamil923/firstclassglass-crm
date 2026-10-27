@@ -4621,7 +4621,6 @@ app.get('/invoices/collections', authenticate, async (req, res) => {
         dueDate: comp.dueDate,
         reminderStage: comp.reminderStage,
         lateFee: comp.lateFee,
-        qbPayLink: inv.qbPayLink || '',
         lastReminderAt: inv.lastReminderAt || null,
         storedReminderStage: inv.reminderStage || 'None',
       };
@@ -6198,7 +6197,6 @@ function buildReminderDraft(inv, comp) {
   const total = Number(inv.total) || 0;
   const amountPaid = Number(inv.amountPaid) || 0;
   const isPartial = amountPaid > 0 && amountPaid < total;
-  const totalDueNow = round2(comp.outstanding + comp.lateFee);
 
   let subject;
   if (comp.reminderStage === 'Due Soon') {
@@ -6227,18 +6225,13 @@ function buildReminderDraft(inv, comp) {
   if (comp.daysOverdue >= 0) {
     lines.push(`Days past due: ${comp.daysOverdue}`);
   }
-  if (comp.lateFee > 0) {
+  // Policy sentence only — no computed fee amounts go in the email.
+  if (comp.daysOverdue >= 0) {
     lines.push('');
-    lines.push(`Late fee: ${fmtMoneyServer(comp.lateFee)}`);
-    lines.push(`(Per our terms, a 15% late fee applies once an invoice is ${NET_TERM_DAYS} days past the invoice date, with an additional 15% added every 30 days it remains unpaid.)`);
-    lines.push(`Total due now (balance + late fee): ${fmtMoneyServer(totalDueNow)}`);
+    lines.push(`Per our terms, a 15% late fee applies once an invoice is ${NET_TERM_DAYS} days past the invoice date.`);
   }
   lines.push('');
-  if (inv.qbPayLink) {
-    lines.push(`Pay this invoice now: ${inv.qbPayLink}`);
-  } else {
-    lines.push('Reply to this email or call us at 630-250-9777 to arrange payment.');
-  }
+  lines.push('Reply to this email or call us at 630-250-9777 to arrange payment.');
   lines.push('');
   lines.push('Thank you,');
   lines.push('First Class Glass & Mirror, Inc.');
@@ -6247,7 +6240,6 @@ function buildReminderDraft(inv, comp) {
     subject,
     body: lines.join('\n'),
     to: inv.custEmail || '',
-    payLinkOnFile: !!inv.qbPayLink,
     lateFee: comp.lateFee,
     outstanding: comp.outstanding,
     reminderStage: comp.reminderStage,
@@ -6264,19 +6256,32 @@ async function getInvoiceWithCustomer(id) {
   return inv || null;
 }
 
-// PUT /invoices/:id/paylink — save the QuickBooks hosted-payment URL
-app.put('/invoices/:id/paylink', authenticate, requireNumericParam('id'), async (req, res) => {
-  try {
-    const b = coerceBody(req);
-    const link = b.qbPayLink == null ? null : String(b.qbPayLink).trim();
-    const [r] = await db.query('UPDATE invoices SET qbPayLink = ?, updatedAt = NOW() WHERE id = ?', [link || null, Number(req.params.id)]);
-    if (!r.affectedRows) return res.status(404).json({ error: 'Invoice not found.' });
-    res.json({ ok: true, qbPayLink: link || '' });
-  } catch (err) {
-    console.error('Save pay link error:', err);
-    res.status(500).json({ error: 'Failed to save pay link.' });
+// Reminder attachment: the invoice row's stored PDF (same file + same
+// resolvePdfAttachment local/S3 fetch the ViewWorkOrder invoice-send uses).
+// Never throws — a missing/unreadable/oversized PDF yields { attachment: null,
+// warning } so the reminder still sends without it.
+const REMINDER_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+async function resolveReminderAttachment(inv) {
+  const invNo = inv.invoiceNumber || inv.qbDocNumber || inv.id;
+  const filename = `INVOICE-${String(invNo).replace(/[^A-Za-z0-9_-]/g, '')}.pdf`;
+  if (!inv.pdfPath) {
+    return { attachment: null, filename: null, warning: 'No invoice PDF on file — reminder will send without attachment.' };
   }
-});
+  try {
+    const a = await resolvePdfAttachment(inv.pdfPath);
+    const size = a.buffer ? a.buffer.length : 0;
+    if (!size) {
+      return { attachment: null, filename: null, warning: 'Invoice PDF on file is empty — reminder will send without attachment.' };
+    }
+    if (size > REMINDER_ATTACHMENT_MAX_BYTES) {
+      return { attachment: null, filename: null, warning: `Invoice PDF is too large to attach (${(size / 1024 / 1024).toFixed(1)} MB, limit 10 MB) — reminder will send without attachment.` };
+    }
+    return { attachment: { filename, content: a.buffer, contentType: 'application/pdf' }, filename, size, warning: null };
+  } catch (e) {
+    console.warn('[reminder] invoice PDF attach failed:', inv.pdfPath, e.message);
+    return { attachment: null, filename: null, warning: 'Invoice PDF on file could not be loaded — reminder will send without attachment.' };
+  }
+}
 
 // POST /invoices/:id/reminder/draft — build (do NOT send) the reminder for review
 app.post('/invoices/:id/reminder/draft', authenticate, requireNumericParam('id'), async (req, res) => {
@@ -6285,10 +6290,13 @@ app.post('/invoices/:id/reminder/draft', authenticate, requireNumericParam('id')
     if (!inv) return res.status(404).json({ error: 'Invoice not found.' });
     const comp = computeCollections(inv);
     const draft = buildReminderDraft(inv, comp);
+    const att = await resolveReminderAttachment(inv);
     res.json({
       ...draft,
       invoiceNumber: inv.invoiceNumber,
-      noPayLinkWarning: inv.qbPayLink ? null : 'No QuickBooks pay link is on file for this invoice. The reminder will ask the customer to reply or call. Add a pay link to include a one-click payment URL.',
+      attachmentName: att.filename,
+      attachmentSize: att.size || null,
+      attachmentWarning: att.warning,
     });
   } catch (err) {
     console.error('Reminder draft error:', err);
@@ -6339,7 +6347,11 @@ app.post('/invoices/:id/reminder/send', authenticate, requireNumericParam('id'),
         </div>
       </div>`;
 
+    const att = await resolveReminderAttachment(inv);
+    const attachments = att.attachment ? [att.attachment] : [];
+
     const { transport, settings } = await createEmailTransport();
+    console.log('[reminder] sending -> to:', to, '| invoice:', invoiceId, '| attachment:', att.filename || `none (${att.warning})`);
     await transport.sendMail({
       from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
       replyTo: settings.replyTo || settings.senderEmail,
@@ -6347,6 +6359,7 @@ app.post('/invoices/:id/reminder/send', authenticate, requireNumericParam('id'),
       subject,
       text: body,
       html,
+      attachments,
     });
 
     await db.query(
@@ -6359,7 +6372,7 @@ app.post('/invoices/:id/reminder/send', authenticate, requireNumericParam('id'),
       [stage, comp.lateFee, invoiceId]
     );
 
-    res.json({ ok: true, stage, lateFee: comp.lateFee, sentTo: to });
+    res.json({ ok: true, stage, lateFee: comp.lateFee, sentTo: to, attachment: att.filename || null });
   } catch (err) {
     console.error('Reminder send error:', err);
     res.status(500).json({ error: err.message || 'Failed to send reminder.' });

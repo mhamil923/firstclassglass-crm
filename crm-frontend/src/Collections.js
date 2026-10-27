@@ -2,7 +2,7 @@
 // Standalone Collections / payment-reminder page. Extracted from the former
 // Invoices list page when the standalone Estimates/Invoices nav pages were retired
 // (invoice creation now happens in QuickBooks). Reads the unchanged collections
-// backend: GET /invoices/collections, PUT /invoices/:id/paylink,
+// backend: GET /invoices/collections,
 // POST /invoices/:id/reminder/{draft,send,skip}.
 //
 // Styling: Apple Design System tokens only (var(--bg-card-solid), --bg-secondary,
@@ -66,7 +66,6 @@ export default function Collections() {
   const navigate = useNavigate();
   const [collections, setCollections] = useState([]);
   const [collectionsLoading, setCollectionsLoading] = useState(false);
-  const [payLinkEdit, setPayLinkEdit] = useState({}); // { [invoiceId]: draftValue }
   const [draftModal, setDraftModal] = useState(null);
   const [payModal, setPayModal] = useState(null);   // the row being paid, or null
 
@@ -87,17 +86,6 @@ export default function Collections() {
     fetchCollections();
   }, [fetchCollections]);
 
-  const savePayLink = async (invoiceId) => {
-    const link = payLinkEdit[invoiceId] ?? "";
-    try {
-      await api.put(`/invoices/${invoiceId}/paylink`, { qbPayLink: link });
-      setPayLinkEdit((m) => { const n = { ...m }; delete n[invoiceId]; return n; });
-      setCollections((prev) => prev.map((c) => (c.id === invoiceId ? { ...c, qbPayLink: link } : c)));
-    } catch (err) {
-      alert(err?.response?.data?.error || "Failed to save pay link.");
-    }
-  };
-
   const openDraft = async (row) => {
     try {
       const res = await api.post(`/invoices/${row.id}/reminder/draft`, {});
@@ -108,11 +96,10 @@ export default function Collections() {
         to: d.to || row.customerEmail || "",
         subject: d.subject || "",
         body: d.body || "",
-        lateFee: d.lateFee ?? row.lateFee ?? 0,
         outstanding: d.outstanding ?? row.outstanding ?? 0,
         reminderStage: d.reminderStage || row.reminderStage,
-        payLinkOnFile: !!d.payLinkOnFile,
-        noPayLinkWarning: d.noPayLinkWarning || null,
+        attachmentName: d.attachmentName || null,
+        attachmentWarning: d.attachmentWarning || null,
         sending: false,
       });
     } catch (err) {
@@ -195,18 +182,16 @@ export default function Collections() {
                   <th style={{ textAlign: "right" }}>Late Fee</th>
                   <th>Reminder Stage</th>
                   <th>Last Reminded</th>
-                  <th>Pay Link</th>
                   <th style={{ width: 380 }}></th>
                 </tr>
               </thead>
               <tbody>
                 {collections.length === 0 && !collectionsLoading && (
-                  <tr><td colSpan={8}><div className="inv-empty">No unpaid or partial invoices to collect. 🎉</div></td></tr>
+                  <tr><td colSpan={7}><div className="inv-empty">No unpaid or partial invoices to collect. 🎉</div></td></tr>
                 )}
                 {collections.map((row) => {
                   const badge = daysOverdueBadge(row.daysOverdue);
                   const isPartial = Number(row.amountPaid) > 0 && Number(row.amountPaid) < Number(row.total);
-                  const editing = Object.prototype.hasOwnProperty.call(payLinkEdit, row.id);
                   const lateFeeTip =
                     row.lateFee > 0
                       ? `15% applied at the 45-day due date, compounding +15% every 30 days. Outstanding ${fmtMoney(row.outstanding)} → late fee ${fmtMoney(row.lateFee)} (stage: ${row.reminderStage}).`
@@ -238,28 +223,6 @@ export default function Collections() {
                       <td data-label="Stage" style={{ color: "var(--text-primary)" }}>{row.reminderStage}</td>
                       <td data-label="Last Reminded" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                         {row.lastReminderAt ? fmtDate(row.lastReminderAt) : <span style={{ color: "var(--text-tertiary)" }}>Never</span>}
-                      </td>
-                      <td data-label="Pay Link">
-                        {!editing && row.qbPayLink ? (
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                            <span style={{ color: "var(--accent-green)", fontWeight: 700 }}>✓ On file</span>
-                            <button type="button" style={{ fontSize: 11, background: "none", border: "none", color: "var(--accent-blue)", cursor: "pointer", textDecoration: "underline", padding: 0 }} onClick={() => setPayLinkEdit((m) => ({ ...m, [row.id]: row.qbPayLink || "" }))}>edit</button>
-                          </span>
-                        ) : !editing ? (
-                          <button type="button" style={{ fontSize: 12, background: "none", border: "none", color: "var(--accent-blue)", cursor: "pointer", textDecoration: "underline", padding: 0 }} onClick={() => setPayLinkEdit((m) => ({ ...m, [row.id]: "" }))}>+ Add pay link</button>
-                        ) : (
-                          <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-                            <input
-                              type="text"
-                              value={payLinkEdit[row.id]}
-                              onChange={(e) => setPayLinkEdit((m) => ({ ...m, [row.id]: e.target.value }))}
-                              placeholder="Paste QuickBooks pay URL"
-                              style={{ ...FIELD, width: 180, fontSize: 12, padding: "5px 8px" }}
-                            />
-                            <button type="button" style={{ ...ROW_BTN, background: "var(--accent-blue)", color: "#fff", border: "none", height: 28, padding: "0 10px" }} onClick={() => savePayLink(row.id)}>Save</button>
-                            <button type="button" style={{ ...ROW_BTN, ...SECONDARY_BTN, height: 28, padding: "0 10px" }} onClick={() => setPayLinkEdit((m) => { const n = { ...m }; delete n[row.id]; return n; })}>✕</button>
-                          </span>
-                        )}
                       </td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         <div style={{ display: "inline-flex", gap: 6 }}>
@@ -304,22 +267,22 @@ export default function Collections() {
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", margin: "8px 0 16px", fontSize: 13, color: "var(--text-secondary)" }}>
               <span>Stage: <strong style={{ color: "var(--text-primary)" }}>{draftModal.reminderStage}</strong></span>
               <span>Outstanding: <strong style={{ color: "var(--text-primary)" }}>{fmtMoney(draftModal.outstanding)}</strong></span>
-              <span>
-                Late fee: <strong style={{ color: draftModal.lateFee > 0 ? "var(--accent-red)" : "var(--text-primary)" }}>{fmtMoney(draftModal.lateFee)}</strong>
-              </span>
-              <span>Pay link: <strong style={{ color: draftModal.payLinkOnFile ? "var(--accent-green)" : "var(--accent-red)" }}>{draftModal.payLinkOnFile ? "✓ included" : "none on file"}</strong></span>
             </div>
-            {draftModal.noPayLinkWarning && (
-              <div style={{ background: "rgba(255,149,0,0.12)", border: "1px solid var(--accent-orange)", color: "var(--accent-orange)", borderRadius: 8, padding: "8px 12px", fontSize: 12, marginBottom: 12 }}>
-                {draftModal.noPayLinkWarning}
-              </div>
-            )}
             <label style={MODAL_LABEL}>To</label>
             <input type="text" value={draftModal.to} onChange={(e) => setDraftModal((m) => ({ ...m, to: e.target.value }))} style={{ ...FIELD, marginBottom: 12 }} />
             <label style={MODAL_LABEL}>Subject</label>
             <input type="text" value={draftModal.subject} onChange={(e) => setDraftModal((m) => ({ ...m, subject: e.target.value }))} style={{ ...FIELD, marginBottom: 12 }} />
             <label style={MODAL_LABEL}>Body</label>
             <textarea value={draftModal.body} onChange={(e) => setDraftModal((m) => ({ ...m, body: e.target.value }))} rows={14} style={{ ...FIELD, resize: "vertical", fontFamily: "inherit", fontSize: 13 }} />
+            {draftModal.attachmentName ? (
+              <div style={{ marginTop: 8, fontSize: 13, color: "var(--text-secondary)" }}>
+                Attachment: <strong style={{ color: "var(--text-primary)" }}>📎 {draftModal.attachmentName}</strong>
+              </div>
+            ) : (
+              <div style={{ marginTop: 8, background: "rgba(255,149,0,0.12)", border: "1px solid var(--accent-orange)", color: "var(--accent-orange)", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
+                {draftModal.attachmentWarning || "No invoice PDF on file — reminder will send without attachment."}
+              </div>
+            )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
               <button type="button" onClick={() => setDraftModal(null)} disabled={draftModal.sending} style={{ ...SECONDARY_BTN, padding: "10px 18px", borderRadius: 8, cursor: "pointer" }}>Cancel</button>
               <button type="button" className="btn-primary-apple" onClick={sendDraft} disabled={draftModal.sending || !draftModal.to || !draftModal.subject || !draftModal.body} style={(draftModal.sending || !draftModal.to || !draftModal.subject || !draftModal.body) ? { opacity: 0.5, cursor: "not-allowed" } : undefined}>
