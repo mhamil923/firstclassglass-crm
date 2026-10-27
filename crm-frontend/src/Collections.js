@@ -9,7 +9,7 @@
 // --text-primary, --text-secondary, --border-color, --accent-blue/green/orange/red).
 // Buttons reuse the shared accent-blue primary class (btn-primary-apple) and the
 // estimate-send modal's inline secondary style — dark-mode correct in both themes.
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "./api";
 import RecordPaymentModal, { RECORD_PAYMENT_BTN } from "./RecordPaymentModal";
@@ -62,12 +62,33 @@ const FIELD = {
 };
 const MODAL_LABEL = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-secondary)" };
 
+// "Send test" remembers the last-used test address per browser.
+const TEST_ADDR_KEY = "collections.testRecipient";
+const DEFAULT_TEST_ADDR = "mhamil923@gmail.com";
+function loadTestAddr() {
+  try {
+    return localStorage.getItem(TEST_ADDR_KEY) || DEFAULT_TEST_ADDR;
+  } catch {
+    return DEFAULT_TEST_ADDR;
+  }
+}
+
 export default function Collections() {
   const navigate = useNavigate();
   const [collections, setCollections] = useState([]);
   const [collectionsLoading, setCollectionsLoading] = useState(false);
   const [draftModal, setDraftModal] = useState(null);
   const [payModal, setPayModal] = useState(null);   // the row being paid, or null
+  // Test-send panel inside the review modal: null when closed, else { addr, sending }.
+  const [testSend, setTestSend] = useState(null);
+  const [toast, setToast] = useState(null);
+  const toastTimerRef = useRef(null);
+  const showToast = (msg) => {
+    setToast(msg);
+    clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 5000);
+  };
+  useEffect(() => () => clearTimeout(toastTimerRef.current), []);
 
   const fetchCollections = useCallback(async () => {
     setCollectionsLoading(true);
@@ -90,6 +111,7 @@ export default function Collections() {
     try {
       const res = await api.post(`/invoices/${row.id}/reminder/draft`, {});
       const d = res.data || {};
+      setTestSend(null);
       setDraftModal({
         invoiceId: row.id,
         row,
@@ -121,6 +143,28 @@ export default function Collections() {
     } catch (err) {
       alert(err?.response?.data?.error || "Failed to send reminder.");
       setDraftModal((m) => (m ? { ...m, sending: false } : m));
+    }
+  };
+
+  // Sends the current draft to a test address only. The backend writes nothing
+  // (no reminder log, no stage change), so the modal stays open for the real Send.
+  const sendTest = async () => {
+    if (!draftModal || !testSend || testSend.sending) return;
+    const addr = testSend.addr.trim();
+    if (!addr) return;
+    setTestSend((t) => ({ ...t, sending: true }));
+    try {
+      await api.post(`/invoices/${draftModal.invoiceId}/reminder/send-test`, {
+        testRecipient: addr,
+        subject: draftModal.subject,
+        body: draftModal.body,
+      });
+      try { localStorage.setItem(TEST_ADDR_KEY, addr); } catch {}
+      setTestSend(null);
+      showToast(`Test sent to ${addr}`);
+    } catch (err) {
+      alert(err?.response?.data?.error || "Failed to send test.");
+      setTestSend((t) => (t ? { ...t, sending: false } : t));
     }
   };
 
@@ -283,13 +327,31 @@ export default function Collections() {
                 {draftModal.attachmentWarning || "No invoice PDF on file — reminder will send without attachment."}
               </div>
             )}
+            {testSend && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
+                <input type="email" aria-label="Test recipient" value={testSend.addr} onChange={(e) => setTestSend((t) => ({ ...t, addr: e.target.value }))} onKeyDown={(e) => e.key === "Enter" && sendTest()} autoFocus style={{ ...FIELD, flex: 1, padding: 8, fontSize: 13 }} />
+                <button type="button" className="btn-primary-apple" onClick={sendTest} disabled={testSend.sending || !testSend.addr.trim()} style={{ whiteSpace: "nowrap", ...((testSend.sending || !testSend.addr.trim()) ? { opacity: 0.5, cursor: "not-allowed" } : {}) }}>
+                  {testSend.sending ? "Sending…" : "Send test"}
+                </button>
+                <button type="button" onClick={() => setTestSend(null)} disabled={testSend.sending} style={{ ...SECONDARY_BTN, padding: "8px 12px", borderRadius: 8, cursor: "pointer" }}>✕</button>
+              </div>
+            )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+              {!testSend && (
+                <button type="button" onClick={() => setTestSend({ addr: loadTestAddr(), sending: false })} disabled={draftModal.sending || !draftModal.subject || !draftModal.body} style={{ ...SECONDARY_BTN, padding: "10px 18px", borderRadius: 8, cursor: "pointer", marginRight: "auto" }}>Send test</button>
+              )}
               <button type="button" onClick={() => setDraftModal(null)} disabled={draftModal.sending} style={{ ...SECONDARY_BTN, padding: "10px 18px", borderRadius: 8, cursor: "pointer" }}>Cancel</button>
               <button type="button" className="btn-primary-apple" onClick={sendDraft} disabled={draftModal.sending || !draftModal.to || !draftModal.subject || !draftModal.body} style={(draftModal.sending || !draftModal.to || !draftModal.subject || !draftModal.body) ? { opacity: 0.5, cursor: "not-allowed" } : undefined}>
                 {draftModal.sending ? "Sending…" : "Send"}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div role="status" aria-live="polite" style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "var(--bg-card-solid)", color: "var(--text-primary)", border: "1px solid var(--accent-green, #34c759)", borderRadius: 8, padding: "10px 16px", fontSize: 13, boxShadow: "0 8px 24px rgba(0,0,0,0.3)", zIndex: 1100 }}>
+          {toast}
         </div>
       )}
     </div>

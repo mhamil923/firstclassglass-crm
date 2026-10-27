@@ -6283,6 +6283,23 @@ async function resolveReminderAttachment(inv) {
   }
 }
 
+// Branded HTML wrapper (matches the existing reminder email styling). Shared by
+// /reminder/send and /reminder/send-test so the test is byte-identical to a real send.
+function buildReminderHtml(body) {
+  return `
+      <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
+        <div style="background:white;padding:30px 20px;text-align:center;border-bottom:3px solid #1b5e20;border-radius:12px 12px 0 0">
+          <div style="color:#1b5e20;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">PAYMENT REMINDER</div>
+        </div>
+        <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
+          ${String(body).replace(/\n/g, '<br>')}
+        </div>
+        <div style="text-align:center;padding:16px;color:#999;font-size:11px">
+          First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777
+        </div>
+      </div>`;
+}
+
 // POST /invoices/:id/reminder/draft — build (do NOT send) the reminder for review
 app.post('/invoices/:id/reminder/draft', authenticate, requireNumericParam('id'), async (req, res) => {
   try {
@@ -6333,19 +6350,7 @@ app.post('/invoices/:id/reminder/send', authenticate, requireNumericParam('id'),
       return res.status(409).json({ error: `A "${stage}" reminder for this invoice was already sent in the last 12 hours.` });
     }
 
-    // Branded HTML wrapper (matches the existing reminder email styling)
-    const html = `
-      <div style="max-width:600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
-        <div style="background:white;padding:30px 20px;text-align:center;border-bottom:3px solid #1b5e20;border-radius:12px 12px 0 0">
-          <div style="color:#1b5e20;font-size:20px;font-weight:700;letter-spacing:2px;text-transform:uppercase">PAYMENT REMINDER</div>
-        </div>
-        <div style="background:white;padding:30px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 12px 12px">
-          ${String(body).replace(/\n/g, '<br>')}
-        </div>
-        <div style="text-align:center;padding:16px;color:#999;font-size:11px">
-          First Class Glass &amp; Mirror, Inc. | 1513 Industrial Drive, Itasca, IL 60143 | 630-250-9777
-        </div>
-      </div>`;
+    const html = buildReminderHtml(body);
 
     const att = await resolveReminderAttachment(inv);
     const attachments = att.attachment ? [att.attachment] : [];
@@ -6376,6 +6381,57 @@ app.post('/invoices/:id/reminder/send', authenticate, requireNumericParam('id'),
   } catch (err) {
     console.error('Reminder send error:', err);
     res.status(500).json({ error: err.message || 'Failed to send reminder.' });
+  }
+});
+
+// POST /invoices/:id/reminder/send-test — send the EXACT reminder the real send
+// would (same body/HTML/attachment/transport) to testRecipient only, subject
+// prefixed "[TEST] ". Writes NOTHING: no invoice_reminders row, no stage /
+// lastReminderAt / status change, and no double-send guard (it isn't a send).
+app.post('/invoices/:id/reminder/send-test', authenticate, requireNumericParam('id'), async (req, res) => {
+  try {
+    const invoiceId = Number(req.params.id);
+    const b = coerceBody(req);
+    const inv = await getInvoiceWithCustomer(invoiceId);
+    if (!inv) return res.status(404).json({ error: 'Invoice not found.' });
+
+    const to = String(b.testRecipient || '').trim();
+    const subject = (b.subject || '').trim();
+    const body = b.body || '';
+    if (!/^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(to)) {
+      return res.status(400).json({ error: 'A single valid test recipient email is required.' });
+    }
+    if (!subject || !body) return res.status(400).json({ error: 'Subject and body are required.' });
+
+    const html = buildReminderHtml(body);
+    const att = await resolveReminderAttachment(inv);
+    const attachments = att.attachment ? [att.attachment] : [];
+
+    const { transport, settings } = await createEmailTransport();
+    console.log('[reminder] TEST sending -> to:', to, '| invoice:', invoiceId, '| attachment:', att.filename || `none (${att.warning})`);
+    const info = await transport.sendMail({
+      from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+      replyTo: settings.replyTo || settings.senderEmail,
+      to,
+      subject: `[TEST] ${subject}`,
+      text: body,
+      html,
+      attachments,
+    });
+
+    res.json({
+      ok: true,
+      test: true,
+      sentTo: to,
+      subject: `[TEST] ${subject}`,
+      attachment: att.filename || null,
+      attachmentWarning: att.warning,
+      messageId: info?.messageId || null,
+      response: info?.response || null,
+    });
+  } catch (err) {
+    console.error('Reminder test-send error:', err);
+    res.status(500).json({ error: err.message || 'Failed to send test reminder.' });
   }
 });
 
