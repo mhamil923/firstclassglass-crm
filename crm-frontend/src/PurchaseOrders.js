@@ -89,6 +89,27 @@ function buildWorkOrderPath(routeBase, woId) {
 }
 
 /* ---------- component ---------- */
+/* ===== Aging: how long a PO has been on order ===== */
+const daysOnOrder = (row) => {
+  if (!row || !row.createdAt || row.__synthetic) return null;
+  const d = new Date(row.createdAt);
+  if (isNaN(d.getTime())) return null;
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  return days < 0 ? 0 : days;
+};
+const agingClass = (days) =>
+  days == null ? "" : days > 14 ? "po-age-red" : days >= 7 ? "po-age-amber" : "po-age-green";
+const fmtOrdered = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "2-digit" }),
+  });
+};
+
 export default function PurchaseOrders() {
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -674,13 +695,34 @@ export default function PurchaseOrders() {
     });
   }, [combinedWaitingRows, search, supplierFilter, statusFilter]);
 
+  // This page is a procurement queue: the PO that has waited longest is the
+  // one to chase, so rows sort oldest-on-order first. Synthetic rows (WOs in
+  // Waiting on Parts with no PO record yet) sink to the bottom.
+  const sortedPurchaseOrders = useMemo(() => {
+    const rows = [...filteredPurchaseOrders];
+    rows.sort((a, b) => {
+      if (!!a.__synthetic !== !!b.__synthetic) return a.__synthetic ? 1 : -1;
+      const da = daysOnOrder(a);
+      const db = daysOnOrder(b);
+      if (da == null && db == null) return 0;
+      if (da == null) return 1;
+      if (db == null) return -1;
+      return db - da;
+    });
+    return rows;
+  }, [filteredPurchaseOrders]);
+
   /* ===== Amount roll-up for the CURRENT filter ===== */
   const amountSummary = useMemo(() => {
     const rows = filteredPurchaseOrders || [];
     const real = rows.filter((r) => !r.__synthetic);
     const entered = real.filter((r) => r.amount != null);
     const total = entered.reduce((sum, r) => sum + Number(r.amount || 0), 0);
-    return { count: rows.length, total, missing: real.length - entered.length };
+    const oldest = rows.reduce((m, r) => {
+      const d = daysOnOrder(r);
+      return d != null && d > m ? d : m;
+    }, 0);
+    return { count: rows.length, total, missing: real.length - entered.length, oldest };
   }, [filteredPurchaseOrders]);
 
   /* ===== Inline PO amount (COGS) editing ===== */
@@ -776,6 +818,17 @@ export default function PurchaseOrders() {
     );
   };
 
+
+  const renderAgeCell = (row) => {
+    const days = daysOnOrder(row);
+    if (days == null) return <span className="po-muted">—</span>;
+    return (
+      <span className="po-age">
+        <span className="po-age-date">{fmtOrdered(row.createdAt)}</span>
+        <span className={`po-age-badge ${agingClass(days)}`}>{days}d</span>
+      </span>
+    );
+  };
 
   const pdfCanMarkPickedUp = useMemo(() => {
     if (!pdfPo) return false;
@@ -899,6 +952,13 @@ export default function PurchaseOrders() {
             ) : (
               <>
                 {amountSummary.count} PO{amountSummary.count === 1 ? "" : "s"}
+                {amountSummary.oldest > 0 ? (
+                  <>
+                    {" · oldest "}
+                    <b>{amountSummary.oldest}d</b>
+                    {" on order"}
+                  </>
+                ) : null}
                 {" · "}
                 <b>{money(amountSummary.total)}</b> entered
                 {amountSummary.missing > 0 ? (
@@ -922,6 +982,7 @@ export default function PurchaseOrders() {
                   <th>Customer</th>
                   <th>Site</th>
                   <th>Work Order #</th>
+                  <th>On Order</th>
                   <th className="po-amount-col">Amount</th>
                   <th>PO Status</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
@@ -929,15 +990,15 @@ export default function PurchaseOrders() {
               </thead>
 
               <tbody>
-                {filteredPurchaseOrders.length === 0 && !loading && (
+                {sortedPurchaseOrders.length === 0 && !loading && (
                   <tr>
-                    <td colSpan="8" className="text-center py-3">
+                    <td colSpan="9" className="text-center py-3">
                       No purchase orders found.
                     </td>
                   </tr>
                 )}
 
-                {filteredPurchaseOrders.map((row) => {
+                {sortedPurchaseOrders.map((row) => {
                   const woId = row.workOrderId;
                   const stillWaiting =
                     (woId && waitingWoIdSet.has(woId)) || isWaitingOnPartsText(row.workOrderStatus);
@@ -957,12 +1018,22 @@ export default function PurchaseOrders() {
                       <td>{row.siteLocation || row.siteAddress || <span className="po-muted">—</span>}</td>
                       <td>{row.workOrderNumber || <span className="po-muted">—</span>}</td>
 
+                      <td>{renderAgeCell(row)}</td>
+
                       <td className="po-amount-col">{renderAmountCell(row)}</td>
 
                       <td>
                         <span className={`po-status-pill ${row.poPickedUp ? "is-picked" : "is-open"}`}>
                           {row.poStatus || (row.poPickedUp ? "Picked Up" : "On Order")}
                         </span>
+                        {row.poPickedUp && stillWaiting ? (
+                          <span
+                            className="po-flag-ready"
+                            title="Parts are picked up but the work order is still Waiting on Parts — it can be scheduled."
+                          >
+                            parts in — schedule it
+                          </span>
+                        ) : null}
                       </td>
 
                       <td>

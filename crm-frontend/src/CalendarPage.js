@@ -261,7 +261,7 @@ function CustomEvent({ event }) {
     event.siteAddress ?? event.meta?.siteAddress ?? event.serviceAddress ?? event.address ?? "";
 
   const popover = (
-    <Popover id={`popover-${event.id}`}>
+    <Popover id={`popover-${event.id}`} className="cal-popover">
       <Popover.Header as="h3">
         {event.customer ? `${event.customer}` : `Work Order`} — {idLabel}
       </Popover.Header>
@@ -292,7 +292,7 @@ function CustomEvent({ event }) {
   );
 
   return (
-    <OverlayTrigger trigger={["hover", "focus"]} placement="top" overlay={popover}>
+    <OverlayTrigger trigger="hover" placement="top" delay={{ show: 250, hide: 0 }} overlay={popover}>
       <span className="cal-chip" title={event.title}>
         {idLabel && idLabel !== "N/A" ? (
           <span className="cal-chip-id">{idLabel}</span>
@@ -1426,18 +1426,35 @@ export default function WorkOrderCalendar() {
     }
     let minutes = end ? diffMinutes(start, end) : minutesWindowForOrder(event);
     if (!Number.isFinite(minutes) || minutes <= 0) minutes = DEFAULT_WINDOW_MIN;
+    const endDate = moment(start).add(minutes, "minutes").toDate();
+
+    // OPTIMISTIC: move the pill immediately so the drop visibly takes.
+    const prevEvents = events;
+    setEvents((list) =>
+      list.map((ev) =>
+        Number(ev.id) === Number(event.id) ? { ...ev, start, end: endDate } : ev
+      )
+    );
 
     setSchedulePayload(event.id, {
       date: fmtDate(start),
       time: fmtTime(start),
-      endTime: fmtTime(moment(start).add(minutes, "minutes").toDate()),
+      endTime: fmtTime(endDate),
       status: "Scheduled",
     })
       .then(async () => {
+        showToast(`Rescheduled to ${moment(start).format("ddd, MMM D")}`, "info");
         if (dayForModal) await openDayModal(dayForModal);
         await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
       })
-      .catch((e) => console.error("⚠️ Error updating work order date:", e));
+      .catch((e) => {
+        console.error("⚠️ Error updating work order date:", e);
+        setEvents(prevEvents);
+        showToast(
+          e?.response?.data?.error || "Couldn't move that work order — put it back.",
+          "error"
+        );
+      });
   }
 
   function handleEventResize({ event, start, end }) {
@@ -1452,7 +1469,10 @@ export default function WorkOrderCalendar() {
         if (dayForModal) await openDayModal(dayForModal);
         await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
       })
-      .catch((e) => console.error("⚠️ Error resizing event:", e));
+      .catch((e) => {
+        console.error("⚠️ Error resizing event:", e);
+        showToast(e?.response?.data?.error || "Couldn't update that time window.", "error");
+      });
   }
 
   function handleDropFromOutside({ start }) {

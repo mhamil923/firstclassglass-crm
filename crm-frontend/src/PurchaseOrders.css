@@ -973,3 +973,37 @@
   .po-section-card .table thead th { padding-left: 11px; padding-right: 11px; }
   .po-btn { padding: 5px 8px; font-size: 11.5px; }
 }
+
+/* ===== Aging: days on order ===== */
+.po-age {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.po-age-date {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+.po-age-badge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.po-age-green { background: rgba(52, 199, 89, 0.16); color: #16a34a; }
+.po-age-amber { background: rgba(245, 158, 11, 0.16); color: #d97706; }
+.po-age-red   { background: rgba(255, 59, 48, 0.16);  color: #dc2626; }
+
+/* Parts arrived but the WO is still Waiting on Parts — the actionable anomaly */
+.po-flag-ready {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #dc2626;
+  border: 1px solid #dc2626;
+  white-space: nowrap;
+}

@@ -103,6 +103,13 @@ const toCanonicalStatus = (s) =>
 // Per-status accent colors (used for chips/badges that need to stand out).
 // Statuses not in this map fall back to default chip styling.
 const STATUS_COLOR = {
+  // The high-signal tabs get persistent accent colors (outlined chip like
+  // Past Due's red): the two day-scoped views and the two money-action
+  // queues. Existing accents elsewhere: Past Due #dc2626, Follow-Up #7c3aed.
+  Today: "#16a34a", // green — today's schedule, act now
+  "Day Review": "#4f46e5", // indigo — the morning debrief
+  "Needs to be Quoted": "#0d9488", // teal — quote money waiting
+  "Needs to be Invoiced": "#db2777", // pink — billable work not yet billed
   "Invoiced Waiting for Payment": "#f59e0b",
 };
 

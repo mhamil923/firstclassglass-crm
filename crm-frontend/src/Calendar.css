@@ -2266,3 +2266,14 @@
 }
 
 .calendar-page .btn-danger:hover { filter: brightness(1.08); }
+
+
+/* ============================================================
+   Hover popovers are informational only — never let them take
+   the mouse. A popover with pointer-events blocks mousedown on
+   pills beneath it, which killed drag-to-reschedule on the grid.
+============================================================ */
+.cal-popover,
+.cal-popover * {
+  pointer-events: none !important;
+}
