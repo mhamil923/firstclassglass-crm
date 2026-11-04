@@ -847,6 +847,16 @@ export default function WorkOrderCalendar() {
   const [dayOrders, setDayOrders] = useState([]);
   const [dayForModal, setDayForModal] = useState(null);
 
+  // Always-current mirrors for async callbacks. A drop's .then() closes over
+  // the render in which the drag STARTED — when the day modal wasn't open yet
+  // (dayForModal === null) and `events` didn't include the new drop — so the
+  // post-save modal refresh never fired and openDayModal filtered a stale
+  // list. Reading through refs always sees the latest state.
+  const eventsRef = useRef([]);
+  eventsRef.current = events;
+  const dayForModalRef = useRef(null);
+  dayForModalRef.current = dayForModal;
+
   // Tech list for assignment dropdown
   const [techs, setTechs] = useState([]);
 
@@ -1143,7 +1153,7 @@ export default function WorkOrderCalendar() {
         status: "Scheduled",
       });
       setEditModalOpen(false);
-      if (dayForModal) await openDayModal(dayForModal);
+      if (dayForModalRef.current) await openDayModal(dayForModalRef.current);
       await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
     } catch (e) {
       console.error("⚠️ Error saving schedule:", e);
@@ -1163,7 +1173,7 @@ export default function WorkOrderCalendar() {
       });
 
       setEditModalOpen(false);
-      if (dayForModal) await openDayModal(dayForModal);
+      if (dayForModalRef.current) await openDayModal(dayForModalRef.current);
       await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
     } catch (e) {
       console.error("⚠️ Error unscheduling:", e);
@@ -1179,8 +1189,9 @@ export default function WorkOrderCalendar() {
     try {
       // Single source of truth: filter the `events` array the calendar
       // cells already render from. No separate API fetch — guarantees the
-      // modal list matches what's visible on the day cell.
-      const list = events;
+      // modal list matches what's visible on the day cell. Read through the
+      // ref so a call from an older closure still sees the current list.
+      const list = eventsRef.current;
 
       // Tech + sequence data now rides along on each event's meta (see
       // /calendar/events). No full-table lookup needed here any more.
@@ -1444,8 +1455,9 @@ export default function WorkOrderCalendar() {
     })
       .then(async () => {
         showToast(`Rescheduled to ${moment(start).format("ddd, MMM D")}`, "info");
-        if (dayForModal) await openDayModal(dayForModal);
         await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
+        const d = dayForModalRef.current;
+        if (d) await openDayModal(d);
       })
       .catch((e) => {
         console.error("⚠️ Error updating work order date:", e);
@@ -1466,7 +1478,7 @@ export default function WorkOrderCalendar() {
       status: "Scheduled",
     })
       .then(async () => {
-        if (dayForModal) await openDayModal(dayForModal);
+        if (dayForModalRef.current) await openDayModal(dayForModalRef.current);
         await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
       })
       .catch((e) => {
@@ -1533,9 +1545,13 @@ export default function WorkOrderCalendar() {
       status: "Scheduled",
     })
       .then(async () => {
-        if (dayForModal) await openDayModal(dayForModal);
-        // Reconcile against the server (cheap now — no full-table fetch).
+        // Reconcile against the server (cheap now — no full-table fetch),
+        // THEN refresh the day modal if one is open — including one that
+        // opened during this very drop (the ref sees it; the old closure
+        // variable was still null from before the drag).
         await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
+        const d = dayForModalRef.current;
+        if (d) await openDayModal(d);
       })
       .catch((e) => {
         console.error("⚠️ Error scheduling work order:", e);
@@ -1690,7 +1706,7 @@ export default function WorkOrderCalendar() {
         });
       }
       setStatusModalOpen(false);
-      if (dayForModal) await openDayModal(dayForModal);
+      if (dayForModalRef.current) await openDayModal(dayForModalRef.current);
       await Promise.all([fetchCalendarForVisibleRange(), refreshLists()]);
     } catch (e) {
       console.error("⚠️ Error updating status:", e);
