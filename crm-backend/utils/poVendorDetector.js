@@ -1369,6 +1369,97 @@ function extractLaserFields(text) {
   return result;
 }
 
+/**
+ * Countrywide National Services (CWNS) dedicated extraction.
+ * Layout (pdfcrowd HTML->PDF, consistent template): "CWNS WORK ORDER DISPATCH"
+ * header, SERVICE LOCATION block (name / store code / site phone / street
+ * lines / "City, ST, ZIP"), JOB DETAILS with the scope line between the
+ * ****Manager sign-off banner**** and the ***check-in boilerplate***, then
+ * JOB # / PO / company block / phones / email, and an NTE notice page
+ * ("PO# <job> NTE NTE: $250.00"). NOTE: the PDF text layer renders
+ * "sign off" with an ff ligature, so never anchor on that phrase.
+ */
+function extractCountrywideFields(text, opts = {}) {
+  console.log('[CWNS] === Countrywide National Services Extraction Start ===');
+
+  const result = {
+    workOrderNumber: null,
+    skipPoNumber: true, // "PO 364365287" is CWNS's own PO; FCG assigns its own
+    customerPhone: null,
+    customerEmail: null,
+    siteLocation: null,
+    siteAddress: null,
+    problemDescription: null,
+  };
+
+  // JOB # is the number CWNS tracks the job by -> our Work Order #.
+  const woMatch = text.match(/JOB\s*#\s*(\d{6,12})\b/i)
+    || (opts.filename || '').match(/job[_ -](\d{6,12})/i)
+    || text.match(/Work\s+Order\s*#\s*(\d{6,12})\b/i)
+    || text.match(/PO#\s*(\d{6,12})\s*NTE\b/i);
+  if (woMatch) result.workOrderNumber = woMatch[1];
+
+  // Dispatch line ("...by calling 508-346-3286 to speak to a CW National
+  // service specialist") is the number FCG actually calls.
+  const callMatch = text.match(/call(?:ing)?\s+(\d{3}[-.]\d{3}[-.]\d{4})/i);
+  if (callMatch) result.customerPhone = callMatch[1];
+
+  const emailMatch = text.match(/\b([A-Za-z0-9._%+-]+@cwnational\.com)\b/i);
+  if (emailMatch) result.customerEmail = emailMatch[1].toLowerCase();
+
+  // SERVICE LOCATION block: name / optional store code / optional phone /
+  // street line(s) / "City, ST, ZIP". Ends at JOB DETAILS.
+  const locMatch = text.match(/SERVICE\s+LOCATION[ \t]*\n([\s\S]*?)\n[ \t]*JOB\s+DETAILS/i);
+  if (locMatch) {
+    const lines = locMatch[1].split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length) {
+      let name = lines.shift();
+      // Store code: short alphanumeric token with a digit (e.g. "G0003").
+      if (lines.length && /^[A-Z]{0,3}\d{2,8}[A-Z]{0,3}$/i.test(lines[0])) {
+        name = `${name} - ${lines.shift()}`;
+      }
+      result.siteLocation = name;
+      const addrLines = lines.filter((l) => !/^\(?\d{3}\)?[ .-]?\d{3}[-.]\d{4}$/.test(l));
+      result.siteAddress = joinAddressLines(addrLines) || null;
+    }
+  }
+  // Column-interleave guard (same rule as Laser): a captured address holding
+  // header labels means the block misparsed — drop it rather than fill junk.
+  if (result.siteAddress && /\b(JOB\s*#|JOB\s+DETAILS|NTE|STATUS|CHECK|IN\/OUT|PO\s*#?\s*\d)\b/i.test(result.siteAddress)) {
+    console.warn('[CWNS] Rejected siteAddress containing header labels:', JSON.stringify(result.siteAddress));
+    result.siteAddress = null;
+  }
+
+  // Scope sits between the manager banner ("...required to process
+  // payments****") and the check-in boilerplate ("***Please have
+  // technicians..."). Fall back to the lines between IN/OUT and the first
+  // ***-line if the banner ever moves in the stream.
+  let scope = null;
+  const scopeMatch = text.match(/required\s+to\s+process\s+payments\*+[ \t]*\n([\s\S]*?)\n[ \t]*\*{2,}[ \t]*Please\s+have\s+technicians/i);
+  if (scopeMatch) {
+    scope = scopeMatch[1];
+  } else {
+    const alt = text.match(/\bIN\/OUT[ \t]*\n([\s\S]*?)\n[ \t]*\*{2,}[ \t]*Please\s+have\s+technicians/i);
+    if (alt) {
+      scope = alt[1].split('\n').filter((l) => !/^\s*\*{2,}/.test(l)).join('\n');
+    }
+  }
+  if (scope) {
+    const scopeText = scope.split('\n').map((l) => l.trim()).filter(Boolean).join('\n');
+    if (scopeText) {
+      const parts = [];
+      const nte = text.match(/NTE:?[ \t]*\$\s*([\d,]+(?:\.\d{2})?)/i);
+      if (nte) parts.push(`NTE $${nte[1]}`);
+      const status = text.match(/\bSTATUS[ \t]+([A-Za-z][A-Za-z ]{2,40}?)[ \t]*$/im);
+      if (status) parts.push(status[1].trim());
+      result.problemDescription = (parts.length ? parts.join(' · ') + ' — ' : '') + scopeText;
+    }
+  }
+
+  console.log('[CWNS] Results:', JSON.stringify({ ...result, problemDescription: result.problemDescription?.substring(0, 100) }));
+  return result;
+}
+
 // Dispatch is first substring match in insertion order. Laser sits first: its
 // anchors are long and specific, whereas the bare "CLM"/"KFM" names below
 // could substring-match free text in a Laser PDF.
@@ -1378,6 +1469,13 @@ const CUSTOMER_PROFILES = {
     displayName: "Laser Facility Management",
     billingAddress: "Laser Facility Management, LLC, 2451 W Grapevine Mills Circle, Suite 303, Grapevine, TX 76051",
     customExtract: extractLaserFields,
+  },
+
+  COUNTRYWIDE: {
+    names: ["COUNTRYWIDE NATIONAL SERVICES", "CWNS WORK ORDER", "CWNATIONAL.COM", "CW NATIONAL SERVICES"],
+    displayName: "Countrywide National Services",
+    billingAddress: "Countrywide National Services, 220 Norfolk Street, Norfolk, MA 02081",
+    customExtract: extractCountrywideFields,
   },
 
   CLEAR_VISION: {
