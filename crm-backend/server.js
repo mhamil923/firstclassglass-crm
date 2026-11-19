@@ -6435,6 +6435,120 @@ app.post('/invoices/:id/reminder/send-test', authenticate, requireNumericParam('
   }
 });
 
+// POST /invoices/collections/bulk-send — send the STANDARD stage reminder for
+// several invoices in one pass. Per-invoice editing stays in the single Draft
+// Reminder flow; the bulk modal is the review step here. Body:
+//   { items: [{ invoiceId, to? }] }   (max 50)
+// `to` fills in / overrides the recipient for that invoice. When the customer
+// has NO email on file, a provided address is also saved to the customer
+// record (never overwrites an existing one). Each send is identical to the
+// single /reminder/send path: same draft builder, HTML, attachment, 12h
+// duplicate guard, invoice_reminders row and stage advance. Sends run
+// sequentially with a small gap; one failure never aborts the batch.
+app.post('/invoices/collections/bulk-send', authenticate, async (req, res) => {
+  const b = coerceBody(req);
+  const items = Array.isArray(b.items) ? b.items : [];
+  if (!items.length) return res.status(400).json({ error: 'No invoices selected.' });
+  if (items.length > 50) return res.status(400).json({ error: 'At most 50 reminders per batch.' });
+
+  let transport, settings;
+  try {
+    ({ transport, settings } = await createEmailTransport());
+  } catch (err) {
+    return res.status(500).json({ error: 'Email transport unavailable: ' + (err.message || err) });
+  }
+
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const results = [];
+  for (const item of items) {
+    const invoiceId = Number(item.invoiceId);
+    const r = { invoiceId, invoiceNumber: null, status: 'failed', error: null, sentTo: null, stage: null, emailSaved: false };
+    results.push(r);
+    try {
+      if (!Number.isFinite(invoiceId)) { r.error = 'Bad invoice id.'; continue; }
+      const inv = await getInvoiceWithCustomer(invoiceId);
+      if (!inv) { r.error = 'Invoice not found.'; continue; }
+      r.invoiceNumber = inv.invoiceNumber;
+
+      const to = String(item.to || inv.custEmail || '').trim();
+      if (!EMAIL_RE.test(to)) {
+        r.status = 'no_email';
+        r.error = to ? 'Invalid email address.' : 'No email on file.';
+        continue;
+      }
+
+      const comp = computeCollections(inv);
+      const stage = comp.reminderStage;
+      r.stage = stage;
+
+      const [[recent]] = await db.query(
+        `SELECT id FROM invoice_reminders
+          WHERE invoiceId = ? AND stage = ? AND status = 'Sent'
+            AND createdAt >= DATE_SUB(NOW(), INTERVAL 12 HOUR)
+          LIMIT 1`,
+        [invoiceId, stage]
+      );
+      if (recent) {
+        r.status = 'skipped_recent';
+        r.error = `"${stage}" reminder already sent in the last 12 hours.`;
+        continue;
+      }
+
+      const draft = buildReminderDraft(inv, comp);
+      const att = await resolveReminderAttachment(inv);
+      const attachments = att.attachment ? [att.attachment] : [];
+
+      console.log('[reminder:bulk] sending -> to:', to, '| invoice:', invoiceId, '| attachment:', att.filename || `none (${att.warning})`);
+      await transport.sendMail({
+        from: `"${settings.senderName || 'First Class Glass'}" <${settings.senderEmail}>`,
+        replyTo: settings.replyTo || settings.senderEmail,
+        to,
+        subject: draft.subject,
+        text: draft.body,
+        html: buildReminderHtml(draft.body),
+        attachments,
+      });
+
+      await db.query(
+        `INSERT INTO invoice_reminders (invoiceId, stage, daysOverdue, lateFeeAtSend, sentBy, sentTo, emailSubject, emailBody, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Sent')`,
+        [invoiceId, stage, comp.daysOverdue, comp.lateFee, req.user?.username || null, to, draft.subject, draft.body]
+      );
+      await db.query(
+        'UPDATE invoices SET reminderStage = ?, lastReminderAt = NOW(), lateFeeAmount = ?, updatedAt = NOW() WHERE id = ?',
+        [stage, comp.lateFee, invoiceId]
+      );
+
+      // Save a newly supplied address onto the customer, but only into an
+      // EMPTY slot — a one-off override never rewrites an existing address.
+      if (item.to && inv.customerId && !(inv.custEmail || '').trim()) {
+        const [upd] = await db.query(
+          `UPDATE customers SET email = ? WHERE id = ? AND (email IS NULL OR email = '')`,
+          [to, inv.customerId]
+        );
+        r.emailSaved = !!(upd && upd.affectedRows > 0);
+      }
+
+      r.status = 'sent';
+      r.sentTo = to;
+      r.error = null;
+      await new Promise((rs) => setTimeout(rs, 400));
+    } catch (err) {
+      console.error('[reminder:bulk] invoice', invoiceId, 'failed:', err.message);
+      r.error = err.message || 'Send failed.';
+    }
+  }
+
+  res.json({
+    ok: true,
+    sent: results.filter((x) => x.status === 'sent').length,
+    skipped: results.filter((x) => x.status === 'skipped_recent').length,
+    noEmail: results.filter((x) => x.status === 'no_email').length,
+    failed: results.filter((x) => x.status === 'failed').length,
+    results,
+  });
+});
+
 // POST /invoices/:id/reminder/skip — log that the user chose not to chase this cycle
 app.post('/invoices/:id/reminder/skip', authenticate, requireNumericParam('id'), async (req, res) => {
   try {

@@ -61,6 +61,7 @@ const FIELD = {
   border: "1px solid var(--border-color)",
 };
 const MODAL_LABEL = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "var(--text-secondary)" };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // "Send test" remembers the last-used test address per browser.
 const TEST_ADDR_KEY = "collections.testRecipient";
@@ -79,6 +80,10 @@ export default function Collections() {
   const [collectionsLoading, setCollectionsLoading] = useState(false);
   const [draftModal, setDraftModal] = useState(null);
   const [payModal, setPayModal] = useState(null);   // the row being paid, or null
+  // Bulk reminders: invoice ids ticked in the table, and the bulk modal
+  // ({ rows, sending, results }) once "Send Reminders (N)" is opened.
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkModal, setBulkModal] = useState(null);
   // Test-send panel inside the review modal: null when closed, else { addr, sending }.
   const [testSend, setTestSend] = useState(null);
   const [toast, setToast] = useState(null);
@@ -94,7 +99,10 @@ export default function Collections() {
     setCollectionsLoading(true);
     try {
       const res = await api.get("/invoices/collections");
-      setCollections(Array.isArray(res.data) ? res.data : []);
+      const rows = Array.isArray(res.data) ? res.data : [];
+      setCollections(rows);
+      // Drop selections for invoices that left collections (paid, etc.).
+      setSelected((prev) => new Set([...prev].filter((id) => rows.some((r) => r.id === id))));
     } catch (err) {
       console.error("Error fetching collections:", err);
       setCollections([]);
@@ -196,6 +204,59 @@ export default function Collections() {
     await fetchCollections();
   };
 
+  const toggleSelect = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    setSelected((prev) =>
+      prev.size === collections.length ? new Set() : new Set(collections.map((r) => r.id))
+    );
+  };
+
+  const openBulk = () => {
+    const rows = collections
+      .filter((r) => selected.has(r.id))
+      .map((r) => ({
+        id: r.id,
+        invoiceNumber: r.invoiceNumber,
+        customer: r.customer,
+        outstanding: r.outstanding,
+        reminderStage: r.reminderStage,
+        email: (r.customerEmail || "").trim(),
+        hadEmail: !!(r.customerEmail || "").trim(),
+      }));
+    if (rows.length) setBulkModal({ rows, sending: false, results: null });
+  };
+
+  const doBulkSend = async () => {
+    if (!bulkModal || bulkModal.sending) return;
+    setBulkModal((m) => ({ ...m, sending: true }));
+    try {
+      const res = await api.post(`/invoices/collections/bulk-send`, {
+        items: bulkModal.rows.map((r) => ({ invoiceId: r.id, to: r.email.trim() })),
+      });
+      const d = res.data || {};
+      setBulkModal((m) => ({ ...m, sending: false, results: d }));
+      const bits = [`${d.sent || 0} sent`];
+      if (d.skipped) bits.push(`${d.skipped} skipped (12h)`);
+      if (d.noEmail) bits.push(`${d.noEmail} missing email`);
+      if (d.failed) bits.push(`${d.failed} failed`);
+      showToast(`Reminders: ${bits.join(" · ")}`);
+      setSelected(new Set());
+      await fetchCollections();
+    } catch (err) {
+      alert(err?.response?.data?.error || "Bulk send failed.");
+      setBulkModal((m) => (m ? { ...m, sending: false } : m));
+    }
+  };
+
+  const allSelected = collections.length > 0 && collections.every((r) => selected.has(r.id));
+
   // Overdue badge colors from design tokens: green (not due) / amber (0–44) / red (45+)
   const daysOverdueBadge = (d) => {
     if (d == null || d < 0) return { background: "var(--accent-green)", color: "#fff", label: d == null ? "—" : "Not due" };
@@ -213,6 +274,11 @@ export default function Collections() {
               Unpaid &amp; partial invoices, most overdue first. QuickBooks Desktop is the source of truth — the CRM tracks overdue status, computes late fees, and drafts reminders for your review before sending.
             </div>
           </div>
+          {selected.size > 0 && (
+            <button type="button" className="btn-primary-apple" onClick={openBulk} style={{ whiteSpace: "nowrap", alignSelf: "flex-start" }}>
+              Send Reminders ({selected.size})
+            </button>
+          )}
         </div>
 
         <div className="cust-section-card">
@@ -220,6 +286,9 @@ export default function Collections() {
             <table className="inv-table">
               <thead>
                 <tr>
+                  <th style={{ width: 34, textAlign: "center" }}>
+                    <input type="checkbox" aria-label="Select all invoices" checked={allSelected} onChange={toggleAll} style={{ cursor: "pointer" }} />
+                  </th>
                   <th>Customer / Invoice #</th>
                   <th style={{ textAlign: "right" }}>Outstanding</th>
                   <th style={{ textAlign: "center" }}>Days Overdue</th>
@@ -231,7 +300,7 @@ export default function Collections() {
               </thead>
               <tbody>
                 {collections.length === 0 && !collectionsLoading && (
-                  <tr><td colSpan={7}><div className="inv-empty">No unpaid or partial invoices to collect. 🎉</div></td></tr>
+                  <tr><td colSpan={8}><div className="inv-empty">No unpaid or partial invoices to collect. 🎉</div></td></tr>
                 )}
                 {collections.map((row) => {
                   const badge = daysOverdueBadge(row.daysOverdue);
@@ -242,6 +311,9 @@ export default function Collections() {
                       : "No late fee — not yet 45 days past the invoice date.";
                   return (
                     <tr key={row.id}>
+                      <td data-label="Select" style={{ textAlign: "center" }}>
+                        <input type="checkbox" aria-label={`Select invoice ${row.invoiceNumber}`} checked={selected.has(row.id)} onChange={() => toggleSelect(row.id)} style={{ cursor: "pointer" }} />
+                      </td>
                       <td data-label="Customer">
                         <div style={{ fontWeight: 600 }}>{row.customer}</div>
                         <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>#{row.invoiceNumber}</div>
@@ -345,6 +417,108 @@ export default function Collections() {
                 {draftModal.sending ? "Sending…" : "Send"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk send: review the batch, fill in missing emails, send, see results */}
+      {bulkModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => !bulkModal.sending && setBulkModal(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(3px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--bg-card-solid)", color: "var(--text-primary)", border: "1px solid var(--border-color)", borderRadius: "var(--radius-md)", maxWidth: 760, width: "100%", maxHeight: "90vh", overflowY: "auto", padding: 24, boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
+            <h3 style={{ margin: "0 0 4px", fontSize: 18, fontWeight: 700 }}>
+              {bulkModal.results ? "Reminder results" : `Send ${bulkModal.rows.length} reminder${bulkModal.rows.length === 1 ? "" : "s"}`}
+            </h3>
+            {!bulkModal.results ? (
+              <>
+                <div style={{ fontSize: 13, color: "var(--text-secondary)", margin: "4px 0 14px" }}>
+                  Each invoice gets its standard reminder for its current stage, with the invoice PDF attached.
+                  Invoices already reminded at their stage in the last 12 hours are skipped automatically.
+                  An address typed here is saved to the customer when none is on file.
+                </div>
+                {bulkModal.rows.map((r, idx) => (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--border-color)" }}>
+                    <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.customer}</div>
+                      <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>#{r.invoiceNumber} · {r.reminderStage} · {fmtMoney(r.outstanding)}</div>
+                    </div>
+                    <div style={{ flex: "1 1 260px" }}>
+                      <input
+                        type="email"
+                        value={r.email}
+                        placeholder="No email on file — add one"
+                        disabled={bulkModal.sending}
+                        onChange={(e) =>
+                          setBulkModal((m) => {
+                            const rows = m.rows.slice();
+                            rows[idx] = { ...rows[idx], email: e.target.value };
+                            return { ...m, rows };
+                          })
+                        }
+                        style={{ ...FIELD, padding: 8, fontSize: 13, borderColor: r.email.trim() ? (EMAIL_RE.test(r.email.trim()) ? "var(--border-color)" : "var(--accent-red)") : "var(--accent-orange)" }}
+                      />
+                      {!r.hadEmail && EMAIL_RE.test(r.email.trim()) && (
+                        <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>Will be saved to this customer.</div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Remove from batch"
+                      disabled={bulkModal.sending}
+                      onClick={() =>
+                        setBulkModal((m) => {
+                          const rows = m.rows.filter((x) => x.id !== r.id);
+                          return rows.length ? { ...m, rows } : null;
+                        })
+                      }
+                      style={{ ...SECONDARY_BTN, padding: "6px 10px", borderRadius: 8, cursor: "pointer" }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+                  <button type="button" onClick={() => setBulkModal(null)} disabled={bulkModal.sending} style={{ ...SECONDARY_BTN, padding: "10px 18px", borderRadius: 8, cursor: "pointer" }}>Cancel</button>
+                  <button
+                    type="button"
+                    className="btn-primary-apple"
+                    onClick={doBulkSend}
+                    disabled={bulkModal.sending || bulkModal.rows.some((r) => !EMAIL_RE.test(r.email.trim()))}
+                    style={(bulkModal.sending || bulkModal.rows.some((r) => !EMAIL_RE.test(r.email.trim()))) ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+                  >
+                    {bulkModal.sending ? "Sending…" : `Send ${bulkModal.rows.length} reminder${bulkModal.rows.length === 1 ? "" : "s"}`}
+                  </button>
+                </div>
+                {bulkModal.rows.some((r) => !EMAIL_RE.test(r.email.trim())) && (
+                  <div style={{ marginTop: 8, textAlign: "right", fontSize: 12, color: "var(--accent-orange)" }}>
+                    Every row needs a valid email — fill it in or remove the row (✕).
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {(bulkModal.results.results || []).map((r) => {
+                  const row = bulkModal.rows.find((x) => x.id === r.invoiceId) || {};
+                  const color = r.status === "sent" ? "var(--accent-green)" : r.status === "failed" ? "var(--accent-red)" : "var(--accent-orange)";
+                  const label = r.status === "sent" ? `Sent to ${r.sentTo}${r.emailSaved ? " (email saved)" : ""}` : (r.error || r.status);
+                  return (
+                    <div key={r.invoiceId} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--border-color)", fontSize: 13 }}>
+                      <span style={{ fontWeight: 600 }}>
+                        {row.customer || "—"} <span style={{ color: "var(--text-tertiary)", fontWeight: 400 }}>#{r.invoiceNumber || row.invoiceNumber || r.invoiceId}</span>
+                      </span>
+                      <span style={{ color, textAlign: "right" }}>{label}</span>
+                    </div>
+                  );
+                })}
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+                  <button type="button" className="btn-primary-apple" onClick={() => setBulkModal(null)}>Done</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
