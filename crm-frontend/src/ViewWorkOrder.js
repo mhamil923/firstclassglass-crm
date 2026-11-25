@@ -589,7 +589,7 @@ Thank you for your business. Please find your invoices attached for the work com
 
 ${list}
 
-Payment is due within 45 days of the invoice date. Please let us know if you would like to use a credit card for this payment, and we'll send you a secure payment link.
+Payment is due within 30 days of the invoice date. Please let us know if you would like to use a credit card for this payment, and we'll send you a secure payment link.
 
 If you have any questions, feel free to reach out anytime.
 

@@ -272,6 +272,7 @@ export default function Collections() {
             <h2 className="inv-title">Collections</h2>
             <div className="inv-subtitle">
               Unpaid &amp; partial invoices, most overdue first. QuickBooks Desktop is the source of truth — the CRM tracks overdue status, computes late fees, and drafts reminders for your review before sending.
+              {" "}Invoices entered 11/30/2026 or later use the new terms — “Payment is due within thirty (30) days of the invoice date. Past-due balances incur a 15% late fee, with an additional 15% added every fifteen (15) days thereafter until paid in full.” Earlier invoices stay on Net 45 (15% at due, +15% every 30 days).
             </div>
           </div>
           {selected.size > 0 && (
@@ -305,10 +306,12 @@ export default function Collections() {
                 {collections.map((row) => {
                   const badge = daysOverdueBadge(row.daysOverdue);
                   const isPartial = Number(row.amountPaid) > 0 && Number(row.amountPaid) < Number(row.total);
+                  const netD = row.termsNetDays ?? 45;
+                  const escD = row.termsEscalateEveryDays ?? 30;
                   const lateFeeTip =
                     row.lateFee > 0
-                      ? `15% applied at the 45-day due date, compounding +15% every 30 days. Outstanding ${fmtMoney(row.outstanding)} → late fee ${fmtMoney(row.lateFee)} (stage: ${row.reminderStage}).`
-                      : "No late fee — not yet 45 days past the invoice date.";
+                      ? `15% applied at the ${netD}-day due date, compounding +15% every ${escD} days. Outstanding ${fmtMoney(row.outstanding)} → late fee ${fmtMoney(row.lateFee)} (stage: ${row.reminderStage}).`
+                      : `No late fee — not yet ${netD} days past the invoice date.`;
                   return (
                     <tr key={row.id}>
                       <td data-label="Select" style={{ textAlign: "center" }}>
@@ -336,7 +339,12 @@ export default function Collections() {
                           {fmtMoney(row.lateFee)}
                         </span>
                       </td>
-                      <td data-label="Stage" style={{ color: "var(--text-primary)" }}>{row.reminderStage}</td>
+                      <td data-label="Stage" style={{ color: "var(--text-primary)" }}>
+                        {row.reminderStage}
+                        {row.termsLabel ? (
+                          <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{row.termsLabel}</div>
+                        ) : null}
+                      </td>
                       <td data-label="Last Reminded" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                         {row.lastReminderAt ? fmtDate(row.lastReminderAt) : <span style={{ color: "var(--text-tertiary)" }}>Never</span>}
                       </td>

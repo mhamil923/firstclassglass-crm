@@ -1562,8 +1562,14 @@ async function ensureInvoiceTables() {
     `);
     await db.query("INSERT IGNORE INTO settings (settingKey, settingValue) VALUES ('nextInvoiceNumber', '1')");
     await db.query("INSERT IGNORE INTO settings (settingKey, settingValue) VALUES ('defaultInvoiceTerms', ?)", [
-      'ALL PAYMENTS MUST BE MADE 45 DAYS AFTER INVOICE DATE OR A 15% LATE FEE WILL BE APPLIED'
+      'PAYMENT DUE WITHIN 30 DAYS OF INVOICE DATE. A 15% LATE FEE APPLIES AFTER 30 DAYS, PLUS 15% EVERY 15 DAYS UNTIL PAID IN FULL.'
     ]);
+    // One-time flip of the stored default off the old Net 45 wording. Only
+    // touches the untouched old default; a hand-edited value is left alone.
+    await db.query(
+      "UPDATE settings SET settingValue = ? WHERE settingKey = 'defaultInvoiceTerms' AND settingValue LIKE '%45 DAYS AFTER INVOICE DATE%'",
+      ['PAYMENT DUE WITHIN 30 DAYS OF INVOICE DATE. A 15% LATE FEE APPLIES AFTER 30 DAYS, PLUS 15% EVERY 15 DAYS UNTIL PAID IN FULL.']
+    );
     console.log('[Invoices] settings table ready');
   } catch (e) {
     console.warn('[Invoices] Could not create settings table:', e.message);
@@ -3154,7 +3160,7 @@ app.get('/customers/:id/merge-preview', authenticate, requireNumericParam('id'),
 
 // ─── ESTIMATES ──────────────────────────────────────────────────────────────
 
-const DEFAULT_TERMS = 'ALL PAYMENTS MUST BE MADE 45 DAYS AFTER INVOICE DATE OR A 15% LATE FEE WILL BE APPLIED';
+const DEFAULT_TERMS = 'PAYMENT DUE WITHIN 30 DAYS OF INVOICE DATE. A 15% LATE FEE APPLIES AFTER 30 DAYS, PLUS 15% EVERY 15 DAYS UNTIL PAID IN FULL.';
 
 // Upload a local file to S3 if S3_BUCKET is configured (used for generated PDFs)
 async function uploadToS3IfConfigured(localFilePath, s3Key) {
@@ -4621,6 +4627,9 @@ app.get('/invoices/collections', authenticate, async (req, res) => {
         dueDate: comp.dueDate,
         reminderStage: comp.reminderStage,
         lateFee: comp.lateFee,
+        termsNetDays: comp.termsNetDays,
+        termsEscalateEveryDays: comp.termsEscalateEveryDays,
+        termsLabel: comp.termsLabel,
         lastReminderAt: inv.lastReminderAt || null,
         storedReminderStage: inv.reminderStage || 'None',
       };
@@ -4678,13 +4687,15 @@ app.get('/invoices/:id', authenticate, requireNumericParam('id'), async (req, re
 });
 
 // POST /invoices - create invoice
-// Company default payment terms (Net 45). Single source of truth for due-date math.
-const DEFAULT_TERMS_DAYS = 45;
-
 // Resolution rule used EVERYWHERE a due date is set:
-//   dueDate = explicit dueDate if provided, else issueDate + (termsDays ?? 45)
-// Returns 'YYYY-MM-DD' or null when there is no issue date to anchor from.
-function computeDueDate(issueDate, termsDays, explicitDueDate) {
+//   dueDate = explicit dueDate if provided, else issueDate + termsDays.
+// When termsDays is not stored, the default comes from the payment-terms
+// regime (termsFor): Net 30 for invoices entering the system on/after
+// 2026-11-30, Net 45 before. Pass `enteredAt` (invoices.createdAt) when
+// recomputing an EXISTING invoice so a legacy invoice edited after the
+// cutoff keeps its Net 45 default; omitted, the regime is judged as of now
+// (correct for newly created invoices).
+function computeDueDate(issueDate, termsDays, explicitDueDate, enteredAt = null) {
   if (explicitDueDate && /^\d{4}-\d{2}-\d{2}/.test(String(explicitDueDate))) {
     return String(explicitDueDate).slice(0, 10);
   }
@@ -4693,7 +4704,7 @@ function computeDueDate(issueDate, termsDays, explicitDueDate) {
   if (isNaN(base.getTime())) return null;
   const days = (termsDays != null && termsDays !== '' && Number.isFinite(Number(termsDays)))
     ? Number(termsDays)
-    : DEFAULT_TERMS_DAYS;
+    : termsFor({ createdAt: enteredAt || new Date() }).netDays;
   base.setUTCDate(base.getUTCDate() + days);
   return base.toISOString().split('T')[0];
 }
@@ -4775,10 +4786,10 @@ app.put('/invoices/:id', authenticate, requireNumericParam('id'), async (req, re
 
     // Recompute dueDate when issueDate/termsDays change and no explicit dueDate was given.
     if (b.dueDate === undefined && (b.issueDate !== undefined || b.termsDays !== undefined)) {
-      const [[cur]] = await db.query('SELECT issueDate, termsDays FROM invoices WHERE id = ?', [req.params.id]);
+      const [[cur]] = await db.query('SELECT issueDate, termsDays, createdAt FROM invoices WHERE id = ?', [req.params.id]);
       const issueDate = b.issueDate !== undefined ? b.issueDate : cur?.issueDate;
       const termsDays = b.termsDays !== undefined ? b.termsDays : cur?.termsDays;
-      const newDue = computeDueDate(issueDate, termsDays, null);
+      const newDue = computeDueDate(issueDate, termsDays, null, cur?.createdAt);
       if (newDue) { sets.push('dueDate=?'); params.push(newDue); }
     }
 
@@ -6098,8 +6109,40 @@ app.post('/email/send-reminder/:invoiceId', authenticate, requireNumericParam('i
 
 const COLLECTIONS_CHASEABLE = ['Sent', 'Partial', 'Overdue', 'Unpaid'];
 const LATE_FEE_RATE = 0.15;       // 15%
-const NET_TERM_DAYS = 45;         // invoice becomes due 45 days after the invoice date
-const ESCALATION_EVERY_DAYS = 30; // additional 15% every 30 days thereafter
+
+// ── Payment-terms regimes ───────────────────────────────────────────────────
+// Invoices keep the terms they were issued under. The regime is decided by the
+// date the invoice ENTERED THE SYSTEM (invoices.createdAt; issue/doc date as
+// fallback):
+//   before 2026-11-30  -> LEGACY:  Net 45; 15% at due, +15% every 30 days
+//   2026-11-30 onward  -> CURRENT: Net 30; 15% at due, +15% every 15 days
+// An undatable invoice gets LEGACY — never apply the harsher cadence to a row
+// we cannot date.
+const NEW_TERMS_CUTOFF = '2026-11-30';
+const TERMS_LEGACY = {
+  netDays: 45,
+  escalateEveryDays: 30,
+  label: 'Net 45 (legacy)',
+  sentence: 'Per our terms, a 15% late fee applies once an invoice is 45 days past the invoice date.',
+};
+const TERMS_CURRENT = {
+  netDays: 30,
+  escalateEveryDays: 15,
+  label: 'Net 30',
+  sentence: 'Payment is due within thirty (30) days of the invoice date. Past-due balances incur a 15% late fee, with an additional 15% added every fifteen (15) days thereafter until paid in full.',
+};
+function dateKeyForTerms(v) {
+  if (!v) return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
+  const s = String(v);
+  return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+}
+function termsFor(inv) {
+  const entered = dateKeyForTerms(inv && inv.createdAt)
+    || dateKeyForTerms(inv && inv.issueDate)
+    || dateKeyForTerms(inv && inv.docDate);
+  return entered && entered >= NEW_TERMS_CUTOFF ? TERMS_CURRENT : TERMS_LEGACY;
+}
 
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
@@ -6116,10 +6159,11 @@ function computeCollections(inv, now = new Date()) {
   const total = Number(inv.total) || 0;
   const amountPaid = Number(inv.amountPaid) || 0;
   const outstanding = round2(Math.max(0, total - amountPaid));
+  const terms = termsFor(inv);
 
   const todayNum = dayNumber(now);
   // Collections clock start: when the invoice was emailed to the customer
-  // (invoiceSentAt) takes precedence — the 45-day term runs from the send.
+  // (invoiceSentAt) takes precedence — the net term runs from the send.
   // Fall back to invoice date / docDate / createdAt for invoices never sent here.
   const clockStartObj = inv.invoiceSentAt
     ? new Date(inv.invoiceSentAt)
@@ -6128,19 +6172,19 @@ function computeCollections(inv, now = new Date()) {
         : (inv.createdAt ? new Date(inv.createdAt) : new Date(now))));
   const issueNum = dayNumber(clockStartObj);
 
-  // dueDate = clockStart + 45 when sent; else explicit invoices.dueDate; else invoice date + 45 (net-45 term)
+  // dueDate = clockStart + netDays when sent; else explicit invoices.dueDate; else invoice date + netDays
   let dueNum, dueLabel;
   if (inv.invoiceSentAt) {
-    dueNum = issueNum + NET_TERM_DAYS;
+    dueNum = issueNum + terms.netDays;
     dueLabel = new Date(clockStartObj);
-    dueLabel.setDate(dueLabel.getDate() + NET_TERM_DAYS);
+    dueLabel.setDate(dueLabel.getDate() + terms.netDays);
   } else if (inv.dueDate) {
     dueNum = dayNumber(inv.dueDate);
     dueLabel = new Date(inv.dueDate);
   } else {
-    dueNum = issueNum + NET_TERM_DAYS;
+    dueNum = issueNum + terms.netDays;
     dueLabel = new Date(clockStartObj);
-    dueLabel.setDate(dueLabel.getDate() + NET_TERM_DAYS);
+    dueLabel.setDate(dueLabel.getDate() + terms.netDays);
   }
 
   const daysOverdue = todayNum - dueNum;          // negative => not yet due
@@ -6148,27 +6192,27 @@ function computeCollections(inv, now = new Date()) {
 
   // ── Late fee policy (auditable) ──────────────────────────────────────────
   //   Let B = outstanding balance (total - amountPaid).
-  //   When the invoice reaches its due date (daysOverdue >= 0, i.e. 45 days
+  //   When the invoice reaches its due date (daysOverdue >= 0, i.e. netDays
   //   after the invoice date), a 15% late fee is applied to B.
-  //   Then for every additional full 30 days it remains unpaid, another 15%
+  //   Then for every additional full escalation period it remains unpaid, another 15%
   //   is applied to the *running* (fee-inclusive) balance — i.e. it COMPOUNDS:
-  //       balance *= 1.15  at the due date, then *= 1.15 again every +30 days.
-  //   Number of 15% applications:  n = 1 + floor(daysOverdue / 30).
+  //       balance *= 1.15  at the due date, then *= 1.15 again each period.
+  //   Number of 15% applications:  n = 1 + floor(daysOverdue / escalateEveryDays).
   //   Total owed with fees = B * (1.15 ^ n).
   //   lateFee = totalOwed - B = B * (1.15^n - 1).
   let lateFee = 0;
   if (daysOverdue >= 0 && outstanding > 0) {
-    const n = 1 + Math.floor(daysOverdue / ESCALATION_EVERY_DAYS);
+    const n = 1 + Math.floor(daysOverdue / terms.escalateEveryDays);
     lateFee = round2(outstanding * (Math.pow(1 + LATE_FEE_RATE, n) - 1));
   }
 
   // ── Reminder stage ───────────────────────────────────────────────────────
   let reminderStage;
   if (daysOverdue >= 0) {
-    const level = Math.floor(daysOverdue / ESCALATION_EVERY_DAYS); // 0 at due, 1 at +30, ...
-    reminderStage = level === 0 ? 'Past Due' : `Escalation +${level * ESCALATION_EVERY_DAYS}`;
+    const level = Math.floor(daysOverdue / terms.escalateEveryDays); // 0 at due, 1 after one period, ...
+    reminderStage = level === 0 ? 'Past Due' : `Escalation +${level * terms.escalateEveryDays}`;
   } else if (daysSinceInvoice >= 0) {
-    reminderStage = 'Due Soon';   // issued, in the 0..44 day pre-due window (gentle nudge)
+    reminderStage = 'Due Soon';   // issued, inside the pre-due window (gentle nudge)
   } else {
     reminderStage = 'None';       // future-dated / not yet issued
   }
@@ -6183,6 +6227,10 @@ function computeCollections(inv, now = new Date()) {
     outstanding,
     lateFee,
     reminderStage,
+    termsNetDays: terms.netDays,
+    termsEscalateEveryDays: terms.escalateEveryDays,
+    termsLabel: terms.label,
+    termsSentence: terms.sentence,
   };
 }
 
@@ -6228,7 +6276,7 @@ function buildReminderDraft(inv, comp) {
   // Policy sentence only — no computed fee amounts go in the email.
   if (comp.daysOverdue >= 0) {
     lines.push('');
-    lines.push(`Per our terms, a 15% late fee applies once an invoice is ${NET_TERM_DAYS} days past the invoice date.`);
+    lines.push(comp.termsSentence);
   }
   lines.push('');
   lines.push('Reply to this email or call us at 630-250-9777 to arrange payment.');
@@ -9576,7 +9624,7 @@ app.get('/work-orders/:id/invoice-send/draft', authenticate, requireNumericParam
 
 Thank you for your business. Please find your invoice attached for the work completed${siteAddr ? ` at ${siteAddr}` : ''}.
 
-Payment is due within 45 days of the invoice date. Please let us know if you would like to use a credit card for this payment, and we'll send you a secure payment link.
+Payment is due within 30 days of the invoice date. Please let us know if you would like to use a credit card for this payment, and we'll send you a secure payment link.
 
 If you have any questions, feel free to reach out anytime.
 
@@ -10032,7 +10080,7 @@ app.put(
         const dd = /^\d{4}-\d{2}-\d{2}/.test(String(b.dueDate)) ? String(b.dueDate).slice(0, 10) : null;
         if (dd) { sets.push('dueDate=?'); params.push(dd); }
       } else if (b.docDate !== undefined || b.termsDays !== undefined) {
-        const newDue = computeDueDate(effIssueDate, effTermsDays, null);
+        const newDue = computeDueDate(effIssueDate, effTermsDays, null, inv.createdAt);
         if (newDue) { sets.push('dueDate=?'); params.push(newDue); }
       }
 
